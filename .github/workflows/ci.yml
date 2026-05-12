@@ -25,5 +25,6 @@ jobs:
           node-version: "24"
           cache: true
       - run: vp install
+      - run: vp run effect-cf#build
       - run: vp check
       - run: vp test

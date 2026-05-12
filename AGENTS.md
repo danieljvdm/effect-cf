@@ -18,7 +18,7 @@ Use Vite+ through the `vp` CLI for installs, checks, tests, builds, scripts, pac
 - `examples/` contains consumer/example apps.
 - Reusable package code belongs under `packages/effect-cf/src` and should be exported from `packages/effect-cf/src/index.ts`.
 - Generated `worker-configuration.d.ts` files are local checks, not source-of-truth API definitions.
-- `repos/effect-smol` is a reference subtree; do not treat it as package source.
+- `repos/effect-smol` is a reference subtree for Effect patterns and API style; consult it when changing Effect-heavy code, but do not treat it as package source.
 
 # Repo-Local Skills
 

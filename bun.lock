@@ -84,6 +84,21 @@
         "vite-plus": "catalog:",
       },
     },
+    "examples/queue-workflow/workers/app": {
+      "name": "queue-workflow-app",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect": "catalog:",
+        "effect-cf": "workspace:*",
+      },
+      "devDependencies": {
+        "@cloudflare/workers-types": "^4.20260421.1",
+        "@effect/vitest": "catalog:",
+        "typescript": "~6.0.2",
+        "vite-plus": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "examples/todo-http/packages/domain": {
       "name": "@effect-cf/todo-http-domain",
       "version": "0.0.0",
@@ -942,6 +957,8 @@
     "quansync": ["quansync@0.2.11", "", {}, "sha512-AifT7QEbW9Nri4tAwR5M/uzpBuqfZf+zwaEM/QkzEjj7NBuFD2rBuy0K3dE+8wltbezDV7JMA0WfnCPYRSYbXA=="],
 
     "queue-microtask": ["queue-microtask@1.2.3", "", {}, "sha512-NuaNSa6flKT5JaSYQzJok04JzTL1CA6aGhv5rfLW3PgqA+M2ChpZQnAC8h8i4ZFkBS8X5RqkDBHA7r4hej3K9A=="],
+
+    "queue-workflow-app": ["queue-workflow-app@workspace:examples/queue-workflow/workers/app"],
 
     "react": ["react@19.2.5", "", {}, "sha512-llUJLzz1zTUBrskt2pwZgLq59AemifIftw4aB7JxOqf1HY2FDaGDxgwpAPVzHU1kdWabH7FauP4i1oEeer2WCA=="],
 

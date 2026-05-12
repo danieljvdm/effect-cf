@@ -1,20 +1,13 @@
 import { WorkerEntrypoint as CloudflareWorkerEntrypoint } from "cloudflare:workers";
-import {
-  Cause,
-  ConfigProvider,
-  Context,
-  Effect,
-  Exit,
-  Layer,
-  ManagedRuntime,
-  type Scope,
-} from "effect";
+import { Cause, ConfigProvider, Context, Effect, Layer, ManagedRuntime, type Scope } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import { WorkerConfig, WorkerEnvironment, type WorkerEnv } from "./Environment";
+import { fromMessage, fromMessageBatch, type QueueHandler } from "./Queue";
 import type * as RpcDefinition from "./RpcDefinition";
 import * as WorkerDefinition from "./WorkerDefinition";
 import * as Entrypoint from "./internal/Entrypoint";
+import { fromExecutionContext, type RunWaitUntilEffect } from "./internal/WorkerContext";
 
 export class ExecutionContext extends Context.Service<
   ExecutionContext,
@@ -22,6 +15,7 @@ export class ExecutionContext extends Context.Service<
 >()("effect-cf/ExecutionContext") {}
 
 export interface WorkerContextWaitUntilOptions<E, R> {
+  readonly mode?: "observe" | "propagate";
   readonly onFailure?: (cause: Cause.Cause<E>) => Effect.Effect<void, never, R>;
 }
 
@@ -31,66 +25,16 @@ export interface WorkerContextService {
     effect: Effect.Effect<A, E, R>,
     options?: WorkerContextWaitUntilOptions<E, R2>,
   ): Effect.Effect<void, never, R | R2>;
+  waitUntilPropagating<A, E, R, R2 = never>(
+    effect: Effect.Effect<A, E, R>,
+    options?: Omit<WorkerContextWaitUntilOptions<E, R2>, "mode">,
+  ): Effect.Effect<void, never, R | R2>;
   readonly passThroughOnException: Effect.Effect<void>;
 }
 
 export class WorkerContext extends Context.Service<WorkerContext, WorkerContextService>()(
   "effect-cf/WorkerContext",
 ) {}
-
-type RunWaitUntilEffect = <A, E>(
-  effect: Effect.Effect<A, E, never>,
-) => Promise<Exit.Exit<A, unknown>>;
-
-const fromExecutionContext = (
-  ctx: globalThis.ExecutionContext,
-  runPromiseExit: RunWaitUntilEffect,
-): WorkerContextService => ({
-  raw: ctx,
-  waitUntil: <A, E, R, R2 = never>(
-    effect: Effect.Effect<A, E, R>,
-    options?: WorkerContextWaitUntilOptions<E, R2>,
-  ) =>
-    Effect.context<R | R2>().pipe(
-      Effect.flatMap((context) =>
-        Effect.sync(() => {
-          const observed = Effect.exit(effect).pipe(
-            Effect.flatMap((exit) => {
-              if (Exit.isSuccess(exit)) {
-                return Effect.void;
-              }
-
-              const handleFailure =
-                options?.onFailure?.(exit.cause) ??
-                Effect.logError("WorkerContext.waitUntil failed", Cause.pretty(exit.cause));
-
-              return handleFailure.pipe(
-                Effect.catchCause((handlerCause) =>
-                  Effect.logError(
-                    "WorkerContext.waitUntil failure handler failed",
-                    Cause.pretty(exit.cause),
-                    Cause.pretty(handlerCause),
-                  ),
-                ),
-              );
-            }),
-          );
-
-          ctx.waitUntil(
-            runPromiseExit(Effect.scoped(Effect.provideContext(observed, context))).then((exit) => {
-              if (Exit.isFailure(exit)) {
-                console.error(
-                  "WorkerContext.waitUntil failure handler failed",
-                  Cause.pretty(exit.cause),
-                );
-              }
-            }),
-          );
-        }),
-      ),
-    ),
-  passThroughOnException: Effect.sync(() => ctx.passThroughOnException()),
-});
 
 export class NativeRequest extends Context.Service<NativeRequest, Request>()(
   "effect-cf/NativeRequest",
@@ -103,6 +47,12 @@ export type ReservedMethodName =
   | RpcDefinition.ReservedMethodName
   | "fetch"
   | "connect"
+  | "queue"
+  | "scheduled"
+  | "tail"
+  | "tailStream"
+  | "test"
+  | "trace"
   | "alarm"
   | "webSocketMessage"
   | "webSocketClose"
@@ -113,6 +63,12 @@ const reservedMethodNames = new Set<string>([
   "dup",
   "fetch",
   "connect",
+  "queue",
+  "scheduled",
+  "tail",
+  "tailStream",
+  "test",
+  "trace",
   "alarm",
   "webSocketMessage",
   "webSocketClose",
@@ -169,6 +125,7 @@ export type RpcHandlers<ROut, Api> = {
 
 export interface WorkerOptions<ROut, Rpc extends WorkerRpc<ROut>> {
   readonly fetch?: Effect.Effect<WorkerFetchSuccess, unknown, WorkerFetchContext<ROut>>;
+  readonly queue?: QueueHandler<ROut>;
   readonly rpc?: Rpc;
 }
 
@@ -181,6 +138,7 @@ export type WorkerClass<Rpc extends WorkerRpc<ROut>, ROut> = new (
   env: WorkerEnv,
 ) => CloudflareWorkerEntrypoint<WorkerEnv> & {
   fetch(request: Request): Promise<Response>;
+  queue(batch: globalThis.MessageBatch): Promise<void>;
 } & WorkerRpcShape<Rpc, ROut>;
 
 export interface FetchHandler<Env extends WorkerEnv = WorkerEnv> {
@@ -214,7 +172,9 @@ const renderFetchSuccess = <E, R>(
 const isWorkerOptions = <ROut, Rpc extends WorkerRpc<ROut>>(
   options: WorkerOptions<ROut, Rpc> | WorkerHandler<ROut>,
 ): options is WorkerOptions<ROut, Rpc> =>
-  typeof options === "object" && options !== null && ("fetch" in options || "rpc" in options);
+  typeof options === "object" &&
+  options !== null &&
+  ("fetch" in options || "queue" in options || "rpc" in options);
 
 export function make<ROut, LayerError>(
   layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
@@ -239,7 +199,7 @@ export function make<ROut, LayerError, const Rpc extends WorkerRpc<ROut> = Recor
       super(ctx, env);
 
       let runWaitUntilEffect: RunWaitUntilEffect = () =>
-        Promise.resolve(Exit.die(new Error("WorkerContext runtime is not initialized")));
+        Promise.reject(new Error("WorkerContext runtime is not initialized"));
 
       const services = Layer.mergeAll(
         Layer.succeed(ExecutionContext, ctx),
@@ -285,6 +245,18 @@ export function make<ROut, LayerError, const Rpc extends WorkerRpc<ROut> = Recor
           RuntimeContext<ROut> | Scope.Scope
         >,
       );
+    }
+
+    queue(batch: globalThis.MessageBatch): Promise<void> {
+      const queueHandler = options.queue;
+
+      if (queueHandler === undefined) {
+        return Promise.resolve();
+      }
+
+      const messages = batch.messages.map((message) => fromMessage(message, message.body));
+
+      return this[RunSymbol](queueHandler(fromMessageBatch(batch, messages)));
     }
   }
 

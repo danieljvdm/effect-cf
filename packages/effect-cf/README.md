@@ -1,6 +1,6 @@
 # effect-cf
 
-Effect-native Cloudflare primitives for Workers, Durable Objects, bindings, KV, and Durable Object storage.
+Effect-native Cloudflare primitives for Workers, Durable Objects, bindings, KV, Queues, Workflows, and Durable Object storage.
 
 ## Install
 
@@ -31,6 +31,8 @@ Runtime creation belongs at Cloudflare entrypoints, not inside binding helpers.
 - `DurableObjectState` / `DurableObjectStorage` - Effect wrappers for state, alarms, SQL, and embedded KV
 - `DurableObjectWebSocket` - WebSocket upgrade helpers for Durable Objects
 - `Kv` - typed KV namespace helper
+- `Queue` / `QueueBinding` - typed Queue producer bindings and consumer handlers
+- `Workflow` / `WorkflowBinding` - typed Workflow entrypoints, steps, and starter bindings
 - `Rpc` - Cloudflare RPC type helpers and scoped disposal utilities
 - `WorkerConfig` - Effect `Config` helpers backed by Cloudflare `env`
 
@@ -70,6 +72,71 @@ export const CounterDurableObject = Counter.make(Layer.empty, {
 ```
 
 Define Wrangler bindings and migrations in the consuming application.
+
+## Queue Example
+
+Queues use the same definition + binding split as Workers and Durable Objects: define the message contract once, use `.binding(...)` or `.Binding(...)` to produce from any runtime with `WorkerEnvironment`, and use `.make(...)` for the consumer Worker entrypoint.
+
+```ts
+import { Effect, Layer, Schema as S } from "effect";
+import { Queue } from "effect-cf";
+
+class AvatarJobs extends Queue.Tag<AvatarJobs>()("AvatarJobs", {
+  message: S.Struct({ userId: S.String, imageKey: S.String }),
+}) {}
+
+export const AvatarQueue = AvatarJobs.binding("AvatarQueue", {
+  binding: "AVATAR_QUEUE",
+});
+
+export const AvatarQueueConsumer = AvatarJobs.make(Layer.empty, {
+  queue: (batch) =>
+    Effect.gen(function* () {
+      for (const message of batch.messages) {
+        yield* Effect.logInfo("process avatar", message.body.userId);
+        yield* message.ack;
+      }
+    }),
+});
+```
+
+Producers can use `AvatarQueue.send(...)`, `AvatarQueue.sendBatch(...)`, and `AvatarQueue.metrics` from any Worker, Durable Object, or Workflow layer that provides `WorkerEnvironment`.
+
+Queue handlers run inline failures through Cloudflare's normal retry path. If background work scheduled with `WorkerContext.waitUntil(...)` should also make the batch retry, use `WorkerContext.waitUntilPropagating(...)` or `waitUntil(..., { mode: "propagate" })`; the default `waitUntil` mode observes and logs failures without rejecting the native `waitUntil` promise.
+
+## Workflow Example
+
+Workflow definitions type the payload and result. Runtime handlers can access `Workflow.WorkflowEvent`, use durable `Workflow.step(...)`, and use normal binding services inside steps.
+
+```ts
+import { Effect, Layer, Schema as S } from "effect";
+import { Workflow } from "effect-cf";
+
+class ExportWorkflow extends Workflow.Tag<ExportWorkflow>()("ExportWorkflow", {
+  payload: S.Struct({ segmentId: S.String }),
+  result: S.Struct({ objectKey: S.String }),
+}) {}
+
+export const ExportWorkflowEntrypoint = ExportWorkflow.make(Layer.empty, {
+  run: (payload) =>
+    Effect.gen(function* () {
+      const objectKey = yield* Workflow.step(
+        "write-export",
+        Effect.succeed(`exports/${payload.segmentId}.json`),
+      );
+
+      return { objectKey };
+    }),
+});
+
+export const ExportWorkflowBinding = ExportWorkflow.binding("ExportWorkflow", {
+  binding: "EXPORT_WORKFLOW",
+});
+```
+
+Use `ExportWorkflowBinding.create(...)`, `createBatch(...)`, and `get(...)` to start and inspect instances.
+
+In definition-backed workflows, the `payload` argument is the typed decoded payload and is the source of truth. `Workflow.WorkflowEvent.payload` is also re-provided decoded for convenience; `Workflow.WorkflowEvent.raw.payload` remains the native Cloudflare event payload.
 
 ## Durable Object WebSockets
 

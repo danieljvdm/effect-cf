@@ -32,7 +32,7 @@ jobs:
             exit 0
           fi
 
-          if [[ ! "$PR_TITLE" =~ ^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?!?:\ .+ ]]; then
+          if ! grep -Eq '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?!?: .+' <<<"$PR_TITLE"; then
             echo "PR title must follow Conventional Commit format, for example: feat: add websocket attachments"
             exit 1
           fi

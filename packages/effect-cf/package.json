@@ -9,6 +9,7 @@
     "directory": "packages/effect-cf"
   },
   "files": [
+    "CHANGELOG.md",
     "dist",
     "src"
   ],

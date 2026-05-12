@@ -30,3 +30,7 @@ Binding helpers should be typed from code-owned Effect definitions such as `Work
 - `examples/chat` should depend on `effect-cf` through the workspace and demonstrate package usage across multiple Workers and a Durable Object.
 - New Cloudflare primitives should be added to `packages/effect-cf/src` and exported from `packages/effect-cf/src/index.ts`.
 - Keep package APIs independent of any one app's generated `Env`; binding names are runtime/config lookups and API types should come from definition values exported by contract packages.
+
+# Repo-Local Skills
+
+- Use `.agents/skills/pr-hygiene/SKILL.md` before creating or updating PRs, choosing PR titles, or writing changesets.

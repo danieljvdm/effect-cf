@@ -14,6 +14,53 @@ permissions:
   contents: read
 
 jobs:
+  pr-policy:
+    name: PR Policy
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Check PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if [[ "$HEAD_REF" == changeset-release/* ]]; then
+            exit 0
+          fi
+
+          if ! grep -Eq '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?!?: .+' <<<"$PR_TITLE"; then
+            echo "PR title must follow Conventional Commit format, for example: feat: add websocket attachments"
+            exit 1
+          fi
+      - name: Check changeset
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if [[ "$HEAD_REF" == changeset-release/* ]]; then
+            exit 0
+          fi
+
+          git fetch origin "$BASE_REF" --depth=1
+          changed_files="$(git diff --name-only "origin/$BASE_REF"...HEAD)"
+
+          has_changeset=false
+          while IFS= read -r file; do
+            if [[ "$file" == .changeset/*.md && "$file" != ".changeset/README.md" ]]; then
+              has_changeset=true
+              break
+            fi
+          done <<<"$changed_files"
+
+          if [[ "$has_changeset" != true ]]; then
+            echo "Every PR must include a changeset file under .changeset/. Use an empty changeset for non-release changes."
+            exit 1
+          fi
+
   check:
     name: Check
     runs-on: ubuntu-latest

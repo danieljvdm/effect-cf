@@ -24,6 +24,56 @@ npm install effect-cf "effect@^4.0.0-beta.65"
 
 Binding types come from code-owned definitions such as `Worker.Tag(...)` and `DurableObject.Tag(...)`. Generated Wrangler types are only used as local config checks.
 
+## A Taste
+
+A Worker can route HTTP with Effect and call a Durable Object through a typed binding:
+
+```ts
+import { Effect, Layer, Schema as S } from "effect";
+import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
+import { DurableObject, DurableObjectState, Worker } from "effect-cf";
+
+class Counter extends DurableObject.Tag<Counter>()("Counter", {
+  increment: DurableObject.method({ success: S.Number }),
+}) {}
+
+const CounterLive = Counter.make(Layer.empty, {
+  rpc: {
+    increment: () =>
+      Effect.gen(function* () {
+        const state = yield* DurableObjectState.DurableObjectState;
+        const current = yield* state.storage.get<number>("count");
+        const next = (current ?? 0) + 1;
+        yield* state.storage.put("count", next);
+        return next;
+      }),
+  },
+});
+
+export class CounterDurableObject extends CounterLive {}
+
+const Counters = Counter.namespace("Counters", { binding: "COUNTER" });
+
+const app = Effect.gen(function* () {
+  const router = yield* HttpRouter.HttpRouter;
+  const counter = Counters.byName("home");
+
+  return yield* router
+    .get(
+      "/",
+      Effect.gen(function* () {
+        const count = yield* counter.increment();
+        return HttpServerResponse.text(`Viewed ${count} times`);
+      }),
+    )
+    .asHttpEffect();
+});
+
+export default Worker.make(Layer.mergeAll(HttpRouter.layer, Counters.layer), app);
+```
+
+`COUNTER` is still declared in `wrangler.jsonc`, but the callable API is inferred from the `Counter` class. The Worker and Durable Object both run through `effect-cf` runtime boundaries.
+
 ## Examples
 
 The `examples/` directory demonstrates package usage across Workers, Durable Objects, service bindings, and frontend consumers.

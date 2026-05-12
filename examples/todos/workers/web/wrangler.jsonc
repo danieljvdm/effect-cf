@@ -1,0 +1,21 @@
+{
+  "$schema": "../../../../node_modules/wrangler/config-schema.json",
+  "name": "effect-cf-todos-web",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-24",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+  },
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "../../web/dist",
+    "not_found_handling": "single-page-application",
+  },
+  "services": [
+    {
+      "binding": "API_WORKER",
+      "service": "effect-cf-todos-api",
+    },
+  ],
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "../../../../node_modules/wrangler/config-schema.json",
+  "name": "effect-cf-tests",
+  "main": "./worker-fixture.ts",
+  "compatibility_date": "2026-04-24",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "TEST_COUNTER_DO",
+        "class_name": "TestCounterDurableObject",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["TestCounterDurableObject"],
+    },
+  ],
+}

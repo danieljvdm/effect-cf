@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+permissions: {}
+
+jobs:
+  release:
+    if: github.repository == 'danieljvdm/effect-cf'
+    name: Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Use the token provided to changesets/action when it pushes updates to
+          # the release branch, so CI runs on the generated release PR.
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version: "24"
+          cache: true
+      - run: vp install
+      - name: Upgrade npm for trusted publishing
+        run: npm install -g npm@latest
+      - name: Create Release Pull Request or Publish
+        uses: changesets/action@v1
+        with:
+          version: vp run changeset:version
+          publish: vp run changeset:publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.CHANGESET_GITHUB_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true

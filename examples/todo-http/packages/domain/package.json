@@ -1,0 +1,28 @@
+{
+  "name": "@effect-cf/todo-http-domain",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./TodoApi": {
+      "types": "./src/TodoApi.ts",
+      "default": "./src/TodoApi.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "check": "vp check"
+  },
+  "dependencies": {
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260421.1",
+    "typescript": "~6.0.2",
+    "vite-plus": "catalog:"
+  }
+}

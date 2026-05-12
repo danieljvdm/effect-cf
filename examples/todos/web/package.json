@@ -1,0 +1,25 @@
+{
+  "name": "todos-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vp dev --host 0.0.0.0 --port 5174",
+    "build": "tsc --noEmit && vp build",
+    "preview": "vp preview --host 0.0.0.0 --port 4174",
+    "check": "vp check"
+  },
+  "dependencies": {
+    "@effect-cf/todos-domain": "workspace:*",
+    "@vitejs/plugin-react": "^6.0.1",
+    "effect": "catalog:",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "~6.0.2",
+    "vite-plus": "catalog:"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "chat-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vp dev --host 0.0.0.0 --port 5173",
+    "build": "tsc --noEmit && vp build",
+    "preview": "vp preview --host 0.0.0.0 --port 4173",
+    "check": "vp check"
+  },
+  "dependencies": {
+    "@effect-cf/example-contracts": "workspace:*",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "typescript": "~6.0.2",
+    "vite-plus": "catalog:"
+  }
+}

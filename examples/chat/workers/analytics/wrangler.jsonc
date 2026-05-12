@@ -1,0 +1,25 @@
+{
+  "$schema": "../../../../node_modules/wrangler/config-schema.json",
+  "name": "effect-cf-chat-analytics",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-24",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+  },
+  "services": [
+    {
+      "binding": "API_WORKER",
+      "service": "effect-cf-chat-api",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CHAT_ROOM",
+        "class_name": "ChatRoomDurableObject",
+        "script_name": "effect-cf-chat-room",
+      },
+    ],
+  },
+}

@@ -1,0 +1,47 @@
+{
+  "name": "effect-cf",
+  "version": "0.1.0",
+  "description": "Effect-native primitives for Cloudflare Workers and bindings.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/danieljvdm/effect-cf.git",
+    "directory": "packages/effect-cf"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "type": "module",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs",
+      "default": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "check": "vp check",
+    "prepublishOnly": "vp run build"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.15.0",
+    "@cloudflare/workers-types": "^4.20260421.1",
+    "@effect/vitest": "catalog:",
+    "effect": "catalog:",
+    "typescript": "^6.0.2",
+    "vite-plus": "0.1.19",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "effect": "^4.0.0-beta.65"
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "name": "effect-cf-monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "examples/*/packages/*",
+    "examples/*/workers/*",
+    "examples/*/durable-objects/*",
+    "examples/*/web",
+    "tools/*"
+  ],
+  "type": "module",
+  "scripts": {
+    "ready": "vp check && vp run -r test && vp run -r build",
+    "changeset": "vp exec changeset",
+    "changeset:version": "vp exec changeset version",
+    "changeset:publish": "vp exec changeset publish",
+    "dev": "vp run chat-api-worker#dev",
+    "dev:web": "vp run chat-web#dev",
+    "cf-typegen": "vp run chat-room-do#cf-typegen && vp run chat-analytics-worker#cf-typegen && vp run chat-api-worker#cf-typegen",
+    "prepare": "vp config && effect-tsgo patch",
+    "dev:todo-http-api": "vp run todo-http-api-worker#dev",
+    "dev:todo-http-web": "vp run todo-http-web#dev",
+    "dev:todo-http": "vp run todo-http-web#dev",
+    "build:todo-http": "vp run todo-http-domain#build && vp run todo-http-api-worker#build && vp run todo-http-web#build",
+    "cf-typegen:todo-http": "vp run todo-http-api-worker#cf-typegen",
+    "dev:todo-rpc-http-api": "vp run todo-rpc-http-api-worker#dev",
+    "dev:todo-rpc-http-web": "vp run todo-rpc-http-web#dev",
+    "dev:todo-rpc-http": "vp run todo-rpc-http-web#dev",
+    "build:todo-rpc-http": "vp run todo-rpc-http-domain#build && vp run todo-rpc-http-api-worker#build && vp run todo-rpc-http-web#build",
+    "cf-typegen:todo-rpc-http": "vp run todo-rpc-http-api-worker#cf-typegen",
+    "dev:todo-rpc-ws-api": "vp run todo-rpc-ws-api-worker#dev",
+    "dev:todo-rpc-ws-web": "vp run todo-rpc-ws-web#dev",
+    "dev:todo-rpc-ws": "vp run todo-rpc-ws-web#dev",
+    "build:todo-rpc-ws": "vp run todo-rpc-ws-domain#build && vp run todo-rpc-ws-store-do#build && vp run todo-rpc-ws-api-worker#build && vp run todo-rpc-ws-web#build",
+    "cf-typegen:todo-rpc-ws": "vp run todo-rpc-ws-store-do#cf-typegen && vp run todo-rpc-ws-api-worker#cf-typegen"
+  },
+  "devDependencies": {
+    "@changesets/changelog-github": "^0.7.0",
+    "@changesets/cli": "^2.31.0",
+    "@cloudflare/vitest-pool-workers": "^0.16.3",
+    "@effect/tsgo": "0.5.1",
+    "@types/node": "^25.6.0",
+    "@typescript/native-preview": "7.0.0-dev.20260423.1",
+    "vite-plus": "catalog:",
+    "vitest": "npm:@voidzero-dev/vite-plus-test@0.1.19",
+    "wrangler": "^4.84.1"
+  },
+  "overrides": {
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "packageManager": "bun@1.3.13",
+  "catalog": {
+    "@effect/vitest": "4.0.0-beta.65",
+    "effect": "4.0.0-beta.65",
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.1.19",
+    "vitest": "npm:@voidzero-dev/vite-plus-test@0.1.19",
+    "vite-plus": "0.1.19"
+  }
+}

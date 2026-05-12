@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+coverage/
+*.tsbuildinfo
+
+# Vite/Vite+
+.vite/
+vite.config.*.timestamp-*
+vite.config.*.mjs
+
+# Cloudflare/Wrangler local state and secrets
+.wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Logs
+logs/
+prompt-exports/
+repos/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+bun-debug.log*
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+Session.vim
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

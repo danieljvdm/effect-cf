@@ -36,6 +36,22 @@ test("Worker.makeFetchHandler returns an ExportedHandler-compatible fetch object
   await expect(response.text()).resolves.toBe("ok");
 });
 
+test("Worker.make accepts a fetch Effect shorthand", async () => {
+  const Live = Worker.make(
+    Layer.succeed(RenderValue, "from-shorthand"),
+    Effect.gen(function* () {
+      const value = yield* RenderValue;
+
+      return new Response(value);
+    }),
+  );
+  const worker = new Live(makeExecutionContext(), {} as Cloudflare.Env);
+
+  const response = await worker.fetch(new Request("https://worker.test/"));
+
+  await expect(response.text()).resolves.toBe("from-shorthand");
+});
+
 test("Worker.fetch renders Effect HttpServerResponse values", async () => {
   const Live = Worker.make(Layer.succeed(RenderValue, "from-context"), {
     fetch: Effect.gen(function* () {

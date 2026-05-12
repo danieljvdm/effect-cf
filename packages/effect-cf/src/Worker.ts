@@ -211,10 +211,27 @@ const renderFetchSuccess = <E, R>(
         ),
   );
 
-export const make = <ROut, LayerError, const Rpc extends WorkerRpc<ROut> = Record<never, never>>(
+const isWorkerOptions = <ROut, Rpc extends WorkerRpc<ROut>>(
+  options: WorkerOptions<ROut, Rpc> | WorkerHandler<ROut>,
+): options is WorkerOptions<ROut, Rpc> =>
+  typeof options === "object" && options !== null && ("fetch" in options || "rpc" in options);
+
+export function make<ROut, LayerError>(
+  layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+  fetch: WorkerHandler<ROut>,
+): WorkerClass<Record<never, never>, ROut>;
+export function make<ROut, LayerError, const Rpc extends WorkerRpc<ROut> = Record<never, never>>(
   layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
   options: WorkerOptions<ROut, Rpc>,
-): WorkerClass<Rpc, ROut> => {
+): WorkerClass<Rpc, ROut>;
+export function make<ROut, LayerError, const Rpc extends WorkerRpc<ROut> = Record<never, never>>(
+  layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+  optionsOrFetch: WorkerOptions<ROut, Rpc> | WorkerHandler<ROut>,
+): WorkerClass<Rpc, ROut> {
+  const options = isWorkerOptions(optionsOrFetch)
+    ? optionsOrFetch
+    : ({ fetch: optionsOrFetch } as WorkerOptions<ROut, Rpc>);
+
   class EffectWorker extends CloudflareWorkerEntrypoint<WorkerEnv> {
     readonly runtime: ManagedRuntime.ManagedRuntime<RuntimeContext<ROut>, LayerError>;
 
@@ -280,7 +297,7 @@ export const make = <ROut, LayerError, const Rpc extends WorkerRpc<ROut> = Recor
   );
 
   return Entrypoint.assumeEntrypointClass<WorkerClass<Rpc, ROut>>(EffectWorker);
-};
+}
 
 export const makeFetchHandler = <ROut, LayerError, Env extends WorkerEnv = WorkerEnv>(
   layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,

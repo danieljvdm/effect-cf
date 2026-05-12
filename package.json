@@ -44,7 +44,7 @@
     "@types/node": "^25.6.0",
     "@typescript/native-preview": "7.0.0-dev.20260423.1",
     "vite-plus": "catalog:",
-    "vitest": "npm:@voidzero-dev/vite-plus-test@0.1.19",
+    "vitest": "npm:@voidzero-dev/vite-plus-test@0.1.20",
     "wrangler": "^4.84.1"
   },
   "overrides": {
@@ -58,8 +58,8 @@
   "catalog": {
     "@effect/vitest": "4.0.0-beta.65",
     "effect": "4.0.0-beta.65",
-    "vite": "npm:@voidzero-dev/vite-plus-core@0.1.19",
-    "vitest": "npm:@voidzero-dev/vite-plus-test@0.1.19",
-    "vite-plus": "0.1.19"
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.1.20",
+    "vitest": "npm:@voidzero-dev/vite-plus-test@0.1.20",
+    "vite-plus": "0.1.20"
   }
 }

@@ -1,6 +1,7 @@
 import { Cause, Context, Effect, Exit } from "effect";
 
 import { fromDurableObjectStorage, type DurableObjectStorage } from "./DurableObjectStorage";
+import { fromWebSocket, type DurableWebSocket } from "./DurableObjectWebSocket";
 
 /**
  * Effect-friendly wrapper around Cloudflare `DurableObjectState`.
@@ -35,21 +36,21 @@ export interface DurableObjectStateService {
    */
   blockConcurrencyWhileOrReset<A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>;
   /** Accepts a websocket connection for hibernation-capable Durable Objects. */
-  acceptWebSocket(ws: WebSocket, tags?: Array<string>): Effect.Effect<void>;
+  acceptWebSocket(ws: DurableWebSocket, tags?: Array<string>): Effect.Effect<void>;
   /** Lists active sockets, optionally filtered by tag. */
-  getWebSockets(tag?: string): Effect.Effect<Array<WebSocket>>;
+  getWebSockets(tag?: string): Effect.Effect<Array<DurableWebSocket>>;
   /** Configures automatic request/response handling for sockets. */
   setWebSocketAutoResponse(pair?: WebSocketRequestResponsePair): Effect.Effect<void>;
   /** Gets the configured websocket auto-response pair. */
   getWebSocketAutoResponse: Effect.Effect<WebSocketRequestResponsePair | null>;
   /** Timestamp of the last automatic websocket response for a socket. */
-  getWebSocketAutoResponseTimestamp(ws: WebSocket): Effect.Effect<Date | null>;
+  getWebSocketAutoResponseTimestamp(ws: DurableWebSocket): Effect.Effect<Date | null>;
   /** Sets the timeout for hibernatable websocket events. */
   setHibernatableWebSocketEventTimeout(timeoutMs?: number): Effect.Effect<void>;
   /** Gets the timeout for hibernatable websocket events. */
   getHibernatableWebSocketEventTimeout: Effect.Effect<number | null>;
   /** Reads tags attached to a websocket. */
-  getTags(ws: WebSocket): Effect.Effect<Array<string>>;
+  getTags(ws: DurableWebSocket): Effect.Effect<Array<string>>;
   /**
    * Forcibly resets the Durable Object. Cloudflare logs an uncaught Error using
    * the optional reason, and the method is not available in `wrangler dev` local
@@ -97,20 +98,21 @@ export const fromDurableObjectState = (
         ),
       ),
     ),
-  acceptWebSocket: (ws: WebSocket, tags?: Array<string>) =>
-    Effect.sync(() => state.acceptWebSocket(ws, tags)),
-  getWebSockets: (tag?: string) => Effect.sync(() => state.getWebSockets(tag)),
+  acceptWebSocket: (ws: DurableWebSocket, tags?: Array<string>) =>
+    Effect.sync(() => state.acceptWebSocket(ws.raw, tags)),
+  getWebSockets: (tag?: string) =>
+    Effect.sync(() => state.getWebSockets(tag).map((socket) => fromWebSocket(socket))),
   setWebSocketAutoResponse: (pair?: WebSocketRequestResponsePair) =>
     Effect.sync(() => state.setWebSocketAutoResponse(pair)),
   getWebSocketAutoResponse: Effect.sync(() => state.getWebSocketAutoResponse()),
-  getWebSocketAutoResponseTimestamp: (ws: WebSocket) =>
-    Effect.sync(() => state.getWebSocketAutoResponseTimestamp(ws)),
+  getWebSocketAutoResponseTimestamp: (ws: DurableWebSocket) =>
+    Effect.sync(() => state.getWebSocketAutoResponseTimestamp(ws.raw)),
   setHibernatableWebSocketEventTimeout: (timeoutMs?: number) =>
     Effect.sync(() => state.setHibernatableWebSocketEventTimeout(timeoutMs)),
   getHibernatableWebSocketEventTimeout: Effect.sync(() =>
     state.getHibernatableWebSocketEventTimeout(),
   ),
-  getTags: (ws: WebSocket) => Effect.sync(() => state.getTags(ws)),
+  getTags: (ws: DurableWebSocket) => Effect.sync(() => state.getTags(ws.raw)),
   abort: (reason?: string) => Effect.sync(() => state.abort(reason)),
 });
 

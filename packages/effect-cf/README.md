@@ -71,6 +71,66 @@ export const CounterDurableObject = Counter.make(Layer.empty, {
 
 Define Wrangler bindings and migrations in the consuming application.
 
+## Durable Object WebSockets
+
+Durable Object application sockets should use the hibernation-compatible state API. Accept sockets with `DurableObjectWebSocket.acceptUpgrade(...)`; do not call `server.accept()` or attach native `message` listeners in application code.
+
+```ts
+import { Effect, Schema as S } from "effect";
+import { DurableObjectState, DurableObjectWebSocket, Worker } from "effect-cf";
+
+const ConnectionAttachment = S.Struct({
+  id: S.String,
+  roomId: S.String,
+});
+
+const Attachments = DurableObjectWebSocket.attachment(ConnectionAttachment);
+
+export const fetch = Effect.gen(function* () {
+  const request = yield* Worker.NativeRequest;
+
+  if (!Worker.isWebSocketUpgrade(request)) {
+    return new Response("Expected WebSocket upgrade", { status: 426 });
+  }
+
+  const upgrade = yield* DurableObjectWebSocket.acceptUpgrade({ tags: ["room:general"] });
+  yield* Attachments.serialize(upgrade.server, {
+    id: crypto.randomUUID(),
+    roomId: "general",
+  });
+  yield* upgrade.server.send(JSON.stringify({ type: "ready" }));
+
+  return upgrade.response;
+});
+```
+
+`DurableWebSocket` keeps the native socket available as `socket.raw`, while `send`, `close`, `serializeAttachment`, and `deserializeAttachment` return typed `Effect` failures. Use `state.getWebSockets(tag)` to retrieve wrapped sockets for broadcast and rehydration.
+
+Schema-backed attachments can rehydrate hibernated sockets:
+
+```ts
+const restored =
+  yield *
+  Attachments.rehydrate({
+    tag: "room:general",
+    onInvalid: "ignore-and-close",
+  });
+
+for (const { socket, attachment } of restored) {
+  yield * socket.send(`restored:${attachment.id}`).pipe(Effect.ignore);
+}
+```
+
+Worker-to-Durable-Object forwarding should stay native so WebSocket upgrade responses are preserved:
+
+```ts
+if (Worker.isWebSocketUpgrade(request)) {
+  return yield * ChatRooms.byName(roomId).fetch(request);
+}
+```
+
+Use `DurableObjectRpcWebSocket.layer(...)` for Effect RPC-over-WebSocket transports. It owns protocol parsing and RPC client bookkeeping; use `DurableWebSocket` for general application sockets, rooms, presence, and broadcast flows.
+
 ## License
 
 MIT

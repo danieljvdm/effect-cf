@@ -1,20 +1,26 @@
 import type { ChatPeer } from "@effect-cf/example-contracts/Schemas";
-import { Context, Effect, Layer } from "effect";
-import { DurableObjectState } from "effect-cf";
+import { Context, Effect, Layer, Option, Schema as S } from "effect";
+import { DurableObjectState, DurableObjectWebSocket } from "effect-cf";
 
 const heartbeatTtlMillis = 45_000;
 
-interface ConnectionAttachment {
-  readonly id: string;
-  readonly connectedAt: number;
-  readonly lastHeartbeat: number;
-  readonly roomId: string;
-  readonly userId: string;
-  readonly restored: boolean;
-}
+const ConnectionAttachment = S.Struct({
+  id: S.String,
+  connectedAt: S.Number,
+  lastHeartbeat: S.Number,
+  roomId: S.String,
+  userId: S.String,
+  restored: S.Boolean,
+});
+
+type ConnectionAttachment = S.Schema.Type<typeof ConnectionAttachment>;
+
+const Attachments = DurableObjectWebSocket.attachment(ConnectionAttachment);
+
+type ConnectionSocket = DurableObjectWebSocket.DurableWebSocket<ConnectionAttachment>;
 
 export interface Connection {
-  readonly socket: WebSocket;
+  readonly socket: ConnectionSocket;
   readonly id: string;
   readonly connectedAt: number;
   readonly lastHeartbeat: number;
@@ -29,48 +35,18 @@ export interface ConnectionMetadata {
 }
 
 export interface ConnectionManagerService {
-  readonly add: (socket: WebSocket, metadata: ConnectionMetadata) => Effect.Effect<Connection>;
-  readonly heartbeat: (socket: WebSocket) => Effect.Effect<Connection>;
-  readonly get: (socket: WebSocket) => Effect.Effect<Connection | undefined>;
-  readonly remove: (socket: WebSocket) => Effect.Effect<Connection | undefined>;
-  readonly list: (roomId: string) => Effect.Effect<ReadonlyArray<ChatPeer>>;
+  readonly add: (
+    socket: ConnectionSocket,
+    metadata: ConnectionMetadata,
+  ) => Effect.Effect<Connection, unknown>;
+  readonly heartbeat: (socket: ConnectionSocket) => Effect.Effect<Connection, unknown>;
+  readonly get: (socket: ConnectionSocket) => Effect.Effect<Connection | undefined, unknown>;
+  readonly remove: (socket: ConnectionSocket) => Effect.Effect<Connection | undefined, unknown>;
+  readonly list: (roomId: string) => Effect.Effect<ReadonlyArray<ChatPeer>, unknown>;
   readonly restoredCount: Effect.Effect<number>;
-  readonly cleanup: Effect.Effect<void>;
+  readonly cleanup: Effect.Effect<void, unknown>;
   readonly count: Effect.Effect<number>;
 }
-
-const readAttachment = (socket: WebSocket): ConnectionAttachment | undefined => {
-  const attachment = socket.deserializeAttachment();
-
-  if (
-    typeof attachment !== "object" ||
-    attachment === null ||
-    !("lastHeartbeat" in attachment) ||
-    !("roomId" in attachment) ||
-    !("userId" in attachment) ||
-    typeof attachment.lastHeartbeat !== "number" ||
-    typeof attachment.roomId !== "string" ||
-    typeof attachment.userId !== "string"
-  ) {
-    return undefined;
-  }
-
-  return {
-    id:
-      "id" in attachment && typeof attachment.id === "string" ? attachment.id : crypto.randomUUID(),
-    connectedAt:
-      "connectedAt" in attachment && typeof attachment.connectedAt === "number"
-        ? attachment.connectedAt
-        : attachment.lastHeartbeat,
-    lastHeartbeat: attachment.lastHeartbeat,
-    roomId: attachment.roomId,
-    userId: attachment.userId,
-    restored:
-      "restored" in attachment && typeof attachment.restored === "boolean"
-        ? attachment.restored
-        : true,
-  };
-};
 
 const toPeer = (connection: Connection): ChatPeer => ({
   id: connection.id,
@@ -88,10 +64,10 @@ export class ConnectionManager extends Context.Service<
     this,
     Effect.gen(function* () {
       const state = yield* DurableObjectState.DurableObjectState;
-      const connections = new Map<WebSocket, Connection>();
+      const connections = new Map<ConnectionSocket, Connection>();
 
       const remember = (
-        socket: WebSocket,
+        socket: ConnectionSocket,
         metadata: ConnectionMetadata,
         options?: {
           readonly id?: string;
@@ -99,93 +75,98 @@ export class ConnectionManager extends Context.Service<
           readonly lastHeartbeat?: number;
           readonly restored?: boolean;
         },
-      ) => {
-        const now = Date.now();
-        const connection = {
-          socket,
-          id: options?.id ?? crypto.randomUUID(),
-          connectedAt: options?.connectedAt ?? now,
-          lastHeartbeat: options?.lastHeartbeat ?? now,
-          roomId: metadata.roomId,
-          userId: metadata.userId,
-          restored: options?.restored ?? false,
-        } satisfies Connection;
-
-        connections.set(socket, connection);
-        socket.serializeAttachment({
-          id: connection.id,
-          connectedAt: connection.connectedAt,
-          lastHeartbeat: connection.lastHeartbeat,
-          roomId: connection.roomId,
-          userId: connection.userId,
-          restored: connection.restored,
-        } satisfies ConnectionAttachment);
-
-        return connection;
-      };
-
-      for (const socket of state.raw.getWebSockets()) {
-        const attachment = readAttachment(socket);
-        if (attachment !== undefined) {
-          remember(
+      ) =>
+        Effect.gen(function* () {
+          const now = Date.now();
+          const connection = {
             socket,
-            { roomId: attachment.roomId, userId: attachment.userId },
-            { ...attachment, restored: true },
-          );
-        }
-      }
+            id: options?.id ?? crypto.randomUUID(),
+            connectedAt: options?.connectedAt ?? now,
+            lastHeartbeat: options?.lastHeartbeat ?? now,
+            roomId: metadata.roomId,
+            userId: metadata.userId,
+            restored: options?.restored ?? false,
+          } satisfies Connection;
 
-      const getConnection = (socket: WebSocket) => {
-        const current = connections.get(socket);
-        if (current !== undefined) {
-          return current;
-        }
+          connections.set(socket, connection);
+          yield* Attachments.serialize(socket, {
+            id: connection.id,
+            connectedAt: connection.connectedAt,
+            lastHeartbeat: connection.lastHeartbeat,
+            roomId: connection.roomId,
+            userId: connection.userId,
+            restored: connection.restored,
+          } satisfies ConnectionAttachment);
 
-        const attachment = readAttachment(socket);
-        if (attachment === undefined) {
-          return undefined;
-        }
+          return connection;
+        });
 
-        return remember(
+      for (const { socket, attachment } of yield* Attachments.rehydrate({
+        onInvalid: "ignore-and-close",
+      })) {
+        yield* remember(
           socket,
           { roomId: attachment.roomId, userId: attachment.userId },
-          attachment,
+          { ...attachment, restored: true },
         );
-      };
+      }
 
-      const pruneStale = () => {
+      const getConnection = (
+        socket: ConnectionSocket,
+      ): Effect.Effect<Connection | undefined, unknown> =>
+        Effect.gen(function* () {
+          const current = connections.get(socket);
+          if (current !== undefined) {
+            return current;
+          }
+
+          const attachment = yield* Attachments.deserialize(socket).pipe(
+            Effect.catch(() => Effect.succeed(Option.none())),
+          );
+          if (Option.isNone(attachment)) {
+            return undefined;
+          }
+
+          return yield* remember(
+            socket,
+            { roomId: attachment.value.roomId, userId: attachment.value.userId },
+            attachment.value,
+          );
+        });
+
+      const pruneStale = Effect.gen(function* () {
         const now = Date.now();
-        for (const socket of state.raw.getWebSockets()) {
-          const connection = getConnection(socket);
+        for (const socket of yield* state.getWebSockets()) {
+          const connection = yield* getConnection(socket);
           if (connection !== undefined && now - connection.lastHeartbeat > heartbeatTtlMillis) {
             connections.delete(socket);
-            socket.close(1000, "heartbeat timeout");
+            yield* socket.close(1000, "heartbeat timeout").pipe(Effect.ignore);
           }
         }
-      };
+      });
 
       return {
-        add: (socket, metadata) => Effect.sync(() => remember(socket, metadata)),
+        add: (socket, metadata) => remember(socket, metadata),
         heartbeat: (socket) =>
-          Effect.sync(() => {
-            const current = getConnection(socket);
+          Effect.gen(function* () {
+            const current = yield* getConnection(socket);
             const metadata = current ?? { roomId: "general", userId: "anonymous" };
-            return remember(socket, metadata, {
+            return yield* remember(socket, metadata, {
               id: current?.id,
               connectedAt: current?.connectedAt,
               restored: current?.restored,
             });
           }),
-        get: (socket) => Effect.sync(() => getConnection(socket)),
+        get: (socket) => getConnection(socket),
         remove: (socket) =>
-          Effect.sync(() => {
-            const connection = getConnection(socket);
+          Effect.gen(function* () {
+            const connection = yield* getConnection(socket);
             connections.delete(socket);
             return connection;
           }),
         list: (roomId) =>
-          Effect.sync(() => {
-            pruneStale();
+          Effect.gen(function* () {
+            yield* pruneStale;
             return Array.from(connections.values())
               .filter((connection) => connection.roomId === roomId)
               .map(toPeer);
@@ -193,9 +174,7 @@ export class ConnectionManager extends Context.Service<
         restoredCount: Effect.sync(
           () => Array.from(connections.values()).filter((connection) => connection.restored).length,
         ),
-        cleanup: Effect.sync(() => {
-          pruneStale();
-        }),
+        cleanup: pruneStale,
         count: Effect.sync(() => connections.size),
       } satisfies ConnectionManagerService;
     }),

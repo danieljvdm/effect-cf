@@ -4,6 +4,7 @@ import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
 import * as RpcServer from "effect/unstable/rpc/RpcServer";
 
 import { DurableObjectState } from "./DurableObjectState";
+import type { DurableWebSocket } from "./DurableObjectWebSocket";
 
 const defaultAttachmentKey = "effectCloudflareRpcClientId";
 const defaultTag = "effect-cf-rpc";
@@ -25,15 +26,18 @@ export type NativeWebSocketMessage = string | ArrayBuffer;
  * Service API used to wire websocket lifecycle events to Effect RPC server protocol.
  */
 export interface DurableObjectRpcWebSocketService {
-  readonly accept: (socket: WebSocket) => Effect.Effect<void>;
-  readonly message: (socket: WebSocket, message: NativeWebSocketMessage) => Effect.Effect<void>;
-  readonly close: (socket: WebSocket) => Effect.Effect<void>;
-  readonly error: (socket: WebSocket, error: unknown) => Effect.Effect<void>;
+  readonly accept: (socket: DurableWebSocket) => Effect.Effect<void>;
+  readonly message: (
+    socket: DurableWebSocket,
+    message: NativeWebSocketMessage,
+  ) => Effect.Effect<void>;
+  readonly close: (socket: DurableWebSocket) => Effect.Effect<void>;
+  readonly error: (socket: DurableWebSocket, error: unknown) => Effect.Effect<void>;
 }
 
 interface RpcConnection {
   readonly id: number;
-  readonly socket: WebSocket;
+  readonly socket: DurableWebSocket;
   readonly parser: RpcSerialization.Parser;
 }
 
@@ -64,20 +68,20 @@ export const layer = (options: LayerOptions = {}) =>
         | ((clientId: number, data: RpcMessage.FromClientEncoded) => Effect.Effect<void>)
         | undefined;
 
-      const reserveClientId = (socket: WebSocket) => {
-        const attachment = readAttachment(socket, attachmentKey);
+      const reserveClientId = (socket: DurableWebSocket) => {
+        const attachment = readAttachment(socket.raw, attachmentKey);
         if (attachment !== undefined) {
           nextClientId = Math.max(nextClientId, attachment + 1);
           return attachment;
         }
 
         const id = nextClientId++;
-        writeAttachment(socket, attachmentKey, id);
+        writeAttachment(socket.raw, attachmentKey, id);
         return id;
       };
 
-      const register = (socket: WebSocket) => {
-        const existing = connectionsBySocket.get(socket);
+      const register = (socket: DurableWebSocket) => {
+        const existing = connectionsBySocket.get(socket.raw);
         if (existing !== undefined) {
           return existing;
         }
@@ -88,20 +92,20 @@ export const layer = (options: LayerOptions = {}) =>
           parser: serialization.makeUnsafe(),
         } satisfies RpcConnection;
 
-        connectionsBySocket.set(socket, connection);
+        connectionsBySocket.set(socket.raw, connection);
         connectionsById.set(connection.id, connection);
         clientIds.add(connection.id);
         return connection;
       };
 
-      const unregister = (socket: WebSocket) =>
+      const unregister = (socket: DurableWebSocket) =>
         Effect.sync(() => {
-          const connection = connectionsBySocket.get(socket);
+          const connection = connectionsBySocket.get(socket.raw);
           if (connection === undefined) {
             return;
           }
 
-          connectionsBySocket.delete(socket);
+          connectionsBySocket.delete(socket.raw);
           connectionsById.delete(connection.id);
           clientIds.delete(connection.id);
           Queue.offerUnsafe(disconnects, connection.id);
@@ -116,12 +120,12 @@ export const layer = (options: LayerOptions = {}) =>
           try {
             const encoded = connection.parser.encode(response);
             if (encoded !== undefined) {
-              connection.socket.send(encoded);
+              connection.socket.raw.send(encoded);
             }
           } catch (cause) {
             const encoded = connection.parser.encode(RpcMessage.ResponseDefectEncoded(cause));
             if (encoded !== undefined) {
-              connection.socket.send(encoded);
+              connection.socket.raw.send(encoded);
             }
           }
         });
@@ -138,7 +142,7 @@ export const layer = (options: LayerOptions = {}) =>
           end: (clientId) =>
             Effect.sync(() => {
               const connection = connectionsById.get(clientId);
-              connection?.socket.close();
+              connection?.socket.raw.close();
             }),
           clientIds: Effect.sync(() => clientIds),
           initialMessage: Effect.succeed(Option.none()),

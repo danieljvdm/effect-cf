@@ -5,7 +5,11 @@ import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
 import * as RpcServer from "effect/unstable/rpc/RpcServer";
 
-import { DurableObjectRpcWebSocket, DurableObjectState } from "../src/index";
+import {
+  DurableObjectRpcWebSocket,
+  DurableObjectState,
+  DurableObjectWebSocket,
+} from "../src/index";
 
 class PingResult extends Schema.Class<PingResult>("PingResult")({
   nonce: Schema.String,
@@ -30,6 +34,7 @@ const TestRpcHandlers = TestRpcs.toLayer(
 
 {
   const socket = makeFakeWebSocket();
+  const durableSocket = DurableObjectWebSocket.fromWebSocket(socket);
   const state = makeFakeDurableObjectState();
 
   layer(makeAppLayer(state))("DurableObjectRpcWebSocket", (it) => {
@@ -37,9 +42,9 @@ const TestRpcHandlers = TestRpcs.toLayer(
       Effect.gen(function* () {
         const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
 
-        yield* transport.accept(socket);
+        yield* transport.accept(durableSocket);
         yield* transport.message(
-          socket,
+          durableSocket,
           JSON.stringify({
             _tag: "Request",
             id: "1",
@@ -68,6 +73,7 @@ const TestRpcHandlers = TestRpcs.toLayer(
 
 {
   const socket = makeFakeWebSocket({ effectCloudflareRpcClientId: 7 });
+  const durableSocket = DurableObjectWebSocket.fromWebSocket(socket);
   const state = makeFakeDurableObjectState({
     socketsByTag: new Map([["test-rpc", [socket]]]),
   });
@@ -82,7 +88,7 @@ const TestRpcHandlers = TestRpcs.toLayer(
         assert.deepStrictEqual(Array.from(clientIds), [7]);
 
         yield* transport.message(
-          socket,
+          durableSocket,
           JSON.stringify({
             _tag: "Request",
             id: "1",
@@ -175,19 +181,20 @@ function makeFakeDurableObjectState(options?: {
     blockConcurrencyWhileOrReset: (effect) => effect,
     acceptWebSocket: (socket, tags) =>
       Effect.sync(() => {
-        accepted.push({ socket, tags });
+        accepted.push({ socket: socket.raw, tags });
         for (const tag of tags ?? []) {
           const current = socketsByTag.get(tag) ?? [];
-          current.push(socket);
+          current.push(socket.raw);
           socketsByTag.set(tag, current);
         }
       }),
     getWebSockets: (tag) =>
       Effect.sync(() => {
-        if (tag !== undefined) {
-          return socketsByTag.get(tag) ?? [];
-        }
-        return Array.from(socketsByTag.values()).flat();
+        const sockets =
+          tag !== undefined
+            ? (socketsByTag.get(tag) ?? [])
+            : Array.from(socketsByTag.values()).flat();
+        return sockets.map((socket) => DurableObjectWebSocket.fromWebSocket(socket));
       }),
     setWebSocketAutoResponse: () => Effect.void,
     getWebSocketAutoResponse: Effect.succeed(null),

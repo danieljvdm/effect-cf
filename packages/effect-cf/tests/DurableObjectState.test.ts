@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import { Cause, Context, Effect } from "effect";
 
-import { DurableObjectState } from "../src/index";
+import { DurableObjectState, DurableObjectWebSocket } from "../src/index";
 
 const FailureMessage = Context.Service<{ readonly message: string }>(
   "effect-cf/test/FailureMessage",
@@ -74,9 +74,17 @@ it.effect("wraps hibernation metadata and abort helpers", () =>
 
     tracker.tags.set(ws, ["room:general", "user:1"]);
     tracker.autoResponseTimestamps.set(ws, timestamp);
+    tracker.sockets = [ws];
+    const socket = DurableObjectWebSocket.fromWebSocket(ws);
 
-    assert.deepStrictEqual(yield* service.getTags(ws), ["room:general", "user:1"]);
-    assert.strictEqual(yield* service.getWebSocketAutoResponseTimestamp(ws), timestamp);
+    assert.deepStrictEqual(yield* service.getTags(socket), ["room:general", "user:1"]);
+    assert.strictEqual(yield* service.getWebSocketAutoResponseTimestamp(socket), timestamp);
+    yield* service.acceptWebSocket(socket, ["room:general"]);
+    assert.deepStrictEqual(tracker.acceptedSockets, [{ socket: ws, tags: ["room:general"] }]);
+    assert.deepStrictEqual(
+      (yield* service.getWebSockets()).map((socket) => socket.raw),
+      [ws],
+    );
 
     assert.strictEqual(yield* service.getHibernatableWebSocketEventTimeout, null);
     yield* service.setHibernatableWebSocketEventTimeout(1_000);
@@ -95,6 +103,11 @@ interface BlockConcurrencyTracker {
   readonly rejected: Array<unknown>;
   readonly tags: Map<WebSocket, Array<string>>;
   readonly autoResponseTimestamps: Map<WebSocket, Date>;
+  readonly acceptedSockets: Array<{
+    readonly socket: WebSocket;
+    readonly tags: Array<string> | undefined;
+  }>;
+  sockets: Array<WebSocket>;
   hibernatableTimeout: number | null;
   readonly abortReasons: Array<string | undefined>;
 }
@@ -109,6 +122,8 @@ function makeRawDurableObjectState(): {
     rejected: [],
     tags: new Map(),
     autoResponseTimestamps: new Map(),
+    acceptedSockets: [],
+    sockets: [],
     hibernatableTimeout: null,
     abortReasons: [],
   };
@@ -129,8 +144,10 @@ function makeRawDurableObjectState(): {
         throw error;
       }
     },
-    acceptWebSocket: () => {},
-    getWebSockets: () => [],
+    acceptWebSocket: (socket: WebSocket, tags?: Array<string>) => {
+      tracker.acceptedSockets.push({ socket, tags });
+    },
+    getWebSockets: () => tracker.sockets,
     setWebSocketAutoResponse: () => {},
     getWebSocketAutoResponse: () => null,
     getWebSocketAutoResponseTimestamp: (ws: WebSocket) =>

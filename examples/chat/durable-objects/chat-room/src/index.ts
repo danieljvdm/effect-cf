@@ -19,19 +19,13 @@ const roomFromRequest = (request: Request) => {
 
 type ChatRoomContext = ConnectionManager | ChatRepository;
 
-const layer: Layer.Layer<ChatRoomContext, never, DurableObjectState.DurableObjectState> =
+const layer: Layer.Layer<ChatRoomContext, unknown, DurableObjectState.DurableObjectState> =
   Layer.mergeAll(ConnectionManager.layer, ChatRepository.layer);
 
 const encode = (event: ChatServerEvent) => JSON.stringify(event);
 
-const send = (socket: WebSocket, event: ChatServerEvent) => {
-  try {
-    socket.send(encode(event));
-  } catch {
-    // Broadcasts are best-effort. A racing close must not make an already-persisted
-    // message fail its RPC caller.
-  }
-};
+const send = (socket: DurableObjectWebSocket.DurableWebSocket, event: ChatServerEvent) =>
+  socket.send(encode(event)).pipe(Effect.ignore);
 
 const parseClientEvent = (message: string): ChatClientEvent | undefined => {
   try {
@@ -68,11 +62,7 @@ const broadcastPresence = (roomId: string) =>
     });
 
     for (const peer of yield* state.getWebSockets(roomId)) {
-      try {
-        peer.send(payload);
-      } catch {
-        // Best-effort presence update.
-      }
+      yield* peer.send(payload).pipe(Effect.ignore);
     }
   });
 
@@ -91,11 +81,7 @@ const appendAndBroadcast = (
     const payload = encode({ type: "message", message });
 
     for (const peer of yield* state.getWebSockets(message.roomId)) {
-      try {
-        peer.send(payload);
-      } catch {
-        // Best-effort message fanout after durable persistence.
-      }
+      yield* peer.send(payload).pipe(Effect.ignore);
     }
 
     return message;
@@ -136,7 +122,7 @@ const ChatRoomLive = ChatRoom.make(layer, {
     const peers = yield* connections.list(roomId);
     const restoredConnections = yield* connections.restoredCount;
 
-    send(upgrade.server, {
+    yield* send(upgrade.server, {
       type: "ready",
       roomId,
       self: {
@@ -157,67 +143,69 @@ const ChatRoomLive = ChatRoom.make(layer, {
 
     return upgrade.response;
   }),
-  webSocketMessage: (socket, message) =>
-    Effect.gen(function* () {
-      const connections = yield* ConnectionManager;
+  ...DurableObjectWebSocket.handlers<ChatRoomContext | DurableObjectState.DurableObjectState>({
+    message: (socket, message) =>
+      Effect.gen(function* () {
+        const connections = yield* ConnectionManager;
 
-      if (message === "ping") {
-        socket.send("pong");
-        return;
-      }
+        if (message === "ping") {
+          yield* socket.send("pong").pipe(Effect.ignore);
+          return;
+        }
 
-      if (typeof message !== "string") {
-        return;
-      }
+        if (typeof message !== "string") {
+          return;
+        }
 
-      const event = parseClientEvent(message);
-      if (event === undefined) {
-        send(socket, { type: "error", message: "Unsupported chat event" });
-        return;
-      }
+        const event = parseClientEvent(message);
+        if (event === undefined) {
+          yield* send(socket, { type: "error", message: "Unsupported chat event" });
+          return;
+        }
 
-      const connection = yield* connections.heartbeat(socket);
+        const connection = yield* connections.heartbeat(socket);
 
-      if (event.type === "heartbeat") {
-        const count = yield* connections.count;
-        send(socket, {
-          type: "heartbeat",
-          at: new Date(connection.lastHeartbeat).toISOString(),
-          connectionCount: count,
+        if (event.type === "heartbeat") {
+          const count = yield* connections.count;
+          yield* send(socket, {
+            type: "heartbeat",
+            at: new Date(connection.lastHeartbeat).toISOString(),
+            connectionCount: count,
+          });
+          yield* broadcastPresence(connection.roomId);
+          return;
+        }
+
+        const text = event.text.trim();
+        if (text === "") {
+          yield* send(socket, { type: "error", message: "Message text is required" });
+          return;
+        }
+
+        yield* appendAndBroadcast({
+          roomId: connection.roomId,
+          userId: connection.userId,
+          text,
         });
         yield* broadcastPresence(connection.roomId);
-        return;
-      }
-
-      const text = event.text.trim();
-      if (text === "") {
-        send(socket, { type: "error", message: "Message text is required" });
-        return;
-      }
-
-      yield* appendAndBroadcast({
-        roomId: connection.roomId,
-        userId: connection.userId,
-        text,
-      });
-      yield* broadcastPresence(connection.roomId);
-    }),
-  webSocketClose: (socket) =>
-    Effect.gen(function* () {
-      const connections = yield* ConnectionManager;
-      const connection = yield* connections.remove(socket);
-      if (connection !== undefined) {
-        yield* broadcastPresence(connection.roomId);
-      }
-    }),
-  webSocketError: (socket) =>
-    Effect.gen(function* () {
-      const connections = yield* ConnectionManager;
-      const connection = yield* connections.remove(socket);
-      if (connection !== undefined) {
-        yield* broadcastPresence(connection.roomId);
-      }
-    }),
+      }),
+    close: (socket) =>
+      Effect.gen(function* () {
+        const connections = yield* ConnectionManager;
+        const connection = yield* connections.remove(socket);
+        if (connection !== undefined) {
+          yield* broadcastPresence(connection.roomId);
+        }
+      }),
+    error: (socket) =>
+      Effect.gen(function* () {
+        const connections = yield* ConnectionManager;
+        const connection = yield* connections.remove(socket);
+        if (connection !== undefined) {
+          yield* broadcastPresence(connection.roomId);
+        }
+      }),
+  }),
   alarm: () =>
     Effect.gen(function* () {
       const connections = yield* ConnectionManager;

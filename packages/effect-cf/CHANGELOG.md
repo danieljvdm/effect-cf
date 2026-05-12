@@ -1,5 +1,17 @@
 # effect-cf
 
+## 0.2.0
+
+### Minor Changes
+
+- [#5](https://github.com/danieljvdm/effect-cf/pull/5) [`a17685f`](https://github.com/danieljvdm/effect-cf/commit/a17685fe3873c18994102fad6c6b4074f2b3b1e8) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add Effect-native Durable Object WebSocket APIs for hibernatable application sockets.
+
+  `DurableObjectWebSocket.acceptUpgrade` now returns a wrapped `DurableWebSocket` server socket with Effect-based `send`, `close`, and attachment helpers. `DurableObjectState.getWebSockets` and `acceptWebSocket` now use the same wrapper, and schema-backed attachment helpers support typed rehydration of hibernated sockets.
+
+- [#7](https://github.com/danieljvdm/effect-cf/pull/7) [`2af014c`](https://github.com/danieljvdm/effect-cf/commit/2af014ca704bf0a170133cadebe4572ccc67e020) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add Effect-native Cloudflare Queue and Workflow primitives with typed definitions, producer/control bindings, runtime entrypoints, and runnable examples.
+
+- [#3](https://github.com/danieljvdm/effect-cf/pull/3) [`219f568`](https://github.com/danieljvdm/effect-cf/commit/219f568639c324da9681de6c34e4e45189ac7972) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add a fetch-handler shorthand for `Worker.make(layer, effect)`.
+
 ## 0.1.0
 
 Initial public release.

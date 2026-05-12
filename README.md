@@ -28,6 +28,10 @@ Binding types come from code-owned definitions such as `Worker.Tag(...)` and `Du
 
 The `examples/` directory demonstrates package usage across Workers, Durable Objects, service bindings, and frontend consumers.
 
+## Changelog
+
+See [packages/effect-cf/CHANGELOG.md](./packages/effect-cf/CHANGELOG.md).
+
 ## Contributing
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md).

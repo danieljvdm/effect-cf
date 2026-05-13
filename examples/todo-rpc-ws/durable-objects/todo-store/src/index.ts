@@ -72,23 +72,21 @@ export const TodoStoreLive = DurableObject.make(layer, {
     yield* transport.accept(upgrade.server);
     return upgrade.response;
   }),
-  ...DurableObjectWebSocket.handlers({
-    message: (socket, message) =>
-      Effect.gen(function* () {
-        const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
-        yield* transport.message(socket, message);
-      }),
-    close: (socket) =>
-      Effect.gen(function* () {
-        const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
-        yield* transport.close(socket);
-      }),
-    error: (socket, error) =>
-      Effect.gen(function* () {
-        const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
-        yield* transport.error(socket, error);
-      }),
-  }),
+  webSocketMessage: (socket, message) =>
+    Effect.gen(function* () {
+      const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
+      yield* transport.message(socket, message);
+    }),
+  webSocketClose: (socket) =>
+    Effect.gen(function* () {
+      const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
+      yield* transport.close(socket);
+    }),
+  webSocketError: (socket, error) =>
+    Effect.gen(function* () {
+      const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
+      yield* transport.error(socket, error);
+    }),
 });
 export class TodoStoreDurableObject extends TodoStoreLive {}
 export default Worker.make(Layer.empty, {

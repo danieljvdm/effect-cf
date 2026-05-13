@@ -251,21 +251,9 @@ export interface DurableWebSocketHandlers<R = never, E = unknown> {
   readonly error?: (socket: DurableWebSocket, error: unknown) => Effect.Effect<void, E, R>;
 }
 
-/** Adapts wrapped websocket lifecycle handlers to `DurableObject.make` raw callbacks. */
+/** Maps compact websocket lifecycle handler names to `DurableObject.make` options. */
 export const handlers = <R = never, E = unknown>(options: DurableWebSocketHandlers<R, E>) => ({
-  webSocketMessage:
-    options.message === undefined
-      ? undefined
-      : (socket: WebSocket, message: string | ArrayBuffer) =>
-          options.message?.(fromWebSocket(socket), message) ?? Effect.void,
-  webSocketClose:
-    options.close === undefined
-      ? undefined
-      : (socket: WebSocket, code: number, reason: string, wasClean: boolean) =>
-          options.close?.(fromWebSocket(socket), code, reason, wasClean) ?? Effect.void,
-  webSocketError:
-    options.error === undefined
-      ? undefined
-      : (socket: WebSocket, error: unknown) =>
-          options.error?.(fromWebSocket(socket), error) ?? Effect.void,
+  webSocketMessage: options.message,
+  webSocketClose: options.close,
+  webSocketError: options.error,
 });

@@ -4,6 +4,7 @@ import { Effect, Layer, ManagedRuntime, type Scope } from "effect";
 import { NativeRequest } from "./Worker";
 import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 import { DurableObjectState, fromDurableObjectState } from "./DurableObjectState";
+import { fromWebSocket, type DurableWebSocket } from "./DurableObjectWebSocket";
 import * as DurableObjectDefinition from "./DurableObjectDefinition";
 import * as Entrypoint from "./internal/Entrypoint";
 
@@ -84,17 +85,17 @@ export interface DurableObjectOptions<ROut, Rpc extends DurableObjectRpc<ROut>> 
     alarmInfo?: globalThis.AlarmInvocationInfo,
   ) => Effect.Effect<void, unknown, HandlerContext<ROut>>;
   readonly webSocketMessage?: (
-    socket: WebSocket,
+    socket: DurableWebSocket,
     message: string | ArrayBuffer,
   ) => Effect.Effect<void, unknown, HandlerContext<ROut>>;
   readonly webSocketClose?: (
-    socket: WebSocket,
+    socket: DurableWebSocket,
     code: number,
     reason: string,
     wasClean: boolean,
   ) => Effect.Effect<void, unknown, HandlerContext<ROut>>;
   readonly webSocketError?: (
-    socket: WebSocket,
+    socket: DurableWebSocket,
     error: unknown,
   ) => Effect.Effect<void, unknown, HandlerContext<ROut>>;
 }
@@ -172,7 +173,7 @@ export const make = <
 
     webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> | void {
       if (options.webSocketMessage !== undefined) {
-        return this[RunSymbol](options.webSocketMessage(socket, message));
+        return this[RunSymbol](options.webSocketMessage(fromWebSocket(socket), message));
       }
     }
 
@@ -183,13 +184,15 @@ export const make = <
       wasClean: boolean,
     ): Promise<void> | void {
       if (options.webSocketClose !== undefined) {
-        return this[RunSymbol](options.webSocketClose(socket, code, reason, wasClean));
+        return this[RunSymbol](
+          options.webSocketClose(fromWebSocket(socket), code, reason, wasClean),
+        );
       }
     }
 
     webSocketError(socket: WebSocket, error: unknown): Promise<void> | void {
       if (options.webSocketError !== undefined) {
-        return this[RunSymbol](options.webSocketError(socket, error));
+        return this[RunSymbol](options.webSocketError(fromWebSocket(socket), error));
       }
     }
   }

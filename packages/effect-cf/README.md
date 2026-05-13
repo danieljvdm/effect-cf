@@ -144,7 +144,7 @@ Durable Object application sockets should use the hibernation-compatible state A
 
 ```ts
 import { Effect, Schema as S } from "effect";
-import { DurableObjectState, DurableObjectWebSocket, Worker } from "effect-cf";
+import { DurableObject, DurableObjectState, DurableObjectWebSocket, Worker } from "effect-cf";
 
 const ConnectionAttachment = S.Struct({
   id: S.String,
@@ -172,6 +172,17 @@ export const fetch = Effect.gen(function* () {
 ```
 
 `DurableWebSocket` keeps the native socket available as `socket.raw`, while `send`, `close`, `serializeAttachment`, and `deserializeAttachment` return typed `Effect` failures. Use `state.getWebSockets(tag)` to retrieve wrapped sockets for broadcast and rehydration.
+
+`DurableObject.make` lifecycle handlers receive wrapped sockets automatically:
+
+```ts
+export const RoomLive = DurableObject.make(layer, {
+  webSocketMessage: (socket, message) =>
+    Effect.gen(function* () {
+      yield* socket.send(message);
+    }),
+});
+```
 
 Schema-backed attachments can rehydrate hibernated sockets:
 

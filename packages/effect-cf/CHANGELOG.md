@@ -1,5 +1,11 @@
 # effect-cf
 
+## 1.0.0
+
+### Major Changes
+
+- [#8](https://github.com/danieljvdm/effect-cf/pull/8) [`a7a4f1b`](https://github.com/danieljvdm/effect-cf/commit/a7a4f1be58745da8977b1037a0007902cf835e76) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Type Durable Object websocket lifecycle handlers with `DurableWebSocket` instead of raw `WebSocket`, so handlers can use the Effect-native durable socket API without manually wrapping Cloudflare sockets.
+
 ## 0.2.0
 
 ### Minor Changes

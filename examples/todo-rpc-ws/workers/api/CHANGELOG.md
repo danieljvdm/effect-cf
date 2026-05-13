@@ -1,13 +1,5 @@
 # todo-rpc-ws-api-worker
 
-## 0.0.2
-
-### Patch Changes
-
-- Updated dependencies [[`a7a4f1b`](https://github.com/danieljvdm/effect-cf/commit/a7a4f1be58745da8977b1037a0007902cf835e76)]:
-  - effect-cf@1.0.0
-  - @effect-cf/todo-rpc-ws-domain@0.0.2
-
 ## 0.0.1
 
 ### Patch Changes

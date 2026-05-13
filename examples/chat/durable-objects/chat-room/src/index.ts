@@ -143,69 +143,67 @@ const ChatRoomLive = ChatRoom.make(layer, {
 
     return upgrade.response;
   }),
-  ...DurableObjectWebSocket.handlers<ChatRoomContext | DurableObjectState.DurableObjectState>({
-    message: (socket, message) =>
-      Effect.gen(function* () {
-        const connections = yield* ConnectionManager;
+  webSocketMessage: (socket, message) =>
+    Effect.gen(function* () {
+      const connections = yield* ConnectionManager;
 
-        if (message === "ping") {
-          yield* socket.send("pong").pipe(Effect.ignore);
-          return;
-        }
+      if (message === "ping") {
+        yield* socket.send("pong").pipe(Effect.ignore);
+        return;
+      }
 
-        if (typeof message !== "string") {
-          return;
-        }
+      if (typeof message !== "string") {
+        return;
+      }
 
-        const event = parseClientEvent(message);
-        if (event === undefined) {
-          yield* send(socket, { type: "error", message: "Unsupported chat event" });
-          return;
-        }
+      const event = parseClientEvent(message);
+      if (event === undefined) {
+        yield* send(socket, { type: "error", message: "Unsupported chat event" });
+        return;
+      }
 
-        const connection = yield* connections.heartbeat(socket);
+      const connection = yield* connections.heartbeat(socket);
 
-        if (event.type === "heartbeat") {
-          const count = yield* connections.count;
-          yield* send(socket, {
-            type: "heartbeat",
-            at: new Date(connection.lastHeartbeat).toISOString(),
-            connectionCount: count,
-          });
-          yield* broadcastPresence(connection.roomId);
-          return;
-        }
-
-        const text = event.text.trim();
-        if (text === "") {
-          yield* send(socket, { type: "error", message: "Message text is required" });
-          return;
-        }
-
-        yield* appendAndBroadcast({
-          roomId: connection.roomId,
-          userId: connection.userId,
-          text,
+      if (event.type === "heartbeat") {
+        const count = yield* connections.count;
+        yield* send(socket, {
+          type: "heartbeat",
+          at: new Date(connection.lastHeartbeat).toISOString(),
+          connectionCount: count,
         });
         yield* broadcastPresence(connection.roomId);
-      }),
-    close: (socket) =>
-      Effect.gen(function* () {
-        const connections = yield* ConnectionManager;
-        const connection = yield* connections.remove(socket);
-        if (connection !== undefined) {
-          yield* broadcastPresence(connection.roomId);
-        }
-      }),
-    error: (socket) =>
-      Effect.gen(function* () {
-        const connections = yield* ConnectionManager;
-        const connection = yield* connections.remove(socket);
-        if (connection !== undefined) {
-          yield* broadcastPresence(connection.roomId);
-        }
-      }),
-  }),
+        return;
+      }
+
+      const text = event.text.trim();
+      if (text === "") {
+        yield* send(socket, { type: "error", message: "Message text is required" });
+        return;
+      }
+
+      yield* appendAndBroadcast({
+        roomId: connection.roomId,
+        userId: connection.userId,
+        text,
+      });
+      yield* broadcastPresence(connection.roomId);
+    }),
+  webSocketClose: (socket) =>
+    Effect.gen(function* () {
+      const connections = yield* ConnectionManager;
+      const connection = yield* connections.remove(socket);
+      if (connection !== undefined) {
+        yield* broadcastPresence(connection.roomId);
+      }
+    }),
+  webSocketError: (socket) =>
+    Effect.gen(function* () {
+      const connections = yield* ConnectionManager;
+      const connection = yield* connections.remove(socket);
+      if (connection !== undefined) {
+        yield* broadcastPresence(connection.roomId);
+      }
+    }),
   alarm: () =>
     Effect.gen(function* () {
       const connections = yield* ConnectionManager;

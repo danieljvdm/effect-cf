@@ -6,6 +6,7 @@ import {
   DurableObject,
   DurableObjectNamespace,
   DurableObjectState,
+  DurableObjectWebSocket,
   ServiceBinding,
   Worker,
   WorkerEnvironment,
@@ -270,6 +271,23 @@ test("DurableObject preserves server, client, handler, and namespace types", () 
       Counters.call(stub, "add", 1, "one"),
     );
     expectType<Effect.Effect<unknown, unknown, Scope.Scope>>(Counters.scopedCall(stub, "resource"));
+
+    DurableObject.make(Layer.empty, {
+      webSocketMessage: (socket, message) => {
+        expectType<DurableObjectWebSocket.DurableWebSocket>(socket);
+        expectType<string | ArrayBuffer>(message);
+        return Effect.void;
+      },
+      webSocketClose: (socket) => {
+        expectType<DurableObjectWebSocket.DurableWebSocket>(socket);
+        return Effect.void;
+      },
+      webSocketError: (socket, error) => {
+        expectType<DurableObjectWebSocket.DurableWebSocket>(socket);
+        expectType<unknown>(error);
+        return Effect.void;
+      },
+    });
 
     void class extends DurableObject.Tag<object>()(
       "InvalidCounter",

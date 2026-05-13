@@ -1,5 +1,13 @@
 # todo-rpc-ws-store-do
 
+## 0.0.2
+
+### Patch Changes
+
+- Updated dependencies [[`a0e3f43`](https://github.com/danieljvdm/effect-cf/commit/a0e3f436df695b8ea3908fbb7813efea099ccd13)]:
+  - effect-cf@0.3.0
+  - @effect-cf/todo-rpc-ws-domain@0.0.2
+
 ## 0.0.1
 
 ### Patch Changes

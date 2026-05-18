@@ -38,6 +38,8 @@ export const ApiWorkerLive = ApiWorker.make(layer, {
   fetch: Effect.gen(function* () {
     const request = yield* Worker.NativeRequest;
     const config = yield* ApiConfig;
+    const analytics = yield* AnalyticsWorker;
+    const rooms = yield* ChatRooms;
     const url = new URL(request.url);
 
     if (request.method === "GET" && url.pathname === "/users") {
@@ -56,7 +58,7 @@ export const ApiWorkerLive = ApiWorker.make(layer, {
       socketRoomId !== undefined &&
       Worker.isWebSocketUpgrade(request)
     ) {
-      return yield* ChatRooms.byName(socketRoomId).fetch(request);
+      return yield* rooms.byName(socketRoomId).fetch(request);
     }
 
     const messagesRoomId = roomRoute(url.pathname, "/messages");
@@ -67,12 +69,12 @@ export const ApiWorkerLive = ApiWorker.make(layer, {
       }
 
       const userId = url.searchParams.get("userId") ?? config.defaultUserId;
-      const message = yield* ChatRooms.byName(messagesRoomId).appendMessage({
+      const message = yield* rooms.byName(messagesRoomId).appendMessage({
         roomId: messagesRoomId,
         userId,
         text,
       });
-      const artifact = yield* AnalyticsWorker.recordMessage({
+      const artifact = yield* analytics.recordMessage({
         roomId: messagesRoomId,
         messageId: message.id,
       });
@@ -82,13 +84,13 @@ export const ApiWorkerLive = ApiWorker.make(layer, {
 
     const roomId = roomRoute(url.pathname, "");
     if (request.method === "GET" && roomId !== undefined) {
-      const snapshot = yield* ChatRooms.byName(roomId).getSnapshot(roomId);
+      const snapshot = yield* rooms.byName(roomId).getSnapshot(roomId);
       return json(snapshot);
     }
 
     const analysisRoomId = roomRoute(url.pathname, "/analysis");
     if (request.method === "GET" && analysisRoomId !== undefined) {
-      const artifact = yield* AnalyticsWorker.analyzeRoom(analysisRoomId);
+      const artifact = yield* analytics.analyzeRoom(analysisRoomId);
       return json(artifact);
     }
 

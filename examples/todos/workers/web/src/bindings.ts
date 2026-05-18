@@ -39,13 +39,14 @@ const ApiWorkerHttpClient = Layer.effect(
     return HttpClient.make((request, _url, signal) =>
       Effect.gen(function* () {
         const webRequest = yield* HttpClientRequest.toWeb(request, { signal }).pipe(Effect.orDie);
-        const response = yield* Effect.tryPromise({
-          try: () => api.fetch(webRequest),
-          catch: (cause) =>
-            new HttpClientError.HttpClientError({
-              reason: new HttpClientError.TransportError({ request, cause }),
-            }),
-        });
+        const response = yield* api.fetch(webRequest).pipe(
+          Effect.mapError(
+            (cause) =>
+              new HttpClientError.HttpClientError({
+                reason: new HttpClientError.TransportError({ request, cause }),
+              }),
+          ),
+        );
         return HttpClientResponse.fromWeb(request, response);
       }),
     );

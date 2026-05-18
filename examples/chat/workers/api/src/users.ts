@@ -13,14 +13,15 @@ export const listUsers = Effect.sync(() => Array.from(users.values()));
 
 export const getUser = (userId: string) =>
   Effect.gen(function* () {
-    const cached = yield* UserCache.get(userId);
+    const cache = yield* UserCache;
+    const cached = yield* cache.get(userId);
     if (Option.isSome(cached)) {
       return cached.value;
     }
 
     const user = users.get(userId);
     if (user !== undefined) {
-      yield* UserCache.put(userId, user);
+      yield* cache.put(userId, user);
       return user;
     }
 

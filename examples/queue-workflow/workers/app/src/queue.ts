@@ -28,11 +28,15 @@ export class ProcessedEmails extends Context.Service<
 >()("effect-cf/examples/queue-workflow/ProcessedEmails") {}
 
 export const enqueueWelcomeEmail = (to: string) =>
-  EmailQueue.send({
-    to,
-    subject: "Welcome to effect-cf",
-    body: "Thanks for trying the Queue primitives.",
-    priority: "normal",
+  Effect.gen(function* () {
+    const queue = yield* EmailQueue;
+
+    yield* queue.send({
+      to,
+      subject: "Welcome to effect-cf",
+      body: "Thanks for trying the Queue primitives.",
+      priority: "normal",
+    });
   });
 
 export const makeEmailQueueConsumer = (messages: Array<EmailJob>) =>

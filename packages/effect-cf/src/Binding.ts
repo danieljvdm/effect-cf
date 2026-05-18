@@ -45,20 +45,36 @@ const getBinding = <Resource>(
 /**
  * Creates a Context tag + layer for reading and validating a Cloudflare binding.
  */
+export interface BindingService<Self, Id extends string, Service> extends Context.ServiceClass<
+  Self,
+  Id,
+  Service
+> {
+  readonly [TypeId]: typeof TypeId;
+  readonly binding: string;
+  readonly layer: Layer.Layer<
+    Self,
+    BindingNotFoundError | BindingValidationError,
+    WorkerEnvironment
+  >;
+}
+
 export const Service =
   <Self>() =>
-  <Id extends string, Resource>(
+  <Id extends string, Resource, Service = Resource>(
     id: Id,
     binding: string,
     isResource: (value: unknown) => value is Resource,
-  ) => {
-    const tag = Context.Service<Self, Resource>()(id);
+    wrap?: (resource: Resource) => Service,
+  ): BindingService<Self, Id, Service> => {
+    const tag = Context.Service<Self, Service>()(id);
 
     const layer = Layer.effect(
       tag,
       Effect.gen(function* () {
         const env = yield* WorkerEnvironment;
-        return yield* getBinding(env, binding, isResource);
+        const resource = yield* getBinding(env, binding, isResource);
+        return wrap === undefined ? (resource as unknown as Service) : wrap(resource);
       }),
     );
 
@@ -66,5 +82,5 @@ export const Service =
       [TypeId]: TypeId,
       binding,
       layer,
-    });
+    }) as BindingService<Self, Id, Service>;
   };

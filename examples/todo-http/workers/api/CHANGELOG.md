@@ -1,5 +1,12 @@
 # todo-http-api-worker
 
+## 0.0.4
+
+### Patch Changes
+
+- Updated dependencies [[`a31a930`](https://github.com/danieljvdm/effect-cf/commit/a31a93020a679e42a748aed54626ce7387d7e685)]:
+  - effect-cf@0.5.0
+
 ## 0.0.3
 
 ### Patch Changes

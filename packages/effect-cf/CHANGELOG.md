@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.4.0
+
+### Minor Changes
+
+- [#12](https://github.com/danieljvdm/effect-cf/pull/12) [`c2af5df`](https://github.com/danieljvdm/effect-cf/commit/c2af5dff03ce0ebc5357a42b0ad7484d4bd23f4c) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add reusable KV definitions with Queue-style binding helpers so packages can share typed KV schemas without choosing concrete Cloudflare binding names.
+
 ## 0.3.0
 
 ### Minor Changes

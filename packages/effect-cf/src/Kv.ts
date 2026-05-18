@@ -52,6 +52,26 @@ export interface KvDefinition<Key, Value, EncodedValue> {
   readonly value: S.Codec<Value, EncodedValue>;
 }
 
+/**
+ * Reusable typed KV resource definition without a concrete Cloudflare binding name.
+ */
+export interface Definition<
+  Id extends string = string,
+  Key = unknown,
+  Value = unknown,
+  EncodedValue = unknown,
+> {
+  readonly id: Id;
+  /** Codec used to encode/decode keys. */
+  readonly key: S.Codec<Key, string>;
+  /** Codec used to encode/decode values. */
+  readonly value: S.Codec<Value, EncodedValue>;
+}
+
+export namespace Definition {
+  export type Any = Definition<string, any, any, any>;
+}
+
 declare const KvServiceTypeId: unique symbol;
 
 /** Nominal service marker for KV services created with {@link make}. */
@@ -61,6 +81,16 @@ export interface KvService<Id extends string, Key, Value, EncodedValue> {
     readonly key: Key;
     readonly value: Value;
     readonly encodedValue: EncodedValue;
+  };
+}
+
+declare const BindingServiceTypeId: unique symbol;
+
+/** Nominal service marker for KV bindings created from a reusable {@link Definition}. */
+export interface BindingService<Id extends string, Self extends Definition.Any> {
+  readonly [BindingServiceTypeId]: {
+    readonly id: Id;
+    readonly definition: Self;
   };
 }
 
@@ -91,6 +121,66 @@ export const make = <Id extends string, Key, Value, EncodedValue>(
   definition: KvDefinition<Key, Value, EncodedValue>,
 ) =>
   Service<KvService<Id, Key, Value, EncodedValue>>()<Id, Key, Value, EncodedValue>(id, definition);
+
+const makeDefinition = <Id extends string, Key, Value, EncodedValue>(
+  id: Id,
+  definition: { readonly key: S.Codec<Key, string>; readonly value: S.Codec<Value, EncodedValue> },
+) => {
+  type SelfDefinition = Definition<Id, Key, Value, EncodedValue>;
+  const kvDefinition: SelfDefinition = {
+    id,
+    key: definition.key,
+    value: definition.value,
+  };
+
+  return Object.assign(kvDefinition, {
+    Binding:
+      <Self>() =>
+      <BindingId extends string>(
+        bindingId: BindingId,
+        binding: Omit<KvDefinition<Key, Value, EncodedValue>, "key" | "value">,
+      ) =>
+        Service<Self>()<BindingId, Key, Value, EncodedValue>(bindingId, {
+          ...binding,
+          key: definition.key,
+          value: definition.value,
+        }),
+    binding: <BindingId extends string>(
+      bindingId: BindingId,
+      binding: Omit<KvDefinition<Key, Value, EncodedValue>, "key" | "value">,
+    ) =>
+      Service<BindingService<BindingId, SelfDefinition>>()<BindingId, Key, Value, EncodedValue>(
+        bindingId,
+        {
+          ...binding,
+          key: definition.key,
+          value: definition.value,
+        },
+      ),
+  });
+};
+
+export const Tag =
+  <_Self>() =>
+  <Id extends string, Key, Value, EncodedValue>(
+    id: Id,
+    definition: {
+      readonly key: S.Codec<Key, string>;
+      readonly value: S.Codec<Value, EncodedValue>;
+    },
+  ) => {
+    const kvDefinition = makeDefinition(id, definition);
+
+    abstract class KvDefinitionClass {
+      static readonly id = kvDefinition.id;
+      static readonly key = kvDefinition.key;
+      static readonly value = kvDefinition.value;
+      static readonly Binding = kvDefinition.Binding;
+      static readonly binding = kvDefinition.binding;
+    }
+
+    return KvDefinitionClass as (abstract new () => object) & typeof kvDefinition;
+  };
 
 /**
  * Builds a KV service around a Cloudflare KV namespace binding.

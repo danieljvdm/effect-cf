@@ -1,7 +1,7 @@
-import { assert, layer } from "@effect/vitest";
+import { assert, expect, layer, test } from "@effect/vitest";
 import { Effect, Layer, Option, Schema as S } from "effect";
 
-import { Kv, WorkerEnvironment } from "../src/index";
+import { Binding, Kv, WorkerEnvironment } from "../src/index";
 
 class TestKv extends Kv.Service<TestKv>()("test/TestKv", {
   binding: "TEST_KV",
@@ -19,6 +19,35 @@ const ValueStyleKv = Kv.make("test/ValueStyleKv", {
   binding: "TEST_KV",
   key: S.String,
   value: S.Struct({ count: S.Number }),
+});
+
+class TestKvDefinition extends Kv.Tag<TestKvDefinition>()("test/TestKvDefinition", {
+  key: S.String,
+  value: S.Struct({ count: S.Number }),
+}) {}
+
+class TestKvBinding extends TestKvDefinition.Binding<TestKvBinding>()("test/TestKvBinding", {
+  binding: "TEST_KV",
+}) {}
+
+const ValueStyleKvBinding = TestKvDefinition.binding("test/ValueStyleKvBinding", {
+  binding: "TEST_KV",
+});
+
+class SharedStringKvDefinition extends Kv.Tag<SharedStringKvDefinition>()(
+  "test/SharedStringKvDefinition",
+  {
+    key: S.String,
+    value: S.String,
+  },
+) {}
+
+const SharedCountKvBinding = TestKvDefinition.binding("test/SharedCountKvBinding", {
+  binding: "TEST_KV",
+});
+
+const SharedStringKvBinding = SharedStringKvDefinition.binding("test/SharedStringKvBinding", {
+  binding: "TEST_KV",
 });
 
 interface PutCall {
@@ -74,6 +103,16 @@ const numberKeyKvLayer = (kv: KVNamespace) =>
 
 const valueStyleKvLayer = (kv: KVNamespace) =>
   ValueStyleKv.layer.pipe(
+    Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_KV: kv } as unknown as Cloudflare.Env)),
+  );
+
+const testKvBindingLayer = (kv: KVNamespace) =>
+  TestKvBinding.layer.pipe(
+    Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_KV: kv } as unknown as Cloudflare.Env)),
+  );
+
+const valueStyleKvBindingLayer = (kv: KVNamespace) =>
+  ValueStyleKvBinding.layer.pipe(
     Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_KV: kv } as unknown as Cloudflare.Env)),
   );
 
@@ -198,6 +237,87 @@ const valueStyleKvLayer = (kv: KVNamespace) =>
 }
 
 {
+  const values = new Map<string, string>();
+  const kv = makeFakeKv({
+    get: async (key) => values.get(key) ?? null,
+    put: async (key, value) => {
+      values.set(key, value as string);
+    },
+  });
+
+  layer(testKvBindingLayer(kv))("definition-backed KV bindings", (it) => {
+    it.effect("roundtrips typed values through class-style bindings", () =>
+      Effect.gen(function* () {
+        values.clear();
+
+        yield* TestKvBinding.put("user:1", { count: 4 });
+        const result = yield* TestKvBinding.get("user:1");
+
+        assert.deepStrictEqual(Option.getOrUndefined(result), { count: 4 });
+        assert.strictEqual(values.get("user:1"), '{"count":4}');
+      }),
+    );
+  });
+}
+
+{
+  const kv = makeFakeKv({
+    get: async () => '{"count":5}',
+  });
+
+  layer(valueStyleKvBindingLayer(kv))("definition-backed KV value-style bindings", (it) => {
+    it.effect("returns the same helper shape as class-style bindings", () =>
+      Effect.gen(function* () {
+        const result = yield* ValueStyleKvBinding.get("user:1");
+
+        assert.deepStrictEqual(Option.getOrUndefined(result), { count: 5 });
+      }),
+    );
+  });
+}
+
+{
+  const values = new Map<string, string>([
+    ["count", '{"count":6}'],
+    ["label", '"ready"'],
+  ]);
+  const kv = makeFakeKv({
+    get: async (key) => values.get(key) ?? null,
+  });
+  const sharedLayer = Layer.merge(SharedCountKvBinding.layer, SharedStringKvBinding.layer).pipe(
+    Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_KV: kv } as unknown as Cloudflare.Env)),
+  );
+
+  layer(sharedLayer)("logical KV definitions sharing one binding", (it) => {
+    it.effect("decodes each logical resource with its own schema", () =>
+      Effect.gen(function* () {
+        const count = yield* SharedCountKvBinding.get("count");
+        const label = yield* SharedStringKvBinding.get("label");
+
+        assert.deepStrictEqual(Option.getOrUndefined(count), { count: 6 });
+        assert.strictEqual(Option.getOrUndefined(label), "ready");
+      }),
+    );
+  });
+}
+
+{
+  const kv = makeFakeKv({
+    get: async () => '{"count":"bad"}',
+  });
+
+  layer(testKvBindingLayer(kv))("definition-backed KV decode errors", (it) => {
+    it.effect("fails when stored JSON does not match the value schema", () =>
+      Effect.gen(function* () {
+        const exit = yield* Effect.exit(TestKvBinding.get("user:1"));
+
+        assert.strictEqual(exit._tag, "Failure");
+      }),
+    );
+  });
+}
+
+{
   const cause = new Error("KV unavailable");
   const kv = makeFakeKv({
     get: async () => {
@@ -220,6 +340,34 @@ const valueStyleKvLayer = (kv: KVNamespace) =>
     );
   });
 }
+
+test("definition-backed KV bindings report missing and invalid bindings", async () => {
+  await expect(
+    Effect.runPromise(
+      TestKvBinding.get("missing").pipe(
+        Effect.provide(
+          TestKvBinding.layer.pipe(
+            Layer.provide(Layer.succeed(WorkerEnvironment, {} as Cloudflare.Env)),
+          ),
+        ),
+      ),
+    ),
+  ).rejects.toBeInstanceOf(Binding.BindingNotFoundError);
+
+  await expect(
+    Effect.runPromise(
+      TestKvBinding.get("invalid").pipe(
+        Effect.provide(
+          TestKvBinding.layer.pipe(
+            Layer.provide(
+              Layer.succeed(WorkerEnvironment, { TEST_KV: {} } as unknown as Cloudflare.Env),
+            ),
+          ),
+        ),
+      ),
+    ),
+  ).rejects.toBeInstanceOf(Binding.BindingValidationError);
+});
 
 {
   const kv = makeFakeKv();

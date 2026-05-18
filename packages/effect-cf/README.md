@@ -1,6 +1,6 @@
 # effect-cf
 
-Effect-native Cloudflare primitives for Workers, Durable Objects, bindings, KV, Queues, Workflows, and Durable Object storage.
+Effect-native Cloudflare primitives for Workers, Durable Objects, bindings, KV, D1, Queues, Workflows, and Durable Object storage.
 
 ## Install
 
@@ -31,6 +31,7 @@ Runtime creation belongs at Cloudflare entrypoints, not inside binding helpers.
 - `DurableObjectState` / `DurableObjectStorage` - Effect wrappers for state, alarms, SQL, and embedded KV
 - `DurableObjectWebSocket` - WebSocket upgrade helpers for Durable Objects
 - `Kv` - typed KV namespace helper
+- `D1` - typed D1 database binding helper with an `@effect/sql-d1` backed SQL layer
 - `Queue` / `QueueBinding` - typed Queue producer bindings and consumer handlers
 - `Workflow` / `WorkflowBinding` - typed Workflow entrypoints, steps, and starter bindings
 - `Rpc` - Cloudflare RPC type helpers and scoped disposal utilities

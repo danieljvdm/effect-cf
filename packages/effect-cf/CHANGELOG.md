@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.5.0
+
+### Minor Changes
+
+- [#14](https://github.com/danieljvdm/effect-cf/pull/14) [`a31a930`](https://github.com/danieljvdm/effect-cf/commit/a31a93020a679e42a748aed54626ce7387d7e685) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add a D1 binding helper with native Effect wrappers and an `@effect/sql-d1` backed SQL layer.
+
 ## 0.4.0
 
 ### Minor Changes

@@ -19,6 +19,19 @@ export interface QueueBindingDefinition<Message extends RpcDefinition.ServiceFre
   readonly message: Message;
 }
 
+export interface QueueBindingClient<Message extends RpcDefinition.ServiceFreeSchema> {
+  readonly send: (
+    message: S.Schema.Type<Message>,
+    options?: QueueSendOptions,
+  ) => Effect.Effect<void, QueueOperationError | S.SchemaError>;
+  readonly sendBatch: (
+    messages: Iterable<MessageSendRequest<S.Schema.Type<Message>>>,
+    options?: QueueSendBatchOptions,
+  ) => Effect.Effect<void, QueueOperationError | S.SchemaError>;
+  readonly metrics: () => Effect.Effect<QueueMetrics, QueueOperationError>;
+  readonly unsafeRaw: Effect.Effect<globalThis.Queue<S.Codec.Encoded<Message>>>;
+}
+
 declare const QueueServiceTypeId: unique symbol;
 
 /** Nominal service marker for Queue services created with {@link make}. */
@@ -81,19 +94,45 @@ export const Service =
     type Body = S.Schema.Type<Message>;
     type EncodedBody = S.Codec.Encoded<Message>;
 
+    const encodeMessage = S.encodeEffect(definition.message);
+
+    const makeClient = (queue: globalThis.Queue<EncodedBody>): QueueBindingClient<Message> => ({
+      send: Effect.fnUntraced(function* (message: Body, options?: QueueSendOptions) {
+        const encoded = yield* encodeMessage(message);
+
+        yield* tryQueuePromise(definition.binding, "send", () => queue.send(encoded, options));
+      }),
+      sendBatch: Effect.fnUntraced(function* (
+        messages: Iterable<MessageSendRequest<Body>>,
+        options?: QueueSendBatchOptions,
+      ) {
+        const encodedMessages: Array<MessageSendRequest<EncodedBody>> = [];
+
+        for (const message of messages) {
+          encodedMessages.push({
+            ...message,
+            body: yield* encodeMessage(message.body),
+          });
+        }
+
+        yield* tryQueuePromise(definition.binding, "sendBatch", () =>
+          queue.sendBatch(encodedMessages, options),
+        );
+      }),
+      metrics: () => tryQueuePromise(definition.binding, "metrics", () => queue.metrics()),
+      unsafeRaw: Effect.succeed(queue),
+    });
+
     const tag = Binding.Service<Self>()(
       id,
       definition.binding,
       (value): value is globalThis.Queue<EncodedBody> => isQueue<EncodedBody>(value),
+      makeClient,
     );
-
-    const encodeMessage = S.encodeEffect(definition.message);
 
     const send = Effect.fnUntraced(function* (message: Body, options?: QueueSendOptions) {
       const queue = yield* tag;
-      const encoded = yield* encodeMessage(message);
-
-      return yield* tryQueuePromise(definition.binding, "send", () => queue.send(encoded, options));
+      yield* queue.send(message, options);
     });
 
     const sendBatch = Effect.fnUntraced(function* (
@@ -101,24 +140,17 @@ export const Service =
       options?: QueueSendBatchOptions,
     ) {
       const queue = yield* tag;
-      const encodedMessages: Array<MessageSendRequest<EncodedBody>> = [];
-
-      for (const message of messages) {
-        encodedMessages.push({
-          ...message,
-          body: yield* encodeMessage(message.body),
-        });
-      }
-
-      return yield* tryQueuePromise(definition.binding, "sendBatch", () =>
-        queue.sendBatch(encodedMessages, options),
-      );
+      yield* queue.sendBatch(messages, options);
     });
 
     const metrics = Effect.fnUntraced(function* () {
       const queue = yield* tag;
+      return yield* queue.metrics();
+    });
 
-      return yield* tryQueuePromise(definition.binding, "metrics", () => queue.metrics());
+    const unsafeRaw = Effect.fnUntraced(function* () {
+      const queue = yield* tag;
+      return yield* queue.unsafeRaw;
     });
 
     return Object.assign(tag, {
@@ -127,5 +159,6 @@ export const Service =
       send,
       sendBatch,
       metrics,
+      unsafeRaw,
     });
   };

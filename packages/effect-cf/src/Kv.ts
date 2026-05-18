@@ -84,6 +84,28 @@ export interface KvService<Id extends string, Key, Value, EncodedValue> {
   };
 }
 
+export interface KvClient<Key, Value, EncodedValue> {
+  readonly put: (
+    key: Key,
+    value: Value,
+    options?: KvPutOptions,
+  ) => Effect.Effect<void, KvOperationError | S.SchemaError>;
+  readonly get: (key: Key) => Effect.Effect<Option.Option<Value>, KvOperationError | S.SchemaError>;
+  readonly getWithMetadata: <Metadata>(
+    key: Key,
+    metadataSchema: S.Codec<Metadata, unknown>,
+  ) => Effect.Effect<
+    Option.Option<KvWithMetadata<Value, Metadata>>,
+    KvOperationError | S.SchemaError
+  >;
+  readonly list: <Metadata = unknown>(
+    options?: KvListOptions<Metadata>,
+  ) => Effect.Effect<KvListResult<Key, Metadata>, KvOperationError | S.SchemaError>;
+  readonly remove: (key: Key) => Effect.Effect<void, KvOperationError | S.SchemaError>;
+  readonly unsafeRaw: Effect.Effect<KVNamespace>;
+  readonly definition: KvDefinition<Key, Value, EncodedValue>;
+}
+
 declare const BindingServiceTypeId: unique symbol;
 
 /** Nominal service marker for KV bindings created from a reusable {@link Definition}. */
@@ -208,46 +230,123 @@ export const Service =
     id: Id,
     definition: KvDefinition<Key, Value, EncodedValue>,
   ) => {
-    const tag = Binding.Service<Self>()(id, definition.binding, (value): value is KVNamespace => {
-      if (typeof value !== "object" || value === null) {
-        return false;
-      }
-
-      const resource = value as Record<string, unknown>;
-
-      return (
-        typeof resource.get === "function" &&
-        typeof resource.put === "function" &&
-        typeof resource.delete === "function" &&
-        typeof resource.getWithMetadata === "function" &&
-        typeof resource.list === "function"
-      );
-    });
-
     const encodeKey = S.encodeEffect(definition.key);
     const decodeKey = S.decodeUnknownEffect(definition.key);
     const encodeValue = S.encodeEffect(S.fromJsonString(S.toCodecJson(definition.value)));
     const decodeValue = S.decodeUnknownEffect(S.fromJsonString(S.toCodecJson(definition.value)));
 
+    const makeClient = (kv: KVNamespace): KvClient<Key, Value, EncodedValue> => ({
+      definition,
+      put: Effect.fnUntraced(function* (key: Key, value: Value, options?: KvPutOptions) {
+        const keyEncoded = yield* encodeKey(key);
+        const valueEncoded = yield* encodeValue(value);
+        yield* tryKvPromise(definition.binding, "put", () =>
+          kv.put(keyEncoded, valueEncoded, options),
+        );
+      }),
+      get: Effect.fnUntraced(function* (key: Key) {
+        const keyEncoded = yield* encodeKey(key);
+        const valueEncoded = yield* tryKvPromise(definition.binding, "get", () =>
+          kv.get(keyEncoded),
+        );
+
+        if (valueEncoded === null) {
+          return Option.none();
+        }
+
+        return yield* decodeValue(valueEncoded).pipe(Effect.map(Option.some));
+      }),
+      getWithMetadata: Effect.fnUntraced(function* <Metadata>(
+        key: Key,
+        metadataSchema: S.Codec<Metadata, unknown>,
+      ) {
+        const keyEncoded = yield* encodeKey(key);
+        const result = yield* tryKvPromise(definition.binding, "getWithMetadata", () =>
+          kv.getWithMetadata<Metadata>(keyEncoded),
+        );
+
+        if (result.value === null) {
+          return Option.none();
+        }
+
+        const value = yield* decodeValue(result.value);
+        const metadata =
+          result.metadata === null
+            ? Option.none<Metadata>()
+            : Option.some(yield* S.decodeUnknownEffect(metadataSchema)(result.metadata));
+
+        return Option.some({
+          value,
+          metadata,
+          cacheStatus: maybeString(result.cacheStatus),
+        });
+      }),
+      list: Effect.fnUntraced(function* <Metadata = unknown>(options?: KvListOptions<Metadata>) {
+        const { metadataSchema, ...kvOptions } = options ?? {};
+        const result = yield* tryKvPromise(definition.binding, "list", () =>
+          kv.list<Metadata>(kvOptions),
+        );
+        const keys: Array<KvListKey<Key, Metadata>> = [];
+
+        for (const key of result.keys) {
+          const decodedName = yield* decodeKey(key.name);
+          const decodedMetadata =
+            key.metadata === undefined
+              ? Option.none<Metadata>()
+              : metadataSchema === undefined
+                ? Option.some(key.metadata as Metadata)
+                : Option.some(yield* S.decodeUnknownEffect(metadataSchema)(key.metadata));
+
+          keys.push({
+            name: decodedName,
+            expiration: maybeNumber(key.expiration),
+            metadata: decodedMetadata,
+          });
+        }
+
+        return {
+          keys,
+          listComplete: result.list_complete,
+          cursor: maybeString("cursor" in result ? result.cursor : undefined),
+          cacheStatus: maybeString(result.cacheStatus),
+        };
+      }),
+      remove: Effect.fnUntraced(function* (key: Key) {
+        const keyEncoded = yield* encodeKey(key);
+        yield* tryKvPromise(definition.binding, "delete", () => kv.delete(keyEncoded));
+      }),
+      unsafeRaw: Effect.succeed(kv),
+    });
+
+    const tag = Binding.Service<Self>()(
+      id,
+      definition.binding,
+      (value): value is KVNamespace => {
+        if (typeof value !== "object" || value === null) {
+          return false;
+        }
+
+        const resource = value as Record<string, unknown>;
+
+        return (
+          typeof resource.get === "function" &&
+          typeof resource.put === "function" &&
+          typeof resource.delete === "function" &&
+          typeof resource.getWithMetadata === "function" &&
+          typeof resource.list === "function"
+        );
+      },
+      makeClient,
+    );
+
     const put = Effect.fnUntraced(function* (key: Key, value: Value, options?: KvPutOptions) {
       const kv = yield* tag;
-      const keyEncoded = yield* encodeKey(key);
-      const valueEncoded = yield* encodeValue(value);
-      yield* tryKvPromise(definition.binding, "put", () =>
-        kv.put(keyEncoded, valueEncoded, options),
-      );
+      yield* kv.put(key, value, options);
     });
 
     const get = Effect.fnUntraced(function* (key: Key) {
       const kv = yield* tag;
-      const keyEncoded = yield* encodeKey(key);
-      const valueEncoded = yield* tryKvPromise(definition.binding, "get", () => kv.get(keyEncoded));
-
-      if (valueEncoded === null) {
-        return Option.none();
-      }
-
-      return yield* decodeValue(valueEncoded).pipe(Effect.map(Option.some));
+      return yield* kv.get(key);
     });
 
     const getWithMetadata = Effect.fnUntraced(function* <Metadata>(
@@ -255,70 +354,24 @@ export const Service =
       metadataSchema: S.Codec<Metadata, unknown>,
     ) {
       const kv = yield* tag;
-      const keyEncoded = yield* encodeKey(key);
-      const result = yield* tryKvPromise(definition.binding, "getWithMetadata", () =>
-        kv.getWithMetadata<Metadata>(keyEncoded),
-      );
-
-      if (result.value === null) {
-        return Option.none();
-      }
-
-      const value = yield* decodeValue(result.value);
-      const metadata =
-        result.metadata === null
-          ? Option.none<Metadata>()
-          : Option.some(yield* S.decodeUnknownEffect(metadataSchema)(result.metadata));
-
-      return Option.some({
-        value,
-        metadata,
-        cacheStatus: maybeString(result.cacheStatus),
-      });
+      return yield* kv.getWithMetadata(key, metadataSchema);
     });
 
     const list = Effect.fnUntraced(function* <Metadata = unknown>(
       options?: KvListOptions<Metadata>,
     ) {
       const kv = yield* tag;
-      const { metadataSchema, ...kvOptions } = options ?? {};
-      const result = yield* tryKvPromise(definition.binding, "list", () =>
-        kv.list<Metadata>(kvOptions),
-      );
-      const keys: Array<KvListKey<Key, Metadata>> = [];
-
-      for (const key of result.keys) {
-        const decodedName = yield* decodeKey(key.name);
-        const decodedMetadata =
-          key.metadata === undefined
-            ? Option.none<Metadata>()
-            : metadataSchema === undefined
-              ? Option.some(key.metadata as Metadata)
-              : Option.some(yield* S.decodeUnknownEffect(metadataSchema)(key.metadata));
-
-        keys.push({
-          name: decodedName,
-          expiration: maybeNumber(key.expiration),
-          metadata: decodedMetadata,
-        });
-      }
-
-      return {
-        keys,
-        listComplete: result.list_complete,
-        cursor: maybeString("cursor" in result ? result.cursor : undefined),
-        cacheStatus: maybeString(result.cacheStatus),
-      };
+      return yield* kv.list(options);
     });
 
     const remove = Effect.fnUntraced(function* (key: Key) {
       const kv = yield* tag;
-      const keyEncoded = yield* encodeKey(key);
-      yield* tryKvPromise(definition.binding, "delete", () => kv.delete(keyEncoded));
+      yield* kv.remove(key);
     });
 
     const unsafeRaw = Effect.fnUntraced(function* () {
-      return yield* tag;
+      const kv = yield* tag;
+      return yield* kv.unsafeRaw;
     });
 
     return Object.assign(tag, {

@@ -7,7 +7,6 @@ import { SqlError } from "effect/unstable/sql";
 import { Worker } from "effect-cf";
 
 import { TodoDatabase } from "./bindings";
-import { D1SqlClient } from "./D1SqlClient";
 import { TodoRepository } from "./TodoRepository";
 
 const cacheHeaders = { "cache-control": "no-store" };
@@ -82,7 +81,7 @@ const EffectRpcLive = RpcServer.layerHttp({
   protocol: "http",
 }).pipe(Layer.provide(TodoRpcLive), Layer.provide(RpcSerialization.layerJson));
 
-const SqlLive = D1SqlClient.layer.pipe(Layer.provide(TodoDatabase.layer));
+const SqlLive = TodoDatabase.sqlLayer();
 const RepositoryLive = TodoRepository.layer.pipe(Layer.provide(SqlLive));
 const BaseLive = Layer.mergeAll(HttpRouter.layer, RepositoryLive);
 const RoutesLive = Layer.mergeAll(HttpApiLive, EffectRpcLive);

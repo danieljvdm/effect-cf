@@ -18,7 +18,7 @@
     },
     "examples/chat/durable-objects/chat-room": {
       "name": "chat-room-do",
-      "version": "0.0.0",
+      "version": "0.0.3",
       "dependencies": {
         "@effect-cf/example-contracts": "workspace:*",
         "effect": "catalog:",
@@ -31,7 +31,7 @@
     },
     "examples/chat/packages/contracts": {
       "name": "@effect-cf/example-contracts",
-      "version": "0.0.0",
+      "version": "0.0.3",
       "dependencies": {
         "effect": "catalog:",
         "effect-cf": "workspace:*",
@@ -44,7 +44,7 @@
     },
     "examples/chat/web": {
       "name": "chat-web",
-      "version": "0.0.0",
+      "version": "0.0.3",
       "dependencies": {
         "@effect-cf/example-contracts": "workspace:*",
         "react": "^19.2.5",
@@ -60,7 +60,7 @@
     },
     "examples/chat/workers/analytics": {
       "name": "chat-analytics-worker",
-      "version": "0.0.0",
+      "version": "0.0.3",
       "dependencies": {
         "@effect-cf/example-contracts": "workspace:*",
         "effect": "catalog:",
@@ -73,7 +73,7 @@
     },
     "examples/chat/workers/api": {
       "name": "chat-api-worker",
-      "version": "0.0.0",
+      "version": "0.0.3",
       "dependencies": {
         "@effect-cf/example-contracts": "workspace:*",
         "effect": "catalog:",
@@ -86,7 +86,7 @@
     },
     "examples/queue-workflow/workers/app": {
       "name": "queue-workflow-app",
-      "version": "0.0.0",
+      "version": "0.0.3",
       "dependencies": {
         "effect": "catalog:",
         "effect-cf": "workspace:*",
@@ -130,7 +130,7 @@
     },
     "examples/todo-http/workers/api": {
       "name": "todo-http-api-worker",
-      "version": "0.0.0",
+      "version": "0.0.3",
       "dependencies": {
         "@effect-cf/todo-http-domain": "workspace:*",
         "effect": "catalog:",
@@ -173,7 +173,7 @@
     },
     "examples/todo-rpc-http/workers/api": {
       "name": "todo-rpc-http-api-worker",
-      "version": "0.0.0",
+      "version": "0.0.3",
       "dependencies": {
         "@effect-cf/todo-rpc-http-domain": "workspace:*",
         "effect": "catalog:",
@@ -187,7 +187,7 @@
     },
     "examples/todo-rpc-ws/durable-objects/todo-store": {
       "name": "todo-rpc-ws-store-do",
-      "version": "0.0.0",
+      "version": "0.0.3",
       "dependencies": {
         "@effect-cf/todo-rpc-ws-domain": "workspace:*",
         "effect": "catalog:",
@@ -201,7 +201,7 @@
     },
     "examples/todo-rpc-ws/packages/domain": {
       "name": "@effect-cf/todo-rpc-ws-domain",
-      "version": "0.0.0",
+      "version": "0.0.3",
       "dependencies": {
         "effect": "catalog:",
         "effect-cf": "workspace:*",
@@ -214,7 +214,7 @@
     },
     "examples/todo-rpc-ws/web": {
       "name": "todo-rpc-ws-web",
-      "version": "0.0.0",
+      "version": "0.0.3",
       "dependencies": {
         "@effect-cf/todo-rpc-ws-domain": "workspace:*",
         "@vitejs/plugin-react": "^6.0.1",
@@ -231,7 +231,7 @@
     },
     "examples/todo-rpc-ws/workers/api": {
       "name": "todo-rpc-ws-api-worker",
-      "version": "0.0.0",
+      "version": "0.0.3",
       "dependencies": {
         "@effect-cf/todo-rpc-ws-domain": "workspace:*",
         "effect": "catalog:",
@@ -274,7 +274,7 @@
     },
     "examples/todos/workers/api": {
       "name": "todos-api-worker",
-      "version": "0.0.0",
+      "version": "0.0.3",
       "dependencies": {
         "@effect-cf/todos-domain": "workspace:*",
         "effect": "catalog:",
@@ -288,7 +288,7 @@
     },
     "examples/todos/workers/web": {
       "name": "todos-web-worker",
-      "version": "0.0.0",
+      "version": "0.0.3",
       "dependencies": {
         "@effect-cf/todos-domain": "workspace:*",
         "effect": "catalog:",
@@ -302,10 +302,11 @@
     },
     "packages/effect-cf": {
       "name": "effect-cf",
-      "version": "0.1.0",
+      "version": "0.4.0",
       "devDependencies": {
         "@cloudflare/vitest-pool-workers": "^0.15.0",
         "@cloudflare/workers-types": "^4.20260421.1",
+        "@effect/sql-d1": "catalog:",
         "@effect/vitest": "catalog:",
         "effect": "catalog:",
         "typescript": "^6.0.2",
@@ -313,6 +314,7 @@
         "vitest": "catalog:",
       },
       "peerDependencies": {
+        "@effect/sql-d1": "^4.0.0-beta.65",
         "effect": "^4.0.0-beta.65",
       },
     },
@@ -333,6 +335,7 @@
     "vitest": "catalog:",
   },
   "catalog": {
+    "@effect/sql-d1": "4.0.0-beta.65",
     "@effect/vitest": "4.0.0-beta.65",
     "effect": "4.0.0-beta.65",
     "vite": "npm:@voidzero-dev/vite-plus-core@0.1.20",
@@ -409,6 +412,8 @@
     "@effect-cf/todo-rpc-ws-domain": ["@effect-cf/todo-rpc-ws-domain@workspace:examples/todo-rpc-ws/packages/domain"],
 
     "@effect-cf/todos-domain": ["@effect-cf/todos-domain@workspace:examples/todos/packages/domain"],
+
+    "@effect/sql-d1": ["@effect/sql-d1@4.0.0-beta.65", "", { "dependencies": { "@cloudflare/workers-types": "^4.20260412.1" }, "peerDependencies": { "effect": "^4.0.0-beta.65" } }, "sha512-tH+OMFZfiutBtGfUcW968z6tKB4yMEhlXRVkl9k6q4BnVqOYvvzy+9WfEGzIcxh8uH0hrN6QPuocLDmF/DHImQ=="],
 
     "@effect/tsgo": ["@effect/tsgo@0.5.1", "", { "optionalDependencies": { "@effect/tsgo-darwin-arm64": "0.5.1", "@effect/tsgo-darwin-x64": "0.5.1", "@effect/tsgo-linux-arm": "0.5.1", "@effect/tsgo-linux-arm64": "0.5.1", "@effect/tsgo-linux-x64": "0.5.1", "@effect/tsgo-win32-arm64": "0.5.1", "@effect/tsgo-win32-x64": "0.5.1" }, "bin": { "effect-tsgo": "dist/effect-tsgo.js" } }, "sha512-INANZ/NK9akOwSQVWpQgSDLjlegrs4gui21nuQsgN7zCjCmj4m/ixUDuVgtW2C0UfqhPWWabyFWCDntu7ryCZQ=="],
 

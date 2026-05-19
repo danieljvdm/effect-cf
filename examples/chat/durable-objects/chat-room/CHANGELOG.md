@@ -1,5 +1,13 @@
 # chat-room-do
 
+## 0.0.5
+
+### Patch Changes
+
+- Updated dependencies [[`8195f35`](https://github.com/danieljvdm/effect-cf/commit/8195f356537bd8a063ddebe30f61d0028ddccba1)]:
+  - effect-cf@0.6.0
+  - @effect-cf/example-contracts@0.0.5
+
 ## 0.0.4
 
 ### Patch Changes

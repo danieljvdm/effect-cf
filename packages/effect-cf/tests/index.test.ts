@@ -266,9 +266,9 @@ test("DurableObject preserves server, client, handler, and namespace types", () 
     type CounterStub = Effect.Success<ReturnType<typeof Counter.getByName>>;
     const stub = null as unknown as CounterStub;
 
-    expectType<Effect.Effect<number, DurableObjectNamespace.DurableObjectRpcError, Counter>>(
-      Counter.rpc(stub, "get"),
-    );
+    expectType<
+      Effect.Effect<Rpc.Result<number>, DurableObjectNamespace.DurableObjectRpcError, Counter>
+    >(Counter.rpc(stub, "get"));
     expectType<Effect.Effect<number, DurableObjectNamespace.DurableObjectRpcError, Counter>>(
       Counter.call(stub, "add", 1, "one"),
     );
@@ -460,6 +460,21 @@ test("Durable Object namespace binding retrieves stubs from the Worker environme
 });
 
 test("Service binding rpc uses the shared dynamic method validation", async () => {
+  await expect(
+    Effect.runPromise(
+      provideEchoService(
+        Effect.gen(function* () {
+          return yield* EchoService;
+        }),
+        {
+          ECHO: {
+            fetch: "bad",
+          },
+        } as unknown as Cloudflare.Env,
+      ),
+    ),
+  ).rejects.toBeInstanceOf(Binding.BindingValidationError);
+
   await expect(
     Effect.runPromise(
       provideEchoService(EchoService.call("echo", "hello"), {

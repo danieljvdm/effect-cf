@@ -1,6 +1,6 @@
 {
   "name": "todo-rpc-ws-api-worker",
-  "version": "0.0.5",
+  "version": "0.0.0",
   "private": true,
   "type": "module",
   "scripts": {

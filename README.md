@@ -52,11 +52,12 @@ const CounterLive = Counter.make(Layer.empty, {
 
 export class CounterDurableObject extends CounterLive {}
 
-const Counters = Counter.namespace("Counters", { binding: "COUNTER" });
+const CounterLayer = Counter.layer({ binding: "COUNTER" });
 
 const app = Effect.gen(function* () {
   const router = yield* HttpRouter.HttpRouter;
-  const counter = Counters.byName("home");
+  const counters = yield* Counter;
+  const counter = counters.byName("home");
 
   return yield* router
     .get(
@@ -69,7 +70,7 @@ const app = Effect.gen(function* () {
     .asHttpEffect();
 });
 
-export default Worker.make(Layer.mergeAll(HttpRouter.layer, Counters.layer), app);
+export default Worker.make(Layer.mergeAll(HttpRouter.layer, CounterLayer), app);
 ```
 
 `COUNTER` is still declared in `wrangler.jsonc`, but the callable API is inferred from the `Counter` class. The Worker and Durable Object both run through `effect-cf` runtime boundaries.

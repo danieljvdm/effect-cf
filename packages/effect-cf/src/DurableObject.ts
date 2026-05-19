@@ -1,11 +1,15 @@
 import { DurableObject as CloudflareDurableObject } from "cloudflare:workers";
-import { Effect, Layer, ManagedRuntime, type Scope } from "effect";
+import { Effect, Layer, ManagedRuntime, type Context, type Scope } from "effect";
+import type { Schema as S } from "effect";
 
 import { NativeRequest } from "./Worker";
 import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 import { DurableObjectState, fromDurableObjectState } from "./DurableObjectState";
 import { fromWebSocket, type DurableWebSocket } from "./DurableObjectWebSocket";
+import type * as Binding from "./Binding";
 import * as DurableObjectDefinition from "./DurableObjectDefinition";
+import type * as DurableObjectNamespace from "./DurableObjectNamespace";
+import type * as Rpc from "./Rpc";
 import * as Entrypoint from "./internal/Entrypoint";
 
 const reservedMethodNames = new Set<string>([
@@ -208,40 +212,130 @@ export const make = <
   return Entrypoint.assumeEntrypointClass<DurableObjectClass<Rpc, ROut>>(EffectDurableObject);
 };
 
-export const Tag = DurableObjectDefinition.Tag;
+export type ServiceFreeSchema = S.Codec<any, any, never, never>;
 
-export const method = DurableObjectDefinition.method;
-
-export const implement = DurableObjectDefinition.implement;
-
-export type Definition<
-  Id extends string = string,
-  Methods extends DurableObjectDefinition.Definition.Any["methods"] =
-    DurableObjectDefinition.Definition.Any["methods"],
-> = DurableObjectDefinition.Definition<Id, Methods>;
-
-export namespace Definition {
-  export type Any = DurableObjectDefinition.Definition.Any;
+export interface Method<
+  Args extends ReadonlyArray<ServiceFreeSchema> = ReadonlyArray<ServiceFreeSchema>,
+  Success extends ServiceFreeSchema = ServiceFreeSchema,
+> {
+  readonly args: Args;
+  readonly success: Success;
 }
 
-export type ServerApi<Self extends DurableObjectDefinition.Definition.Any> =
-  DurableObjectDefinition.ServerApi<Self>;
+export namespace Method {
+  export type Any = Method<ReadonlyArray<ServiceFreeSchema>, ServiceFreeSchema>;
 
-export type Api<Self extends DurableObjectDefinition.Definition.Any> =
-  DurableObjectDefinition.Api<Self>;
+  type ArgsFromSchemas<Args extends ReadonlyArray<ServiceFreeSchema>> = Args extends readonly []
+    ? []
+    : Args extends readonly [
+          infer Head extends ServiceFreeSchema,
+          ...infer Tail extends ReadonlyArray<ServiceFreeSchema>,
+        ]
+      ? [S.Schema.Type<Head>, ...ArgsFromSchemas<Tail>]
+      : Array<S.Schema.Type<Args[number]>>;
 
-export type Handlers<
+  export type Args<Self extends Any> = ArgsFromSchemas<Self["args"]>;
+
+  export type Success<Self extends Any> = S.Schema.Type<Self["success"]>;
+}
+
+export type Methods = Record<string, Method.Any>;
+
+export type ReservedMethodName = DurableObjectDefinition.ReservedMethodName;
+
+export type NoReservedMethods<MethodsShape extends Methods> =
+  Extract<keyof MethodsShape, ReservedMethodName> extends never ? MethodsShape : never;
+
+export interface Definition<Id extends string = string, MethodsShape extends Methods = Methods> {
+  readonly id: Id;
+  readonly methods: MethodsShape;
+}
+
+export namespace Definition {
+  export type Any = Definition<string, Methods>;
+}
+
+export type LayerOptions = DurableObjectDefinition.LayerOptions;
+
+export type ServerApi<Self extends Definition.Any> = {
+  readonly [Key in keyof Self["methods"]]: (
+    ...args: Method.Args<Self["methods"][Key]>
+  ) => Promise<Method.Success<Self["methods"][Key]>>;
+};
+
+export type Api<Self extends Definition.Any> = Rpc.Provider<ServerApi<Self>, ReservedMethodName>;
+
+export type Handlers<ROut, Self extends Definition.Any> = {
+  readonly [Key in keyof Self["methods"]]: (
+    ...args: Method.Args<Self["methods"][Key]>
+  ) => DurableObjectHandler<ROut, Method.Success<Self["methods"][Key]>>;
+};
+
+export interface Options<ROut, Self extends Definition.Any> extends Omit<
+  DurableObjectOptions<ROut, Handlers<ROut, Self>>,
+  "rpc"
+> {
+  readonly rpc: Handlers<ROut, Self>;
+}
+
+export type TagClass<Self, Id extends string, MethodsShape extends Methods> = Context.ServiceClass<
+  Self,
+  Id,
+  DurableObjectNamespace.DurableObjectNamespaceEffectClient<
+    Api<Definition<Id, MethodsShape>>,
+    Definition<Id, MethodsShape>
+  >
+> &
+  DurableObjectNamespace.DurableObjectNamespaceStaticClient<
+    Self,
+    Api<Definition<Id, MethodsShape>>,
+    Definition<Id, MethodsShape>
+  > & {
+    readonly id: Id;
+    readonly methods: MethodsShape;
+    readonly make: <ROut, LayerError>(
+      layer: Layer.Layer<ROut, LayerError, DurableObjectState | WorkerEnvironment>,
+      options: Options<ROut, Definition<Id, MethodsShape>>,
+    ) => DurableObjectClass<Handlers<ROut, Definition<Id, MethodsShape>>, ROut>;
+    readonly layer: (
+      options: LayerOptions,
+    ) => Layer.Layer<
+      Self,
+      Binding.BindingNotFoundError | Binding.BindingValidationError,
+      WorkerEnvironment
+    >;
+  };
+
+export type TagFactory = <Self>() => <Id extends string, const MethodsShape extends Methods>(
+  id: Id,
+  methods: MethodsShape & NoReservedMethods<MethodsShape>,
+) => TagClass<Self, Id, MethodsShape>;
+
+export const Tag = DurableObjectDefinition.Tag as unknown as TagFactory;
+
+export const method = DurableObjectDefinition.method as {
+  <Success extends ServiceFreeSchema>(definition: {
+    readonly success: Success;
+  }): Method<readonly [], Success>;
+  <
+    const Args extends ReadonlyArray<ServiceFreeSchema>,
+    Success extends ServiceFreeSchema,
+  >(definition: {
+    readonly args: Args;
+    readonly success: Success;
+  }): Method<Args, Success>;
+};
+
+export const implement = DurableObjectDefinition.implement as unknown as <
   ROut,
-  Self extends DurableObjectDefinition.Definition.Any,
-> = DurableObjectDefinition.Handlers<ROut, Self>;
-
-export type Options<
-  ROut,
-  Self extends DurableObjectDefinition.Definition.Any,
-> = DurableObjectDefinition.Options<ROut, Self>;
+  const Self extends Definition.Any,
+>(
+  _definition: Self,
+  handlers: Handlers<ROut, Self>,
+) => Handlers<ROut, Self>;
 
 export type HandlerEffect<
   ROut,
-  Self extends DurableObjectDefinition.Definition.Any,
+  Self extends Definition.Any,
   Key extends keyof Self["methods"],
-> = DurableObjectDefinition.HandlerEffect<ROut, Self, Key>;
+> = DurableObjectHandler<ROut, Method.Success<Self["methods"][Key]>>;

@@ -1,9 +1,7 @@
-import { Data, Effect, Option, Schema as S } from "effect";
+import { Context, Data, Effect, Option, Schema as S } from "effect";
 
 import * as Binding from "./Binding";
 import type * as RpcDefinition from "./RpcDefinition";
-
-const TypeId = "effect-cf/WorkflowBinding" as const;
 
 export type WorkflowInstanceCreateOptions<Payload> = Omit<
   globalThis.WorkflowInstanceCreateOptions<Payload>,
@@ -66,20 +64,27 @@ export interface WorkflowBindingDefinition<
   readonly result: Result;
 }
 
-declare const WorkflowServiceTypeId: unique symbol;
-
-export interface WorkflowService<
-  Id extends string,
+export interface WorkflowBindingClient<
   Payload extends RpcDefinition.ServiceFreeSchema,
   Result extends RpcDefinition.ServiceFreeSchema,
 > {
-  readonly [WorkflowServiceTypeId]: {
-    readonly id: Id;
-    readonly payload: S.Schema.Type<Payload>;
-    readonly encodedPayload: S.Codec.Encoded<Payload>;
-    readonly result: S.Schema.Type<Result>;
-    readonly encodedResult: S.Codec.Encoded<Result>;
-  };
+  readonly create: (
+    payload: S.Schema.Type<Payload>,
+    options?: WorkflowInstanceCreateOptions<S.Codec.Encoded<Payload>>,
+  ) => Effect.Effect<
+    WorkflowInstance<S.Schema.Type<Result>>,
+    WorkflowOperationError | S.SchemaError
+  >;
+  readonly createBatch: (
+    batch: WorkflowInstanceCreateBatchOptions<S.Schema.Type<Payload>, S.Codec.Encoded<Payload>>,
+  ) => Effect.Effect<
+    ReadonlyArray<WorkflowInstance<S.Schema.Type<Result>>>,
+    WorkflowOperationError | S.SchemaError
+  >;
+  readonly get: (
+    instanceId: string,
+  ) => Effect.Effect<WorkflowInstance<S.Schema.Type<Result>>, WorkflowOperationError>;
+  readonly unsafeRaw: Effect.Effect<globalThis.Workflow<S.Codec.Encoded<Payload>>>;
 }
 
 export class WorkflowOperationError extends Data.TaggedError("WorkflowOperationError")<{
@@ -107,7 +112,7 @@ const tryWorkflowPromise = <A>(
     catch: (cause) => workflowError(binding, operation, cause),
   });
 
-const isWorkflow = <Payload>(value: unknown): value is globalThis.Workflow<Payload> => {
+export const isWorkflow = <Payload>(value: unknown): value is globalThis.Workflow<Payload> => {
   if (typeof value !== "object" || value === null) {
     return false;
   }
@@ -121,102 +126,83 @@ const isWorkflow = <Payload>(value: unknown): value is globalThis.Workflow<Paylo
   );
 };
 
-export const make = <
-  Id extends string,
+export const makeClient = <
   Payload extends RpcDefinition.ServiceFreeSchema,
   Result extends RpcDefinition.ServiceFreeSchema,
 >(
-  id: Id,
   definition: WorkflowBindingDefinition<Payload, Result>,
-) => Service<WorkflowService<Id, Payload, Result>>()<Id, Payload, Result>(id, definition);
+): ((
+  workflow: globalThis.Workflow<S.Codec.Encoded<Payload>>,
+) => WorkflowBindingClient<Payload, Result>) => {
+  type PayloadValue = S.Schema.Type<Payload>;
+  type EncodedPayload = S.Codec.Encoded<Payload>;
+  type ResultValue = S.Schema.Type<Result>;
 
-export const Service =
-  <Self>() =>
-  <
-    Id extends string,
-    Payload extends RpcDefinition.ServiceFreeSchema,
-    Result extends RpcDefinition.ServiceFreeSchema,
-  >(
-    id: Id,
-    definition: WorkflowBindingDefinition<Payload, Result>,
-  ) => {
-    type PayloadValue = S.Schema.Type<Payload>;
-    type EncodedPayload = S.Codec.Encoded<Payload>;
-    type ResultValue = S.Schema.Type<Result>;
+  const encodePayload = S.encodeEffect(definition.payload);
+  const decodeResult = S.decodeUnknownEffect(definition.result);
 
-    const tag = Binding.Service<Self>()(
-      id,
-      definition.binding,
-      (value): value is globalThis.Workflow<EncodedPayload> => isWorkflow<EncodedPayload>(value),
-    );
+  const wrapInstance = (raw: globalThis.WorkflowInstance): WorkflowInstance<ResultValue> => {
+    const operation = <A>(name: string, evaluate: () => Promise<A>) =>
+      tryWorkflowPromise(definition.binding, name, evaluate);
 
-    const encodePayload = S.encodeEffect(definition.payload);
-    const decodeResult = S.decodeUnknownEffect(definition.result);
-
-    const wrapInstance = (raw: globalThis.WorkflowInstance): WorkflowInstance<ResultValue> => {
-      const operation = <A>(name: string, evaluate: () => Promise<A>) =>
-        tryWorkflowPromise(definition.binding, name, evaluate);
-
-      return {
-        raw,
-        id: raw.id,
-        pause: operation("pause", () => raw.pause()),
-        resume: operation("resume", () => raw.resume()),
-        terminate: operation("terminate", () => raw.terminate()),
-        restart: (options) =>
-          operation("restart", () =>
-            (raw as { restart(options?: WorkflowInstanceRestartOptions): Promise<void> }).restart(
-              options,
-            ),
-          ),
-        status: operation("status", () => raw.status()).pipe(
-          Effect.flatMap((status) =>
-            Effect.gen(function* () {
-              const output =
-                status.output === undefined
-                  ? Option.none<ResultValue>()
-                  : Option.some(
-                      yield* decodeResult(status.output).pipe(
-                        Effect.mapError(
-                          (cause) =>
-                            new WorkflowResultDecodeError({
-                              binding: definition.binding,
-                              instanceId: raw.id,
-                              cause,
-                            }),
-                        ),
-                      ),
-                    );
-
-              return {
-                status: status.status,
-                output,
-                error: status.error === undefined ? Option.none() : Option.some(status.error),
-              };
-            }),
+    return {
+      raw,
+      id: raw.id,
+      pause: operation("pause", () => raw.pause()),
+      resume: operation("resume", () => raw.resume()),
+      terminate: operation("terminate", () => raw.terminate()),
+      restart: (options) =>
+        operation("restart", () =>
+          (raw as { restart(options?: WorkflowInstanceRestartOptions): Promise<void> }).restart(
+            options,
           ),
         ),
-        sendEvent: (event) => operation("sendEvent", () => raw.sendEvent(event)),
-      };
-    };
+      status: operation("status", () => raw.status()).pipe(
+        Effect.flatMap((status) =>
+          Effect.gen(function* () {
+            const output =
+              status.output === undefined
+                ? Option.none<ResultValue>()
+                : Option.some(
+                    yield* decodeResult(status.output).pipe(
+                      Effect.mapError(
+                        (cause) =>
+                          new WorkflowResultDecodeError({
+                            binding: definition.binding,
+                            instanceId: raw.id,
+                            cause,
+                          }),
+                      ),
+                    ),
+                  );
 
-    const create = Effect.fnUntraced(function* (
+            return {
+              status: status.status,
+              output,
+              error: status.error === undefined ? Option.none() : Option.some(status.error),
+            };
+          }),
+        ),
+      ),
+      sendEvent: (event) => operation("sendEvent", () => raw.sendEvent(event)),
+    };
+  };
+
+  return (workflow) => ({
+    create: Effect.fnUntraced(function* (
       payload: PayloadValue,
       options?: WorkflowInstanceCreateOptions<EncodedPayload>,
     ) {
-      const workflow = yield* tag;
       const encoded = yield* encodePayload(payload);
       const raw = yield* tryWorkflowPromise(definition.binding, "create", () =>
         workflow.create({ ...options, params: encoded }),
       );
 
       return wrapInstance(raw);
-    });
-
-    const createBatch = Effect.fnUntraced(function* (
+    }),
+    createBatch: Effect.fnUntraced(function* (
       batch: WorkflowInstanceCreateBatchOptions<PayloadValue, EncodedPayload>,
     ) {
-      const workflow = yield* tag;
       const encodedBatch: Array<globalThis.WorkflowInstanceCreateOptions<EncodedPayload>> = [];
 
       for (const item of batch) {
@@ -233,22 +219,27 @@ export const Service =
       );
 
       return rawInstances.map(wrapInstance);
-    });
+    }),
+    get: (instanceId) =>
+      tryWorkflowPromise(definition.binding, "get", () => workflow.get(instanceId)).pipe(
+        Effect.map(wrapInstance),
+      ),
+    unsafeRaw: Effect.succeed(workflow),
+  });
+};
 
-    const get = Effect.fnUntraced(function* (instanceId: string) {
-      const workflow = yield* tag;
-      const raw = yield* tryWorkflowPromise(definition.binding, "get", () =>
-        workflow.get(instanceId),
-      );
-
-      return wrapInstance(raw);
-    });
-
-    return Object.assign(tag, {
-      [TypeId]: TypeId,
-      binding: definition.binding,
-      create,
-      createBatch,
-      get,
-    });
-  };
+export const layer = <
+  Self,
+  Payload extends RpcDefinition.ServiceFreeSchema,
+  Result extends RpcDefinition.ServiceFreeSchema,
+>(
+  tag: Context.Service<Self, WorkflowBindingClient<Payload, Result>>,
+  definition: WorkflowBindingDefinition<Payload, Result>,
+) =>
+  Binding.layer(
+    tag,
+    definition.binding,
+    (value): value is globalThis.Workflow<S.Codec.Encoded<Payload>> =>
+      isWorkflow<S.Codec.Encoded<Payload>>(value),
+    makeClient(definition),
+  );

@@ -1,3 +1,3 @@
-import { DurableObjectDefinition } from "effect-cf";
+import { DurableObject } from "effect-cf";
 
-export const TodoStore = DurableObjectDefinition.make("TodoStore", {});
+export class TodoStore extends DurableObject.Tag<TodoStore>()("TodoStore", {}) {}

@@ -1,10 +1,14 @@
 import { WorkerEntrypoint as CloudflareWorkerEntrypoint } from "cloudflare:workers";
 import { Cause, ConfigProvider, Context, Effect, Layer, ManagedRuntime, type Scope } from "effect";
+import type { Schema as S } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
+import type * as Binding from "./Binding";
 import { WorkerConfig, WorkerEnvironment, type WorkerEnv } from "./Environment";
 import { fromMessage, fromMessageBatch, type QueueHandler } from "./Queue";
+import type * as Rpc from "./Rpc";
 import type * as RpcDefinition from "./RpcDefinition";
+import type * as ServiceBinding from "./ServiceBinding";
 import * as WorkerDefinition from "./WorkerDefinition";
 import * as Entrypoint from "./internal/Entrypoint";
 import { fromExecutionContext, type RunWaitUntilEffect } from "./internal/WorkerContext";
@@ -282,38 +286,128 @@ export const makeFetchHandler = <ROut, LayerError, Env extends WorkerEnv = Worke
   };
 };
 
-export const Tag = WorkerDefinition.Tag;
+export type ServiceFreeSchema = S.Codec<any, any, never, never>;
 
-export const method = WorkerDefinition.method;
-
-export const implement = WorkerDefinition.implement;
-
-export type Definition<
-  Id extends string = string,
-  Methods extends RpcDefinition.Methods = RpcDefinition.Methods,
-> = WorkerDefinition.Definition<Id, Methods>;
-
-export namespace Definition {
-  export type Any = WorkerDefinition.Definition.Any;
+export interface Method<
+  Args extends ReadonlyArray<ServiceFreeSchema> = ReadonlyArray<ServiceFreeSchema>,
+  Success extends ServiceFreeSchema = ServiceFreeSchema,
+> {
+  readonly args: Args;
+  readonly success: Success;
 }
 
-export type ServerApi<Self extends WorkerDefinition.Definition.Any> =
-  WorkerDefinition.ServerApi<Self>;
+export namespace Method {
+  export type Any = Method<ReadonlyArray<ServiceFreeSchema>, ServiceFreeSchema>;
 
-export type Api<Self extends WorkerDefinition.Definition.Any> = WorkerDefinition.Api<Self>;
+  type ArgsFromSchemas<Args extends ReadonlyArray<ServiceFreeSchema>> = Args extends readonly []
+    ? []
+    : Args extends readonly [
+          infer Head extends ServiceFreeSchema,
+          ...infer Tail extends ReadonlyArray<ServiceFreeSchema>,
+        ]
+      ? [S.Schema.Type<Head>, ...ArgsFromSchemas<Tail>]
+      : Array<S.Schema.Type<Args[number]>>;
 
-export type Handlers<
+  export type Args<Self extends Any> = ArgsFromSchemas<Self["args"]>;
+
+  export type Success<Self extends Any> = S.Schema.Type<Self["success"]>;
+}
+
+export type Methods = Record<string, Method.Any>;
+
+export type NoReservedMethods<MethodsShape extends Methods> =
+  Extract<keyof MethodsShape, ReservedMethodName> extends never ? MethodsShape : never;
+
+export interface Definition<Id extends string = string, MethodsShape extends Methods = Methods> {
+  readonly id: Id;
+  readonly methods: MethodsShape;
+}
+
+export namespace Definition {
+  export type Any = Definition<string, Methods>;
+}
+
+export type ServerApi<Self extends Definition.Any> = {
+  readonly [Key in keyof Self["methods"]]: (
+    ...args: Method.Args<Self["methods"][Key]>
+  ) => Promise<Method.Success<Self["methods"][Key]>>;
+};
+
+export type Api<Self extends Definition.Any> = Rpc.Provider<ServerApi<Self>, ReservedMethodName>;
+
+export type Handlers<ROut, Self extends Definition.Any> = {
+  readonly [Key in keyof Self["methods"]]: (
+    ...args: Method.Args<Self["methods"][Key]>
+  ) => WorkerRpcHandler<ROut, Method.Success<Self["methods"][Key]>>;
+};
+
+export interface Options<ROut, Self extends Definition.Any> extends Omit<
+  WorkerOptions<ROut, Handlers<ROut, Self>>,
+  "rpc"
+> {
+  readonly rpc: Handlers<ROut, Self>;
+}
+
+export type LayerOptions = WorkerDefinition.LayerOptions;
+
+export type TagClass<Self, Id extends string, MethodsShape extends Methods> = Context.ServiceClass<
+  Self,
+  Id,
+  ServiceBinding.ServiceBindingEffectClient<
+    Api<Definition<Id, MethodsShape>>,
+    Definition<Id, MethodsShape>
+  >
+> &
+  ServiceBinding.ServiceBindingStaticClient<
+    Self,
+    Api<Definition<Id, MethodsShape>>,
+    Definition<Id, MethodsShape>
+  > & {
+    readonly id: Id;
+    readonly methods: MethodsShape;
+    readonly make: <ROut, LayerError>(
+      layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+      options: Options<ROut, Definition<Id, MethodsShape>>,
+    ) => WorkerClass<Handlers<ROut, Definition<Id, MethodsShape>>, ROut>;
+    readonly layer: (
+      options: LayerOptions,
+    ) => Layer.Layer<
+      Self,
+      Binding.BindingNotFoundError | Binding.BindingValidationError,
+      WorkerEnvironment
+    >;
+  };
+
+export type TagFactory = <Self>() => <Id extends string, const MethodsShape extends Methods>(
+  id: Id,
+  methods: MethodsShape & NoReservedMethods<MethodsShape>,
+) => TagClass<Self, Id, MethodsShape>;
+
+export const Tag = WorkerDefinition.Tag as unknown as TagFactory;
+
+export const method = WorkerDefinition.method as {
+  <Success extends ServiceFreeSchema>(definition: {
+    readonly success: Success;
+  }): Method<readonly [], Success>;
+  <
+    const Args extends ReadonlyArray<ServiceFreeSchema>,
+    Success extends ServiceFreeSchema,
+  >(definition: {
+    readonly args: Args;
+    readonly success: Success;
+  }): Method<Args, Success>;
+};
+
+export const implement = WorkerDefinition.implement as unknown as <
   ROut,
-  Self extends WorkerDefinition.Definition.Any,
-> = WorkerDefinition.Handlers<ROut, Self>;
-
-export type Options<ROut, Self extends WorkerDefinition.Definition.Any> = WorkerDefinition.Options<
-  ROut,
-  Self
->;
+  const Self extends Definition.Any,
+>(
+  _definition: Self,
+  handlers: Handlers<ROut, Self>,
+) => Handlers<ROut, Self>;
 
 export type HandlerEffect<
   ROut,
-  Self extends WorkerDefinition.Definition.Any,
+  Self extends Definition.Any,
   Key extends keyof Self["methods"],
-> = WorkerDefinition.HandlerEffect<ROut, Self, Key>;
+> = WorkerRpcHandler<ROut, Method.Success<Self["methods"][Key]>>;

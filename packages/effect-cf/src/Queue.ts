@@ -91,10 +91,6 @@ export const decodeBatch = <Body>(
     return fromMessageBatch(batch, messages);
   });
 
-export const Tag = QueueDefinition.Tag;
-
-export const implement = QueueDefinition.implement;
-
 export type Definition<
   Id extends string = string,
   Message extends QueueDefinition.Definition.Any["message"] =
@@ -104,6 +100,24 @@ export type Definition<
 export namespace Definition {
   export type Any = QueueDefinition.Definition.Any;
 }
+
+export type LayerOptions = QueueDefinition.LayerOptions;
+
+export type TagClass<
+  Self,
+  Id extends string,
+  Message extends QueueDefinition.Definition.Any["message"],
+> = QueueDefinition.TagClass<Self, Id, Message>;
+
+export const Tag: <Self>() => <
+  Id extends string,
+  Message extends QueueDefinition.Definition.Any["message"],
+>(
+  id: Id,
+  definition: { readonly message: Message },
+) => TagClass<Self, Id, Message> = QueueDefinition.Tag;
+
+export const implement = QueueDefinition.implement;
 
 export type Handler<ROut, Self extends QueueDefinition.Definition.Any> = QueueDefinition.Handler<
   ROut,

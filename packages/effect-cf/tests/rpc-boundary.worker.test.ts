@@ -10,10 +10,6 @@ class Counter extends DurableObject.Tag<Counter>()("WorkerPoolCounter", {
   get: DurableObject.method({ success: S.Number }),
 }) {}
 
-class Counters extends Counter.Namespace<Counters>()("effect-cf/test/WorkerPoolCounters", {
-  binding: "COUNTERS",
-}) {}
-
 class EchoWorker extends Worker.Tag<EchoWorker>()("WorkerPoolEcho", {
   echo: Worker.method({
     args: [S.String] as const,
@@ -21,12 +17,7 @@ class EchoWorker extends Worker.Tag<EchoWorker>()("WorkerPoolEcho", {
   }),
 }) {}
 
-class EchoService extends EchoWorker.Binding<EchoService>()(
-  "effect-cf/test/WorkerPoolEchoService",
-  {
-    binding: "ECHO",
-  },
-) {}
+const EchoService = EchoWorker;
 
 interface AuditReceipt {
   readonly room: string;
@@ -61,17 +52,8 @@ class AuditLog extends DurableObject.Tag<AuditLog>()("WorkerPoolAuditLog", {
   }),
 }) {}
 
-class MathService extends MathWorker.Binding<MathService>()("effect-cf/test/MathService", {
-  binding: "MATH",
-}) {}
-
-class FormatService extends FormatWorker.Binding<FormatService>()("effect-cf/test/FormatService", {
-  binding: "FORMAT",
-}) {}
-
-class AuditLogs extends AuditLog.Namespace<AuditLogs>()("effect-cf/test/AuditLogs", {
-  binding: "AUDIT_LOGS",
-}) {}
+const MathService = MathWorker;
+const FormatService = FormatWorker;
 
 const durableObjectId = {
   toString: () => "worker-pool-counter",
@@ -91,10 +73,10 @@ const makeNamespace = (stub: unknown) => {
 };
 
 test("namespace bindings resolve RPC calls inside the Workers runtime", async () => {
-  const WorkerClass = Worker.make(Counters.layer, {
+  const WorkerClass = Worker.make(Counter.layer({ binding: "COUNTERS" }), {
     fetch: Effect.gen(function* () {
-      const stub = yield* Counters.getByName("counter");
-      const value = yield* Counters.call(stub, "get");
+      const stub = yield* Counter.getByName("counter");
+      const value = yield* Counter.call(stub, "get");
 
       return Response.json({ value });
     }),
@@ -115,11 +97,11 @@ test("namespace bindings resolve RPC calls inside the Workers runtime", async ()
 });
 
 test("namespace RPC validation fails with package errors inside the Workers runtime", async () => {
-  const WorkerClass = Worker.make(Counters.layer, {
+  const WorkerClass = Worker.make(Counter.layer({ binding: "COUNTERS" }), {
     fetch: Effect.gen(function* () {
-      const stub = yield* Counters.getByName("counter");
+      const stub = yield* Counter.getByName("counter");
 
-      return yield* Counters.call(stub, "get").pipe(
+      return yield* Counter.call(stub, "get").pipe(
         Effect.match({
           onFailure: (error) =>
             new Response(
@@ -151,7 +133,7 @@ test("namespace RPC validation fails with package errors inside the Workers runt
 });
 
 test("service binding RPC validation runs inside the Workers runtime", async () => {
-  const WorkerClass = Worker.make(EchoService.layer, {
+  const WorkerClass = Worker.make(EchoService.layer({ binding: "ECHO" }), {
     fetch: Effect.gen(function* () {
       return yield* EchoService.call("echo", "hello").pipe(
         Effect.match({
@@ -208,14 +190,18 @@ test("workers compose service bindings and Durable Object RPC contracts in the W
   });
 
   const ApiWorkerClass = Worker.make(
-    Layer.mergeAll(MathService.layer, FormatService.layer, AuditLogs.layer),
+    Layer.mergeAll(
+      MathService.layer({ binding: "MATH" }),
+      FormatService.layer({ binding: "FORMAT" }),
+      AuditLog.layer({ binding: "AUDIT_LOGS" }),
+    ),
     {
       fetch: Effect.gen(function* () {
         const request = yield* Worker.NativeRequest;
         const value = Number(new URL(request.url).searchParams.get("value") ?? "0");
         const doubled = yield* MathService.call("double", value);
-        const auditLog = yield* AuditLogs.getByName("main");
-        const receipt = yield* AuditLogs.call(auditLog, "append", "main", doubled);
+        const auditLog = yield* AuditLog.getByName("main");
+        const receipt = yield* AuditLog.call(auditLog, "append", "main", doubled);
         const summary = yield* FormatService.call("summarize", receipt);
 
         return Response.json({

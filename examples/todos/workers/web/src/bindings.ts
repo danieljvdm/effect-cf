@@ -1,5 +1,5 @@
 import { TodoRpcGroup } from "@effect-cf/todos-domain";
-import { Binding, ServiceBinding } from "effect-cf";
+import { Binding, Worker } from "effect-cf";
 import { Context, Effect, Layer } from "effect";
 import {
   HttpClient,
@@ -25,11 +25,7 @@ export interface AssetsService {}
 
 export const Assets = Binding.Service<AssetsService>()("todos-web/Assets", "ASSETS", isFetcher);
 
-export interface ApiWorkerService {}
-
-export const ApiWorker = ServiceBinding.Service<ApiWorkerService, {}>()("todos-web/ApiWorker", {
-  binding: "API_WORKER",
-});
+export class ApiWorker extends Worker.Tag<ApiWorker>()("todos-web/ApiWorker", {}) {}
 
 const ApiWorkerHttpClient = Layer.effect(
   HttpClient.HttpClient,

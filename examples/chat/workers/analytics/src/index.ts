@@ -1,9 +1,10 @@
 import { AnalyticsWorker } from "@effect-cf/example-contracts/AnalyticsWorker";
+import { ApiWorker } from "@effect-cf/example-contracts/ApiWorker";
+import { ChatRoom } from "@effect-cf/example-contracts/ChatRoom";
 import { Effect, Layer } from "effect";
 import { Worker } from "effect-cf";
 
 import * as Analytics from "./analytics";
-import { ApiWorker, ChatRooms } from "./bindings";
 
 const json = (value: unknown, init?: ResponseInit) => {
   const headers = new Headers(init?.headers);
@@ -11,7 +12,10 @@ const json = (value: unknown, init?: ResponseInit) => {
   return Response.json(value, { ...init, headers });
 };
 
-const layer = Layer.mergeAll(ApiWorker.layer, ChatRooms.layer);
+const layer = Layer.mergeAll(
+  ApiWorker.layer({ binding: "API_WORKER" }),
+  ChatRoom.layer({ binding: "CHAT_ROOM" }),
+);
 
 export const AnalyticsWorkerLive = AnalyticsWorker.make(layer, {
   rpc: {

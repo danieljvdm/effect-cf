@@ -41,13 +41,13 @@ class Counter extends DurableObject.Tag<Counter>()("Counter", {
   resource: DurableObject.method({ success: S.Unknown }),
 }) {}
 
-class Counters extends Counter.Namespace<Counters>()("effect-cf/test/Counters", {
-  binding: "COUNTERS",
-}) {}
-
-const provideCounters = <A, E>(effect: Effect.Effect<A, E, Counters>, env: Cloudflare.Env) =>
+const provideCounters = <A, E>(effect: Effect.Effect<A, E, Counter>, env: Cloudflare.Env) =>
   effect.pipe(
-    Effect.provide(Counters.layer.pipe(Layer.provide(Layer.succeed(WorkerEnvironment, env)))),
+    Effect.provide(
+      Counter.layer({ binding: "COUNTERS" }).pipe(
+        Layer.provide(Layer.succeed(WorkerEnvironment, env)),
+      ),
+    ),
   );
 
 class EchoWorker extends Worker.Tag<EchoWorker>()("EchoWorker", {
@@ -57,13 +57,15 @@ class EchoWorker extends Worker.Tag<EchoWorker>()("EchoWorker", {
   }),
 }) {}
 
-class EchoService extends EchoWorker.Binding<EchoService>()("effect-cf/test/EchoService", {
-  binding: "ECHO",
-}) {}
+const EchoService = EchoWorker;
 
-const provideEchoService = <A, E>(effect: Effect.Effect<A, E, EchoService>, env: Cloudflare.Env) =>
+const provideEchoService = <A, E>(effect: Effect.Effect<A, E, EchoWorker>, env: Cloudflare.Env) =>
   effect.pipe(
-    Effect.provide(EchoService.layer.pipe(Layer.provide(Layer.succeed(WorkerEnvironment, env)))),
+    Effect.provide(
+      EchoService.layer({ binding: "ECHO" }).pipe(
+        Layer.provide(Layer.succeed(WorkerEnvironment, env)),
+      ),
+    ),
   );
 
 const makeNamespace = (stub: unknown) => {
@@ -261,16 +263,18 @@ test("DurableObject preserves server, client, handler, and namespace types", () 
       "get"
     > = handlers.get();
 
-    type CounterStub = Effect.Success<ReturnType<typeof Counters.getByName>>;
+    type CounterStub = Effect.Success<ReturnType<typeof Counter.getByName>>;
     const stub = null as unknown as CounterStub;
 
-    expectType<Effect.Effect<Rpc.Result<number>, DurableObjectNamespace.DurableObjectRpcError>>(
-      Counters.rpc(stub, "get"),
+    expectType<Effect.Effect<number, DurableObjectNamespace.DurableObjectRpcError, Counter>>(
+      Counter.rpc(stub, "get"),
     );
-    expectType<Effect.Effect<number, DurableObjectNamespace.DurableObjectRpcError>>(
-      Counters.call(stub, "add", 1, "one"),
+    expectType<Effect.Effect<number, DurableObjectNamespace.DurableObjectRpcError, Counter>>(
+      Counter.call(stub, "add", 1, "one"),
     );
-    expectType<Effect.Effect<unknown, unknown, Scope.Scope>>(Counters.scopedCall(stub, "resource"));
+    expectType<Effect.Effect<unknown, unknown, Scope.Scope | Counter>>(
+      Counter.scopedCall(stub, "resource"),
+    );
 
     DurableObject.make(Layer.empty, {
       webSocketMessage: (socket, message) => {
@@ -298,13 +302,13 @@ test("DurableObject preserves server, client, handler, and namespace types", () 
     ) {};
 
     // @ts-expect-error unknown RPC method names are rejected.
-    Counters.call(stub, "missing");
+    Counter.call(stub, "missing");
 
     // @ts-expect-error method arguments come from the code-owned definition.
-    Counters.call(stub, "add", "one", "two");
+    Counter.call(stub, "add", "one", "two");
 
     // @ts-expect-error all tuple arguments are required.
-    Counters.call(stub, "add", 1);
+    Counter.call(stub, "add", 1);
 
     void handler;
   };
@@ -316,12 +320,12 @@ test("DurableObject preserves server, client, handler, and namespace types", () 
 
 test("Durable Object namespace bindings report missing and invalid bindings", async () => {
   await expect(
-    Effect.runPromise(provideCounters(Counters.getByName("missing"), {} as Cloudflare.Env)),
+    Effect.runPromise(provideCounters(Counter.getByName("missing"), {} as Cloudflare.Env)),
   ).rejects.toBeInstanceOf(Binding.BindingNotFoundError);
 
   await expect(
     Effect.runPromise(
-      provideCounters(Counters.getByName("invalid"), {
+      provideCounters(Counter.getByName("invalid"), {
         COUNTERS: {
           getByName: () => undefined,
         },
@@ -337,23 +341,34 @@ test("Durable Object namespace rpc validates dynamic methods", async () => {
   };
 
   await expect(
-    Effect.runPromise(Counters.rpc(missingMethodStub as any, "get")),
-  ).rejects.toBeInstanceOf(DurableObjectNamespace.DurableObjectRpcError);
-
-  await expect(
-    Effect.runPromise(Counters.rpc({ ...missingMethodStub, get: 1 } as any, "get")),
+    Effect.runPromise(
+      provideCounters(Counter.rpc(missingMethodStub as any, "get"), {
+        COUNTERS: makeNamespace(missingMethodStub),
+      } as unknown as Cloudflare.Env),
+    ),
   ).rejects.toBeInstanceOf(DurableObjectNamespace.DurableObjectRpcError);
 
   await expect(
     Effect.runPromise(
-      Counters.rpc(
-        {
-          ...missingMethodStub,
-          get: () => {
-            throw new Error("boom");
-          },
-        } as any,
-        "get",
+      provideCounters(Counter.rpc({ ...missingMethodStub, get: 1 } as any, "get"), {
+        COUNTERS: makeNamespace(missingMethodStub),
+      } as unknown as Cloudflare.Env),
+    ),
+  ).rejects.toBeInstanceOf(DurableObjectNamespace.DurableObjectRpcError);
+
+  await expect(
+    Effect.runPromise(
+      provideCounters(
+        Counter.rpc(
+          {
+            ...missingMethodStub,
+            get: () => {
+              throw new Error("boom");
+            },
+          } as any,
+          "get",
+        ),
+        { COUNTERS: makeNamespace(missingMethodStub) } as unknown as Cloudflare.Env,
       ),
     ),
   ).rejects.toBeInstanceOf(DurableObjectNamespace.DurableObjectRpcError);
@@ -367,8 +382,20 @@ test("Durable Object namespace call resolves native RPC results", async () => {
     get: () => result,
   };
 
-  expect(Effect.runSync(Counters.rpc(stub as any, "get"))).toBe(result);
-  await expect(Effect.runPromise(Counters.call(stub as any, "get"))).resolves.toBe(42);
+  expect(
+    Effect.runSync(
+      provideCounters(Counter.rpc(stub as any, "get"), {
+        COUNTERS: makeNamespace(stub),
+      } as unknown as Cloudflare.Env),
+    ),
+  ).toBe(result);
+  await expect(
+    Effect.runPromise(
+      provideCounters(Counter.call(stub as any, "get"), {
+        COUNTERS: makeNamespace(stub),
+      } as unknown as Cloudflare.Env),
+    ),
+  ).resolves.toBe(42);
 });
 
 test("Durable Object namespace call maps rejected RPC results", async () => {
@@ -378,9 +405,13 @@ test("Durable Object namespace call maps rejected RPC results", async () => {
     get: () => Promise.reject(new Error("rejected")),
   };
 
-  await expect(Effect.runPromise(Counters.call(stub as any, "get"))).rejects.toBeInstanceOf(
-    DurableObjectNamespace.DurableObjectRpcError,
-  );
+  await expect(
+    Effect.runPromise(
+      provideCounters(Counter.call(stub as any, "get"), {
+        COUNTERS: makeNamespace(stub),
+      } as unknown as Cloudflare.Env),
+    ),
+  ).rejects.toBeInstanceOf(DurableObjectNamespace.DurableObjectRpcError);
 });
 
 test("Durable Object namespace scopedCall disposes disposable RPC results", async () => {
@@ -396,7 +427,11 @@ test("Durable Object namespace scopedCall disposes disposable RPC results", asyn
       }),
   };
 
-  await Effect.runPromise(Effect.scoped(Counters.scopedCall(stub as any, "resource")));
+  await Effect.runPromise(
+    provideCounters(Effect.scoped(Counter.scopedCall(stub as any, "resource")), {
+      COUNTERS: makeNamespace(stub),
+    } as unknown as Cloudflare.Env),
+  );
 
   expect(disposed).toBe(true);
 });
@@ -411,7 +446,7 @@ test("Durable Object namespace binding retrieves stubs from the Worker environme
   const resolved = await Effect.runPromise(
     provideCounters(
       Effect.gen(function* () {
-        const counters = yield* Counters;
+        const counters = yield* Counter;
         const counter = yield* counters.getByName("counter");
         return yield* counters.call(counter, "get");
       }),

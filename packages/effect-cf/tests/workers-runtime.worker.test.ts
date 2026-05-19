@@ -6,14 +6,11 @@ import { Effect, Layer } from "effect";
 import { WorkerEnvironment } from "../src/index";
 import { TestCounterDefinition, TestCounterDurableObject } from "./worker-fixture";
 
-const TestCounters = TestCounterDefinition.Namespace<typeof TestCounterDefinition>()(
-  "TestCounters",
-  {
-    binding: "TEST_COUNTER_DO",
-  },
-);
+const TestCounters = TestCounterDefinition;
 
-const testLayer = TestCounters.layer.pipe(Layer.provide(Layer.succeed(WorkerEnvironment, env)));
+const testLayer = TestCounters.layer({ binding: "TEST_COUNTER_DO" }).pipe(
+  Layer.provide(Layer.succeed(WorkerEnvironment, env)),
+);
 
 test("runs package WorkerEntrypoint RPC in the Workers runtime", async () => {
   const worker = exports.TestWorkerEntrypoint as unknown as {

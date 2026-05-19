@@ -59,6 +59,21 @@ export interface BindingService<Self, Id extends string, Service> extends Contex
   >;
 }
 
+export const layer = <Self, Resource, Service = Resource>(
+  tag: Context.Service<Self, Service>,
+  binding: string,
+  isResource: (value: unknown) => value is Resource,
+  wrap?: (resource: Resource) => Service,
+): Layer.Layer<Self, BindingNotFoundError | BindingValidationError, WorkerEnvironment> =>
+  Layer.effect(
+    tag,
+    Effect.gen(function* () {
+      const env = yield* WorkerEnvironment;
+      const resource = yield* getBinding(env, binding, isResource);
+      return wrap === undefined ? (resource as unknown as Service) : wrap(resource);
+    }),
+  );
+
 export const Service =
   <Self>() =>
   <Id extends string, Resource, Service = Resource>(
@@ -68,19 +83,11 @@ export const Service =
     wrap?: (resource: Resource) => Service,
   ): BindingService<Self, Id, Service> => {
     const tag = Context.Service<Self, Service>()(id);
-
-    const layer = Layer.effect(
-      tag,
-      Effect.gen(function* () {
-        const env = yield* WorkerEnvironment;
-        const resource = yield* getBinding(env, binding, isResource);
-        return wrap === undefined ? (resource as unknown as Service) : wrap(resource);
-      }),
-    );
+    const serviceLayer = layer(tag, binding, isResource, wrap);
 
     return Object.assign(tag, {
       [TypeId]: TypeId,
       binding,
-      layer,
+      layer: serviceLayer,
     }) as BindingService<Self, Id, Service>;
   };

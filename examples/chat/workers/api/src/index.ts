@@ -1,8 +1,10 @@
+import { AnalyticsWorker } from "@effect-cf/example-contracts/AnalyticsWorker";
 import { ApiWorker } from "@effect-cf/example-contracts/ApiWorker";
+import { ChatRoom } from "@effect-cf/example-contracts/ChatRoom";
 import { Config, Effect, Layer, Redacted } from "effect";
 import { Worker, WorkerConfig } from "effect-cf";
 
-import { AnalyticsWorker, ChatRooms, UserCache } from "./bindings";
+import { UserCache } from "./bindings";
 import * as Users from "./users";
 
 const json = (value: unknown, init?: ResponseInit) => {
@@ -20,9 +22,9 @@ const ApiConfig = Config.all({
 
 const layer = Layer.mergeAll(
   WorkerConfig.layer,
-  AnalyticsWorker.layer,
-  ChatRooms.layer,
-  UserCache.layer,
+  AnalyticsWorker.layer({ binding: "ANALYTICS_WORKER" }),
+  ChatRoom.layer({ binding: "CHAT_ROOM" }),
+  UserCache.layer({ binding: "USER_CACHE" }),
 );
 
 const roomRoute = (pathname: string, suffix: string) => {
@@ -39,7 +41,7 @@ export const ApiWorkerLive = ApiWorker.make(layer, {
     const request = yield* Worker.NativeRequest;
     const config = yield* ApiConfig;
     const analytics = yield* AnalyticsWorker;
-    const rooms = yield* ChatRooms;
+    const rooms = yield* ChatRoom;
     const url = new URL(request.url);
 
     if (request.method === "GET" && url.pathname === "/users") {

@@ -48,7 +48,11 @@ const BrowserRpcLive = RpcServer.layerHttp({
   Layer.provide(TodoRpcClient.layer),
 );
 
-const BaseLive = Layer.mergeAll(Assets.layer, ApiWorker.layer, HttpRouter.layer);
+const BaseLive = Layer.mergeAll(
+  Assets.layer,
+  ApiWorker.layer({ binding: "API_WORKER" }),
+  HttpRouter.layer,
+);
 const layer = Layer.mergeAll(TodoRpcClient.layer, BrowserRpcLive).pipe(
   Layer.provideMerge(BaseLive),
 );

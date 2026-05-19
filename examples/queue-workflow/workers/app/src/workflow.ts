@@ -14,19 +14,13 @@ export const ReportResult = S.Struct({
 export type ReportRequest = S.Schema.Type<typeof ReportRequest>;
 export type ReportResult = S.Schema.Type<typeof ReportResult>;
 
-export interface ReportWorkflow {}
-
-export const ReportWorkflow = Workflow.Tag<ReportWorkflow>()("ReportWorkflow", {
+export class ReportWorkflow extends Workflow.Tag<ReportWorkflow>()("ReportWorkflow", {
   payload: ReportRequest,
   result: ReportResult,
-});
-
-export const ReportWorkflowBinding = ReportWorkflow.binding("ReportWorkflowBinding", {
-  binding: "REPORT_WORKFLOW",
-});
+}) {}
 
 export const startReportWorkflow = (payload: ReportRequest, id = payload.reportId) =>
-  ReportWorkflowBinding.create(payload, { id });
+  ReportWorkflow.create(payload, { id });
 
 export const ReportWorkflowEntrypoint = ReportWorkflow.make(Layer.empty, {
   run: (payload: ReportRequest) =>

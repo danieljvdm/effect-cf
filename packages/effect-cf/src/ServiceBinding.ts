@@ -1,4 +1,4 @@
-import { Data, Effect, type Scope } from "effect";
+import { Context, Data, Effect, type Scope } from "effect";
 
 import * as Binding from "./Binding";
 import * as CloudflareRpc from "./Rpc";
@@ -116,6 +116,158 @@ export type ServiceBindingEffectClient<
   ) => Effect.Effect<Awaited<ServiceMethodSuccess<Api, Method>>, unknown, Scope.Scope>;
 };
 
+export type ServiceBindingStaticClient<
+  R,
+  Api extends object,
+  Definition extends WorkerDefinition.Definition.Any | undefined = undefined,
+> = DirectMethods<R, Definition> & {
+  readonly fetch: (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => Effect.Effect<globalThis.Response, ServiceBindingFetchError, R>;
+  readonly rpc: <Method extends ServiceMethodKey<Api>>(
+    method: Method,
+    ...args: ServiceMethodArgs<Api, Method>
+  ) => Effect.Effect<ServiceMethodSuccess<Api, Method>, ServiceBindingRpcError, R>;
+  readonly call: <Method extends ServiceMethodKey<Api>>(
+    method: Method,
+    ...args: ServiceMethodArgs<Api, Method>
+  ) => Effect.Effect<ServiceMethodSuccess<Api, Method>, ServiceBindingRpcError, R>;
+  readonly scopedCall: <Method extends ServiceMethodKey<Api>>(
+    method: Method,
+    ...args: ServiceMethodArgs<Api, Method>
+  ) => Effect.Effect<Awaited<ServiceMethodSuccess<Api, Method>>, unknown, Scope.Scope | R>;
+};
+
+export const isServiceBindingClient = <Api extends object>(
+  value: unknown,
+): value is ServiceBindingClient<Api> =>
+  typeof value === "object" && value !== null && "fetch" in value;
+
+export const makeClient = <
+  Api extends object,
+  const Definition extends WorkerDefinition.Definition.Any | undefined = undefined,
+>(
+  definition: ServiceBindingDefinition<Definition>,
+): ((service: ServiceBindingClient<Api>) => ServiceBindingEffectClient<Api, Definition>) => {
+  return (service: ServiceBindingClient<Api>) => {
+    const fetch = (input: RequestInfo | URL, init?: RequestInit) =>
+      Effect.tryPromise({
+        try: () => service.fetch(input, init),
+        catch: (cause) => new ServiceBindingFetchError({ binding: definition.binding, cause }),
+      });
+
+    const rpc = <Method extends ServiceMethodKey<Api>>(
+      method: Method,
+      ...args: ServiceMethodArgs<Api, Method>
+    ) =>
+      Effect.gen(function* () {
+        const methodName = String(method);
+        const encodedArgs =
+          definition.definition === undefined
+            ? args
+            : yield* RpcDefinition.encodeArgs(
+                definition.definition,
+                methodName as RpcDefinition.Definition.MethodNames<NonNullable<Definition>>,
+                args as never,
+              ).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ServiceBindingRpcError({
+                      binding: definition.binding,
+                      method: methodName,
+                      cause,
+                    }),
+                ),
+              );
+
+        return yield* RpcInvocation.invokeRpcMethod(
+          service,
+          method,
+          encodedArgs as ServiceMethodArgs<Api, Method>,
+          (cause) =>
+            new ServiceBindingRpcError({
+              binding: definition.binding,
+              method: methodName,
+              cause,
+            }),
+        );
+      });
+
+    const call = <Method extends ServiceMethodKey<Api>>(
+      method: Method,
+      ...args: ServiceMethodArgs<Api, Method>
+    ) =>
+      Effect.gen(function* () {
+        const methodName = String(method);
+        const value = yield* CloudflareRpc.resolve(yield* rpc(method, ...args)).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ServiceBindingRpcError({
+                binding: definition.binding,
+                method: methodName,
+                cause,
+              }),
+          ),
+        );
+
+        if (definition.definition === undefined) {
+          return value as ServiceMethodSuccess<Api, Method>;
+        }
+
+        const decoded = yield* RpcDefinition.decodeSuccess(
+          definition.definition,
+          methodName as RpcDefinition.Definition.MethodNames<NonNullable<Definition>>,
+          value,
+        ).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ServiceBindingRpcError({
+                binding: definition.binding,
+                method: methodName,
+                cause,
+              }),
+          ),
+        );
+
+        return decoded as ServiceMethodSuccess<Api, Method>;
+      });
+
+    const scopedCall = <Method extends ServiceMethodKey<Api>>(
+      method: Method,
+      ...args: ServiceMethodArgs<Api, Method>
+    ) =>
+      Effect.gen(function* () {
+        const result = yield* rpc(method, ...args);
+        return yield* CloudflareRpc.scoped(result);
+      });
+
+    const directMethods = makeDirectMethods<never, Api, Definition>(definition.definition, call);
+
+    return Object.assign(directMethods, {
+      fetch,
+      rpc,
+      call,
+      scopedCall,
+    }) as ServiceBindingEffectClient<Api, Definition>;
+  };
+};
+
+export const layer = <
+  Self,
+  Api extends object,
+  const Definition extends WorkerDefinition.Definition.Any | undefined = undefined,
+>(
+  tag: Context.Service<Self, ServiceBindingEffectClient<Api, Definition>>,
+  definition: ServiceBindingDefinition<Definition>,
+) =>
+  Binding.layer(
+    tag,
+    definition.binding,
+    (value): value is ServiceBindingClient<Api> => isServiceBindingClient<Api>(value),
+    makeClient<Api, Definition>(definition),
+  );
+
 /**
  * Creates a typed Effect service for a Worker service binding.
  *
@@ -134,10 +286,11 @@ export type ServiceBindingEffectClient<
  *   }),
  * });
  *
- * const CounterService = Counter.binding("COUNTER", { binding: "COUNTER" });
+ * const CounterLive = Counter.layer({ binding: "COUNTER" });
  *
  * const program = Effect.gen(function* () {
- *   const next = yield* CounterService.increment(1);
+ *   const counter = yield* Counter;
+ *   const next = yield* counter.increment(1);
  *   return next;
  * });
  * ```
@@ -153,119 +306,11 @@ export const Service =
   ) => {
     type ServiceApi = ApiOrDefinition<Api, Definition>;
 
-    const makeClient = (
-      service: ServiceBindingClient<ServiceApi>,
-    ): ServiceBindingEffectClient<ServiceApi, Definition> => {
-      const fetch = (input: RequestInfo | URL, init?: RequestInit) =>
-        Effect.tryPromise({
-          try: () => service.fetch(input, init),
-          catch: (cause) => new ServiceBindingFetchError({ binding: definition.binding, cause }),
-        });
-
-      const rpc = <Method extends ServiceMethodKey<ServiceApi>>(
-        method: Method,
-        ...args: ServiceMethodArgs<ServiceApi, Method>
-      ) =>
-        Effect.gen(function* () {
-          const methodName = String(method);
-          const encodedArgs =
-            definition.definition === undefined
-              ? args
-              : yield* RpcDefinition.encodeArgs(
-                  definition.definition,
-                  methodName as RpcDefinition.Definition.MethodNames<NonNullable<Definition>>,
-                  args as never,
-                ).pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new ServiceBindingRpcError({
-                        binding: definition.binding,
-                        method: methodName,
-                        cause,
-                      }),
-                  ),
-                );
-
-          return yield* RpcInvocation.invokeRpcMethod(
-            service,
-            method,
-            encodedArgs as ServiceMethodArgs<ServiceApi, Method>,
-            (cause) =>
-              new ServiceBindingRpcError({
-                binding: definition.binding,
-                method: methodName,
-                cause,
-              }),
-          );
-        });
-
-      const call = <Method extends ServiceMethodKey<ServiceApi>>(
-        method: Method,
-        ...args: ServiceMethodArgs<ServiceApi, Method>
-      ) =>
-        Effect.gen(function* () {
-          const methodName = String(method);
-          const value = yield* CloudflareRpc.resolve(yield* rpc(method, ...args)).pipe(
-            Effect.mapError(
-              (cause) =>
-                new ServiceBindingRpcError({
-                  binding: definition.binding,
-                  method: methodName,
-                  cause,
-                }),
-            ),
-          );
-
-          if (definition.definition === undefined) {
-            return value as ServiceMethodSuccess<ServiceApi, Method>;
-          }
-
-          const decoded = yield* RpcDefinition.decodeSuccess(
-            definition.definition,
-            methodName as RpcDefinition.Definition.MethodNames<NonNullable<Definition>>,
-            value,
-          ).pipe(
-            Effect.mapError(
-              (cause) =>
-                new ServiceBindingRpcError({
-                  binding: definition.binding,
-                  method: methodName,
-                  cause,
-                }),
-            ),
-          );
-
-          return decoded as ServiceMethodSuccess<ServiceApi, Method>;
-        });
-
-      const scopedCall = <Method extends ServiceMethodKey<ServiceApi>>(
-        method: Method,
-        ...args: ServiceMethodArgs<ServiceApi, Method>
-      ) =>
-        Effect.gen(function* () {
-          const result = yield* rpc(method, ...args);
-          return yield* CloudflareRpc.scoped(result);
-        });
-
-      const directMethods = makeDirectMethods<never, ServiceApi, Definition>(
-        definition.definition,
-        call,
-      );
-
-      return Object.assign(directMethods, {
-        fetch,
-        rpc,
-        call,
-        scopedCall,
-      }) as ServiceBindingEffectClient<ServiceApi, Definition>;
-    };
-
     const tag = Binding.Service<Self>()(
       id,
       definition.binding,
-      (value): value is ServiceBindingClient<ServiceApi> =>
-        typeof value === "object" && value !== null && "fetch" in value,
-      makeClient,
+      (value): value is ServiceBindingClient<ServiceApi> => isServiceBindingClient(value),
+      makeClient<ServiceApi, Definition>(definition),
     );
 
     const fetch = (input: RequestInfo | URL, init?: RequestInit) =>
@@ -324,7 +369,11 @@ export const Service =
       };
   };
 
-const makeDirectMethods = <R, Api, Definition extends WorkerDefinition.Definition.Any | undefined>(
+export const makeDirectMethods = <
+  R,
+  Api,
+  Definition extends WorkerDefinition.Definition.Any | undefined,
+>(
   rpcDefinition: Definition | undefined,
   call: ServiceCall<R, Api>,
 ): DirectMethods<R, Definition> => {

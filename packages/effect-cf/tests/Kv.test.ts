@@ -15,24 +15,18 @@ class NumberKeyKv extends Kv.Service<NumberKeyKv>()("test/NumberKeyKv", {
   value: S.String,
 }) {}
 
-const ValueStyleKv = Kv.make("test/ValueStyleKv", {
-  binding: "TEST_KV",
+class ValueStyleKv extends Kv.Tag<ValueStyleKv>()("test/ValueStyleKv", {
   key: S.String,
   value: S.Struct({ count: S.Number }),
-});
+}) {}
 
 class TestKvDefinition extends Kv.Tag<TestKvDefinition>()("test/TestKvDefinition", {
   key: S.String,
   value: S.Struct({ count: S.Number }),
 }) {}
 
-class TestKvBinding extends TestKvDefinition.Binding<TestKvBinding>()("test/TestKvBinding", {
-  binding: "TEST_KV",
-}) {}
-
-const ValueStyleKvBinding = TestKvDefinition.binding("test/ValueStyleKvBinding", {
-  binding: "TEST_KV",
-});
+const TestKvBinding = TestKvDefinition;
+const ValueStyleKvBinding = TestKvDefinition;
 
 class SharedStringKvDefinition extends Kv.Tag<SharedStringKvDefinition>()(
   "test/SharedStringKvDefinition",
@@ -42,13 +36,8 @@ class SharedStringKvDefinition extends Kv.Tag<SharedStringKvDefinition>()(
   },
 ) {}
 
-const SharedCountKvBinding = TestKvDefinition.binding("test/SharedCountKvBinding", {
-  binding: "TEST_KV",
-});
-
-const SharedStringKvBinding = SharedStringKvDefinition.binding("test/SharedStringKvBinding", {
-  binding: "TEST_KV",
-});
+const SharedCountKvBinding = TestKvDefinition;
+const SharedStringKvBinding = SharedStringKvDefinition;
 
 interface PutCall {
   readonly key: string;
@@ -102,17 +91,17 @@ const numberKeyKvLayer = (kv: KVNamespace) =>
   );
 
 const valueStyleKvLayer = (kv: KVNamespace) =>
-  ValueStyleKv.layer.pipe(
+  ValueStyleKv.layer({ binding: "TEST_KV" }).pipe(
     Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_KV: kv } as unknown as Cloudflare.Env)),
   );
 
 const testKvBindingLayer = (kv: KVNamespace) =>
-  TestKvBinding.layer.pipe(
+  TestKvBinding.layer({ binding: "TEST_KV" }).pipe(
     Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_KV: kv } as unknown as Cloudflare.Env)),
   );
 
 const valueStyleKvBindingLayer = (kv: KVNamespace) =>
-  ValueStyleKvBinding.layer.pipe(
+  ValueStyleKvBinding.layer({ binding: "TEST_KV" }).pipe(
     Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_KV: kv } as unknown as Cloudflare.Env)),
   );
 
@@ -285,7 +274,10 @@ const valueStyleKvBindingLayer = (kv: KVNamespace) =>
   const kv = makeFakeKv({
     get: async (key) => values.get(key) ?? null,
   });
-  const sharedLayer = Layer.merge(SharedCountKvBinding.layer, SharedStringKvBinding.layer).pipe(
+  const sharedLayer = Layer.merge(
+    SharedCountKvBinding.layer({ binding: "TEST_KV" }),
+    SharedStringKvBinding.layer({ binding: "TEST_KV" }),
+  ).pipe(
     Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_KV: kv } as unknown as Cloudflare.Env)),
   );
 
@@ -347,7 +339,7 @@ test("definition-backed KV bindings report missing and invalid bindings", async 
     Effect.runPromise(
       TestKvBinding.get("missing").pipe(
         Effect.provide(
-          TestKvBinding.layer.pipe(
+          TestKvBinding.layer({ binding: "TEST_KV" }).pipe(
             Layer.provide(Layer.succeed(WorkerEnvironment, {} as Cloudflare.Env)),
           ),
         ),
@@ -359,7 +351,7 @@ test("definition-backed KV bindings report missing and invalid bindings", async 
     Effect.runPromise(
       TestKvBinding.get("invalid").pipe(
         Effect.provide(
-          TestKvBinding.layer.pipe(
+          TestKvBinding.layer({ binding: "TEST_KV" }).pipe(
             Layer.provide(
               Layer.succeed(WorkerEnvironment, { TEST_KV: {} } as unknown as Cloudflare.Env),
             ),

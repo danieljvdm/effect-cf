@@ -1,5 +1,6 @@
-import { Effect, Schema as S, type Layer, type Scope } from "effect";
+import { Context, Effect, Schema as S, type Layer, type Scope } from "effect";
 
+import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
 import * as QueueEntrypoint from "./Queue";
 import * as QueueBinding from "./QueueBinding";
@@ -19,15 +20,6 @@ export namespace Definition {
   export type Any = Definition<string, RpcDefinition.ServiceFreeSchema>;
 }
 
-declare const BindingServiceTypeId: unique symbol;
-
-export interface BindingService<Id extends string, Self extends Definition.Any> {
-  readonly [BindingServiceTypeId]: {
-    readonly id: Id;
-    readonly definition: Self;
-  };
-}
-
 export type Handler<ROut, Self extends Definition.Any> = (
   batch: QueueEntrypoint.QueueBatch<S.Schema.Type<Self["message"]>>,
 ) => Effect.Effect<
@@ -42,6 +34,44 @@ export interface Options<ROut, Self extends Definition.Any> extends Omit<
 > {
   readonly queue: Handler<ROut, Self>;
   readonly rpc?: never;
+}
+
+export type LayerOptions = {
+  readonly binding: string;
+};
+
+export interface TagClass<
+  Self,
+  Id extends string,
+  Message extends RpcDefinition.ServiceFreeSchema,
+> extends Context.ServiceClass<Self, Id, QueueBinding.QueueBindingClient<Message>> {
+  readonly id: Id;
+  readonly message: Message;
+  readonly make: <ROut, LayerError>(
+    layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+    options: Options<ROut, Definition<Id, Message>>,
+  ) => WorkerEntrypoint.WorkerClass<Record<never, never>, ROut>;
+  readonly layer: (
+    options: LayerOptions,
+  ) => Layer.Layer<
+    Self,
+    Binding.BindingNotFoundError | Binding.BindingValidationError,
+    WorkerEnvironment
+  >;
+  readonly send: (
+    message: S.Schema.Type<Message>,
+    options?: QueueBinding.QueueSendOptions,
+  ) => Effect.Effect<void, QueueBinding.QueueOperationError | S.SchemaError, Self>;
+  readonly sendBatch: (
+    messages: Iterable<QueueBinding.MessageSendRequest<S.Schema.Type<Message>>>,
+    options?: QueueBinding.QueueSendBatchOptions,
+  ) => Effect.Effect<void, QueueBinding.QueueOperationError | S.SchemaError, Self>;
+  readonly metrics: () => Effect.Effect<
+    QueueBinding.QueueMetrics,
+    QueueBinding.QueueOperationError,
+    Self
+  >;
+  readonly unsafeRaw: () => Effect.Effect<globalThis.Queue<S.Codec.Encoded<Message>>, never, Self>;
 }
 
 const makeDefinition = <Id extends string, Message extends RpcDefinition.ServiceFreeSchema>(
@@ -63,49 +93,65 @@ const makeDefinition = <Id extends string, Message extends RpcDefinition.Service
         ...options,
         queue: wrapHandler(queueDefinition, options.queue),
       }),
-    Binding:
-      <Self>() =>
-      <BindingId extends string>(
-        bindingId: BindingId,
-        binding: Omit<QueueBinding.QueueBindingDefinition<Message>, "message">,
-      ) =>
-        QueueBinding.Service<Self>()<BindingId, Message>(bindingId, {
-          ...binding,
-          message: definition.message,
-        }),
-    binding: <BindingId extends string>(
-      bindingId: BindingId,
-      binding: Omit<QueueBinding.QueueBindingDefinition<Message>, "message">,
-    ) =>
-      QueueBinding.Service<BindingService<BindingId, SelfDefinition>>()<BindingId, Message>(
-        bindingId,
-        {
-          ...binding,
-          message: definition.message,
-        },
-      ),
   });
 };
 
-export const make = makeDefinition;
+export const make = <Id extends string, Message extends RpcDefinition.ServiceFreeSchema>(
+  id: Id,
+  definition: { readonly message: Message },
+) => Tag<Definition<Id, Message>>()(id, definition);
 
 export const Tag =
-  <_Self>() =>
+  <Self>() =>
   <Id extends string, Message extends RpcDefinition.ServiceFreeSchema>(
     id: Id,
     definition: { readonly message: Message },
   ) => {
     const queueDefinition = makeDefinition(id, definition);
+    const tag = Context.Service<Self, QueueBinding.QueueBindingClient<Message>>()(id);
 
-    abstract class QueueDefinitionClass {
-      static readonly id = queueDefinition.id;
-      static readonly message = queueDefinition.message;
-      static readonly make = queueDefinition.make;
-      static readonly Binding = queueDefinition.Binding;
-      static readonly binding = queueDefinition.binding;
-    }
+    const layer = (binding: LayerOptions) =>
+      QueueBinding.layer(tag, {
+        ...binding,
+        message: definition.message,
+      });
 
-    return QueueDefinitionClass as (abstract new () => object) & typeof queueDefinition;
+    const send = Effect.fnUntraced(function* (
+      message: S.Schema.Type<Message>,
+      options?: QueueBinding.QueueSendOptions,
+    ) {
+      const queue = yield* tag;
+      yield* queue.send(message, options);
+    });
+
+    const sendBatch = Effect.fnUntraced(function* (
+      messages: Iterable<QueueBinding.MessageSendRequest<S.Schema.Type<Message>>>,
+      options?: QueueBinding.QueueSendBatchOptions,
+    ) {
+      const queue = yield* tag;
+      yield* queue.sendBatch(messages, options);
+    });
+
+    const metrics = Effect.fnUntraced(function* () {
+      const queue = yield* tag;
+      return yield* queue.metrics();
+    });
+
+    const unsafeRaw = Effect.fnUntraced(function* () {
+      const queue = yield* tag;
+      return yield* queue.unsafeRaw;
+    });
+
+    return Object.assign(tag, {
+      id: queueDefinition.id,
+      message: queueDefinition.message,
+      make: queueDefinition.make,
+      layer,
+      send,
+      sendBatch,
+      metrics,
+      unsafeRaw,
+    }) as TagClass<Self, Id, Message>;
   };
 
 export const Queue = Tag;

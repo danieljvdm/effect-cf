@@ -10,6 +10,8 @@ import {
   ServiceBinding,
   Worker,
   WorkerEnvironment,
+  Workflow,
+  WorkflowBinding,
 } from "../src/index";
 
 export const AvatarQueueMessagePayload = Schema.Struct({
@@ -17,15 +19,11 @@ export const AvatarQueueMessagePayload = Schema.Struct({
   userId: Schema.String,
 });
 
-export class AvatarQueueDefinition extends Queue.Tag<AvatarQueueDefinition>()("AvatarQueue", {
+export class AvatarQueue extends Queue.Tag<AvatarQueue>()("AvatarQueue", {
   message: AvatarQueueMessagePayload,
 }) {}
 
-export class AvatarQueue extends AvatarQueueDefinition.Binding<AvatarQueue>()("AvatarQueue", {
-  binding: "AVATAR_QUEUE",
-}) {}
-
-export const AvatarQueueLayer = AvatarQueue.layer;
+export const AvatarQueueLayer = AvatarQueue.layer({ binding: "AVATAR_QUEUE" });
 
 const queueProgram = Effect.gen(function* () {
   const queue = yield* AvatarQueue;
@@ -47,7 +45,11 @@ const missingQueueLayer: Effect.Effect<void, unknown, never> = queueProgram;
 
 declare const env: Cloudflare.Env;
 const providedQueueProgram: Effect.Effect<void, unknown, never> = queueProgram.pipe(
-  Effect.provide(AvatarQueue.layer.pipe(Layer.provide(Layer.succeed(WorkerEnvironment, env)))),
+  Effect.provide(
+    AvatarQueue.layer({ binding: "AVATAR_QUEUE" }).pipe(
+      Layer.provide(Layer.succeed(WorkerEnvironment, env)),
+    ),
+  ),
 );
 
 expectTypeOf(AvatarQueue.send({ requestId: "r1", userId: "u1" })).toEqualTypeOf<
@@ -57,16 +59,56 @@ expectTypeOf(AvatarQueue.send({ requestId: "r1", userId: "u1" })).toEqualTypeOf<
 void missingQueueLayer;
 void providedQueueProgram;
 
-export class SessionKvDefinition extends Kv.Tag<SessionKvDefinition>()("SessionKv", {
+export const ReportWorkflowPayload = Schema.Struct({
+  reportId: Schema.String,
+});
+
+export const ReportWorkflowResult = Schema.Struct({
+  objectKey: Schema.String,
+});
+
+export class ReportWorkflow extends Workflow.Tag<ReportWorkflow>()("ReportWorkflow", {
+  payload: ReportWorkflowPayload,
+  result: ReportWorkflowResult,
+}) {}
+
+export const ReportWorkflowLayer = ReportWorkflow.layer({ binding: "REPORT_WORKFLOW" });
+
+const workflowProgram = Effect.gen(function* () {
+  const workflow = yield* ReportWorkflow;
+
+  expectTypeOf(workflow.create({ reportId: "r1" })).toEqualTypeOf<
+    Effect.Effect<
+      WorkflowBinding.WorkflowInstance<{ readonly objectKey: string }>,
+      WorkflowBinding.WorkflowOperationError | Schema.SchemaError
+    >
+  >();
+
+  yield* workflow.create({ reportId: "r1" });
+  yield* workflow.createBatch([{ id: "batch-1", payload: { reportId: "r2" } }]);
+
+  // @ts-expect-error workflow payloads use the decoded schema shape.
+  yield* workflow.create({});
+});
+
+expectTypeOf(ReportWorkflow.create({ reportId: "r1" })).toEqualTypeOf<
+  Effect.Effect<
+    WorkflowBinding.WorkflowInstance<{ readonly objectKey: string }>,
+    WorkflowBinding.WorkflowOperationError | Schema.SchemaError,
+    ReportWorkflow
+  >
+>();
+
+void workflowProgram;
+
+export class SessionKv extends Kv.Tag<SessionKv>()("SessionKv", {
   key: Schema.String,
   value: Schema.Struct({ count: Schema.Number }),
 }) {}
 
-export class SessionKv extends SessionKvDefinition.Binding<SessionKv>()("SessionKv", {
+export const SessionKvLayer = SessionKv.layer({
   binding: "SESSION_KV",
-}) {}
-
-export const SessionKvLayer = SessionKv.layer;
+});
 
 const kvProgram = Effect.gen(function* () {
   const kv = yield* SessionKv;
@@ -84,18 +126,16 @@ const kvProgram = Effect.gen(function* () {
   yield* kv.put("session-1", { count: "1" });
 });
 
-export class ApiWorkerDefinition extends Worker.Tag<ApiWorkerDefinition>()("ApiWorker", {
+export class ApiWorker extends Worker.Tag<ApiWorker>()("ApiWorker", {
   ping: Worker.method({
     args: [Schema.String] as const,
     success: Schema.String,
   }),
 }) {}
 
-export class ApiWorker extends ApiWorkerDefinition.Binding<ApiWorker>()("ApiWorker", {
+export const ApiWorkerLayer = ApiWorker.layer({
   binding: "API_WORKER",
-}) {}
-
-export const ApiWorkerLayer = ApiWorker.layer;
+});
 
 const workerProgram = Effect.gen(function* () {
   const worker = yield* ApiWorker;
@@ -110,22 +150,19 @@ const workerProgram = Effect.gen(function* () {
   yield* worker.ping(123);
 });
 
-export class CounterDurableObjectDefinition extends DurableObject.Tag<CounterDurableObjectDefinition>()(
+export class CounterDurableObject extends DurableObject.Tag<CounterDurableObject>()(
   "CounterDurableObject",
   {
     get: DurableObject.method({ success: Schema.Number }),
   },
 ) {}
 
-export class CounterDurableObjects extends CounterDurableObjectDefinition.Namespace<CounterDurableObjects>()(
-  "CounterDurableObjects",
-  { binding: "COUNTER_DURABLE_OBJECTS" },
-) {}
-
-export const CounterDurableObjectsLayer = CounterDurableObjects.layer;
+export const CounterDurableObjectLayer = CounterDurableObject.layer({
+  binding: "COUNTER_DURABLE_OBJECTS",
+});
 
 const durableObjectProgram = Effect.gen(function* () {
-  const namespace = yield* CounterDurableObjects;
+  const namespace = yield* CounterDurableObject;
   const counter = namespace.byName("counter-1");
 
   expectTypeOf(counter.get()).toEqualTypeOf<
@@ -138,6 +175,10 @@ const durableObjectProgram = Effect.gen(function* () {
   yield* counter.missing();
 });
 
+// @ts-expect-error CounterDurableObject.layer must be provided before the program can run.
+const missingDurableObjectLayer: Effect.Effect<void, unknown, never> = durableObjectProgram;
+
 void kvProgram;
 void workerProgram;
 void durableObjectProgram;
+void missingDurableObjectLayer;

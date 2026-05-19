@@ -3,17 +3,8 @@ import type { WorkflowStep } from "cloudflare:workers";
 import { Effect, Layer, Option } from "effect";
 import { WorkerEnvironment } from "effect-cf";
 
-import {
-  EmailQueue,
-  enqueueWelcomeEmail,
-  makeEmailQueueConsumer,
-  type EmailJob,
-} from "../src/queue.ts";
-import {
-  ReportWorkflowBinding,
-  ReportWorkflowEntrypoint,
-  startReportWorkflow,
-} from "../src/workflow.ts";
+import { EmailQueue, EmailQueueConsumer, enqueueWelcomeEmail } from "../src/queue.ts";
+import { ReportWorkflow, ReportWorkflowEntrypoint, startReportWorkflow } from "../src/workflow.ts";
 
 const executionContext = {
   waitUntil() {},
@@ -36,7 +27,11 @@ test("Queue example sends typed jobs through a producer binding", async () => {
       } as unknown as Cloudflare.Env;
 
       yield* enqueueWelcomeEmail("dan@example.com").pipe(
-        Effect.provide(EmailQueue.layer.pipe(Layer.provide(Layer.succeed(WorkerEnvironment, env)))),
+        Effect.provide(
+          EmailQueue.layer({ binding: "EMAIL_QUEUE" }).pipe(
+            Layer.provide(Layer.succeed(WorkerEnvironment, env)),
+          ),
+        ),
       );
 
       assert.deepStrictEqual(sent, [
@@ -52,10 +47,8 @@ test("Queue example sends typed jobs through a producer binding", async () => {
 });
 
 test("Queue example consumes typed jobs and acknowledges messages", async () => {
-  const processed: Array<EmailJob> = [];
   const acked: Array<string> = [];
-  const Consumer = makeEmailQueueConsumer(processed);
-  const worker = new Consumer(executionContext, {} as Cloudflare.Env);
+  const worker = new EmailQueueConsumer(executionContext, {} as Cloudflare.Env);
 
   await worker.queue(
     makeMessageBatch("email-queue", [
@@ -72,14 +65,6 @@ test("Queue example consumes typed jobs and acknowledges messages", async () => 
     ]),
   );
 
-  assert.deepStrictEqual(processed, [
-    {
-      to: "dan@example.com",
-      subject: "Welcome",
-      body: "Hello from the queue example.",
-      priority: "high",
-    },
-  ]);
   assert.deepStrictEqual(acked, ["m_1"]);
 });
 
@@ -107,7 +92,9 @@ test("Workflow example starts an instance through a binding", async () => {
 
       const started = yield* startReportWorkflow({ reportId: "report-1", requestedBy: "dan" }).pipe(
         Effect.provide(
-          ReportWorkflowBinding.layer.pipe(Layer.provide(Layer.succeed(WorkerEnvironment, env))),
+          ReportWorkflow.layer({ binding: "REPORT_WORKFLOW" }).pipe(
+            Layer.provide(Layer.succeed(WorkerEnvironment, env)),
+          ),
         ),
       );
       const status = yield* started.status;

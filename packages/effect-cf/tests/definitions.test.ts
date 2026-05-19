@@ -55,15 +55,11 @@ test("definition-backed Worker RPC validates encoded success values", async () =
 });
 
 {
-  class AvatarJobs extends Queue.Tag<AvatarJobs>()("AvatarJobs", {
+  class AvatarQueue extends Queue.Tag<AvatarQueue>()("AvatarQueue", {
     message: S.Struct({
       userId: S.String,
       attempts: S.NumberFromString,
     }),
-  }) {}
-
-  class AvatarQueue extends AvatarJobs.Binding<AvatarQueue>()("AvatarQueue", {
-    binding: "AVATAR_QUEUE",
   }) {}
 
   const assertQueueBindingTypes = () => {
@@ -86,7 +82,11 @@ test("definition-backed Worker RPC validates encoded success values", async () =
     const missingLayer: Effect.Effect<void, unknown, never> = program;
 
     const provided: Effect.Effect<void, unknown, never> = program.pipe(
-      Effect.provide(AvatarQueue.layer.pipe(Layer.provide(Layer.succeed(WorkerEnvironment, env)))),
+      Effect.provide(
+        AvatarQueue.layer({ binding: "AVATAR_QUEUE" }).pipe(
+          Layer.provide(Layer.succeed(WorkerEnvironment, env)),
+        ),
+      ),
     );
 
     void missingLayer;
@@ -110,32 +110,33 @@ test("definition-backed Worker RPC validates encoded success values", async () =
     },
   } as unknown as Cloudflare.Env;
 
-  layer(AvatarQueue.layer.pipe(Layer.provide(Layer.succeed(WorkerEnvironment, env))))(
-    "definition-backed Queue bindings",
-    (it) => {
-      it.effect("encodes sent messages", () =>
-        Effect.gen(function* () {
-          sent.length = 0;
+  layer(
+    AvatarQueue.layer({ binding: "AVATAR_QUEUE" }).pipe(
+      Layer.provide(Layer.succeed(WorkerEnvironment, env)),
+    ),
+  )("definition-backed Queue bindings", (it) => {
+    it.effect("encodes sent messages", () =>
+      Effect.gen(function* () {
+        sent.length = 0;
 
-          yield* AvatarQueue.send({ userId: "u_1", attempts: 2 });
-          const queue = yield* AvatarQueue;
-          yield* queue.sendBatch([{ body: { userId: "u_2", attempts: 3 } }]);
-          const metrics = yield* queue.metrics();
+        yield* AvatarQueue.send({ userId: "u_1", attempts: 2 });
+        const queue = yield* AvatarQueue;
+        yield* queue.sendBatch([{ body: { userId: "u_2", attempts: 3 } }]);
+        const metrics = yield* queue.metrics();
 
-          assert.deepStrictEqual(sent, [
-            { userId: "u_1", attempts: "2" },
-            { userId: "u_2", attempts: "3" },
-          ]);
-          assert.deepStrictEqual(metrics, { backlogCount: 0, backlogBytes: 0 });
-        }),
-      );
-    },
-  );
+        assert.deepStrictEqual(sent, [
+          { userId: "u_1", attempts: "2" },
+          { userId: "u_2", attempts: "3" },
+        ]);
+        assert.deepStrictEqual(metrics, { backlogCount: 0, backlogBytes: 0 });
+      }),
+    );
+  });
 
   test("definition-backed Queue consumers decode messages", async () => {
     const seen: Array<unknown> = [];
     const acked: Array<string> = [];
-    const Live = AvatarJobs.make(Layer.empty, {
+    const Live = AvatarQueue.make(Layer.empty, {
       queue: (batch) =>
         Effect.gen(function* () {
           seen.push(batch.messages[0].body);
@@ -155,7 +156,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
   });
 
   test("definition-backed Queue consumers fail on invalid messages", async () => {
-    const Live = AvatarJobs.make(Layer.empty, {
+    const Live = AvatarQueue.make(Layer.empty, {
       queue: () => Effect.void,
     });
     const worker = new Live(executionContext, {} as Cloudflare.Env);
@@ -172,13 +173,8 @@ test("definition-backed Worker RPC validates encoded success values", async () =
     result: S.NumberFromString,
   }) {}
 
-  class ArtifactWorkflowBinding extends ArtifactWorkflow.Binding<ArtifactWorkflowBinding>()(
-    "ArtifactWorkflowBinding",
-    { binding: "ARTIFACT_WORKFLOW" },
-  ) {}
-
   void (() => {
-    ArtifactWorkflowBinding.createBatch([
+    ArtifactWorkflow.createBatch([
       // @ts-expect-error Workflow bindings accept decoded `payload`, not native `params`.
       { id: "bad", params: { segmentId: "s_1", attempt: "1" } },
     ]);
@@ -212,45 +208,46 @@ test("definition-backed Worker RPC validates encoded success values", async () =
     },
   } as unknown as Cloudflare.Env;
 
-  layer(ArtifactWorkflowBinding.layer.pipe(Layer.provide(Layer.succeed(WorkerEnvironment, env))))(
-    "definition-backed Workflow bindings",
-    (it) => {
-      it.effect("encodes create params and decodes status output", () =>
-        Effect.gen(function* () {
-          const created = yield* ArtifactWorkflowBinding.create(
-            { segmentId: "s_1", attempt: 7 },
-            { id: "wf_1" },
-          );
-          const status = yield* created.status;
+  layer(
+    ArtifactWorkflow.layer({ binding: "ARTIFACT_WORKFLOW" }).pipe(
+      Layer.provide(Layer.succeed(WorkerEnvironment, env)),
+    ),
+  )("definition-backed Workflow bindings", (it) => {
+    it.effect("encodes create params and decodes status output", () =>
+      Effect.gen(function* () {
+        const created = yield* ArtifactWorkflow.create(
+          { segmentId: "s_1", attempt: 7 },
+          { id: "wf_1" },
+        );
+        const status = yield* created.status;
 
-          assert.deepStrictEqual(createdOptions, {
-            id: "wf_1",
-            params: { segmentId: "s_1", attempt: "7" },
-          });
-          assert.strictEqual(Option.isSome(status.output) ? status.output.value : undefined, 42);
-          yield* created.restart({ from: { name: "prepare", count: 2, type: "step" } });
-          assert.deepStrictEqual(restartOptions, {
-            from: { name: "prepare", count: 2, type: "step" },
-          });
-        }),
-      );
+        assert.deepStrictEqual(createdOptions, {
+          id: "wf_1",
+          params: { segmentId: "s_1", attempt: "7" },
+        });
+        assert.strictEqual(Option.isSome(status.output) ? status.output.value : undefined, 42);
+        yield* created.restart({ from: { name: "prepare", count: 2, type: "step" } });
+        assert.deepStrictEqual(restartOptions, {
+          from: { name: "prepare", count: 2, type: "step" },
+        });
+      }),
+    );
 
-      it.effect("encodes createBatch params without leaking decoded payload", () =>
-        Effect.gen(function* () {
-          yield* ArtifactWorkflowBinding.createBatch([
-            { id: "wf_batch_1", payload: { segmentId: "s_2", attempt: 8 } },
-          ]);
+    it.effect("encodes createBatch params without leaking decoded payload", () =>
+      Effect.gen(function* () {
+        yield* ArtifactWorkflow.createBatch([
+          { id: "wf_batch_1", payload: { segmentId: "s_2", attempt: 8 } },
+        ]);
 
-          assert.deepStrictEqual(createdBatchOptions, [
-            {
-              id: "wf_batch_1",
-              params: { segmentId: "s_2", attempt: "8" },
-            },
-          ]);
-        }),
-      );
-    },
-  );
+        assert.deepStrictEqual(createdBatchOptions, [
+          {
+            id: "wf_batch_1",
+            params: { segmentId: "s_2", attempt: "8" },
+          },
+        ]);
+      }),
+    );
+  });
 
   test("definition-backed Workflow entrypoints decode payloads and encode results", async () => {
     const stepNames: Array<string> = [];
@@ -311,9 +308,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
 }
 
 {
-  const TestService = TestWorker.Binding<typeof TestWorker>()("TestService", {
-    binding: "TEST_SERVICE",
-  });
+  const TestService = TestWorker;
   const env = {
     TEST_SERVICE: {
       fetch: async () => new Response("ok"),
@@ -321,18 +316,19 @@ test("definition-backed Worker RPC validates encoded success values", async () =
     },
   } as unknown as Cloudflare.Env;
 
-  layer(TestService.layer.pipe(Layer.provide(Layer.succeed(WorkerEnvironment, env))))(
-    "definition-backed service bindings",
-    (it) => {
-      it.effect("encodes arguments and decodes results", () =>
-        Effect.gen(function* () {
-          const value = yield* TestService.call("double", 21);
+  layer(
+    TestService.layer({ binding: "TEST_SERVICE" }).pipe(
+      Layer.provide(Layer.succeed(WorkerEnvironment, env)),
+    ),
+  )("definition-backed service bindings", (it) => {
+    it.effect("encodes arguments and decodes results", () =>
+      Effect.gen(function* () {
+        const value = yield* TestService.call("double", 21);
 
-          assert.strictEqual(value, 42);
-        }),
-      );
-    },
-  );
+        assert.strictEqual(value, 42);
+      }),
+    );
+  });
 }
 
 {
@@ -342,18 +338,8 @@ test("definition-backed Worker RPC validates encoded success values", async () =
       success: S.NumberFromString,
     }),
   });
-  const StringNumberService = StringNumberWorker.Binding<typeof StringNumberWorker>()(
-    "StringNumberService",
-    {
-      binding: "STRING_NUMBER_SERVICE",
-    },
-  );
-  const ValueStyleStringNumberService = StringNumberWorker.binding(
-    "ValueStyleStringNumberService",
-    {
-      binding: "STRING_NUMBER_SERVICE",
-    },
-  );
+  const StringNumberService = StringNumberWorker;
+  const ValueStyleStringNumberService = StringNumberWorker;
   let received: unknown;
   const env = {
     STRING_NUMBER_SERVICE: {
@@ -366,7 +352,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
   } as unknown as Cloudflare.Env;
 
   layer(
-    Layer.mergeAll(StringNumberService.layer, ValueStyleStringNumberService.layer).pipe(
+    StringNumberService.layer({ binding: "STRING_NUMBER_SERVICE" }).pipe(
       Layer.provide(Layer.succeed(WorkerEnvironment, env)),
     ),
   )("definition-backed transformed service bindings", (it) => {
@@ -404,9 +390,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
 }
 
 {
-  const TestService = TestWorker.Binding<typeof TestWorker>()("InvalidTestService", {
-    binding: "TEST_SERVICE",
-  });
+  const TestService = TestWorker;
   const env = {
     TEST_SERVICE: {
       fetch: async () => new Response("ok"),
@@ -414,18 +398,19 @@ test("definition-backed Worker RPC validates encoded success values", async () =
     },
   } as unknown as Cloudflare.Env;
 
-  layer(TestService.layer.pipe(Layer.provide(Layer.succeed(WorkerEnvironment, env))))(
-    "definition-backed invalid service bindings",
-    (it) => {
-      it.effect("rejects invalid remote results", () =>
-        Effect.gen(function* () {
-          const exit = yield* Effect.exit(TestService.call("double", 21));
+  layer(
+    TestService.layer({ binding: "TEST_SERVICE" }).pipe(
+      Layer.provide(Layer.succeed(WorkerEnvironment, env)),
+    ),
+  )("definition-backed invalid service bindings", (it) => {
+    it.effect("rejects invalid remote results", () =>
+      Effect.gen(function* () {
+        const exit = yield* Effect.exit(TestService.call("double", 21));
 
-          assert.strictEqual(exit._tag, "Failure");
-        }),
-      );
-    },
-  );
+        assert.strictEqual(exit._tag, "Failure");
+      }),
+    );
+  });
 }
 
 {
@@ -435,9 +420,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
       success: S.String,
     }),
   });
-  const TestRooms = TestRoom.namespace("ValueStyleRooms", {
-    binding: "TEST_ROOMS",
-  });
+  const TestRooms = TestRoom;
   let received: unknown;
   const namespace = {
     newUniqueId: () => ({}) as DurableObjectId,
@@ -466,19 +449,20 @@ test("definition-backed Worker RPC validates encoded success values", async () =
     TEST_ROOMS: namespace,
   } as unknown as Cloudflare.Env;
 
-  layer(TestRooms.layer.pipe(Layer.provide(Layer.succeed(WorkerEnvironment, env))))(
-    "definition-backed value-style Durable Object namespaces",
-    (it) => {
-      it.effect("exposes byName clients with direct methods", () =>
-        Effect.gen(function* () {
-          const value = yield* TestRooms.byName("room").ping("hello");
+  layer(
+    TestRooms.layer({ binding: "TEST_ROOMS" }).pipe(
+      Layer.provide(Layer.succeed(WorkerEnvironment, env)),
+    ),
+  )("definition-backed value-style Durable Object namespaces", (it) => {
+    it.effect("exposes byName clients with direct methods", () =>
+      Effect.gen(function* () {
+        const value = yield* TestRooms.byName("room").ping("hello");
 
-          assert.strictEqual(received, "hello");
-          assert.strictEqual(value, "HELLO");
-        }),
-      );
-    },
-  );
+        assert.strictEqual(received, "hello");
+        assert.strictEqual(value, "HELLO");
+      }),
+    );
+  });
 }
 
 test("reserved RPC method names are rejected", () => {

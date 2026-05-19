@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Schema as S } from "effect";
+import { Effect, Layer, Schema as S } from "effect";
 import { Queue } from "effect-cf";
 
 export const EmailJob = S.Struct({
@@ -10,22 +10,9 @@ export const EmailJob = S.Struct({
 
 export type EmailJob = S.Schema.Type<typeof EmailJob>;
 
-export interface EmailJobs {}
-
-export const EmailJobs = Queue.Tag<EmailJobs>()("EmailJobs", {
+export class EmailQueue extends Queue.Tag<EmailQueue>()("EmailQueue", {
   message: EmailJob,
-});
-
-export const EmailQueue = EmailJobs.binding("EmailQueue", {
-  binding: "EMAIL_QUEUE",
-});
-
-export class ProcessedEmails extends Context.Service<
-  ProcessedEmails,
-  {
-    readonly messages: Array<EmailJob>;
-  }
->()("effect-cf/examples/queue-workflow/ProcessedEmails") {}
+}) {}
 
 export const enqueueWelcomeEmail = (to: string) =>
   Effect.gen(function* () {
@@ -39,15 +26,24 @@ export const enqueueWelcomeEmail = (to: string) =>
     });
   });
 
-export const makeEmailQueueConsumer = (messages: Array<EmailJob>) =>
-  EmailJobs.make(Layer.succeed(ProcessedEmails, { messages }), {
-    queue: (batch: Queue.QueueBatch<EmailJob>) =>
-      Effect.gen(function* () {
-        const processed = yield* ProcessedEmails;
+const processEmail = (job: EmailJob) =>
+  Effect.logInfo("Processing email job").pipe(
+    Effect.annotateLogs({
+      to: job.to,
+      subject: job.subject,
+      priority: job.priority,
+    }),
+  );
 
-        for (const message of batch.messages) {
-          processed.messages.push(message.body);
+export const EmailQueueConsumer = EmailQueue.make(Layer.empty, {
+  queue: (batch: Queue.QueueBatch<EmailJob>) =>
+    Effect.forEach(
+      batch.messages,
+      (message) =>
+        Effect.gen(function* () {
+          yield* processEmail(message.body);
           yield* message.ack;
-        }
-      }),
-  });
+        }),
+      { discard: true },
+    ),
+});

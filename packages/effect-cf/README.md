@@ -32,8 +32,8 @@ Runtime creation belongs at Cloudflare entrypoints, not inside binding helpers.
 - `DurableObjectWebSocket` - WebSocket upgrade helpers for Durable Objects
 - `Kv` - typed KV namespace helper
 - `D1` - typed D1 database binding helper with an `@effect/sql-d1` backed SQL layer
-- `Queue` / `QueueBinding` - typed Queue producer bindings and consumer handlers
-- `Workflow` / `WorkflowBinding` - typed Workflow entrypoints, steps, and starter bindings
+- `Queue` / `QueueBinding` - typed Queue producer/consumer tags plus client and error types
+- `Workflow` / `WorkflowBinding` - typed Workflow entrypoints, steps, starter clients, and instance types
 - `Rpc` - Cloudflare RPC type helpers and scoped disposal utilities
 - `WorkerConfig` - Effect `Config` helpers backed by Cloudflare `env`
 
@@ -70,27 +70,30 @@ export const CounterDurableObject = Counter.make(Layer.empty, {
       }),
   },
 });
+
+export const CounterLayer = Counter.layer({ binding: "COUNTER" });
+
+export const readCounter = Effect.gen(function* () {
+  const counters = yield* Counter;
+  return yield* counters.byName("home").get();
+});
 ```
 
-Define Wrangler bindings and migrations in the consuming application.
+Define Wrangler bindings and migrations in the consuming application. Durable Object namespace bindings are provided with `YourObject.layer({ binding })`, and consumers use `const namespace = yield* YourObject`.
 
 ## Queue Example
 
-Queues use the same definition + binding split as Workers and Durable Objects: define the message contract once, use `.binding(...)` or `.Binding(...)` to produce from any runtime with `WorkerEnvironment`, and use `.make(...)` for the consumer Worker entrypoint.
+Queues define the message contract once. The same class is the producer service tag and the consumer Worker definition: use `YourQueue.layer({ binding })` to provide a Cloudflare producer binding from `WorkerEnvironment`, and use `.make(...)` for the consumer Worker entrypoint.
 
 ```ts
 import { Effect, Layer, Schema as S } from "effect";
 import { Queue } from "effect-cf";
 
-class AvatarJobs extends Queue.Tag<AvatarJobs>()("AvatarJobs", {
+class AvatarQueue extends Queue.Tag<AvatarQueue>()("AvatarQueue", {
   message: S.Struct({ userId: S.String, imageKey: S.String }),
 }) {}
 
-export const AvatarQueue = AvatarJobs.binding("AvatarQueue", {
-  binding: "AVATAR_QUEUE",
-});
-
-export const AvatarQueueConsumer = AvatarJobs.make(Layer.empty, {
+export const AvatarQueueConsumer = AvatarQueue.make(Layer.empty, {
   queue: (batch) =>
     Effect.gen(function* () {
       for (const message of batch.messages) {
@@ -100,6 +103,8 @@ export const AvatarQueueConsumer = AvatarJobs.make(Layer.empty, {
     }),
 });
 
+export const AvatarQueueLayer = AvatarQueue.layer({ binding: "AVATAR_QUEUE" });
+
 export const enqueueAvatar = (userId: string, imageKey: string) =>
   Effect.gen(function* () {
     const queue = yield* AvatarQueue;
@@ -107,7 +112,7 @@ export const enqueueAvatar = (userId: string, imageKey: string) =>
   });
 ```
 
-Producers should usually use `const queue = yield* AvatarQueue` and then call `queue.send(...)`, `queue.sendBatch(...)`, or `queue.metrics()`. The static `AvatarQueue.send(...)` helpers remain available for compatibility and concise one-off calls.
+Producers should usually use `const queue = yield* AvatarQueue` and then call `queue.send(...)`, `queue.sendBatch(...)`, or `queue.metrics()`. The static `AvatarQueue.send(...)` helpers remain available for concise one-off calls.
 
 Queue handlers run inline failures through Cloudflare's normal retry path. If background work scheduled with `WorkerContext.waitUntil(...)` should also make the batch retry, use `WorkerContext.waitUntilPropagating(...)` or `waitUntil(..., { mode: "propagate" })`; the default `waitUntil` mode observes and logs failures without rejecting the native `waitUntil` promise.
 
@@ -136,12 +141,10 @@ export const ExportWorkflowEntrypoint = ExportWorkflow.make(Layer.empty, {
     }),
 });
 
-export const ExportWorkflowBinding = ExportWorkflow.binding("ExportWorkflow", {
-  binding: "EXPORT_WORKFLOW",
-});
+export const ExportWorkflowLayer = ExportWorkflow.layer({ binding: "EXPORT_WORKFLOW" });
 ```
 
-Use `ExportWorkflowBinding.create(...)`, `createBatch(...)`, and `get(...)` to start and inspect instances.
+Provide `ExportWorkflow.layer({ binding: "EXPORT_WORKFLOW" })`, then use `const workflow = yield* ExportWorkflow` or the static `ExportWorkflow.create(...)`, `createBatch(...)`, and `get(...)` helpers to start and inspect instances.
 
 In definition-backed workflows, the `payload` argument is the typed decoded payload and is the source of truth. `Workflow.WorkflowEvent.payload` is also re-provided decoded for convenience; `Workflow.WorkflowEvent.raw.payload` remains the native Cloudflare event payload.
 
@@ -210,7 +213,8 @@ Worker-to-Durable-Object forwarding should stay native so WebSocket upgrade resp
 
 ```ts
 if (Worker.isWebSocketUpgrade(request)) {
-  return yield * ChatRooms.byName(roomId).fetch(request);
+  const rooms = yield * ChatRoom;
+  return yield * rooms.byName(roomId).fetch(request);
 }
 ```
 

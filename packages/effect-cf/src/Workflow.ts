@@ -252,10 +252,6 @@ export const waitForEvent = <Payload>(
     workflowStep.waitForEvent<Payload>(name, options),
   );
 
-export const Tag = WorkflowDefinition.Tag;
-
-export const implement = WorkflowDefinition.implement;
-
 export type Definition<
   Id extends string = string,
   Payload extends WorkflowDefinition.Definition.Any["payload"] =
@@ -267,6 +263,29 @@ export type Definition<
 export namespace Definition {
   export type Any = WorkflowDefinition.Definition.Any;
 }
+
+export type LayerOptions = WorkflowDefinition.LayerOptions;
+
+export type TagClass<
+  Self,
+  Id extends string,
+  Payload extends WorkflowDefinition.Definition.Any["payload"],
+  Result extends WorkflowDefinition.Definition.Any["result"],
+> = WorkflowDefinition.TagClass<Self, Id, Payload, Result>;
+
+export const Tag: <Self>() => <
+  Id extends string,
+  Payload extends WorkflowDefinition.Definition.Any["payload"],
+  Result extends WorkflowDefinition.Definition.Any["result"],
+>(
+  id: Id,
+  definition: {
+    readonly payload: Payload;
+    readonly result: Result;
+  },
+) => TagClass<Self, Id, Payload, Result> = WorkflowDefinition.Tag;
+
+export const implement = WorkflowDefinition.implement;
 
 export type Handler<
   ROut,

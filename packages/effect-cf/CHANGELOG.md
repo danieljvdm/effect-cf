@@ -1,5 +1,13 @@
 # effect-cf
 
+## 0.7.0
+
+### Minor Changes
+
+- [#20](https://github.com/danieljvdm/effect-cf/pull/20) [`f57a59c`](https://github.com/danieljvdm/effect-cf/commit/f57a59c14d317438348b36ac0341dc921fe72be2) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Tighten binding APIs around Cloudflare RPC and the single-tag KV model. `rpc` now exposes the raw Cloudflare RPC result, while `call` and `scopedCall` resolve and decode definition-backed success values. Durable Object static direct helpers now keep the namespace layer requirement in their effect environment, and the old concrete `Kv.make` / `Kv.Service` constructors have been removed in favor of `Kv.Tag(...).layer({ binding })`.
+
+- [#19](https://github.com/danieljvdm/effect-cf/pull/19) [`37b4883`](https://github.com/danieljvdm/effect-cf/commit/37b4883de9790df151ddbb16f2fd432b2d4348b5) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Replace separate binding classes with a single exported tag class API for Queues, Workflows, KV namespaces, Worker service bindings, and Durable Object namespaces. These tags now expose `layer({ binding })` directly, consumers use `const service = yield* Service`, and the old definition `.Binding(...)` / `.binding(...)` / `.Namespace(...)` / `.namespace(...)` helpers have been removed.
+
 ## 0.6.0
 
 ### Minor Changes

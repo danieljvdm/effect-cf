@@ -80,27 +80,27 @@ const makeFakeKv = (options: FakeKvOptions = {}) =>
 
 const testKvLayer = (kv: KVNamespace) =>
   TestKv.layer({ binding: "TEST_KV" }).pipe(
-    Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_KV: kv } as unknown as Cloudflare.Env)),
+    Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_KV: kv })),
   );
 
 const numberKeyKvLayer = (kv: KVNamespace) =>
   NumberKeyKv.layer({ binding: "TEST_KV" }).pipe(
-    Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_KV: kv } as unknown as Cloudflare.Env)),
+    Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_KV: kv })),
   );
 
 const valueStyleKvLayer = (kv: KVNamespace) =>
   ValueStyleKv.layer({ binding: "TEST_KV" }).pipe(
-    Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_KV: kv } as unknown as Cloudflare.Env)),
+    Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_KV: kv })),
   );
 
 const testKvBindingLayer = (kv: KVNamespace) =>
   TestKvBinding.layer({ binding: "TEST_KV" }).pipe(
-    Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_KV: kv } as unknown as Cloudflare.Env)),
+    Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_KV: kv })),
   );
 
 const valueStyleKvBindingLayer = (kv: KVNamespace) =>
   ValueStyleKvBinding.layer({ binding: "TEST_KV" }).pipe(
-    Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_KV: kv } as unknown as Cloudflare.Env)),
+    Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_KV: kv })),
   );
 
 {
@@ -152,7 +152,8 @@ const valueStyleKvBindingLayer = (kv: KVNamespace) =>
   layer(testKvLayer(kv))("KV getWithMetadata", (it) => {
     it.effect("decodes value and metadata", () =>
       Effect.gen(function* () {
-        const result = yield* TestKv.getWithMetadata("user:1", S.Struct({ owner: S.String }));
+        const testKv = yield* TestKv;
+        const result = yield* testKv.getWithMetadata("user:1", S.Struct({ owner: S.String }));
 
         assert.strictEqual(Option.isSome(result), true);
         if (Option.isSome(result)) {
@@ -188,7 +189,8 @@ const valueStyleKvBindingLayer = (kv: KVNamespace) =>
   layer(numberKeyKvLayer(kv))("KV list", (it) => {
     it.effect("decodes key names and maps pagination shape", () =>
       Effect.gen(function* () {
-        const result = yield* NumberKeyKv.list({
+        const numberKeyKv = yield* NumberKeyKv;
+        const result = yield* numberKeyKv.list({
           prefix: "user:",
           limit: 1,
           cursor: "current-page",
@@ -216,7 +218,8 @@ const valueStyleKvBindingLayer = (kv: KVNamespace) =>
   layer(valueStyleKvLayer(kv))("KV value-style make", (it) => {
     it.effect("returns the same schema-backed helper shape", () =>
       Effect.gen(function* () {
-        const value = yield* ValueStyleKv.get("user:1");
+        const valueStyleKv = yield* ValueStyleKv;
+        const value = yield* valueStyleKv.get("user:1");
 
         assert.deepStrictEqual(Option.getOrUndefined(value), { count: 3 });
       }),
@@ -237,9 +240,10 @@ const valueStyleKvBindingLayer = (kv: KVNamespace) =>
     it.effect("roundtrips typed values through class-style bindings", () =>
       Effect.gen(function* () {
         values.clear();
+        const testKvBinding = yield* TestKvBinding;
 
-        yield* TestKvBinding.put("user:1", { count: 4 });
-        const result = yield* TestKvBinding.get("user:1");
+        yield* testKvBinding.put("user:1", { count: 4 });
+        const result = yield* testKvBinding.get("user:1");
 
         assert.deepStrictEqual(Option.getOrUndefined(result), { count: 4 });
         assert.strictEqual(values.get("user:1"), '{"count":4}');
@@ -256,7 +260,8 @@ const valueStyleKvBindingLayer = (kv: KVNamespace) =>
   layer(valueStyleKvBindingLayer(kv))("definition-backed KV value-style bindings", (it) => {
     it.effect("returns the same helper shape as class-style bindings", () =>
       Effect.gen(function* () {
-        const result = yield* ValueStyleKvBinding.get("user:1");
+        const valueStyleKvBinding = yield* ValueStyleKvBinding;
+        const result = yield* valueStyleKvBinding.get("user:1");
 
         assert.deepStrictEqual(Option.getOrUndefined(result), { count: 5 });
       }),
@@ -275,15 +280,15 @@ const valueStyleKvBindingLayer = (kv: KVNamespace) =>
   const sharedLayer = Layer.merge(
     SharedCountKvBinding.layer({ binding: "TEST_KV" }),
     SharedStringKvBinding.layer({ binding: "TEST_KV" }),
-  ).pipe(
-    Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_KV: kv } as unknown as Cloudflare.Env)),
-  );
+  ).pipe(Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_KV: kv })));
 
   layer(sharedLayer)("logical KV definitions sharing one binding", (it) => {
     it.effect("decodes each logical resource with its own schema", () =>
       Effect.gen(function* () {
-        const count = yield* SharedCountKvBinding.get("count");
-        const label = yield* SharedStringKvBinding.get("label");
+        const sharedCountKvBinding = yield* SharedCountKvBinding;
+        const sharedStringKvBinding = yield* SharedStringKvBinding;
+        const count = yield* sharedCountKvBinding.get("count");
+        const label = yield* sharedStringKvBinding.get("label");
 
         assert.deepStrictEqual(Option.getOrUndefined(count), { count: 6 });
         assert.strictEqual(Option.getOrUndefined(label), "ready");
@@ -300,7 +305,8 @@ const valueStyleKvBindingLayer = (kv: KVNamespace) =>
   layer(testKvBindingLayer(kv))("definition-backed KV decode errors", (it) => {
     it.effect("fails when stored JSON does not match the value schema", () =>
       Effect.gen(function* () {
-        const exit = yield* Effect.exit(TestKvBinding.get("user:1"));
+        const testKvBinding = yield* TestKvBinding;
+        const exit = yield* Effect.exit(testKvBinding.get("user:1"));
 
         assert.strictEqual(exit._tag, "Failure");
       }),
@@ -319,7 +325,8 @@ const valueStyleKvBindingLayer = (kv: KVNamespace) =>
   layer(testKvLayer(kv))("KV platform errors", (it) => {
     it.effect("maps rejected platform operations to KvOperationError", () =>
       Effect.gen(function* () {
-        const error = yield* Effect.flip(TestKv.get("user:1"));
+        const testKv = yield* TestKv;
+        const error = yield* Effect.flip(testKv.get("user:1"));
 
         assert.strictEqual(error._tag, "KvOperationError");
         if (error._tag === "KvOperationError") {
@@ -335,10 +342,13 @@ const valueStyleKvBindingLayer = (kv: KVNamespace) =>
 test("definition-backed KV bindings report missing and invalid bindings", async () => {
   await expect(
     Effect.runPromise(
-      TestKvBinding.get("missing").pipe(
+      Effect.gen(function* () {
+        const testKvBinding = yield* TestKvBinding;
+        yield* testKvBinding.get("missing");
+      }).pipe(
         Effect.provide(
           TestKvBinding.layer({ binding: "TEST_KV" }).pipe(
-            Layer.provide(Layer.succeed(WorkerEnvironment, {} as Cloudflare.Env)),
+            Layer.provide(Layer.succeed(WorkerEnvironment, {})),
           ),
         ),
       ),
@@ -347,12 +357,13 @@ test("definition-backed KV bindings report missing and invalid bindings", async 
 
   await expect(
     Effect.runPromise(
-      TestKvBinding.get("invalid").pipe(
+      Effect.gen(function* () {
+        const testKvBinding = yield* TestKvBinding;
+        yield* testKvBinding.get("invalid");
+      }).pipe(
         Effect.provide(
           TestKvBinding.layer({ binding: "TEST_KV" }).pipe(
-            Layer.provide(
-              Layer.succeed(WorkerEnvironment, { TEST_KV: {} } as unknown as Cloudflare.Env),
-            ),
+            Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_KV: {} as KVNamespace })),
           ),
         ),
       ),
@@ -366,7 +377,8 @@ test("definition-backed KV bindings report missing and invalid bindings", async 
   layer(testKvLayer(kv))("KV unsafeRaw", (it) => {
     it.effect("exposes an explicit raw namespace escape hatch", () =>
       Effect.gen(function* () {
-        const raw = yield* TestKv.unsafeRaw();
+        const testKv = yield* TestKv;
+        const raw = yield* testKv.unsafeRaw;
 
         assert.strictEqual(raw, kv);
       }),

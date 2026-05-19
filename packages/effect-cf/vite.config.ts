@@ -36,6 +36,7 @@ export default defineConfig({
     ],
   },
   pack: {
+    entry: ["src/index.ts", "src/HyperdrivePg.ts"],
     deps: {
       neverBundle: ["cloudflare:workers"],
     },

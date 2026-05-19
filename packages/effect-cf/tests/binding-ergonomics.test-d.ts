@@ -1,12 +1,18 @@
 import { expectTypeOf } from "vitest";
 import { Effect, Layer, Option, Schema } from "effect";
+import { PgClient } from "@effect/sql-pg";
+import { SqlClient, SqlError } from "effect/unstable/sql";
 
 import {
+  Binding,
   DurableObject,
   DurableObjectNamespace,
+  Hyperdrive,
+  Images,
   Kv,
   Queue,
   QueueBinding,
+  R2,
   Rpc,
   ServiceBinding,
   Worker,
@@ -14,6 +20,7 @@ import {
   Workflow,
   WorkflowBinding,
 } from "../src/index";
+import * as HyperdrivePg from "../src/HyperdrivePg";
 
 export const AvatarQueueMessagePayload = Schema.Struct({
   requestId: Schema.String,
@@ -101,6 +108,79 @@ expectTypeOf(ReportWorkflow.create({ reportId: "r1" })).toEqualTypeOf<
 >();
 
 void workflowProgram;
+
+export class ArtifactBucket extends R2.Tag<ArtifactBucket>()("ArtifactBucket") {}
+
+export const ArtifactBucketLayer = ArtifactBucket.layer({
+  binding: "ARTIFACT_BUCKET",
+});
+
+const r2Program = Effect.gen(function* () {
+  const bucket = yield* ArtifactBucket;
+
+  expectTypeOf(bucket.get("avatars/u1.png")).toEqualTypeOf<
+    Effect.Effect<Option.Option<R2ObjectBody>, R2.R2OperationError>
+  >();
+
+  yield* bucket.put("avatars/u1.png", "image-bytes");
+  yield* bucket.delete(["avatars/u1.png"]);
+
+  expectTypeOf(bucket.head("avatars/u1.png")).toEqualTypeOf<
+    Effect.Effect<Option.Option<R2Object>, R2.R2OperationError>
+  >();
+});
+
+export class AppHyperdrive extends Hyperdrive.Tag<AppHyperdrive>()("AppHyperdrive") {}
+
+export const AppHyperdriveLayer = AppHyperdrive.layer({
+  binding: "HYPERDRIVE",
+});
+
+const hyperdriveProgram = Effect.gen(function* () {
+  const hyperdrive = yield* AppHyperdrive;
+
+  expectTypeOf(hyperdrive.connectionString).toEqualTypeOf<string>();
+  expectTypeOf(hyperdrive.unsafeRaw).toEqualTypeOf<Effect.Effect<globalThis.Hyperdrive>>();
+});
+
+expectTypeOf(HyperdrivePg.layer(AppHyperdrive, { binding: "HYPERDRIVE" })).toEqualTypeOf<
+  Layer.Layer<
+    PgClient.PgClient | SqlClient.SqlClient,
+    Binding.BindingNotFoundError | Binding.BindingValidationError | SqlError.SqlError,
+    WorkerEnvironment
+  >
+>();
+
+HyperdrivePg.layer(AppHyperdrive, { binding: "HYPERDRIVE" }, { applicationName: "effect-cf" });
+
+// @ts-expect-error Hyperdrive owns database pooling, so app-side pool options are not exposed.
+HyperdrivePg.layer(AppHyperdrive, { binding: "HYPERDRIVE" }, { maxConnections: 4 });
+
+export class AvatarImages extends Images.Tag<AvatarImages>()("AvatarImages") {}
+
+export const AvatarImagesLayer = AvatarImages.layer({
+  binding: "IMAGES",
+});
+
+const imagesProgram = Effect.gen(function* () {
+  const images = yield* AvatarImages;
+  const hosted = images.hosted;
+
+  expectTypeOf(images.info(new ReadableStream<Uint8Array>())).toEqualTypeOf<
+    Effect.Effect<Images.ImageInfoResponse, Images.ImagesOperationError>
+  >();
+
+  expectTypeOf(
+    images.process(Images.transform(Images.empty, { width: 128 }), {
+      stream: new ReadableStream<Uint8Array>(),
+      outputOptions: { format: "image/webp" },
+    }),
+  ).toEqualTypeOf<
+    Effect.Effect<Images.ImagesTransformationResultClient, Images.ImagesOperationError>
+  >();
+
+  yield* hosted.upload(new ArrayBuffer(0), { id: "avatar-1" });
+});
 
 export class SessionKv extends Kv.Tag<SessionKv>()("SessionKv", {
   key: Schema.String,
@@ -212,6 +292,9 @@ const staticDirectMethodWithoutLayer: Effect.Effect<number, unknown, never> =
   CounterDurableObject.increment(counterStub, 1);
 
 void kvProgram;
+void r2Program;
+void hyperdriveProgram;
+void imagesProgram;
 void workerProgram;
 void durableObjectProgram;
 void missingDurableObjectLayer;

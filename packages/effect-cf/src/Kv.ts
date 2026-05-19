@@ -114,27 +114,6 @@ export interface TagClass<
     Binding.BindingNotFoundError | Binding.BindingValidationError,
     WorkerEnvironment
   >;
-  readonly put: (
-    key: Key,
-    value: Value,
-    options?: KvPutOptions,
-  ) => Effect.Effect<void, KvOperationError | S.SchemaError, Self>;
-  readonly get: (
-    key: Key,
-  ) => Effect.Effect<Option.Option<Value>, KvOperationError | S.SchemaError, Self>;
-  readonly getWithMetadata: <Metadata>(
-    key: Key,
-    metadataSchema: S.Codec<Metadata, unknown>,
-  ) => Effect.Effect<
-    Option.Option<KvWithMetadata<Value, Metadata>>,
-    KvOperationError | S.SchemaError,
-    Self
-  >;
-  readonly list: <Metadata = unknown>(
-    options?: KvListOptions<Metadata>,
-  ) => Effect.Effect<KvListResult<Key, Metadata>, KvOperationError | S.SchemaError, Self>;
-  readonly remove: (key: Key) => Effect.Effect<void, KvOperationError | S.SchemaError, Self>;
-  readonly unsafeRaw: () => Effect.Effect<KVNamespace, never, Self>;
 }
 
 const maybeString = (value: string | null | undefined): Option.Option<string> =>
@@ -311,51 +290,10 @@ export const Tag =
 
     const makeLayer = (binding: LayerOptions) => kvDefinition.layer(tag, binding);
 
-    const put = Effect.fnUntraced(function* (key: Key, value: Value, options?: KvPutOptions) {
-      const kv = yield* tag;
-      yield* kv.put(key, value, options);
-    });
-
-    const get = Effect.fnUntraced(function* (key: Key) {
-      const kv = yield* tag;
-      return yield* kv.get(key);
-    });
-
-    const getWithMetadata = Effect.fnUntraced(function* <Metadata>(
-      key: Key,
-      metadataSchema: S.Codec<Metadata, unknown>,
-    ) {
-      const kv = yield* tag;
-      return yield* kv.getWithMetadata(key, metadataSchema);
-    });
-
-    const list = Effect.fnUntraced(function* <Metadata = unknown>(
-      options?: KvListOptions<Metadata>,
-    ) {
-      const kv = yield* tag;
-      return yield* kv.list(options);
-    });
-
-    const remove = Effect.fnUntraced(function* (key: Key) {
-      const kv = yield* tag;
-      yield* kv.remove(key);
-    });
-
-    const unsafeRaw = Effect.fnUntraced(function* () {
-      const kv = yield* tag;
-      return yield* kv.unsafeRaw;
-    });
-
     return Object.assign(tag, {
       id: kvDefinition.id,
       keySchema: kvDefinition.key,
       valueSchema: kvDefinition.value,
       layer: makeLayer,
-      put,
-      get,
-      getWithMetadata,
-      list,
-      remove,
-      unsafeRaw,
     }) as TagClass<Self, Id, Key, Value, EncodedValue>;
   };

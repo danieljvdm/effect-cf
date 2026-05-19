@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.6.0
+
+### Minor Changes
+
+- [#16](https://github.com/danieljvdm/effect-cf/pull/16) [`8195f35`](https://github.com/danieljvdm/effect-cf/commit/8195f356537bd8a063ddebe30f61d0028ddccba1) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Provide Effect-native clients when yielding Queue, KV, Worker service, and Durable Object namespace binding tags, while keeping existing static helpers compatible.
+
 ## 0.5.0
 
 ### Minor Changes

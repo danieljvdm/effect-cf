@@ -128,8 +128,9 @@ const valueStyleKvBindingLayer = (kv: KVNamespace) =>
     it.effect("forwards Cloudflare KV put options", () =>
       Effect.gen(function* () {
         const metadata = { owner: "api" };
+        const kv = yield* TestKv;
 
-        yield* TestKv.put(
+        yield* kv.put(
           "user:1",
           { count: 1 },
           {

@@ -15,6 +15,10 @@ export default defineConfig({
           },
           exclude: [...testExcludes, "**/*.worker.test.ts"],
           include: ["**/*.test.ts"],
+          typecheck: {
+            enabled: true,
+            include: ["tests/**/*.test-d.ts"],
+          },
         },
       },
       {

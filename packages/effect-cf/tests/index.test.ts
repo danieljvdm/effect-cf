@@ -411,8 +411,9 @@ test("Durable Object namespace binding retrieves stubs from the Worker environme
   const resolved = await Effect.runPromise(
     provideCounters(
       Effect.gen(function* () {
-        const counter = yield* Counters.getByName("counter");
-        return yield* Counters.call(counter, "get");
+        const counters = yield* Counters;
+        const counter = yield* counters.getByName("counter");
+        return yield* counters.call(counter, "get");
       }),
       {
         COUNTERS: makeNamespace(stub),
@@ -445,12 +446,18 @@ test("Service binding rpc uses the shared dynamic method validation", async () =
 
   await expect(
     Effect.runPromise(
-      provideEchoService(EchoService.call("echo", "hello"), {
-        ECHO: {
-          ...fetcher,
-          echo: (value: string) => Promise.resolve(value),
-        },
-      } as unknown as Cloudflare.Env),
+      provideEchoService(
+        Effect.gen(function* () {
+          const service = yield* EchoService;
+          return yield* service.call("echo", "hello");
+        }),
+        {
+          ECHO: {
+            ...fetcher,
+            echo: (value: string) => Promise.resolve(value),
+          },
+        } as unknown as Cloudflare.Env,
+      ),
     ),
   ).resolves.toBe("hello");
 });

@@ -5,10 +5,13 @@ import {
   DurableObjectDefinition,
   DurableObjectStorage,
   Queue,
+  QueueBinding,
   WorkerDefinition,
   WorkerEnvironment,
   Workflow,
 } from "../src/index";
+
+const expectType = <T>(_value: T) => {};
 
 const TestWorker = WorkerDefinition.make("TestWorker", {
   double: WorkerDefinition.method({
@@ -63,6 +66,35 @@ test("definition-backed Worker RPC validates encoded success values", async () =
     binding: "AVATAR_QUEUE",
   }) {}
 
+  const assertQueueBindingTypes = () => {
+    const program = Effect.gen(function* () {
+      const queue = yield* AvatarQueue;
+
+      expectType<Effect.Effect<void, QueueBinding.QueueOperationError | S.SchemaError>>(
+        queue.send({ userId: "u_1", attempts: 1 }),
+      );
+
+      yield* queue.send({ userId: "u_1", attempts: 1 });
+      yield* queue.sendBatch([{ body: { userId: "u_2", attempts: 2 } }]);
+      yield* queue.metrics();
+
+      // @ts-expect-error Queue bindings accept decoded messages, not encoded wire values.
+      yield* queue.send({ userId: "u_1", attempts: "1" });
+    });
+
+    // @ts-expect-error AvatarQueue.layer must be provided before the program can run.
+    const missingLayer: Effect.Effect<void, unknown, never> = program;
+
+    const provided: Effect.Effect<void, unknown, never> = program.pipe(
+      Effect.provide(AvatarQueue.layer.pipe(Layer.provide(Layer.succeed(WorkerEnvironment, env)))),
+    );
+
+    void missingLayer;
+    void provided;
+  };
+
+  void assertQueueBindingTypes;
+
   const sent: Array<unknown> = [];
   const env = {
     AVATAR_QUEUE: {
@@ -86,12 +118,15 @@ test("definition-backed Worker RPC validates encoded success values", async () =
           sent.length = 0;
 
           yield* AvatarQueue.send({ userId: "u_1", attempts: 2 });
-          yield* AvatarQueue.sendBatch([{ body: { userId: "u_2", attempts: 3 } }]);
+          const queue = yield* AvatarQueue;
+          yield* queue.sendBatch([{ body: { userId: "u_2", attempts: 3 } }]);
+          const metrics = yield* queue.metrics();
 
           assert.deepStrictEqual(sent, [
             { userId: "u_1", attempts: "2" },
             { userId: "u_2", attempts: "3" },
           ]);
+          assert.deepStrictEqual(metrics, { backlogCount: 0, backlogBytes: 0 });
         }),
       );
     },

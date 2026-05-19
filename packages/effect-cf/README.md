@@ -99,9 +99,15 @@ export const AvatarQueueConsumer = AvatarJobs.make(Layer.empty, {
       }
     }),
 });
+
+export const enqueueAvatar = (userId: string, imageKey: string) =>
+  Effect.gen(function* () {
+    const queue = yield* AvatarQueue;
+    yield* queue.send({ userId, imageKey });
+  });
 ```
 
-Producers can use `AvatarQueue.send(...)`, `AvatarQueue.sendBatch(...)`, and `AvatarQueue.metrics` from any Worker, Durable Object, or Workflow layer that provides `WorkerEnvironment`.
+Producers should usually use `const queue = yield* AvatarQueue` and then call `queue.send(...)`, `queue.sendBatch(...)`, or `queue.metrics()`. The static `AvatarQueue.send(...)` helpers remain available for compatibility and concise one-off calls.
 
 Queue handlers run inline failures through Cloudflare's normal retry path. If background work scheduled with `WorkerContext.waitUntil(...)` should also make the batch retry, use `WorkerContext.waitUntilPropagating(...)` or `waitUntil(..., { mode: "propagate" })`; the default `waitUntil` mode observes and logs failures without rejecting the native `waitUntil` promise.
 

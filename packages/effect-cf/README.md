@@ -32,20 +32,19 @@ Runtime creation belongs at Cloudflare entrypoints, not inside binding helpers.
 - `DurableObjectWebSocket` - WebSocket upgrade helpers for Durable Objects
 - `Kv` - typed KV namespace helper
 - `D1` - typed D1 database binding helper with an `@effect/sql-d1` backed SQL layer
-- `Queue` / `QueueBinding` - typed Queue producer/consumer tags plus client and error types
-- `Workflow` / `WorkflowBinding` - typed Workflow entrypoints, steps, starter clients, and instance types
+- `Queue` - typed Queue producer/consumer tags plus client and error types
+- `Workflow` - typed Workflow entrypoints, steps, starter clients, and instance types
 - `Rpc` - Cloudflare RPC type helpers and scoped disposal utilities
 - `WorkerConfig` - Effect `Config` helpers backed by Cloudflare `env`
 
 ## Worker Example
 
 ```ts
-import { HttpServerResponse } from "effect";
+import { Effect, Layer } from "effect";
+import { HttpServerResponse } from "effect/unstable/http";
 import { Worker } from "effect-cf";
 
-export default Worker.make({
-  fetch: () => HttpServerResponse.text("ok"),
-});
+export default Worker.make(Layer.empty, Effect.succeed(HttpServerResponse.text("ok")));
 ```
 
 ## Durable Object Example
@@ -196,25 +195,23 @@ export const RoomLive = DurableObject.make(layer, {
 
 Schema-backed attachments can rehydrate hibernated sockets:
 
-```ts
-const restored =
-  yield *
-  Attachments.rehydrate({
-    tag: "room:general",
-    onInvalid: "ignore-and-close",
-  });
+```text
+const restored = yield* Attachments.rehydrate({
+  tag: "room:general",
+  onInvalid: "ignore-and-close",
+});
 
 for (const { socket, attachment } of restored) {
-  yield * socket.send(`restored:${attachment.id}`).pipe(Effect.ignore);
+  yield* socket.send(`restored:${attachment.id}`).pipe(Effect.ignore);
 }
 ```
 
 Worker-to-Durable-Object forwarding should stay native so WebSocket upgrade responses are preserved:
 
-```ts
+```text
 if (Worker.isWebSocketUpgrade(request)) {
-  const rooms = yield * ChatRoom;
-  return yield * rooms.byName(roomId).fetch(request);
+  const rooms = yield* ChatRoom;
+  return yield* rooms.byName(roomId).fetch(request);
 }
 ```
 

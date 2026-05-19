@@ -3,14 +3,12 @@ import { Effect, Layer, Option, Schema as S } from "effect";
 
 import { Binding, Kv, WorkerEnvironment } from "../src/index";
 
-class TestKv extends Kv.Service<TestKv>()("test/TestKv", {
-  binding: "TEST_KV",
+class TestKv extends Kv.Tag<TestKv>()("test/TestKv", {
   key: S.String,
   value: S.Struct({ count: S.Number }),
 }) {}
 
-class NumberKeyKv extends Kv.Service<NumberKeyKv>()("test/NumberKeyKv", {
-  binding: "TEST_KV",
+class NumberKeyKv extends Kv.Tag<NumberKeyKv>()("test/NumberKeyKv", {
   key: S.NumberFromString,
   value: S.String,
 }) {}
@@ -81,12 +79,12 @@ const makeFakeKv = (options: FakeKvOptions = {}) =>
   }) as unknown as KVNamespace;
 
 const testKvLayer = (kv: KVNamespace) =>
-  TestKv.layer.pipe(
+  TestKv.layer({ binding: "TEST_KV" }).pipe(
     Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_KV: kv } as unknown as Cloudflare.Env)),
   );
 
 const numberKeyKvLayer = (kv: KVNamespace) =>
-  NumberKeyKv.layer.pipe(
+  NumberKeyKv.layer({ binding: "TEST_KV" }).pipe(
     Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_KV: kv } as unknown as Cloudflare.Env)),
   );
 

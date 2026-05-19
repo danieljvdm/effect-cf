@@ -7,6 +7,7 @@ import {
   Kv,
   Queue,
   QueueBinding,
+  Rpc,
   ServiceBinding,
   Worker,
   WorkerEnvironment,
@@ -137,6 +138,19 @@ export const ApiWorkerLayer = ApiWorker.layer({
   binding: "API_WORKER",
 });
 
+export class FetchOnlyWorker extends ServiceBinding.Service<FetchOnlyWorker, {}>()(
+  "FetchOnlyWorker",
+  {
+    binding: "FETCH_ONLY_WORKER",
+  },
+) {}
+
+export const FetchOnlyWorkerLayer = FetchOnlyWorker.layer;
+
+expectTypeOf(FetchOnlyWorker.fetch(new Request("https://example.com"))).toEqualTypeOf<
+  Effect.Effect<Response, ServiceBinding.ServiceBindingFetchError, FetchOnlyWorker>
+>();
+
 const workerProgram = Effect.gen(function* () {
   const worker = yield* ApiWorker;
 
@@ -154,6 +168,10 @@ export class CounterDurableObject extends DurableObject.Tag<CounterDurableObject
   "CounterDurableObject",
   {
     get: DurableObject.method({ success: Schema.Number }),
+    increment: DurableObject.method({
+      args: [Schema.Number] as const,
+      success: Schema.Number,
+    }),
   },
 ) {}
 
@@ -164,21 +182,37 @@ export const CounterDurableObjectLayer = CounterDurableObject.layer({
 const durableObjectProgram = Effect.gen(function* () {
   const namespace = yield* CounterDurableObject;
   const counter = namespace.byName("counter-1");
+  const stub = yield* namespace.getByName("counter-1");
 
   expectTypeOf(counter.get()).toEqualTypeOf<
     Effect.Effect<number, DurableObjectNamespace.DurableObjectRpcError>
   >();
 
+  const counterRpcResult: Effect.Effect<
+    Rpc.Result<number>,
+    DurableObjectNamespace.DurableObjectRpcError,
+    CounterDurableObject
+  > = CounterDurableObject.rpc(stub, "get");
+
   yield* counter.get();
 
   // @ts-expect-error Durable Object RPC method names come from the definition.
   yield* counter.missing();
+
+  void counterRpcResult;
 });
 
 // @ts-expect-error CounterDurableObject.layer must be provided before the program can run.
 const missingDurableObjectLayer: Effect.Effect<void, unknown, never> = durableObjectProgram;
 
+declare const counterStub: Effect.Success<ReturnType<typeof CounterDurableObject.getByName>>;
+
+// @ts-expect-error Static direct methods require the namespace layer.
+const staticDirectMethodWithoutLayer: Effect.Effect<number, unknown, never> =
+  CounterDurableObject.increment(counterStub, 1);
+
 void kvProgram;
 void workerProgram;
 void durableObjectProgram;
 void missingDurableObjectLayer;
+void staticDirectMethodWithoutLayer;

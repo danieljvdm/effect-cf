@@ -99,6 +99,10 @@ type StubMethodSuccess<Api, Method extends keyof Api> = RpcInvocation.AsyncMetho
   Api,
   Method
 >;
+type StubMethodCloudflareReturn<
+  Api,
+  Method extends keyof Api,
+> = RpcInvocation.AsyncMethodCloudflareReturn<Api, Method>;
 
 type StubCall<R, Api extends object> = <Method extends StubMethodKey<Api>>(
   stub: DurableObjectStubClient<Api>,
@@ -118,6 +122,7 @@ type DurableObjectDirectClient<R, Api extends object> = {
 };
 
 type DefinitionNamespaceDirectMethods<
+  R,
   Api extends object,
   Definition extends DurableObjectDefinition.Definition.Any,
 > = {
@@ -126,7 +131,8 @@ type DefinitionNamespaceDirectMethods<
     ...args: RpcDefinition.Method.Args<Definition["methods"][Method]>
   ) => Effect.Effect<
     RpcDefinition.Method.Success<Definition["methods"][Method]>,
-    DurableObjectRpcError
+    DurableObjectRpcError,
+    R
   >;
 };
 
@@ -167,7 +173,7 @@ type DirectMethods<
   Api extends object,
   Definition,
 > = Definition extends DurableObjectDefinition.Definition.Any
-  ? DefinitionNamespaceDirectMethods<Api, Definition> &
+  ? DefinitionNamespaceDirectMethods<R, Api, Definition> &
       DefinitionNamespaceDirectClientMethods<R, Definition>
   : {};
 
@@ -200,7 +206,7 @@ export type DurableObjectNamespaceEffectClient<
     stub: DurableObjectStubClient<Api>,
     method: Method,
     ...args: StubMethodArgs<Api, Method>
-  ) => Effect.Effect<StubMethodSuccess<Api, Method>, DurableObjectRpcError>;
+  ) => Effect.Effect<StubMethodCloudflareReturn<Api, Method>, DurableObjectRpcError>;
   readonly call: <Method extends StubMethodKey<Api>>(
     stub: DurableObjectStubClient<Api>,
     method: Method,
@@ -244,7 +250,7 @@ export type DurableObjectNamespaceStaticClient<
     stub: DurableObjectStubClient<Api>,
     method: Method,
     ...args: StubMethodArgs<Api, Method>
-  ) => Effect.Effect<StubMethodSuccess<Api, Method>, DurableObjectRpcError, R>;
+  ) => Effect.Effect<StubMethodCloudflareReturn<Api, Method>, DurableObjectRpcError, R>;
   readonly call: <Method extends StubMethodKey<Api>>(
     stub: DurableObjectStubClient<Api>,
     method: Method,
@@ -349,24 +355,11 @@ export const makeClient = <
         );
       });
 
-    const call = <Method extends StubMethodKey<Api>>(
-      stub: StubClient,
-      method: Method,
-      ...args: StubMethodArgs<Api, Method>
+    const decodeSuccess = <Method extends StubMethodKey<Api>>(
+      methodName: string,
+      value: Awaited<StubMethodCloudflareReturn<Api, Method>>,
     ) =>
       Effect.gen(function* () {
-        const methodName = String(method);
-        const value = yield* CloudflareRpc.resolve(yield* rpc(stub, method, ...args)).pipe(
-          Effect.mapError(
-            (cause) =>
-              new DurableObjectRpcError({
-                binding: definition.binding,
-                method: methodName,
-                cause,
-              }),
-          ),
-        );
-
         if (definition.definition === undefined) {
           return value as StubMethodSuccess<Api, Method>;
         }
@@ -389,14 +382,37 @@ export const makeClient = <
         return decoded as StubMethodSuccess<Api, Method>;
       });
 
+    const call = <Method extends StubMethodKey<Api>>(
+      stub: StubClient,
+      method: Method,
+      ...args: StubMethodArgs<Api, Method>
+    ) =>
+      Effect.gen(function* () {
+        const methodName = String(method);
+        const value = yield* CloudflareRpc.resolve(yield* rpc(stub, method, ...args)).pipe(
+          Effect.mapError(
+            (cause) =>
+              new DurableObjectRpcError({
+                binding: definition.binding,
+                method: methodName,
+                cause,
+              }),
+          ),
+        );
+
+        return yield* decodeSuccess<Method>(methodName, value);
+      });
+
     const scopedCall = <Method extends StubMethodKey<Api>>(
       stub: StubClient,
       method: Method,
       ...args: StubMethodArgs<Api, Method>
     ) =>
       Effect.gen(function* () {
+        const methodName = String(method);
         const result = yield* rpc(stub, method, ...args);
-        return yield* CloudflareRpc.scoped(result);
+        const value = yield* CloudflareRpc.scoped(result);
+        return yield* decodeSuccess<Method>(methodName, value);
       });
 
     const directMethods = makeDirectMethods<never, Api, Definition>(definition.definition, {
@@ -495,7 +511,7 @@ export const makeDirectMethods = <
                 stub: DurableObjectStubClient<Api>,
                 method: string,
                 ...args: Array<unknown>
-              ) => Effect.Effect<unknown, DurableObjectRpcError>
+              ) => Effect.Effect<unknown, DurableObjectRpcError, R>
             )(stub, methodName, ...args);
           });
       }

@@ -1,11 +1,14 @@
 import { assert, expect, it, layer, test } from "@effect/vitest";
-import { Effect, Layer, Option, Schema as S } from "effect";
+import { Effect, Layer, Option, Schema as S, type Scope } from "effect";
 
 import {
   DurableObjectDefinition,
+  DurableObjectNamespace,
   DurableObjectStorage,
   Queue,
   QueueBinding,
+  Rpc,
+  ServiceBinding,
   WorkerDefinition,
   WorkerEnvironment,
   Workflow,
@@ -340,6 +343,24 @@ test("definition-backed Worker RPC validates encoded success values", async () =
   });
   const StringNumberService = StringNumberWorker;
   const ValueStyleStringNumberService = StringNumberWorker;
+  const assertStringNumberServiceTypes = () => {
+    const program = Effect.gen(function* () {
+      const service = yield* StringNumberService;
+
+      expectType<Effect.Effect<Rpc.Result<number>, ServiceBinding.ServiceBindingRpcError>>(
+        service.rpc("increment", 41),
+      );
+      expectType<Effect.Effect<number, ServiceBinding.ServiceBindingRpcError>>(
+        service.call("increment", 41),
+      );
+      expectType<Effect.Effect<number, unknown, Scope.Scope>>(service.scopedCall("increment", 41));
+    });
+
+    void program;
+  };
+
+  void assertStringNumberServiceTypes;
+
   let received: unknown;
   const env = {
     STRING_NUMBER_SERVICE: {
@@ -359,6 +380,29 @@ test("definition-backed Worker RPC validates encoded success values", async () =
     it.effect("roundtrips transformed codecs", () =>
       Effect.gen(function* () {
         const value = yield* StringNumberService.call("increment", 41);
+
+        assert.strictEqual(received, "41");
+        assert.strictEqual(value, 42);
+      }),
+    );
+
+    it.effect("returns raw encoded results from rpc", () =>
+      Effect.gen(function* () {
+        received = undefined;
+
+        const result = yield* StringNumberService.rpc("increment", 41);
+        const value = yield* Effect.promise(() => result);
+
+        assert.strictEqual(received, "41");
+        assert.strictEqual(value as unknown, "42");
+      }),
+    );
+
+    it.effect("roundtrips transformed codecs through scopedCall", () =>
+      Effect.gen(function* () {
+        received = undefined;
+
+        const value = yield* Effect.scoped(StringNumberService.scopedCall("increment", 41));
 
         assert.strictEqual(received, "41");
         assert.strictEqual(value, 42);
@@ -408,6 +452,94 @@ test("definition-backed Worker RPC validates encoded success values", async () =
         const exit = yield* Effect.exit(TestService.call("double", 21));
 
         assert.strictEqual(exit._tag, "Failure");
+      }),
+    );
+
+    it.effect("rejects invalid remote results through scopedCall", () =>
+      Effect.gen(function* () {
+        const exit = yield* Effect.exit(Effect.scoped(TestService.scopedCall("double", 21)));
+
+        assert.strictEqual(exit._tag, "Failure");
+      }),
+    );
+  });
+}
+
+{
+  const NumberRoom = DurableObjectDefinition.make("NumberRoom", {
+    increment: DurableObjectDefinition.method({
+      args: [S.NumberFromString] as const,
+      success: S.NumberFromString,
+    }),
+  });
+  const NumberRooms = NumberRoom;
+  let received: unknown;
+  const stub = {
+    id: {} as DurableObjectId,
+    fetch: async () => new Response("ok"),
+    increment: async (value: string) => {
+      received = value;
+      return String(Number(value) + 1);
+    },
+  };
+  const namespace = {
+    newUniqueId: () => ({}) as DurableObjectId,
+    idFromName: () => ({}) as DurableObjectId,
+    idFromString: () => ({}) as DurableObjectId,
+    jurisdiction: () => namespace,
+    get: () => stub,
+    getByName: () => stub,
+  };
+  const env = {
+    NUMBER_ROOMS: namespace,
+  } as unknown as Cloudflare.Env;
+
+  const assertNumberRoomTypes = () => {
+    const program = Effect.gen(function* () {
+      const rooms = yield* NumberRooms;
+      const room = yield* rooms.getByName("room");
+
+      expectType<Effect.Effect<Rpc.Result<number>, DurableObjectNamespace.DurableObjectRpcError>>(
+        rooms.rpc(room, "increment", 41),
+      );
+      expectType<Effect.Effect<number, DurableObjectNamespace.DurableObjectRpcError>>(
+        rooms.call(room, "increment", 41),
+      );
+      expectType<Effect.Effect<number, unknown, Scope.Scope>>(
+        rooms.scopedCall(room, "increment", 41),
+      );
+    });
+
+    void program;
+  };
+
+  void assertNumberRoomTypes;
+
+  layer(
+    NumberRooms.layer({ binding: "NUMBER_ROOMS" }).pipe(
+      Layer.provide(Layer.succeed(WorkerEnvironment, env)),
+    ),
+  )("definition-backed transformed Durable Object namespaces", (it) => {
+    it.effect("returns raw encoded results from rpc", () =>
+      Effect.gen(function* () {
+        const room = yield* NumberRooms.getByName("room");
+        const result = yield* NumberRooms.rpc(room, "increment", 41);
+        const value = yield* Effect.promise(() => result);
+
+        assert.strictEqual(received, "41");
+        assert.strictEqual(value as unknown, "42");
+      }),
+    );
+
+    it.effect("roundtrips transformed codecs through scopedCall", () =>
+      Effect.gen(function* () {
+        received = undefined;
+
+        const room = yield* NumberRooms.getByName("room");
+        const value = yield* Effect.scoped(NumberRooms.scopedCall(room, "increment", 41));
+
+        assert.strictEqual(received, "41");
+        assert.strictEqual(value, 42);
       }),
     );
   });

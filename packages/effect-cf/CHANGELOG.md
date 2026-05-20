@@ -1,5 +1,13 @@
 # effect-cf
 
+## 0.8.0
+
+### Minor Changes
+
+- [#22](https://github.com/danieljvdm/effect-cf/pull/22) [`24c27ee`](https://github.com/danieljvdm/effect-cf/commit/24c27ee2884aacc72ab51ab5a208b795e1fa9738) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add Effect-native R2 bucket, Hyperdrive, and Cloudflare Images binding tags, including optional hosted Images operations, ArrayBuffer image inputs, and an optional Hyperdrive Postgres SQL layer integration.
+
+- [#22](https://github.com/danieljvdm/effect-cf/pull/22) [`24c27ee`](https://github.com/danieljvdm/effect-cf/commit/24c27ee2884aacc72ab51ab5a208b795e1fa9738) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Remove non-canonical static operation helpers from existing KV and D1 resource bindings. Use yielded binding services for resource operations; D1 keeps `sqlLayer()`.
+
 ## 0.7.0
 
 ### Minor Changes

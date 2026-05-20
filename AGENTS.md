@@ -1,16 +1,16 @@
 <!--VITE PLUS START-->
 
-# Vite+
+# Using Vite+, the Unified Toolchain for the Web
 
-Use Vite+ through the `vp` CLI for installs, checks, tests, builds, scripts, package-manager operations, and one-off binaries. Docs are in `node_modules/vite-plus/docs` and at https://viteplus.dev/guide/.
+This project is using Vite+, a unified toolchain built on top of Vite, Rolldown, Vitest, tsdown, Oxlint, Oxfmt, and Vite Task. Vite+ wraps runtime management, package management, and frontend tooling in a single global CLI called `vp`. Vite+ is distinct from Vite, and it invokes Vite through `vp dev` and `vp build`. Run `vp help` to print a list of commands and `vp <command> --help` for information about a specific command.
 
-## Validation
+Docs are local at `node_modules/vite-plus/docs` or online at https://viteplus.dev/guide/.
+
+## Review Checklist
 
 - [ ] Run `vp install` after pulling remote changes and before getting started.
 - [ ] Run `vp check` and `vp test` to format, lint, type check and test changes.
 - [ ] Check if there are `vite.config.ts` tasks or `package.json` scripts necessary for validation, run via `vp run <script>`.
-
-<!--VITE PLUS END-->
 
 # Package Layout
 
@@ -18,7 +18,7 @@ Use Vite+ through the `vp` CLI for installs, checks, tests, builds, scripts, pac
 - `examples/` contains consumer/example apps.
 - Reusable package code belongs under `packages/effect-cf/src` and should be exported from `packages/effect-cf/src/index.ts`.
 - Generated `worker-configuration.d.ts` files are local checks, not source-of-truth API definitions.
-- `repos/effect-smol` is a reference subtree for Effect patterns and API style; consult it when changing Effect-heavy code, but do not treat it as package source.
+- Effect source code can be referenced at `repos/effect-smol` for patterns and API style when changing Effect-heavy code. Do not edit files under `repos/effect-smol`; it is a reference checkout, not package source.
 
 # Repo-Local Skills
 

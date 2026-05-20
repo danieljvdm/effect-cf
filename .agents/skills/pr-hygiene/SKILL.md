@@ -1,3 +1,13 @@
+---
+name: pr-hygiene
+description: Use before creating or updating PRs, choosing PR titles, writing PR bodies, or adding changesets for this repository.
+tags:
+  - pull-request
+  - changeset
+  - release
+  - validation
+---
+
 # PR Hygiene
 
 Use this skill before creating or updating a pull request, adding a changeset, or choosing a PR title.

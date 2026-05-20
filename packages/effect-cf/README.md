@@ -32,6 +32,9 @@ Runtime creation belongs at Cloudflare entrypoints, not inside binding helpers.
 - `DurableObjectWebSocket` - WebSocket upgrade helpers for Durable Objects
 - `Kv` - typed KV namespace helper
 - `D1` - typed D1 database binding helper with an `@effect/sql-d1` backed SQL layer
+- `R2` - typed R2 bucket binding helper with Effect-wrapped object and multipart operations
+- `Hyperdrive` - typed Hyperdrive binding helper for connection strings and optional Postgres SQL integration
+- `Images` - typed Cloudflare Images binding helper with transformation APIs and optional hosted image operations
 - `Queue` - typed Queue producer/consumer tags plus client and error types
 - `Workflow` - typed Workflow entrypoints, steps, starter clients, and instance types
 - `Rpc` - Cloudflare RPC type helpers and scoped disposal utilities
@@ -114,6 +117,94 @@ export const enqueueAvatar = (userId: string, imageKey: string) =>
 Producers should usually use `const queue = yield* AvatarQueue` and then call `queue.send(...)`, `queue.sendBatch(...)`, or `queue.metrics()`. The static `AvatarQueue.send(...)` helpers remain available for concise one-off calls.
 
 Queue handlers run inline failures through Cloudflare's normal retry path. If background work scheduled with `WorkerContext.waitUntil(...)` should also make the batch retry, use `WorkerContext.waitUntilPropagating(...)` or `waitUntil(..., { mode: "propagate" })`; the default `waitUntil` mode observes and logs failures without rejecting the native `waitUntil` promise.
+
+## R2 Example
+
+R2 bucket tags expose Cloudflare object operations as Effects and map nullable reads to `Option`.
+
+```ts
+import { Effect, Layer, Option } from "effect";
+import { R2 } from "effect-cf";
+
+class ArtifactBucket extends R2.Tag<ArtifactBucket>()("ArtifactBucket") {}
+
+export const ArtifactBucketLayer = ArtifactBucket.layer({ binding: "ARTIFACT_BUCKET" });
+
+export const writeArtifact = (key: string, body: string) =>
+  Effect.gen(function* () {
+    const bucket = yield* ArtifactBucket;
+    yield* bucket.put(key, body, {
+      httpMetadata: { contentType: "application/json" },
+    });
+  });
+
+export const readArtifact = (key: string) =>
+  Effect.gen(function* () {
+    const bucket = yield* ArtifactBucket;
+    const object = yield* bucket.get(key);
+    return Option.isSome(object) ? yield* Effect.promise(() => object.value.text()) : undefined;
+  });
+```
+
+Use `createMultipartUpload(...)` or `resumeMultipartUpload(...)` for large objects; returned upload handles wrap `uploadPart`, `complete`, and `abort` in Effect.
+
+## Hyperdrive Example
+
+Hyperdrive tags expose the binding `connectionString` directly on the yielded service.
+
+```ts
+import { Effect } from "effect";
+import { Hyperdrive } from "effect-cf";
+
+class AppDatabase extends Hyperdrive.Tag<AppDatabase>()("AppDatabase") {}
+
+export const AppDatabaseLayer = AppDatabase.layer({ binding: "HYPERDRIVE" });
+
+export const databaseUrl = Effect.gen(function* () {
+  const hyperdrive = yield* AppDatabase;
+  return hyperdrive.connectionString;
+});
+```
+
+If your Worker uses Postgres via `@effect/sql-pg`, install that driver and use the optional subpath integration:
+
+```ts
+import { Hyperdrive } from "effect-cf";
+import * as HyperdrivePg from "effect-cf/hyperdrive-pg";
+
+class AppDatabase extends Hyperdrive.Tag<AppDatabase>()("AppDatabase") {}
+
+export const SqlLive = HyperdrivePg.layer(AppDatabase, { binding: "HYPERDRIVE" });
+```
+
+The Postgres integration builds an Effect `PgClient` from Hyperdrive's generated connection string with `PgClient.makeClient`. It intentionally does not expose app-side pool options; Hyperdrive manages the underlying database pool.
+
+## Images Example
+
+Images tags expose `info`, `input`, optional hosted image operations, and composable transform/draw steps.
+
+```ts
+import { Effect } from "effect";
+import { Images } from "effect-cf";
+
+class AvatarImages extends Images.Tag<AvatarImages>()("AvatarImages") {}
+
+export const AvatarImagesLayer = AvatarImages.layer({ binding: "IMAGES" });
+
+export const resizeAvatar = (image: Images.ImageInputValue) =>
+  Effect.gen(function* () {
+    const images = yield* AvatarImages;
+    const result = yield* images.process(
+      Images.transform(Images.empty, { width: 256, height: 256 }),
+      {
+        stream: image,
+        outputOptions: { format: "image/webp" },
+      },
+    );
+
+    return yield* result.response;
+  });
+```
 
 ## Workflow Example
 

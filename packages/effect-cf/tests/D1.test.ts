@@ -41,7 +41,7 @@ const makeFakeD1 = (options: FakeD1Options = {}) =>
   }) as unknown as D1Database;
 
 const workerEnvironmentLayer = (db: D1Database) =>
-  Layer.succeed(WorkerEnvironment, { TEST_DB: db } as unknown as Cloudflare.Env);
+  Layer.succeed(WorkerEnvironment, { TEST_DB: db });
 
 const testDatabaseLayer = (db: D1Database) =>
   TestDatabase.layer.pipe(Layer.provide(workerEnvironmentLayer(db)));
@@ -77,10 +77,11 @@ const sqlLayer = (db: D1Database) =>
     exec: (query) => ({ count: query.length, duration: 1 }),
   });
 
-  layer(testDatabaseLayer(db))("D1 native helpers", (it) => {
-    it.effect("wraps native D1 operations in Effect errors", () =>
+  layer(testDatabaseLayer(db))("D1 native binding", (it) => {
+    it.effect("provides the raw D1 binding", () =>
       Effect.gen(function* () {
-        const result = yield* TestDatabase.exec("CREATE TABLE todos (id TEXT)");
+        const database = yield* TestDatabase;
+        const result = yield* Effect.promise(() => database.exec("CREATE TABLE todos (id TEXT)"));
 
         assert.deepStrictEqual(result, { count: 28, duration: 1 });
       }),

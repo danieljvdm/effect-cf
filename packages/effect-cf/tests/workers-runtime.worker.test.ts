@@ -59,7 +59,7 @@ layer(testLayer)("Workers runtime Durable Object namespace", (it) => {
         ),
       );
 
-      const ids = yield* Effect.promise(() => listDurableObjectIds(env.TEST_COUNTER_DO));
+      const ids = yield* Effect.promise(() => listDurableObjectIds(env.TEST_COUNTER_DO!));
       assert.strictEqual(ids.length > 0, true);
     }),
   );

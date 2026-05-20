@@ -21,6 +21,11 @@
       "import": "./dist/index.mjs",
       "default": "./dist/index.mjs"
     },
+    "./hyperdrive-pg": {
+      "types": "./dist/HyperdrivePg.d.mts",
+      "import": "./dist/HyperdrivePg.mjs",
+      "default": "./dist/HyperdrivePg.mjs"
+    },
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -37,6 +42,7 @@
     "@cloudflare/vitest-pool-workers": "^0.15.0",
     "@cloudflare/workers-types": "^4.20260421.1",
     "@effect/sql-d1": "catalog:",
+    "@effect/sql-pg": "4.0.0-beta.65",
     "@effect/vitest": "catalog:",
     "effect": "catalog:",
     "typescript": "^6.0.2",
@@ -45,6 +51,12 @@
   },
   "peerDependencies": {
     "@effect/sql-d1": "^4.0.0-beta.65",
+    "@effect/sql-pg": "^4.0.0-beta.65",
     "effect": "^4.0.0-beta.65"
+  },
+  "peerDependenciesMeta": {
+    "@effect/sql-pg": {
+      "optional": true
+    }
   }
 }

@@ -30,6 +30,7 @@ export type ImageUpdateOptions = globalThis.ImageUpdateOptions;
 export type ImageListOptions = globalThis.ImageListOptions;
 export type ImageList = globalThis.ImageList;
 export type ImageMetadata = globalThis.ImageMetadata;
+export type ImageInputValue = ReadableStream<Uint8Array> | ArrayBuffer;
 export type ImageUploadValue = ReadableStream<Uint8Array> | ArrayBuffer;
 
 export interface DrawStepOptions {
@@ -50,7 +51,7 @@ export interface Steps {
 }
 
 export interface ProcessOptions {
-  readonly stream: ReadableStream<Uint8Array>;
+  readonly stream: ImageInputValue;
   readonly inputOptions?: ImageInputOptions;
   readonly outputOptions: ImageOutputOptions;
 }
@@ -84,21 +85,33 @@ export interface HostedImagesClient {
   readonly unsafeRaw: Effect.Effect<globalThis.HostedImagesBinding>;
 }
 
+export interface ImagesRuntimeBinding {
+  readonly info: (
+    image: ImageInputValue,
+    options?: ImageInputOptions,
+  ) => Promise<ImageInfoResponse>;
+  readonly input: (
+    image: ImageInputValue,
+    options?: ImageInputOptions,
+  ) => globalThis.ImageTransformer;
+  readonly hosted?: globalThis.HostedImagesBinding;
+}
+
 export interface ImagesClient {
   readonly info: (
-    stream: ReadableStream<Uint8Array>,
+    image: ImageInputValue,
     options?: ImageInputOptions,
   ) => Effect.Effect<ImageInfoResponse, ImagesOperationError>;
   readonly input: (
-    stream: ReadableStream<Uint8Array>,
+    image: ImageInputValue,
     options?: ImageInputOptions,
   ) => Effect.Effect<globalThis.ImageTransformer, ImagesOperationError>;
   readonly process: (
     steps: Steps,
     options: ProcessOptions,
   ) => Effect.Effect<ImagesTransformationResultClient, ImagesOperationError>;
-  readonly hosted: HostedImagesClient;
-  readonly unsafeRaw: Effect.Effect<globalThis.ImagesBinding>;
+  readonly hosted: Option.Option<HostedImagesClient>;
+  readonly unsafeRaw: Effect.Effect<ImagesRuntimeBinding>;
   readonly definition: ImagesDefinition;
 }
 
@@ -216,12 +229,11 @@ const isHostedImagesBinding = (value: unknown): value is globalThis.HostedImages
   hasFunction(value, "upload") &&
   hasFunction(value, "list");
 
-export const isImagesBinding = (value: unknown): value is globalThis.ImagesBinding =>
+export const isImagesBinding = (value: unknown): value is ImagesRuntimeBinding =>
   typeof value === "object" &&
   value !== null &&
   hasFunction(value, "info") &&
-  hasFunction(value, "input") &&
-  isHostedImagesBinding(Reflect.get(value, "hosted"));
+  hasFunction(value, "input");
 
 const wrapResult = (
   binding: string,
@@ -254,9 +266,9 @@ const wrapHosted = (
 
 export const makeClient =
   (definition: ImagesDefinition) =>
-  (images: globalThis.ImagesBinding): ImagesClient => {
-    const input = (stream: ReadableStream<Uint8Array>, options?: ImageInputOptions) =>
-      tryImagesSync(definition.binding, "input", () => images.input(stream, options));
+  (images: ImagesRuntimeBinding): ImagesClient => {
+    const input = (image: ImageInputValue, options?: ImageInputOptions) =>
+      tryImagesSync(definition.binding, "input", () => images.input(image, options));
 
     const process = (steps: Steps, options: ProcessOptions) =>
       Effect.gen(function* () {
@@ -288,11 +300,13 @@ export const makeClient =
 
     return {
       definition,
-      info: (stream, options) =>
-        tryImagesPromise(definition.binding, "info", () => images.info(stream, options)),
+      info: (image, options) =>
+        tryImagesPromise(definition.binding, "info", () => images.info(image, options)),
       input,
       process,
-      hosted: wrapHosted(definition.binding, images.hosted),
+      hosted: isHostedImagesBinding(images.hosted)
+        ? Option.some(wrapHosted(definition.binding, images.hosted))
+        : Option.none(),
       unsafeRaw: Effect.succeed(images),
     };
   };

@@ -187,6 +187,10 @@ export const makeClient = (
             return Option.none<globalThis.R2Object>();
           }
 
+          if (options !== undefined && "onlyIf" in options) {
+            return Option.some(object);
+          }
+
           return object;
         }),
       )) as R2Client["put"],

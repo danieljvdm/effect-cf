@@ -34,7 +34,7 @@ Runtime creation belongs at Cloudflare entrypoints, not inside binding helpers.
 - `D1` - typed D1 database binding helper with an `@effect/sql-d1` backed SQL layer
 - `R2` - typed R2 bucket binding helper with Effect-wrapped object and multipart operations
 - `Hyperdrive` - typed Hyperdrive binding helper for connection strings and optional Postgres SQL integration
-- `Images` - typed Cloudflare Images binding helper with hosted image and transformation APIs
+- `Images` - typed Cloudflare Images binding helper with transformation APIs and optional hosted image operations
 - `Queue` - typed Queue producer/consumer tags plus client and error types
 - `Workflow` - typed Workflow entrypoints, steps, starter clients, and instance types
 - `Rpc` - Cloudflare RPC type helpers and scoped disposal utilities
@@ -181,7 +181,7 @@ The Postgres integration builds an Effect `PgClient` from Hyperdrive's generated
 
 ## Images Example
 
-Images tags expose `info`, hosted image operations, and composable transform/draw steps.
+Images tags expose `info`, `input`, optional hosted image operations, and composable transform/draw steps.
 
 ```ts
 import { Effect } from "effect";
@@ -191,13 +191,13 @@ class AvatarImages extends Images.Tag<AvatarImages>()("AvatarImages") {}
 
 export const AvatarImagesLayer = AvatarImages.layer({ binding: "IMAGES" });
 
-export const resizeAvatar = (stream: ReadableStream<Uint8Array>) =>
+export const resizeAvatar = (image: Images.ImageInputValue) =>
   Effect.gen(function* () {
     const images = yield* AvatarImages;
     const result = yield* images.process(
       Images.transform(Images.empty, { width: 256, height: 256 }),
       {
-        stream,
+        stream: image,
         outputOptions: { format: "image/webp" },
       },
     );

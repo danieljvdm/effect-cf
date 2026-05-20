@@ -20,6 +20,7 @@ import {
   Workflow,
   WorkflowBinding,
 } from "../src/index";
+import * as EffectCf from "../src/index";
 import * as HyperdrivePg from "../src/HyperdrivePg";
 
 export const AvatarQueueMessagePayload = Schema.Struct({
@@ -164,23 +165,33 @@ export const AvatarImagesLayer = AvatarImages.layer({
 
 const imagesProgram = Effect.gen(function* () {
   const images = yield* AvatarImages;
-  const hosted = images.hosted;
 
   expectTypeOf(images.info(new ReadableStream<Uint8Array>())).toEqualTypeOf<
+    Effect.Effect<Images.ImageInfoResponse, Images.ImagesOperationError>
+  >();
+  expectTypeOf(images.info(new ArrayBuffer(0))).toEqualTypeOf<
     Effect.Effect<Images.ImageInfoResponse, Images.ImagesOperationError>
   >();
 
   expectTypeOf(
     images.process(Images.transform(Images.empty, { width: 128 }), {
-      stream: new ReadableStream<Uint8Array>(),
+      stream: new ArrayBuffer(0),
       outputOptions: { format: "image/webp" },
     }),
   ).toEqualTypeOf<
     Effect.Effect<Images.ImagesTransformationResultClient, Images.ImagesOperationError>
   >();
 
-  yield* hosted.upload(new ArrayBuffer(0), { id: "avatar-1" });
+  expectTypeOf(images.hosted).toEqualTypeOf<Option.Option<Images.HostedImagesClient>>();
+  Option.map(images.hosted, (hosted) => {
+    expectTypeOf(hosted.upload(new ArrayBuffer(0), { id: "avatar-1" })).toEqualTypeOf<
+      Effect.Effect<Images.ImageMetadata, Images.ImagesOperationError>
+    >();
+  });
 });
+
+// @ts-expect-error optional driver integrations stay behind subpath exports.
+expectTypeOf(EffectCf.HyperdrivePg).toBeNever();
 
 export class SessionKv extends Kv.Tag<SessionKv>()("SessionKv", {
   key: Schema.String,

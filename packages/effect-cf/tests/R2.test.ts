@@ -104,6 +104,38 @@ const bucketLayer = (bucket: R2Bucket) =>
         assert.strictEqual(Option.getOrUndefined(object)?.key, "avatars/u1.png");
       }),
     );
+
+    it.effect("wraps conditional put results in Option", () =>
+      Effect.gen(function* () {
+        const r2 = yield* TestBucket;
+
+        const stored = yield* r2.put("avatars/u1.png", "data", {
+          onlyIf: { etagMatches: "etag" },
+        });
+
+        assert.strictEqual(Option.isSome(stored), true);
+        assert.strictEqual(Option.getOrUndefined(stored)?.key, "avatars/u1.png");
+      }),
+    );
+  });
+}
+
+{
+  const bucket = makeFakeR2({
+    put: async () => null,
+  });
+
+  layer(bucketLayer(bucket))("R2 conditional operations", (it) => {
+    it.effect("maps failed conditional put to Option.none", () =>
+      Effect.gen(function* () {
+        const r2 = yield* TestBucket;
+        const stored = yield* r2.put("avatars/u1.png", "data", {
+          onlyIf: { etagMatches: "missing-etag" },
+        });
+
+        assert.strictEqual(Option.isNone(stored), true);
+      }),
+    );
   });
 }
 

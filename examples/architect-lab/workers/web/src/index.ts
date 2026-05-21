@@ -1,7 +1,8 @@
 import { Effect } from "effect";
 import { Worker } from "effect-cf";
 
-import { ApiWorker } from "@architect-lab/domain";
+import { architectureResourceTemplates } from "@architect-lab/domain/architecture";
+import { ApiWorker } from "@architect-lab/domain/runtime";
 
 const ApiLayer = ApiWorker.layer({ binding: "API" });
 
@@ -35,7 +36,13 @@ export default Worker.make(ApiLayer, {
   fetch: routeFetch,
 });
 
-const renderShell = () => `<!doctype html>
+const renderShell = () => {
+  const resourceTemplatesJson = JSON.stringify(architectureResourceTemplates).replaceAll(
+    "<",
+    "\\u003c",
+  );
+
+  return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -52,6 +59,8 @@ const renderShell = () => `<!doctype html>
         --canvas: #f5f7f8;
         --accent: #0f766e;
         --accent-strong: #0b4f4a;
+        --code-bg: #101418;
+        --code-ink: #edf2f7;
         font-family:
           ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         background: var(--canvas);
@@ -82,22 +91,27 @@ const renderShell = () => `<!doctype html>
       .app {
         height: 100vh;
         display: grid;
-        grid-template-columns: 320px minmax(0, 1fr);
+        grid-template-columns: 320px minmax(0, 1fr) 360px;
         background: var(--canvas);
       }
 
-      .sidebar {
+      .sidebar,
+      .inspector {
         min-width: 0;
-        border-right: 1px solid var(--line);
         background: rgba(251, 252, 253, 0.96);
+        z-index: 2;
+      }
+
+      .sidebar {
+        border-right: 1px solid var(--line);
         display: grid;
         grid-template-rows: auto auto 1fr auto;
         gap: 18px;
         padding: 22px;
-        z-index: 2;
       }
 
-      .sidebar > * {
+      .sidebar > *,
+      .inspector > * {
         min-width: 0;
       }
 
@@ -173,6 +187,24 @@ const renderShell = () => `<!doctype html>
         border-color: #c6d0d8;
       }
 
+      button.resource-button {
+        display: grid;
+        grid-template-columns: 16px minmax(0, 1fr);
+        gap: 9px;
+        align-items: start;
+        width: 100%;
+        padding: 10px;
+        color: var(--ink);
+        background: #ffffff;
+        border-color: #d2dae1;
+        text-align: left;
+      }
+
+      button.resource-button:hover:not(:disabled) {
+        border-color: #8a99a6;
+        background: #f7fafc;
+      }
+
       button:disabled {
         opacity: 0.55;
         cursor: not-allowed;
@@ -217,6 +249,153 @@ const renderShell = () => `<!doctype html>
         color: var(--muted);
         font-size: 13px;
         line-height: 1.45;
+      }
+
+      .inspector {
+        border-left: 1px solid var(--line);
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        gap: 18px;
+        padding: 22px;
+        overflow: hidden;
+      }
+
+      .palette {
+        display: grid;
+        gap: 10px;
+        align-content: start;
+      }
+
+      .palette-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+
+      .resource-dot {
+        width: 14px;
+        height: 14px;
+        border-radius: 999px;
+        margin-top: 2px;
+        background: #64748b;
+        border: 1px solid rgba(21, 25, 29, 0.14);
+      }
+
+      .resource-copy {
+        display: grid;
+        gap: 3px;
+      }
+
+      .resource-copy strong {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        font-size: 14px;
+        line-height: 1.15;
+      }
+
+      .resource-copy span {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.3;
+        font-weight: 500;
+      }
+
+      .code-panel {
+        min-height: 0;
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        gap: 10px;
+      }
+
+      .code-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: end;
+        gap: 12px;
+      }
+
+      .code-title {
+        display: grid;
+        gap: 3px;
+      }
+
+      .code-title h2 {
+        margin: 0;
+        font-size: 16px;
+        line-height: 1.25;
+        letter-spacing: 0;
+      }
+
+      .code-title p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 12px;
+        overflow-wrap: anywhere;
+      }
+
+      .code-panel pre {
+        min-width: 0;
+        min-height: 0;
+        margin: 0;
+        overflow: auto;
+        padding: 14px;
+        border-radius: 8px;
+        background: var(--code-bg);
+        color: var(--code-ink);
+        font:
+          12px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+        white-space: pre;
+      }
+
+      .code-empty {
+        display: grid;
+        place-items: center;
+        min-height: 220px;
+        border: 1px dashed #c6d0d8;
+        border-radius: 8px;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.4;
+        text-align: center;
+        padding: 18px;
+        background: rgba(255, 255, 255, 0.7);
+      }
+
+      .color-blue {
+        background: #2563eb;
+      }
+
+      .color-orange {
+        background: #ea580c;
+      }
+
+      .color-green {
+        background: #16a34a;
+      }
+
+      .color-violet {
+        background: #7c3aed;
+      }
+
+      .color-light-blue {
+        background: #0284c7;
+      }
+
+      .color-yellow {
+        background: #ca8a04;
+      }
+
+      .color-red {
+        background: #dc2626;
+      }
+
+      .color-light-violet {
+        background: #a855f7;
+      }
+
+      .color-grey {
+        background: #64748b;
       }
 
       .canvas-stage {
@@ -296,12 +475,22 @@ const renderShell = () => `<!doctype html>
           min-height: 100vh;
           height: auto;
           grid-template-columns: 1fr;
-          grid-template-rows: auto minmax(620px, 1fr);
+          grid-template-rows: auto minmax(620px, 1fr) auto;
         }
 
         .sidebar {
           border-right: 0;
           border-bottom: 1px solid var(--line);
+        }
+
+        .inspector {
+          border-left: 0;
+          border-top: 1px solid var(--line);
+          overflow: visible;
+        }
+
+        .code-panel {
+          min-height: 380px;
         }
       }
     </style>
@@ -319,12 +508,13 @@ const renderShell = () => `<!doctype html>
       }
     </script>
     <script type="module">
-      import React, { useMemo, useState } from "react";
+      import React, { useCallback, useMemo, useState } from "react";
       import { createRoot } from "react-dom/client";
-      import { Tldraw } from "tldraw";
+      import { Tldraw, createShapeId, toRichText } from "tldraw";
       import { useSync } from "@tldraw/sync";
 
       const e = React.createElement;
+      const resourceTemplates = ${resourceTemplatesJson};
       const randomLabel = () => "Guest " + Math.floor(Math.random() * 1000);
       const getInitialRoomId = () =>
         location.pathname.startsWith("/room/") ? location.pathname.slice("/room/".length) : "";
@@ -347,10 +537,165 @@ const renderShell = () => `<!doctype html>
         },
       };
 
+      const wordsFromName = (name) => {
+        const words = String(name || "").match(/[A-Za-z0-9]+/g) || [];
+        return words.length === 0 ? ["Resource"] : words;
+      };
+
+      const toPascalIdentifier = (name) =>
+        wordsFromName(name)
+          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+          .join("")
+          .replace(/^[0-9]/, "_$&");
+
+      const toCamelIdentifier = (name) => {
+        const pascal = toPascalIdentifier(name);
+        return pascal.charAt(0).toLowerCase() + pascal.slice(1);
+      };
+
+      const toBindingName = (name, fallbackPrefix = "RESOURCE") => {
+        const binding = wordsFromName(name)
+          .join("_")
+          .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+          .toUpperCase();
+        return binding === "RESOURCE" ? fallbackPrefix : binding;
+      };
+
+      const classNameSuffixes = {
+        worker: "Worker",
+        "durable-object": "DurableObject",
+        d1: "Database",
+        r2: "Bucket",
+        kv: "Namespace",
+        queue: "Queue",
+        workflow: "Workflow",
+        images: "Images",
+        "service-binding": "Service",
+      };
+      const reservedClassNames = new Set([
+        "Worker",
+        "DurableObject",
+        "D1",
+        "R2",
+        "KV",
+        "Kv",
+        "Queue",
+        "Workflow",
+        "Images",
+      ]);
+      const toResourceClassName = (resource) => {
+        const className = toPascalIdentifier(resource.name);
+        return reservedClassNames.has(className) ? className + classNameSuffixes[resource.kind] : className;
+      };
+
+      const renderResourceSnippet = (resource) => {
+        const className = toResourceClassName(resource);
+        const valueName = toCamelIdentifier(className);
+        const bindingName = resource.bindingName || toBindingName(resource.name);
+
+        switch (resource.kind) {
+          case "worker":
+            return \`import { Schema as S } from "effect";
+import { Worker } from "effect-cf";
+
+export class \${className} extends Worker.Tag<\${className}>()("\${className}", {
+  health: Worker.method({
+    success: S.Struct({ ok: S.Boolean }),
+  }),
+}) {}\`;
+          case "durable-object":
+            return \`import { Schema as S } from "effect";
+import { DurableObject } from "effect-cf";
+
+export class \${className} extends DurableObject.Tag<\${className}>()("\${className}", {
+  getState: DurableObject.method({
+    success: S.Struct({ id: S.String, updatedAt: S.String }),
+  }),
+}) {}\`;
+          case "d1":
+            return \`import { D1 } from "effect-cf";
+
+export class \${className} extends D1.Service<\${className}>()("\${className}", {
+  binding: "\${bindingName}",
+}) {}
+
+export const \${valueName}Sql = \${className}.sqlLayer();\`;
+          case "r2":
+            return \`import { R2 } from "effect-cf";
+
+export class \${className} extends R2.Tag<\${className}>()("\${className}") {}
+
+export const \${valueName}Layer = \${className}.layer({
+  binding: "\${bindingName}",
+});\`;
+          case "kv":
+            return \`import { Schema as S } from "effect";
+import { Kv } from "effect-cf";
+
+export class \${className} extends Kv.Tag<\${className}>()("\${className}", {
+  key: S.String,
+  value: S.Struct({ updatedAt: S.String }),
+}) {}
+
+export const \${valueName}Layer = \${className}.layer({
+  binding: "\${bindingName}",
+});\`;
+          case "queue":
+            return \`import { Schema as S } from "effect";
+import { Queue } from "effect-cf";
+
+export class \${className} extends Queue.Tag<\${className}>()("\${className}", {
+  message: S.Struct({ id: S.String }),
+}) {}
+
+export const \${valueName}Layer = \${className}.layer({
+  binding: "\${bindingName}",
+});\`;
+          case "workflow":
+            return \`import { Schema as S } from "effect";
+import { Workflow } from "effect-cf";
+
+export class \${className} extends Workflow.Tag<\${className}>()("\${className}", {
+  payload: S.Struct({ id: S.String }),
+  result: S.Struct({ ok: S.Boolean }),
+}) {}
+
+export const \${valueName}Layer = \${className}.layer({
+  binding: "\${bindingName}",
+});\`;
+          case "images":
+            return \`import { Images } from "effect-cf";
+
+export class \${className} extends Images.Tag<\${className}>()("\${className}") {}
+
+export const \${valueName}Layer = \${className}.layer({
+  binding: "\${bindingName}",
+});\`;
+          case "service-binding":
+            return \`import { Schema as S } from "effect";
+import { Worker } from "effect-cf";
+
+export class \${className} extends Worker.Tag<\${className}>()("\${className}", {
+  health: Worker.method({
+    success: S.Struct({ ok: S.Boolean }),
+  }),
+}) {}
+
+export const \${valueName}Layer = \${className}.layer({
+  binding: "\${bindingName}",
+});\`;
+          default:
+            return "";
+        }
+      };
+
       function App() {
         const [roomId, setRoomId] = useState(getInitialRoomId);
         const [label, setLabel] = useState(() => localStorage.getItem("architect:label") || randomLabel());
         const [creating, setCreating] = useState(false);
+        const [editor, setEditor] = useState(null);
+        const [selectedResource, setSelectedResource] = useState(null);
+        const [resourceCounts, setResourceCounts] = useState({});
 
         const createRoom = async () => {
           setCreating(true);
@@ -370,6 +715,59 @@ const renderShell = () => `<!doctype html>
         };
 
         const copyUrl = () => navigator.clipboard?.writeText(location.href);
+
+        const handleSelectionChange = useCallback((resource) => {
+          setSelectedResource(resource);
+        }, []);
+
+        const addResource = (template) => {
+          if (!editor) {
+            return;
+          }
+
+          const nextCount = (resourceCounts[template.kind] || 0) + 1;
+          const name = nextCount === 1 ? template.label : template.label + " " + nextCount;
+          const bindingName = toBindingName(name, template.bindingPrefix);
+          const id = createShapeId();
+          const bounds = editor.getViewportPageBounds();
+          const resource = {
+            id,
+            kind: template.kind,
+            name,
+            bindingName,
+          };
+
+          editor.createShape({
+            id,
+            type: "geo",
+            x: bounds.x + bounds.w / 2 - 110 + nextCount * 12,
+            y: bounds.y + bounds.h / 2 - 52 + nextCount * 12,
+            props: {
+              w: 220,
+              h: 104,
+              geo: "rectangle",
+              color: template.color,
+              fill: "solid",
+              dash: "draw",
+              size: "m",
+              font: "draw",
+              align: "middle",
+              verticalAlign: "middle",
+              richText: toRichText(name),
+            },
+            meta: {
+              architect: resource,
+            },
+          });
+          editor.select(id);
+          setResourceCounts((counts) => ({
+            ...counts,
+            [template.kind]: nextCount,
+          }));
+          setSelectedResource(resource);
+        };
+
+        const selectedSnippet = selectedResource ? renderResourceSnippet(selectedResource) : "";
 
         return e(
           "div",
@@ -417,7 +815,12 @@ const renderShell = () => `<!doctype html>
             "section",
             { className: "canvas-stage" },
             roomId
-              ? e(RoomCanvas, { roomId, label })
+              ? e(RoomCanvas, {
+                  roomId,
+                  label,
+                  onEditorReady: setEditor,
+                  onSelectionChange: handleSelectionChange,
+                })
               : e(
                   "div",
                   { className: "empty-room" },
@@ -430,10 +833,58 @@ const renderShell = () => `<!doctype html>
                   ),
                 ),
           ),
+          e(
+            "aside",
+            { className: "inspector", "aria-label": "Architecture resources and code" },
+            e(
+              "section",
+              { className: "palette", "aria-label": "Resource palette" },
+              e("h2", { className: "section-label" }, "Resources"),
+              e(
+                "div",
+                { className: "palette-grid" },
+                resourceTemplates.map((template) =>
+                  e(
+                    "button",
+                    {
+                      key: template.kind,
+                      className: "resource-button",
+                      onClick: () => addResource(template),
+                      disabled: !roomId || !editor,
+                    },
+                    e("span", { className: "resource-dot color-" + template.color, "aria-hidden": "true" }),
+                    e(
+                      "span",
+                      { className: "resource-copy" },
+                      e("strong", null, template.label),
+                      e("span", null, template.description),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            e(
+              "section",
+              { className: "code-panel", "aria-label": "Generated code" },
+              e(
+                "div",
+                { className: "code-header" },
+                e(
+                  "div",
+                  { className: "code-title" },
+                  e("h2", null, selectedResource ? selectedResource.name : "Code"),
+                  e("p", null, selectedResource ? selectedResource.bindingName : "Select a semantic resource"),
+                ),
+              ),
+              selectedResource
+                ? e("pre", null, e("code", null, selectedSnippet))
+                : e("div", { className: "code-empty" }, "Add or select a resource to inspect its effect-cf snippet."),
+            ),
+          ),
         );
       }
 
-      function RoomCanvas({ roomId, label }) {
+      function RoomCanvas({ roomId, label, onEditorReady, onSelectionChange }) {
         const uri = useMemo(() => {
           const protocol = location.protocol === "https:" ? "wss:" : "ws:";
           const url = new URL(protocol + "//" + location.host + "/api/rooms/" + roomId + "/ws");
@@ -447,6 +898,27 @@ const renderShell = () => `<!doctype html>
           assets: inlineAssetStore,
         });
 
+        const handleMount = useCallback(
+          (mountedEditor) => {
+            onEditorReady(mountedEditor);
+
+            const updateSelection = () => {
+              const selected = mountedEditor.getOnlySelectedShape();
+              onSelectionChange(selected?.meta?.architect || null);
+            };
+
+            updateSelection();
+            const dispose = mountedEditor.store.listen(updateSelection);
+
+            return () => {
+              dispose?.();
+              onSelectionChange(null);
+              onEditorReady(null);
+            };
+          },
+          [onEditorReady, onSelectionChange],
+        );
+
         if (remote.status === "loading") {
           return e("div", { className: "sync-banner" }, "Connecting tldraw sync...");
         }
@@ -458,7 +930,7 @@ const renderShell = () => `<!doctype html>
         return e(
           React.Fragment,
           null,
-          e("div", { className: "tldraw-host" }, e(Tldraw, { store: remote.store })),
+          e("div", { className: "tldraw-host" }, e(Tldraw, { store: remote.store, onMount: handleMount })),
           e("div", { className: "sync-banner" }, "Tldraw sync connected. Document changes and presence are room-scoped."),
         );
       }
@@ -467,3 +939,4 @@ const renderShell = () => `<!doctype html>
     </script>
   </body>
 </html>`;
+};

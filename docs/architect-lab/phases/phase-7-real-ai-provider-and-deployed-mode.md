@@ -44,6 +44,6 @@ remains deterministic and free of external credentials.
 
 ## Testing Notes
 
-- Unit test provider selection from config.
-- Unit test fake provider parity with the real provider interface.
-- Avoid tests that require real provider credentials.
+Automated coverage is not a blocker for moving through the product phases. Keep the important
+scenarios in [Architect Lab Testing Log](../testing.md) and implement them during the final
+hardening pass. Tests should not require real provider credentials.

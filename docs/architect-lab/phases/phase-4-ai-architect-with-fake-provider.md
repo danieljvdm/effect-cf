@@ -46,6 +46,6 @@ shared canvas as a collaborator.
 
 ## Testing Notes
 
-- Unit test fake provider outputs.
-- Runtime test queue message decoding and acknowledgement.
-- Durable Object test that AI operations pass through the same validation path as human edits.
+Automated coverage is not a blocker for moving through the product phases. Keep the important
+scenarios in [Architect Lab Testing Log](../testing.md) and implement them during the final
+hardening pass.

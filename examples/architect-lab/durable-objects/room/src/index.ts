@@ -4,12 +4,12 @@ import { DurableObjectSqlite, Worker } from "effect-cf";
 
 import { TldrawRoom } from "@architect-lab/tldraw-effect-cf";
 
+import { RoomDurableObject as RoomDefinition } from "@architect-lab/domain/runtime";
 import {
-  RoomDurableObject as RoomDefinition,
   type RoomId,
   type RoomMetadata,
   type TransportEventInput,
-} from "@architect-lab/domain";
+} from "@architect-lab/domain/contracts";
 
 interface RoomInfoRow {
   readonly [key: string]: unknown;

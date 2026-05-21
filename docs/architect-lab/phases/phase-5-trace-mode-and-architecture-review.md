@@ -47,6 +47,6 @@ review feedback.
 
 ## Testing Notes
 
-- Unit test trace definitions.
-- Durable Object test for trace broadcast state.
-- Durable Object alarm test for checkpoint or cleanup scheduling.
+Automated coverage is not a blocker for moving through the product phases. Keep the important
+scenarios in [Architect Lab Testing Log](../testing.md) and implement them during the final
+hardening pass.

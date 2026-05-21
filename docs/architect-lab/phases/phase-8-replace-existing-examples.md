@@ -43,6 +43,6 @@ spread across the removed examples.
 
 ## Testing Notes
 
-- Run root `vp check`.
-- Run targeted Architect Lab tests.
-- Run any retained package tests affected by root script or workspace changes.
+Phase 8 includes the final hardening pass from [Architect Lab Testing Log](../testing.md). At a
+minimum, run root `vp check`, root `vp test`, targeted Architect Lab tests, and any retained package
+tests affected by root script or workspace changes.

@@ -7,10 +7,14 @@ enabled.
 
 ## Status
 
-Planned. The current implementation has raw tldraw document sync, room metadata, and transport
-events, but it does not yet define semantic architecture resource schemas, a resource palette, a
-selection-driven code panel, template-generated snippets, or a KV-backed latest/published read
-model.
+Partially implemented. The domain package now defines semantic resource and edge schemas, a
+resource catalog, and deterministic `effect-cf` snippet generation for Workers, Durable Objects,
+D1, R2, KV, Queues, Workflows, Images, and service bindings. The web shell exposes that catalog as
+a resource palette, attaches semantic metadata to tldraw resource nodes, and shows a
+selection-driven code panel.
+
+Remaining scope: semantic state is still stored only inside tldraw shape metadata, and the
+KV-backed latest/published read model has not been implemented.
 
 ## Product Requirement
 
@@ -41,15 +45,16 @@ code.
 
 ## Acceptance Criteria
 
-- User can manually draw an architecture and inspect generated snippets.
+- User can add semantic architecture resources and inspect generated snippets.
 - Selecting a Worker, Durable Object, D1, R2, KV, Queue, Workflow, Images, or service binding node
   shows a relevant snippet.
 - Snippets use binding names and schema names from the diagram.
 - Snippets reflect diagram names and binding names.
-- Semantic state survives reload.
+- Semantic state survives reload through tldraw record persistence.
+- KV-backed latest/published read model survives reload.
 
 ## Testing Notes
 
-- Unit test semantic schemas.
-- Unit test code generation templates.
-- Runtime test KV-backed latest/published read model updates.
+Automated coverage is not a blocker for moving through the product phases. Keep the important
+scenarios in [Architect Lab Testing Log](../testing.md) and implement them during the final
+hardening pass.

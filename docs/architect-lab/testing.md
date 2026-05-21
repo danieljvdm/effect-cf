@@ -1,0 +1,76 @@
+# Architect Lab Testing Log
+
+Architect Lab is moving through product phases first. Automated test coverage should be finished in
+a final hardening pass once the main workflows are in place, rather than blocking every phase on
+browser and platform coverage.
+
+This file is the backlog of scenarios that matter. Keep it current as implementation changes.
+
+## Current Manual Verification
+
+- Local Architect Lab tldraw sync has been manually verified.
+- The room can be opened locally, edited, and shared across browser tabs.
+
+## Existing Automated Coverage
+
+- Domain schema contract tests.
+- API Worker room creation and room health tests through the typed room namespace.
+- Web Worker shell and typed service-binding forwarding tests.
+- Room Durable Object metadata persistence and health tests.
+- `effect-cf` Durable Object SQLite SQL layer tests.
+- Semantic resource catalog and snippet template tests.
+
+## Final Hardening Backlog
+
+### Phase 1 And 2 Foundation
+
+- Browser smoke test that starts the local app, opens a room, and verifies the tldraw canvas renders
+  nonblank.
+- Two-tab browser sync test: create or edit a shape in one tab and verify it appears in the other.
+- Reload/reconnect test: create a representative document, reload the room, and verify the latest
+  document state is restored.
+- Conflict/concurrent-edit test appropriate to tldraw sync-core.
+- Durable Object or integration test for applying and replaying/persisting representative tldraw
+  document changes.
+- Hibernation/resume test for sockets with serialized tldraw session snapshots.
+
+### Phase 3 Semantic Model
+
+- Additional unit tests for semantic edge schemas and invalid resource metadata.
+- Additional unit tests for code generation templates across every supported resource kind.
+- Runtime test for KV-backed latest/published read model updates.
+- Browser smoke test for selecting a diagram element and seeing the matching code panel snippet.
+
+### Phase 4 AI Jobs
+
+- Unit tests for fake provider outputs.
+- Runtime tests for Queue message decoding and acknowledgement.
+- Durable Object test that AI operations pass through the same validation path as human edits.
+- Browser smoke test for submitting the default prompt and seeing generated canvas edits.
+
+### Phase 5 Trace And Review
+
+- Unit tests for trace definitions.
+- Durable Object test for trace broadcast state.
+- Durable Object alarm test for checkpoint or cleanup scheduling.
+- Browser smoke test for trace mode updating the canvas and side panel.
+
+### Phase 6 Export
+
+- Workflow test for successful manifest generation.
+- Workflow test for failure status persistence.
+- R2 test for generated file and manifest writes.
+- Browser smoke test for starting an export and seeing durable status updates.
+
+### Phase 7 Deployed Provider
+
+- Unit tests for provider selection from config.
+- Unit tests for fake provider parity with the real provider interface.
+- No tests should require real provider credentials.
+
+### Phase 8 Replacement Validation
+
+- Root `vp check`.
+- Root `vp test`.
+- Targeted Architect Lab tests.
+- Preserved example pattern traceability review.

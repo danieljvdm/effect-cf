@@ -296,14 +296,18 @@ The README should document any Cloudflare features that have reduced local fidel
 
 ## Testing Strategy
 
-Required before replacing existing examples:
+Architect Lab should move through product phases first. Automated coverage is tracked in
+[Architect Lab Testing Log](./testing.md) and should be completed in a final hardening pass once the
+main workflows are implemented.
+
+Final hardening should include:
 
 - Unit tests for domain schemas and code snippet generation.
 - Worker runtime tests for API routes and service bindings.
 - Durable Object room tests for tldraw operation validation, reconnect, and document restore.
 - Queue tests using in-memory or Workers test bindings.
 - Workflow tests for export manifest generation.
-- Frontend smoke test for opening a room and seeing a nonblank canvas.
+- Browser smoke test for opening a room and seeing a nonblank canvas.
 
 The demo should also become a regression target for package runtime boundaries:
 
@@ -313,13 +317,15 @@ The demo should also become a regression target for package runtime boundaries:
 
 ## Open Technical Questions
 
-- Whether to use tldraw's sync protocol directly or wrap a smaller operation protocol around
-  tldraw records.
-- Whether room state should be event-sourced in DO SQLite, checkpointed as serialized document
-  blobs in embedded key/value storage, or both from the start.
 - Whether the API Worker should start Workflows directly or enqueue jobs that start Workflows.
 - How much generated code should be runnable in the first public version.
 - Whether real AI provider support belongs in the example or only in documentation/config hooks.
+
+Resolved:
+
+- The tldraw sync engine is hosted directly in the room Durable Object.
+- Room metadata and transport events use room-owned Durable Object SQLite tables, while tldraw
+  document state is persisted through tldraw sync-core's SQLite storage adapter.
 
 ## Preserved Example Patterns
 

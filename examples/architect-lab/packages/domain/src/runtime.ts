@@ -1,0 +1,52 @@
+import { Config } from "effect";
+import { DurableObject, Worker, WorkerConfig } from "effect-cf";
+
+import {
+  ApiHealth,
+  CreateRoomResult,
+  RoomHealth,
+  RoomId,
+  RoomMetadata,
+  TransportEventInput,
+  TransportEventReceipt,
+} from "./contracts.js";
+
+export const ArchitectConfig = Config.all({
+  publicOrigin: WorkerConfig.string("ARCHITECT_PUBLIC_ORIGIN").pipe(
+    Config.withDefault("http://localhost:8787"),
+  ),
+  defaultRoomTitle: WorkerConfig.string("ARCHITECT_DEFAULT_ROOM_TITLE").pipe(
+    Config.withDefault("Untitled architecture"),
+  ),
+});
+
+export class RoomDurableObject extends DurableObject.Tag<RoomDurableObject>()(
+  "ArchitectRoomDurableObject",
+  {
+    getMetadata: DurableObject.method({
+      args: [RoomId] as const,
+      success: RoomMetadata,
+    }),
+    getHealth: DurableObject.method({
+      args: [RoomId] as const,
+      success: RoomHealth,
+    }),
+    recordTransportEvent: DurableObject.method({
+      args: [TransportEventInput] as const,
+      success: TransportEventReceipt,
+    }),
+  },
+) {}
+
+export class ApiWorker extends Worker.Tag<ApiWorker>()("ArchitectApiWorker", {
+  health: Worker.method({
+    success: ApiHealth,
+  }),
+  createRoom: Worker.method({
+    success: CreateRoomResult,
+  }),
+  roomHealth: Worker.method({
+    args: [RoomId] as const,
+    success: RoomHealth,
+  }),
+}) {}

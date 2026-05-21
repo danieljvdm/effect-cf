@@ -20,6 +20,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260421.1",
     "vite-plus": "0.1.20",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "wrangler": "^4.93.1"
   }
 }

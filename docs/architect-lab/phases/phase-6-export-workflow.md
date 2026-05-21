@@ -47,6 +47,6 @@ Users can export an architecture package that contains generated documentation a
 
 ## Testing Notes
 
-- Workflow test for successful manifest generation.
-- Workflow test for failure status persistence.
-- R2 test for generated file and manifest writes.
+Automated coverage is not a blocker for moving through the product phases. Keep the important
+scenarios in [Architect Lab Testing Log](../testing.md) and implement them during the final
+hardening pass.

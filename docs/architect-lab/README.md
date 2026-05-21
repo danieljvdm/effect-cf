@@ -6,10 +6,10 @@ application that uses `effect-cf` to build a multiplayer architecture canvas.
 The demo should be self-referential:
 
 - The implemented app currently covers Cloudflare Workers, service bindings, Durable Objects,
-  Durable Object WebSockets, Durable Object storage, Durable Object SQLite, WorkerConfig, and
-  tldraw sync through `effect-cf`.
-- Later roadmap phases add D1, R2, KV, Queues, Workflows, Images, optional Hyperdrive, AI-assisted
-  architecture edits, trace mode, and export workflows.
+  Durable Object WebSockets, Durable Object storage, Durable Object SQLite, WorkerConfig, tldraw
+  sync, and semantic `effect-cf` resource snippets through `effect-cf`.
+- Later roadmap phases add KV-backed latest/published read models, optional Hyperdrive,
+  AI-assisted architecture edits, trace mode, and export workflows.
 - The application helps users design Cloudflare architectures and generates `effect-cf` code from
   the diagrams they create.
 
@@ -17,8 +17,10 @@ The demo should be self-referential:
 
 - Phase 0 and Phase 1 are complete.
 - Phase 2 is implemented with direct tldraw sync hosted inside the room Durable Object. Browser-level
-  two-tab sync, reconnect, conflict, and canvas smoke tests remain verification gaps.
-- Phase 3 through Phase 7 are planned.
+  two-tab sync, reconnect, conflict, and canvas smoke tests are tracked for final hardening.
+- Phase 3 is partially implemented with semantic resource nodes and a selection-driven code panel;
+  the KV-backed latest/published read model remains.
+- Phase 4 through Phase 7 are planned.
 - Phase 8 is mostly complete because Architect Lab is now the only `examples/` app; a final
   traceability pass remains after later resource coverage is implemented or explicitly ruled out.
 
@@ -29,6 +31,7 @@ The demo should be self-referential:
 - [Technical Requirements](./trd.md) describes the proposed architecture, resource mapping,
   data model, room protocol, AI tool model, local development approach, and validation strategy.
 - [Phased Roadmap](./phases.md) breaks the implementation into incremental, reviewable phases.
+- [Testing Log](./testing.md) tracks important automated coverage to add during final hardening.
 - [Phase PRD/TRD Matrix](./phase-prd-trd.md) gives each phase its product promise, technical
   scope, and acceptance criteria.
 - [AI Canvas Agent](./ai-canvas-agent.md) specifies how the agent should interact with the canvas,

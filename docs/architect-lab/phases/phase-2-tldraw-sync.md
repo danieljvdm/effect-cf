@@ -7,13 +7,14 @@ tldraw as the main technical problem, not as a thin WebSocket detail.
 
 ## Status
 
-Implemented, with verification gaps. The room Durable Object hosts tldraw sync through
+Implemented and manually verified. The room Durable Object hosts tldraw sync through
 `@architect-lab/tldraw-effect-cf`, which wraps `TLSocketRoom`, `SQLiteSyncStorage`, hibernatable
 WebSocket attachments, and Durable Object SQLite persistence. The selected strategy is documented
 in `examples/architect-lab/tldraw-sync-strategy.md`.
 
 The current automated tests cover room metadata, health, typed Worker/RPC paths, and the web shell.
-They do not yet provide browser-level two-tab sync, reconnect, conflict, or canvas smoke coverage.
+Browser-level two-tab sync, reconnect, conflict, and canvas smoke coverage are tracked in
+[Architect Lab Testing Log](../testing.md) for the final hardening pass.
 
 ## Product Requirement
 
@@ -68,19 +69,15 @@ Deferred resource coverage:
 
 ## Testing Notes
 
-Implemented coverage:
+Automated coverage is not a blocker for moving through the product phases. Keep the important
+scenarios in [Architect Lab Testing Log](../testing.md) and implement them during the final
+hardening pass.
+
+Current coverage:
 
 - Room Durable Object metadata persistence and health tests.
 - API Worker room creation and room health tests through the typed room namespace.
 - Web Worker shell and typed service-binding forwarding tests.
-
-Remaining verification gaps:
-
-- Add a Durable Object or integration test for applying and replaying/persisting representative
-  tldraw document changes.
-- Add a reconnect test that verifies a second client receives the current document state.
-- Add a conflict/concurrent-edit test appropriate to tldraw sync-core.
-- Add a browser smoke check that verifies the canvas is nonblank and synchronized across clients.
 
 ## Tldraw Integration Notes
 

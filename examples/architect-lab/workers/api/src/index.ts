@@ -5,9 +5,8 @@ import {
   ApiWorker as ApiDefinition,
   ArchitectConfig,
   RoomDurableObject,
-  type RoomHealth,
-  type RoomId,
-} from "@architect-lab/domain";
+} from "@architect-lab/domain/runtime";
+import { type RoomHealth, type RoomId } from "@architect-lab/domain/contracts";
 export { RoomDurableObject } from "@architect-lab/room";
 
 const ApiLayer = Layer.mergeAll(RoomDurableObject.layer({ binding: "ROOMS" }), WorkerConfig.layer);

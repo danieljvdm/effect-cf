@@ -81,14 +81,12 @@ Deferred resource coverage:
 
 ## Testing Notes
 
-- Add a runtime test for room creation.
-- Add a Durable Object test for persisted room metadata.
-- Add a typed RPC/namespace call test for room health or metadata.
-- Add a frontend smoke check once the web shell exists.
+Automated coverage is not a blocker for moving through the product phases. Keep the important
+scenarios in [Architect Lab Testing Log](../testing.md) and implement them during the final
+hardening pass.
 
-Remaining verification gap:
-
-- Add browser-level WebSocket/tldraw sync coverage in Phase 2.
+Current coverage includes room creation, room metadata persistence, room health, typed namespace
+calls, and web shell/service-binding tests.
 
 ## Notes
 

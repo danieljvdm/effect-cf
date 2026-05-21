@@ -1,5 +1,5 @@
 import { assert, expect, it, layer, test } from "@effect/vitest";
-import { Effect, Layer, Option, Schema as S, type Scope } from "effect";
+import { Cause, Effect, Exit, Layer, Option, Schema as S, type Scope } from "effect";
 
 import {
   DurableObjectDefinition,
@@ -134,6 +134,94 @@ test("definition-backed Worker RPC validates encoded success values", async () =
         assert.deepStrictEqual(metrics, { backlogCount: 0, backlogBytes: 0 });
       }),
     );
+  });
+
+  test("definition-backed Queue bindings accept local producer shape", async () => {
+    const sent: Array<unknown> = [];
+    const localEnv = {
+      AVATAR_QUEUE: {
+        send: async (message: unknown, options?: QueueBinding.QueueSendOptions) => {
+          sent.push({ message, options });
+          return { metadata: { metrics: { backlogCount: sent.length, backlogBytes: 0 } } };
+        },
+      },
+    } as unknown as Cloudflare.Env;
+    const provided = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      effect.pipe(
+        Effect.provide(
+          AvatarQueue.layer({ binding: "AVATAR_QUEUE" }).pipe(
+            Layer.provide(Layer.succeed(WorkerEnvironment, localEnv)),
+          ),
+        ),
+      );
+
+    await Effect.runPromise(
+      provided(
+        Effect.gen(function* () {
+          yield* AvatarQueue.send({ userId: "u_1", attempts: 2 });
+
+          const queue = yield* AvatarQueue;
+          yield* queue.sendBatch(
+            [
+              { body: { userId: "u_2", attempts: 3 }, contentType: "json" },
+              { body: { userId: "u_3", attempts: 4 }, delaySeconds: 7 },
+            ],
+            { delaySeconds: 5 },
+          );
+        }),
+      ),
+    );
+
+    assert.deepStrictEqual(sent, [
+      { message: { userId: "u_1", attempts: "2" }, options: undefined },
+      {
+        message: { userId: "u_2", attempts: "3" },
+        options: { contentType: "json", delaySeconds: 5 },
+      },
+      {
+        message: { userId: "u_3", attempts: "4" },
+        options: { contentType: undefined, delaySeconds: 7 },
+      },
+    ]);
+
+    const missingMetrics = await Effect.runPromiseExit(provided(AvatarQueue.metrics()));
+
+    assert.ok(Exit.isFailure(missingMetrics));
+    expect(Cause.pretty(missingMetrics.cause)).toContain(
+      'QueueOperationError: Cloudflare queue binding "AVATAR_QUEUE" does not provide metrics()',
+    );
+    await expect(Effect.runPromise(provided(AvatarQueue.metrics()))).rejects.toMatchObject({
+      _tag: "QueueOperationError",
+      binding: "AVATAR_QUEUE",
+      operation: "metrics",
+    });
+  });
+
+  test("definition-backed Queue validation errors include binding and expected shape", async () => {
+    const invalidEnv = {
+      AVATAR_QUEUE: {
+        metrics: async () => ({ backlogCount: 0, backlogBytes: 0 }),
+      },
+    } as unknown as Cloudflare.Env;
+
+    const exit = await Effect.runPromiseExit(
+      AvatarQueue.send({ userId: "u_1", attempts: 2 }).pipe(
+        Effect.provide(
+          AvatarQueue.layer({ binding: "AVATAR_QUEUE" }).pipe(
+            Layer.provide(Layer.succeed(WorkerEnvironment, invalidEnv)),
+          ),
+        ),
+      ),
+    );
+
+    assert.ok(Exit.isFailure(exit));
+    const pretty = Cause.pretty(exit.cause);
+
+    expect(pretty).toContain(
+      'BindingValidationError: Cloudflare binding "AVATAR_QUEUE" failed validation',
+    );
+    expect(pretty).toContain("Expected Queue producer binding with send()");
+    expect(pretty).toContain("got Object with methods metrics");
   });
 
   test("definition-backed Queue consumers decode messages", async () => {

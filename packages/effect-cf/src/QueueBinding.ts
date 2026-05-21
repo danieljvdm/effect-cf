@@ -10,6 +10,11 @@ export type QueueSendBatchResponse = globalThis.QueueSendBatchResponse;
 export type QueueMetrics = globalThis.QueueMetrics;
 export type MessageSendRequest<Body> = globalThis.MessageSendRequest<Body>;
 
+export type QueueProducer<Body> = Pick<globalThis.Queue<Body>, "send"> &
+  Partial<Pick<globalThis.Queue<Body>, "sendBatch" | "metrics">>;
+
+const expectedQueueProducer = "Queue producer binding with send(); optional sendBatch()/metrics()";
+
 export interface QueueBindingDefinition<Message extends RpcDefinition.ServiceFreeSchema> {
   /** Binding name as configured in `wrangler.jsonc`. */
   readonly binding: string;
@@ -34,10 +39,8 @@ export class QueueOperationError extends Data.TaggedError("QueueOperationError")
   readonly binding: string;
   readonly operation: string;
   readonly cause: unknown;
+  readonly message: string;
 }> {}
-
-const queueError = (binding: string, operation: string, cause: unknown) =>
-  new QueueOperationError({ binding, operation, cause });
 
 const tryQueuePromise = <A>(
   binding: string,
@@ -46,26 +49,28 @@ const tryQueuePromise = <A>(
 ): Effect.Effect<A, QueueOperationError> =>
   Effect.tryPromise({
     try: evaluate,
-    catch: (cause) => queueError(binding, operation, cause),
+    catch: (cause) =>
+      new QueueOperationError({
+        binding,
+        operation,
+        cause,
+        message: `Cloudflare queue binding "${binding}" operation "${operation}" failed`,
+      }),
   });
 
-export const isQueue = <Body>(value: unknown): value is globalThis.Queue<Body> => {
+export const isQueue = <Body>(value: unknown): value is QueueProducer<Body> => {
   if (typeof value !== "object" || value === null) {
     return false;
   }
 
   const resource = value as Record<string, unknown>;
 
-  return (
-    typeof resource.send === "function" &&
-    typeof resource.sendBatch === "function" &&
-    typeof resource.metrics === "function"
-  );
+  return typeof resource.send === "function";
 };
 
 export const makeClient = <Message extends RpcDefinition.ServiceFreeSchema>(
   definition: QueueBindingDefinition<Message>,
-): ((queue: globalThis.Queue<S.Codec.Encoded<Message>>) => QueueBindingClient<Message>) => {
+): ((queue: QueueProducer<S.Codec.Encoded<Message>>) => QueueBindingClient<Message>) => {
   type Body = S.Schema.Type<Message>;
   type EncodedBody = S.Codec.Encoded<Message>;
 
@@ -90,12 +95,41 @@ export const makeClient = <Message extends RpcDefinition.ServiceFreeSchema>(
         });
       }
 
-      yield* tryQueuePromise(definition.binding, "sendBatch", () =>
-        queue.sendBatch(encodedMessages, options),
-      );
+      const sendBatch = queue.sendBatch;
+
+      if (sendBatch !== undefined) {
+        yield* tryQueuePromise(definition.binding, "sendBatch", () =>
+          sendBatch.call(queue, encodedMessages, options),
+        );
+        return;
+      }
+
+      yield* tryQueuePromise(definition.binding, "sendBatch", async () => {
+        for (const message of encodedMessages) {
+          await queue.send(message.body, {
+            contentType: message.contentType,
+            delaySeconds: message.delaySeconds ?? options?.delaySeconds,
+          });
+        }
+      });
     }),
-    metrics: () => tryQueuePromise(definition.binding, "metrics", () => queue.metrics()),
-    unsafeRaw: Effect.succeed(queue),
+    metrics: () => {
+      const metrics = queue.metrics;
+
+      if (metrics === undefined) {
+        return Effect.fail(
+          new QueueOperationError({
+            binding: definition.binding,
+            operation: "metrics",
+            cause: new Error(`Queue binding "${definition.binding}" does not provide metrics()`),
+            message: `Cloudflare queue binding "${definition.binding}" does not provide metrics()`,
+          }),
+        );
+      }
+
+      return tryQueuePromise(definition.binding, "metrics", () => metrics.call(queue));
+    },
+    unsafeRaw: Effect.succeed(queue as globalThis.Queue<EncodedBody>),
   });
 };
 
@@ -106,7 +140,8 @@ export const layer = <Self, Message extends RpcDefinition.ServiceFreeSchema>(
   Binding.layer(
     tag,
     definition.binding,
-    (value): value is globalThis.Queue<S.Codec.Encoded<Message>> =>
+    (value): value is QueueProducer<S.Codec.Encoded<Message>> =>
       isQueue<S.Codec.Encoded<Message>>(value),
     makeClient(definition),
+    { expected: expectedQueueProducer },
   );

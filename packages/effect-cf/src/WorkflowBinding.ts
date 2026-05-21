@@ -3,6 +3,8 @@ import { Context, Data, Effect, Option, Schema as S } from "effect";
 import * as Binding from "./Binding";
 import type * as RpcDefinition from "./RpcDefinition";
 
+const expectedWorkflow = "Workflow binding with create(), createBatch(), and get()";
+
 export type WorkflowInstanceCreateOptions<Payload> = Omit<
   globalThis.WorkflowInstanceCreateOptions<Payload>,
   "params"
@@ -242,4 +244,5 @@ export const layer = <
     (value): value is globalThis.Workflow<S.Codec.Encoded<Payload>> =>
       isWorkflow<S.Codec.Encoded<Payload>>(value),
     makeClient(definition),
+    { expected: expectedWorkflow },
   );

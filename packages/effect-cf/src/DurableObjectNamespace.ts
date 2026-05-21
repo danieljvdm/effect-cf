@@ -6,6 +6,9 @@ import type * as DurableObjectDefinition from "./DurableObjectDefinition";
 import * as RpcDefinition from "./RpcDefinition";
 import * as RpcInvocation from "./internal/RpcInvocation";
 
+const expectedDurableObjectNamespace =
+  "Durable Object namespace binding with getByName(), get(), idFromName(), idFromString(), newUniqueId(), and jurisdiction()";
+
 interface DurableObjectFetcher {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
 }
@@ -548,6 +551,7 @@ export const layer = <
     (value): value is DurableObjectNamespaceClient<Api> =>
       isDurableObjectNamespaceClient<Api>(value),
     makeClient<Api, Definition>(definition),
+    { expected: expectedDurableObjectNamespace },
   );
 
 export const makeDirectMethods = <

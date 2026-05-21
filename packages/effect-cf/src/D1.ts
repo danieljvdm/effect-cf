@@ -4,6 +4,7 @@ import { Effect, Layer } from "effect";
 import * as Binding from "./Binding";
 
 const TypeId = "effect-cf/D1" as const;
+const expectedD1Database = "D1 database binding with prepare(), batch(), and exec()";
 
 /** Typed D1 binding definition. */
 export interface D1Definition {
@@ -61,7 +62,9 @@ export const make = <Id extends string>(id: Id, definition: D1Definition) =>
 export const Service =
   <Self>() =>
   <Id extends string>(id: Id, definition: D1Definition) => {
-    const tag = Binding.Service<Self>()(id, definition.binding, isD1Database);
+    const tag = Binding.Service<Self>()(id, definition.binding, isD1Database, undefined, {
+      expected: expectedD1Database,
+    });
 
     const sqlLayer = (options?: D1SqlLayerOptions) =>
       Layer.unwrap(

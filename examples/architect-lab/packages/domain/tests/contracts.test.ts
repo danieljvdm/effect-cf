@@ -15,7 +15,7 @@ describe("architect-lab domain contracts", () => {
     expect(metadata.id).toBe("room_123");
   });
 
-  test("keeps phase 1 presence messages explicit", () => {
+  test("keeps room presence snapshot messages explicit", () => {
     const snapshot = S.decodeUnknownSync(PresenceSnapshot)({
       type: "server.presence.snapshot",
       roomId: "room_123",

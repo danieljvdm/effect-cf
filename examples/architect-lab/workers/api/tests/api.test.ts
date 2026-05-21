@@ -45,6 +45,7 @@ test("reads room health through the typed Room Durable Object RPC path", async (
         id: roomId,
         title: "Untitled architecture",
         connections: 2,
+        documentClock: 7,
         transportEvents: 5,
         updatedAt: "2026-05-21T12:00:00.000Z",
       }),
@@ -56,6 +57,7 @@ test("reads room health through the typed Room Durable Object RPC path", async (
   await expect(response.json()).resolves.toMatchObject({
     id: "room_a",
     connections: 2,
+    documentClock: 7,
     transportEvents: 5,
   });
 });

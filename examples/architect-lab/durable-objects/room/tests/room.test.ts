@@ -31,6 +31,7 @@ test("records transport events and reports health through typed Durable Object R
   expect(health).toMatchObject({
     id: "room_b",
     connections: 0,
+    documentClock: 0,
     transportEvents: 1,
   });
 });
@@ -56,6 +57,8 @@ interface RoomEvent {
 function makeState(): DurableObjectState {
   const rooms = new Map<string, RoomRow>();
   const events: Array<RoomEvent> = [];
+  let tldrawSchema = "";
+  let tldrawDocumentClock = 0;
 
   return {
     id: { toString: () => "room-do-id" },
@@ -66,6 +69,40 @@ function makeState(): DurableObjectState {
 
           if (normalized.startsWith("CREATE TABLE")) {
             return makeCursor([]);
+          }
+
+          if (normalized.includes("CREATE TABLE tldraw_documents")) {
+            return makeCursor([]);
+          }
+
+          if (normalized.startsWith("SELECT schema FROM tldraw_metadata")) {
+            return makeCursor(tldrawSchema === "" ? [] : [{ schema: tldrawSchema }]);
+          }
+
+          if (normalized.startsWith("SELECT migrationVersion FROM tldraw_metadata")) {
+            return makeCursor([]);
+          }
+
+          if (normalized.startsWith("UPDATE tldraw_metadata SET migrationVersion")) {
+            return makeCursor([]);
+          }
+
+          if (normalized.startsWith("DELETE FROM tldraw_documents")) {
+            return makeCursor([]);
+          }
+
+          if (normalized.startsWith("INSERT OR REPLACE INTO tldraw_documents")) {
+            return makeCursor([]);
+          }
+
+          if (normalized.startsWith("UPDATE tldraw_metadata SET documentClock")) {
+            tldrawDocumentClock = bindings[0] as number;
+            tldrawSchema = bindings[2] as string;
+            return makeCursor([]);
+          }
+
+          if (normalized.startsWith("SELECT documentClock FROM tldraw_metadata")) {
+            return makeCursor([{ documentClock: tldrawDocumentClock }]);
           }
 
           if (normalized.startsWith("INSERT INTO room_info")) {
@@ -121,6 +158,8 @@ function makeState(): DurableObjectState {
         },
         databaseSize: 0,
       },
+      transactionSync: (callback: () => unknown) => callback(),
+      sync: () => undefined,
     },
     blockConcurrencyWhile: (callback: () => Promise<unknown>) => void callback(),
     waitUntil: () => undefined,
@@ -132,22 +171,26 @@ function makeState(): DurableObjectState {
 function makeCursor<T extends Record<string, SqlStorageValue>>(
   rows: Array<T>,
 ): SqlStorageCursor<T> {
+  const cursorRows = [...rows];
   return {
     next: () => {
-      const value = rows.shift();
+      const value = cursorRows.shift();
       return value === undefined ? { done: true } : { done: false, value };
     },
-    toArray: () => [...rows],
+    toArray: () => [...cursorRows],
     one: () => {
-      const value = rows[0];
+      const value = cursorRows[0];
       if (value === undefined) {
         throw new Error("No rows");
       }
       return value;
     },
     raw: function* () {},
-    columnNames: Object.keys(rows[0] ?? {}),
-    rowsRead: rows.length,
+    [Symbol.iterator]: function* () {
+      yield* cursorRows;
+    },
+    columnNames: Object.keys(cursorRows[0] ?? {}),
+    rowsRead: cursorRows.length,
     rowsWritten: 0,
   } as unknown as SqlStorageCursor<T>;
 }

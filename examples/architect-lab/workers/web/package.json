@@ -13,8 +13,12 @@
   },
   "dependencies": {
     "@architect-lab/domain": "workspace:*",
+    "@tldraw/sync": "^5.0.1",
     "effect": "catalog:",
-    "effect-cf": "workspace:*"
+    "effect-cf": "workspace:*",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "tldraw": "^5.0.1"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260421.1",

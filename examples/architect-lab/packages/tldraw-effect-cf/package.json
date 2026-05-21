@@ -1,5 +1,5 @@
 {
-  "name": "@architect-lab/room",
+  "name": "@architect-lab/tldraw-effect-cf",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -11,8 +11,8 @@
     "test": "vp test"
   },
   "dependencies": {
-    "@architect-lab/domain": "workspace:*",
-    "@architect-lab/tldraw-effect-cf": "workspace:*",
+    "@tldraw/sync-core": "^5.0.1",
+    "@tldraw/tlschema": "^5.0.1",
     "effect": "catalog:",
     "effect-cf": "workspace:*"
   },

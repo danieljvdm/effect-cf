@@ -20,6 +20,7 @@ export const RoomHealth = S.Struct({
   title: S.String,
   connections: S.Number,
   transportEvents: S.Number,
+  documentClock: S.Number,
   updatedAt: S.String,
 });
 export type RoomHealth = S.Schema.Type<typeof RoomHealth>;

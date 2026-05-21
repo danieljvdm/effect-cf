@@ -1,8 +1,8 @@
 # Architect Lab
 
-Phase 1 is a Cloudflare/effect-cf transport scaffold. It proves the Worker, service binding,
-Durable Object, WebSocket, Durable Object SQLite, typed Durable Object namespace, and typed Worker
-service binding paths before tldraw sync is added.
+Architect Lab is a Cloudflare/effect-cf multiplayer canvas example. Phase 2 hosts tldraw sync in a
+room Durable Object, persists tldraw records in Durable Object SQLite, and keeps typed Worker and
+Durable Object RPC for room metadata and health.
 
 ## Run Locally
 
@@ -11,12 +11,13 @@ vp install
 vp run architect#dev
 ```
 
-Open <http://localhost:8787>. Create a room, then open the same room URL in a second tab to see
-presence and transport pings.
+Open <http://localhost:8787>. Create a room, draw on the tldraw canvas, then open the same room URL
+in a second tab to see shared document edits and presence. Reloading the room restores the latest
+document from Durable Object SQLite.
 
-Phase 1 intentionally does not claim tldraw sync support. The room protocol only carries basic
-presence and transport ping messages that remain useful when Phase 2 adds the real canvas sync
-strategy.
+The tldraw sync strategy is documented in
+[tldraw-sync-strategy.md](./tldraw-sync-strategy.md). Phase 2 stores image/video assets inline so
+the room remains DO-only; R2-backed asset uploads are deferred to later resource coverage.
 
 ## Layout
 
@@ -27,4 +28,6 @@ examples/architect-lab/
   workers/web/           Browser-facing Worker and service-binding bridge
   workers/api/           API Worker and room routing
   durable-objects/room/  Room Durable Object
+  packages/tldraw-effect-cf/
+                         Effect-native tldraw sync adapter for DO WebSockets and SQLite
 ```

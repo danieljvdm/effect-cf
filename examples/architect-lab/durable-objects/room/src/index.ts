@@ -1,11 +1,12 @@
-import { Effect, Layer, Option, Schema as S } from "effect";
-import { DurableObjectState, DurableObjectWebSocket, Worker } from "effect-cf";
+import { Effect, Option } from "effect";
+import { DurableObjectState, Worker } from "effect-cf";
+
+import { TldrawRoom } from "@architect-lab/tldraw-effect-cf";
 
 import {
-  type PresenceMember,
-  type RoomMetadata,
   RoomDurableObject as RoomDefinition,
   type RoomId,
+  type RoomMetadata,
   type TransportEventInput,
 } from "@architect-lab/domain";
 
@@ -27,30 +28,7 @@ interface SequenceRow {
   readonly sequence: number;
 }
 
-interface SocketAttachment {
-  readonly roomId: RoomId;
-  readonly sessionId: string;
-  readonly userId: string;
-  readonly label: string;
-  readonly joinedAt: string;
-  readonly lastSeenAt: string;
-}
-
-const SocketAttachmentSchema = S.Struct({
-  roomId: S.String,
-  sessionId: S.String,
-  userId: S.String,
-  label: S.String,
-  joinedAt: S.String,
-  lastSeenAt: S.String,
-});
-
-const SocketAttachment = DurableObjectWebSocket.attachment(SocketAttachmentSchema);
-
-const roomTag = (roomId: RoomId) => `room:${roomId}`;
-const departedSessionKeys = new Set<string>();
-const sessionKey = (attachment: Pick<SocketAttachment, "roomId" | "sessionId">) =>
-  `${attachment.roomId}:${attachment.sessionId}`;
+const RoomLayer = TldrawRoom.layer({ tablePrefix: "tldraw_" });
 
 const setupSchema = Effect.fn("setupSchema")(function* () {
   const state = yield* DurableObjectState.DurableObjectState;
@@ -139,186 +117,50 @@ const recordTransportEvent = Effect.fn("recordTransportEvent")(function* (
   return { roomId: event.roomId, sequence: row.sequence };
 });
 
-const getPresenceMembers = Effect.fn("getPresenceMembers")(function* (roomId: RoomId) {
-  const state = yield* DurableObjectState.DurableObjectState;
-  const sockets = yield* state.getWebSockets(roomTag(roomId));
-  const members: Array<PresenceMember> = [];
-
-  for (const socket of sockets) {
-    const decoded = yield* SocketAttachment.deserialize(socket).pipe(Effect.option);
-    if (
-      Option.isSome(decoded) &&
-      Option.isSome(decoded.value) &&
-      !departedSessionKeys.has(sessionKey(decoded.value.value))
-    ) {
-      members.push(decoded.value.value);
-    }
-  }
-
-  return members;
-});
-
-const broadcastPresence = Effect.fn("broadcastPresence")(function* (roomId: RoomId) {
-  const state = yield* DurableObjectState.DurableObjectState;
-  const members = yield* getPresenceMembers(roomId);
-  const message = JSON.stringify({
-    type: "server.presence.snapshot",
-    roomId,
-    members,
-  });
-
-  const sockets = yield* state.getWebSockets(roomTag(roomId));
-  for (const socket of sockets) {
-    yield* socket.send(message).pipe(Effect.ignore);
-  }
-});
-
 const acceptRoomSocket = Effect.fn("acceptRoomSocket")(function* (
   request: Request,
   roomId: RoomId,
 ) {
-  if (!Worker.isWebSocketUpgrade(request)) {
-    return new Response("Expected WebSocket upgrade", { status: 426 });
-  }
-
-  yield* ensureRoom(roomId);
-
+  const tldraw = yield* TldrawRoom;
   const url = new URL(request.url);
   const userId = url.searchParams.get("userId") ?? `user_${crypto.randomUUID().slice(0, 8)}`;
   const label = url.searchParams.get("label") ?? "Guest";
-  const now = new Date().toISOString();
-  const attachment: SocketAttachment = {
+  const sessionId = url.searchParams.get("sessionId") ?? undefined;
+
+  yield* ensureRoom(roomId);
+  const response = yield* tldraw.acceptWebSocket(request, {
     roomId,
-    sessionId: `session_${crypto.randomUUID()}`,
     userId,
     label,
-    joinedAt: now,
-    lastSeenAt: now,
-  };
-  departedSessionKeys.delete(sessionKey(attachment));
-
-  const upgrade = yield* DurableObjectWebSocket.acceptUpgrade<SocketAttachment>({
-    tags: [roomTag(roomId)],
-    attachment,
+    sessionId,
   });
 
   yield* recordTransportEvent({
     roomId,
     actor: userId,
-    kind: "socket.open",
-    payloadJson: JSON.stringify({ sessionId: attachment.sessionId }),
+    kind: "tldraw.socket.open",
+    payloadJson: JSON.stringify({ label, sessionId: sessionId ?? null }),
   });
-  yield* broadcastPresence(roomId);
 
-  return upgrade.response;
-});
-
-const handleSocketMessage = Effect.fn("handleSocketMessage")(function* (
-  socket: DurableObjectWebSocket.DurableWebSocket,
-  message: string,
-) {
-  const decoded = yield* SocketAttachment.deserialize(socket);
-  if (Option.isNone(decoded)) {
-    yield* socket.close(1008, "missing attachment").pipe(Effect.ignore);
-    return;
-  }
-
-  const attachment = decoded.value;
-  const parsed = parseMessage(message);
-  const now = new Date().toISOString();
-
-  if (parsed.type === "presence.update") {
-    const next = {
-      ...attachment,
-      label:
-        typeof parsed.label === "string" && parsed.label.length > 0
-          ? parsed.label
-          : attachment.label,
-      lastSeenAt: now,
-    };
-    yield* SocketAttachment.serialize(socket, next);
-    yield* recordTransportEvent({
-      roomId: attachment.roomId,
-      actor: attachment.userId,
-      kind: "presence.update",
-      payloadJson: JSON.stringify({ label: next.label }),
-    });
-    yield* broadcastPresence(attachment.roomId);
-    return;
-  }
-
-  if (parsed.type === "transport.ping") {
-    const next = { ...attachment, lastSeenAt: now };
-    yield* SocketAttachment.serialize(socket, next);
-    yield* recordTransportEvent({
-      roomId: attachment.roomId,
-      actor: attachment.userId,
-      kind: "transport.ping",
-      payloadJson: JSON.stringify({ nonce: parsed.nonce ?? null }),
-    });
-    yield* socket.send(
-      JSON.stringify({
-        type: "server.transport.pong",
-        roomId: attachment.roomId,
-        nonce: parsed.nonce ?? null,
-        receivedAt: now,
-      }),
-    );
-    yield* broadcastPresence(attachment.roomId);
-    return;
-  }
-
-  yield* socket.send(
-    JSON.stringify({
-      type: "server.error",
-      message: "Unsupported phase 1 room message",
-    }),
-  );
-});
-
-const handleSocketClose = Effect.fn("handleSocketClose")(function* (
-  socket: DurableObjectWebSocket.DurableWebSocket,
-  options: { readonly wasClean: boolean },
-) {
-  const decoded = yield* SocketAttachment.deserialize(socket).pipe(Effect.option);
-  if (Option.isSome(decoded) && Option.isSome(decoded.value)) {
-    const attachment = decoded.value.value;
-    departedSessionKeys.add(sessionKey(attachment));
-    yield* recordTransportEvent({
-      roomId: attachment.roomId,
-      actor: attachment.userId,
-      kind: "socket.close",
-      payloadJson: JSON.stringify({
-        sessionId: attachment.sessionId,
-        wasClean: options.wasClean,
-      }),
-    }).pipe(Effect.ignore);
-    yield* broadcastPresence(attachment.roomId).pipe(Effect.ignore);
-  }
+  return response;
 });
 
 const getHealth = Effect.fn("getHealth")(function* (roomId: RoomId) {
+  const tldraw = yield* TldrawRoom;
   const metadata = yield* ensureRoom(roomId);
-  const members = yield* getPresenceMembers(roomId);
   const transportEvents = yield* getEventCount(roomId);
+  const connections = yield* tldraw.getActiveSessionCount;
+  const documentClock = yield* tldraw.getDocumentClock;
 
   return {
     id: metadata.id,
     title: metadata.title,
     updatedAt: metadata.updatedAt,
-    connections: members.length,
+    connections,
     transportEvents,
+    documentClock,
   };
 });
-
-const parseMessage = (message: string): Record<string, unknown> => {
-  try {
-    const parsed = JSON.parse(message);
-    return typeof parsed === "object" && parsed !== null ? parsed : { type: "unknown" };
-  } catch {
-    return { type: "invalid" };
-  }
-};
 
 const toMetadata = (row: RoomInfoRow): RoomMetadata => ({
   id: row.id,
@@ -327,7 +169,7 @@ const toMetadata = (row: RoomInfoRow): RoomMetadata => ({
   updatedAt: row.updated_at,
 });
 
-export const RoomDurableObject = RoomDefinition.make(Layer.empty, {
+export const RoomDurableObject = RoomDefinition.make(RoomLayer, {
   fetch: Effect.gen(function* () {
     const request = yield* Worker.NativeRequest;
     const url = new URL(request.url);
@@ -344,14 +186,44 @@ export const RoomDurableObject = RoomDefinition.make(Layer.empty, {
     getHealth,
     recordTransportEvent,
   },
-  webSocketMessage: (socket, message) =>
-    typeof message === "string"
-      ? handleSocketMessage(socket, message)
-      : socket.send(
-          JSON.stringify({ type: "server.error", message: "Binary messages are not supported" }),
-        ),
-  webSocketClose: (socket, _code, _reason, wasClean) => handleSocketClose(socket, { wasClean }),
-  webSocketError: (socket) => handleSocketClose(socket, { wasClean: false }),
+  webSocketMessage: (socket, message) => {
+    const tldrawMessage = Effect.gen(function* () {
+      const tldraw = yield* TldrawRoom;
+      yield* tldraw.handleMessage(socket, message);
+    });
+
+    return typeof message === "string" || message instanceof ArrayBuffer
+      ? tldrawMessage
+      : socket.close(1003, "unsupported tldraw websocket message");
+  },
+  webSocketClose: (socket) =>
+    Effect.gen(function* () {
+      const tldraw = yield* TldrawRoom;
+      const closed = yield* tldraw.handleClose(socket);
+
+      if (Option.isSome(closed)) {
+        yield* recordTransportEvent({
+          roomId: closed.value.roomId,
+          actor: closed.value.userId,
+          kind: "tldraw.socket.close",
+          payloadJson: JSON.stringify({ sessionId: closed.value.sessionId }),
+        }).pipe(Effect.ignore);
+      }
+    }),
+  webSocketError: (socket) =>
+    Effect.gen(function* () {
+      const tldraw = yield* TldrawRoom;
+      const closed = yield* tldraw.handleError(socket);
+
+      if (Option.isSome(closed)) {
+        yield* recordTransportEvent({
+          roomId: closed.value.roomId,
+          actor: closed.value.userId,
+          kind: "tldraw.socket.error",
+          payloadJson: JSON.stringify({ sessionId: closed.value.sessionId }),
+        }).pipe(Effect.ignore);
+      }
+    }),
 });
 
 export { RoomDefinition };

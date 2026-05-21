@@ -4,6 +4,12 @@
 
 Make the example usable beyond deterministic demos while keeping local development reliable.
 
+## Status
+
+Planned. No fake/real provider interface has been implemented yet, so deployed AI provider
+configuration, timeout/retry/cost controls, and the optional Hyperdrive extension remain future
+work.
+
 ## Product Requirement
 
 Maintainers can enable a real AI provider for richer demos while the default local experience

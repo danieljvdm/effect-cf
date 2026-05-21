@@ -5,6 +5,16 @@
 Integrate real tldraw document synchronization with the Durable Object room. This phase treats
 tldraw as the main technical problem, not as a thin WebSocket detail.
 
+## Status
+
+Implemented, with verification gaps. The room Durable Object hosts tldraw sync through
+`@architect-lab/tldraw-effect-cf`, which wraps `TLSocketRoom`, `SQLiteSyncStorage`, hibernatable
+WebSocket attachments, and Durable Object SQLite persistence. The selected strategy is documented
+in `examples/architect-lab/tldraw-sync-strategy.md`.
+
+The current automated tests cover room metadata, health, typed Worker/RPC paths, and the web shell.
+They do not yet provide browser-level two-tab sync, reconnect, conflict, or canvas smoke coverage.
+
 ## Product Requirement
 
 Users can open the same room in multiple tabs, edit a tldraw canvas, see each other's changes, and
@@ -58,24 +68,26 @@ Deferred resource coverage:
 
 ## Testing Notes
 
-- Add a Durable Object test for applying and replaying/persisting representative tldraw document
-  changes.
+Implemented coverage:
+
+- Room Durable Object metadata persistence and health tests.
+- API Worker room creation and room health tests through the typed room namespace.
+- Web Worker shell and typed service-binding forwarding tests.
+
+Remaining verification gaps:
+
+- Add a Durable Object or integration test for applying and replaying/persisting representative
+  tldraw document changes.
 - Add a reconnect test that verifies a second client receives the current document state.
-- Add a conflict/concurrent-edit test appropriate to the chosen sync strategy.
-- Add a frontend smoke check that verifies the canvas is nonblank and synchronized across clients.
+- Add a conflict/concurrent-edit test appropriate to tldraw sync-core.
+- Add a browser smoke check that verifies the canvas is nonblank and synchronized across clients.
 
 ## Tldraw Integration Notes
 
-Implementation should evaluate these options:
+The selected implementation hosts tldraw's sync engine directly behind a Durable Object WebSocket
+and persists through Durable Object storage.
 
-- Use tldraw's sync engine directly if it can be cleanly hosted behind a Durable Object WebSocket
-  and persisted into Durable Object storage.
-- Use tldraw store listeners on the client and a smaller validated patch protocol in the Durable
-  Object if direct sync is too coupled to a different server runtime.
-- Use a constrained canvas subset only if the limitation is explicit and does not block later
-  migration to real tldraw records.
-
-The chosen path must define:
+The chosen path defines:
 
 - document identity and versioning;
 - initial snapshot handshake;

@@ -4,6 +4,21 @@
 
 Align on product shape and technical boundaries before replacing examples.
 
+## Status
+
+Complete. Architect Lab is the only `examples/` app in the repository, and the initial
+implementation uses the chosen split topology:
+
+- `examples/architect-lab/web`
+- `examples/architect-lab/workers/web`
+- `examples/architect-lab/workers/api`
+- `examples/architect-lab/durable-objects/room`
+- `examples/architect-lab/packages/domain`
+- `examples/architect-lab/packages/tldraw-effect-cf`
+
+The Phase 1 transport slice and Phase 2 tldraw strategy have both been implemented. Later AI
+provider details remain deferred to Phase 4.
+
 ## Product Requirement
 
 Maintainers have enough shared context to decide whether Architect Lab should become the flagship
@@ -30,12 +45,17 @@ example and what the first implementation slice must prove.
 
 - Maintainers agree this becomes the single flagship example.
 - Scope is small enough for incremental implementation.
-- Phase 1 can start without re-litigating the overall product shape or transport topology.
+- Phase 1 started and was implemented without re-litigating the overall product shape or transport
+  topology.
 
-## Open Decisions
+## Resolved Decisions
 
-- Final example directory name.
-- Whether Phase 1 keeps web/API/room in separate packages from day one or collapses until needed.
-- Which typed room RPC methods are needed before tldraw exists.
-- Whether Phase 2 should use tldraw's sync protocol directly or wrap a smaller operation protocol.
-- Which local fake AI prompts are required for the first demo.
+- The canonical example directory is `examples/architect-lab`.
+- Phase 1 kept web, API, room, and shared domain code in separate workspace packages.
+- The initial typed room RPC methods are `getMetadata`, `getHealth`, and `recordTransportEvent`.
+- Phase 2 uses tldraw's sync engine directly in the room Durable Object through
+  `@architect-lab/tldraw-effect-cf`.
+
+## Deferred Decisions
+
+- The local fake AI prompt catalog belongs to Phase 4.

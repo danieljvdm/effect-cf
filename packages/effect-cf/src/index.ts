@@ -5,6 +5,7 @@ export * as DurableObjectAlarm from "./DurableObjectAlarm";
 export * as DurableObjectDefinition from "./DurableObjectDefinition";
 export * as DurableObjectNamespace from "./DurableObjectNamespace";
 export * as DurableObjectRpcWebSocket from "./DurableObjectRpcWebSocket";
+export * as DurableObjectSqlite from "./DurableObjectSqlite";
 export * as DurableObjectState from "./DurableObjectState";
 export * as DurableObjectWebSocket from "./DurableObjectWebSocket";
 export * as DurableObjectStorage from "./DurableObjectStorage";

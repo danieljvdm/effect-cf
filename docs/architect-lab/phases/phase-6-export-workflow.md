@@ -4,6 +4,11 @@
 
 Demonstrate long-running durable work and produce a tangible artifact from the canvas.
 
+## Status
+
+Planned. The current implementation does not yet include export commands, Workflows, D1 export
+status, R2 artifact storage, export manifests, or Images-backed preview generation.
+
 ## Product Requirement
 
 Users can export an architecture package that contains generated documentation and starter

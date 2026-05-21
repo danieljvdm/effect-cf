@@ -5,6 +5,19 @@
 Build the minimal Cloudflare/effect-cf application shell before taking on tldraw sync. This phase
 proves the Worker, service binding, Durable Object, WebSocket, and RPC transport boundaries.
 
+## Status
+
+Complete. The scaffold exists under `examples/architect-lab`, with a web Worker forwarding through a
+typed service binding to the API Worker, and the API Worker routing room RPC and WebSocket upgrades
+to the room Durable Object.
+
+Current implementation has moved beyond the original Phase 1 shell:
+
+- Phase 2 tldraw sync is now integrated.
+- Room metadata and transport events are stored in Durable Object SQLite.
+- Room-local SQL now uses `effect/unstable/sql` through `effect-cf`'s
+  `DurableObjectSqlite.layer()` helper backed by `@effect/sql-sqlite-do`.
+
 ## Product Requirement
 
 Users can open the demo app, create or join a room URL, and see a connected room shell with basic
@@ -51,10 +64,9 @@ Deferred resource coverage:
 - tldraw sync is Phase 2.
 - D1 is deferred until the app needs cross-room query/index state.
 - R2 is deferred until exports, large artifacts, or public snapshot objects are introduced.
-- Effect SQL for Durable Object SQLite is a follow-up polish opportunity. The Phase 1 scaffold can
-  start with direct Durable Object SQLite calls, but a later pass should consider adding an
-  `effect-cf` helper around `@effect/sql-sqlite-do` so room-local queries demonstrate Effect SQL
-  without introducing D1 early.
+- Effect SQL for Durable Object SQLite was added after the initial scaffold through
+  `DurableObjectSqlite.layer()`, so the room can demonstrate Effect SQL without introducing D1
+  early.
 
 ## Acceptance Criteria
 
@@ -65,15 +77,18 @@ Deferred resource coverage:
 - Web/API Worker service-binding path is present where the selected local topology needs it.
 - Durable Object persists and reloads minimal room metadata through DO SQLite.
 - The implementation uses `effect-cf` Worker and Durable Object runtime boundaries.
-- No tldraw-specific sync correctness is claimed in this phase.
+- Tldraw-specific sync correctness is claimed and tracked by Phase 2, not this scaffold phase.
 
 ## Testing Notes
 
 - Add a runtime test for room creation.
 - Add a Durable Object test for persisted room metadata.
-- Add a transport test for WebSocket connect/ping/broadcast.
 - Add a typed RPC/namespace call test for room health or metadata.
 - Add a frontend smoke check once the web shell exists.
+
+Remaining verification gap:
+
+- Add browser-level WebSocket/tldraw sync coverage in Phase 2.
 
 ## Notes
 

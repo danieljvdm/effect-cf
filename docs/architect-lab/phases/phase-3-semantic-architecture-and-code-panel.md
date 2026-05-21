@@ -5,6 +5,13 @@
 Connect canvas shapes to `effect-cf` concepts so the demo teaches the package even before AI is
 enabled.
 
+## Status
+
+Planned. The current implementation has raw tldraw document sync, room metadata, and transport
+events, but it does not yet define semantic architecture resource schemas, a resource palette, a
+selection-driven code panel, template-generated snippets, or a KV-backed latest/published read
+model.
+
 ## Product Requirement
 
 Users can draw architecture resources and immediately see how each resource maps to `effect-cf`

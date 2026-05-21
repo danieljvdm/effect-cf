@@ -4,6 +4,12 @@
 
 Turn diagrams into interactive explanations and architecture feedback.
 
+## Status
+
+Planned. The current implementation does not yet include trace schemas, trace animation, room
+broadcast of trace state, AI review findings, accept/reject review changes, or Durable Object alarm
+usage for checkpointing or cleanup.
+
 ## Product Requirement
 
 Users can understand how the architecture behaves by animating flows and asking for architecture

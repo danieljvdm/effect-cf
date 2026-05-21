@@ -10,6 +10,12 @@ architecture package.
 This replaces many narrow examples with one application that is both useful and representative of
 real Cloudflare application architecture.
 
+## Implementation Status
+
+The current implementation has completed the foundational Cloudflare transport slice and integrated
+real tldraw sync in a room Durable Object. It does not yet implement the AI collaborator, semantic
+architecture model, code panel, trace mode, export workflow, or deployed real-provider mode.
+
 ## Goals
 
 - Demonstrate most `effect-cf` primitives in one coherent app.

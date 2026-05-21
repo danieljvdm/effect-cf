@@ -13,6 +13,7 @@
   "dependencies": {
     "@architect-lab/domain": "workspace:*",
     "@architect-lab/tldraw-effect-cf": "workspace:*",
+    "@effect/sql-sqlite-do": "catalog:",
     "effect": "catalog:",
     "effect-cf": "workspace:*"
   },

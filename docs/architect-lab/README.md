@@ -1,15 +1,26 @@
 # Effect-CF Architect Lab Specs
 
-Effect-CF Architect Lab is the proposed replacement for the current collection of examples: a
-single, compelling, locally runnable demo application that uses `effect-cf` to build a multiplayer
-AI architecture canvas.
+Effect-CF Architect Lab is the repository's flagship example: a single, locally runnable demo
+application that uses `effect-cf` to build a multiplayer architecture canvas.
 
 The demo should be self-referential:
 
-- The application is implemented with Cloudflare Workers, Durable Objects, D1, R2, KV, Queues,
-  Workflows, service bindings, Images, and optional Hyperdrive through `effect-cf`.
+- The implemented app currently covers Cloudflare Workers, service bindings, Durable Objects,
+  Durable Object WebSockets, Durable Object storage, Durable Object SQLite, WorkerConfig, and
+  tldraw sync through `effect-cf`.
+- Later roadmap phases add D1, R2, KV, Queues, Workflows, Images, optional Hyperdrive, AI-assisted
+  architecture edits, trace mode, and export workflows.
 - The application helps users design Cloudflare architectures and generates `effect-cf` code from
   the diagrams they create.
+
+## Current Status
+
+- Phase 0 and Phase 1 are complete.
+- Phase 2 is implemented with direct tldraw sync hosted inside the room Durable Object. Browser-level
+  two-tab sync, reconnect, conflict, and canvas smoke tests remain verification gaps.
+- Phase 3 through Phase 7 are planned.
+- Phase 8 is mostly complete because Architect Lab is now the only `examples/` app; a final
+  traceability pass remains after later resource coverage is implemented or explicitly ruled out.
 
 ## Documents
 
@@ -25,10 +36,10 @@ The demo should be self-referential:
 - [Preserved Example Patterns](./preserved-example-patterns.md) records useful patterns from the
   removed examples that should shape Architect Lab.
 
-## Working Name
+## Name
 
-Use `Architect Lab` in docs and planning. The example directory can later be named
-`examples/architect-lab` unless a stronger product name emerges.
+Use `Architect Lab` in docs and planning. The canonical example directory is
+`examples/architect-lab`.
 
 ## Primary Demo Script
 

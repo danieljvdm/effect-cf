@@ -8,24 +8,34 @@ tldraw frontend, an API Worker, asynchronous AI/export Workers, and room-authori
 inside Durable Object storage. D1, R2, and KV are introduced when the app needs cross-room indexes,
 exports, public artifacts, and cache/read-model storage.
 
-## Proposed Package Layout
+## Implementation Status
+
+The current implementation includes the web shell, web Worker, API Worker, room Durable Object,
+domain package, and tldraw Durable Object adapter. It has not yet added AI, queue, workflow, export,
+or deployed-provider packages.
+
+## Current Package Layout
 
 ```text
 examples/architect-lab/
   README.md
   packages/domain/
+  packages/tldraw-effect-cf/
   web/
   workers/web/
   workers/api/
+  durable-objects/room/
+```
+
+## Planned Later Package Layout
+
+```text
+examples/architect-lab/
   workers/ai/
   workers/exporter/
   workers/queue/
   workers/workflow/
-  durable-objects/room/
 ```
-
-This can be collapsed if early implementation shows too much package overhead. The split should
-serve the demo, not become ceremony.
 
 ## Runtime Components
 

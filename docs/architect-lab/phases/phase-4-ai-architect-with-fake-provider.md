@@ -4,6 +4,11 @@
 
 Make the demo compelling without requiring external AI credentials.
 
+## Status
+
+Planned. The current implementation does not yet include prompt submission, AI job schemas, a fake
+provider, Queue-backed AI execution, AI tool calls, or AI operation persistence/broadcasting.
+
 ## Product Requirement
 
 Users can ask the AI architect to draw or revise a Cloudflare system, and the AI visibly edits the

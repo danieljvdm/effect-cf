@@ -185,7 +185,11 @@ function makeCursor<T extends Record<string, SqlStorageValue>>(
       }
       return value;
     },
-    raw: function* () {},
+    raw: function* () {
+      for (const row of cursorRows) {
+        yield Object.values(row) as Array<SqlStorageValue>;
+      }
+    },
     [Symbol.iterator]: function* () {
       yield* cursorRows;
     },

@@ -1,7 +1,7 @@
 import { assert, expect, layer, test } from "@effect/vitest";
 import { Effect, Layer, Option } from "effect";
 
-import { Binding, R2, WorkerEnvironment } from "../src/index";
+import { R2, WorkerEnvironment } from "../src/index";
 
 class TestBucket extends R2.Tag<TestBucket>()("test/TestBucket") {}
 
@@ -201,5 +201,11 @@ test("R2 layer validates the binding shape", async () => {
         ),
       ),
     ),
-  ).rejects.toBeInstanceOf(Binding.BindingValidationError);
+  ).rejects.toMatchObject({
+    _tag: "BindingValidationError",
+    binding: "TEST_BUCKET",
+    expected:
+      "R2 bucket binding with head(), get(), put(), createMultipartUpload(), resumeMultipartUpload(), delete(), and list()",
+    actual: "Object",
+  });
 });

@@ -3,6 +3,9 @@ import { Context, Data, Effect, Option, type Layer } from "effect";
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
 
+const expectedR2Bucket =
+  "R2 bucket binding with head(), get(), put(), createMultipartUpload(), resumeMultipartUpload(), delete(), and list()";
+
 /** Error raised when an R2 operation fails. */
 export class R2OperationError extends Data.TaggedError("R2OperationError")<{
   readonly binding: string;
@@ -272,7 +275,9 @@ export const makeClient = (
 };
 
 export const layer = <Self>(tag: Context.Service<Self, R2Client>, definition: R2Definition) =>
-  Binding.layer(tag, definition.binding, isR2Bucket, makeClient(definition));
+  Binding.layer(tag, definition.binding, isR2Bucket, makeClient(definition), {
+    expected: expectedR2Bucket,
+  });
 
 export const make = <Id extends string>(id: Id) => Tag<R2Service<Id>>()<Id>(id);
 

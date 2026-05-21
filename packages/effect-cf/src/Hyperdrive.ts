@@ -3,6 +3,8 @@ import { Context, Effect, type Layer } from "effect";
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
 
+const expectedHyperdrive = "Hyperdrive binding with connectionString";
+
 /** Typed Hyperdrive binding definition. */
 export interface HyperdriveDefinition {
   /** Binding name as configured in `wrangler.jsonc`. */
@@ -64,7 +66,10 @@ export const makeClient =
 export const layer = <Self>(
   tag: Context.Service<Self, HyperdriveClient>,
   definition: HyperdriveDefinition,
-) => Binding.layer(tag, definition.binding, isHyperdrive, makeClient(definition));
+) =>
+  Binding.layer(tag, definition.binding, isHyperdrive, makeClient(definition), {
+    expected: expectedHyperdrive,
+  });
 
 export const make = <Id extends string>(id: Id) => Tag<HyperdriveService<Id>>()<Id>(id);
 

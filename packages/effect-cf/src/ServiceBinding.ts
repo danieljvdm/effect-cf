@@ -7,6 +7,7 @@ import type * as WorkerDefinition from "./WorkerDefinition";
 import * as RpcInvocation from "./internal/RpcInvocation";
 
 const TypeId = "effect-cf/ServiceBinding" as const;
+const expectedServiceBinding = "Worker service binding with fetch()";
 
 /**
  * Minimum shape for a Cloudflare service binding.
@@ -359,6 +360,7 @@ export const layer = <
     definition.binding,
     (value): value is ServiceBindingClient<Api> => isServiceBindingClient<Api>(value),
     makeClient<Api, Definition>(definition),
+    { expected: expectedServiceBinding },
   );
 
 /**

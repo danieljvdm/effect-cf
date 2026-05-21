@@ -4,6 +4,7 @@ import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
 
 const TypeId = "effect-cf/Images/Steps" as const;
+const expectedImagesBinding = "Images binding with info() and input()";
 
 /** Error raised when a Cloudflare Images operation fails. */
 export class ImagesOperationError extends Data.TaggedError("ImagesOperationError")<{
@@ -314,7 +315,10 @@ export const makeClient =
 export const layer = <Self>(
   tag: Context.Service<Self, ImagesClient>,
   definition: ImagesDefinition,
-) => Binding.layer(tag, definition.binding, isImagesBinding, makeClient(definition));
+) =>
+  Binding.layer(tag, definition.binding, isImagesBinding, makeClient(definition), {
+    expected: expectedImagesBinding,
+  });
 
 export const make = <Id extends string>(id: Id) => Tag<ImagesService<Id>>()<Id>(id);
 

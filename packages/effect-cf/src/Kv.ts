@@ -3,6 +3,9 @@ import { Context, Data, Effect, Option, Schema as S, type Layer } from "effect";
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
 
+const expectedKvNamespace =
+  "KV namespace binding with get(), put(), delete(), getWithMetadata(), and list()";
+
 /** Error raised when a KV operation fails. */
 export class KvOperationError extends Data.TaggedError("KvOperationError")<{
   readonly binding: string;
@@ -250,6 +253,7 @@ export const layer = <Self, Key, Value, EncodedValue>(
     definition.binding,
     isKvNamespace,
     makeClient<Key, Value, EncodedValue>(definition),
+    { expected: expectedKvNamespace },
   );
 
 const makeDefinition = <Id extends string, Key, Value, EncodedValue>(

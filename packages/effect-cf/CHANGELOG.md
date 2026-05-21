@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.9.1
+
+### Patch Changes
+
+- [#27](https://github.com/danieljvdm/effect-cf/pull/27) [`ac2fb0f`](https://github.com/danieljvdm/effect-cf/commit/ac2fb0f9b557c1f73d779ed024c03245c1850b02) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Wrap R2 object body reader methods in Effect so `json`, `text`, `bytes`, `arrayBuffer`, and `blob` report read failures as `R2OperationError`.
+
 ## 0.9.0
 
 ### Minor Changes

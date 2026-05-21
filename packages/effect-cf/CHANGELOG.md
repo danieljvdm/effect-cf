@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.9.2
+
+### Patch Changes
+
+- [#30](https://github.com/danieljvdm/effect-cf/pull/30) [`29c3fd4`](https://github.com/danieljvdm/effect-cf/commit/29c3fd491bad0c8d6994e9a666f6e501c1a337a2) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Accept local queue producer bindings that only expose `send`, including Wrangler local dev bindings. Binding validation errors now include the binding name, expected shape, and actual resource shape in pretty output across Cloudflare bindings.
+
 ## 0.9.1
 
 ### Patch Changes

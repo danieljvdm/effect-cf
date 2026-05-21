@@ -1,0 +1,17 @@
+{
+  "$schema": "../../../../node_modules/wrangler/config-schema.json",
+  "name": "architect-lab-web",
+  "main": "./src/index.ts",
+  "compatibility_date": "2026-05-14",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "ARCHITECT_PUBLIC_ORIGIN": "http://localhost:8787",
+    "ARCHITECT_DEFAULT_ROOM_TITLE": "Untitled architecture",
+  },
+  "services": [
+    {
+      "binding": "API",
+      "service": "architect-lab-api",
+    },
+  ],
+}

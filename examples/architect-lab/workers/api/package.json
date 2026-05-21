@@ -1,0 +1,25 @@
+{
+  "name": "@architect-lab/api-worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "vp check",
+    "dev": "wrangler dev --config wrangler.jsonc --port 8788",
+    "test": "vp test"
+  },
+  "dependencies": {
+    "@architect-lab/domain": "workspace:*",
+    "@architect-lab/room": "workspace:*",
+    "effect": "catalog:",
+    "effect-cf": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260421.1",
+    "vite-plus": "0.1.20",
+    "vitest": "catalog:"
+  }
+}

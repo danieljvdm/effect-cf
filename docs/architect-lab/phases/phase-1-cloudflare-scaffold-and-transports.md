@@ -51,6 +51,10 @@ Deferred resource coverage:
 - tldraw sync is Phase 2.
 - D1 is deferred until the app needs cross-room query/index state.
 - R2 is deferred until exports, large artifacts, or public snapshot objects are introduced.
+- Effect SQL for Durable Object SQLite is a follow-up polish opportunity. The Phase 1 scaffold can
+  start with direct Durable Object SQLite calls, but a later pass should consider adding an
+  `effect-cf` helper around `@effect/sql-sqlite-do` so room-local queries demonstrate Effect SQL
+  without introducing D1 early.
 
 ## Acceptance Criteria
 

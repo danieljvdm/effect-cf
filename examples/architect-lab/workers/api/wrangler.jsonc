@@ -1,0 +1,25 @@
+{
+  "$schema": "../../../../node_modules/wrangler/config-schema.json",
+  "name": "architect-lab-api",
+  "main": "./src/index.ts",
+  "compatibility_date": "2026-05-14",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "ARCHITECT_PUBLIC_ORIGIN": "http://localhost:8787",
+    "ARCHITECT_DEFAULT_ROOM_TITLE": "Untitled architecture",
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ROOMS",
+        "class_name": "RoomDurableObject",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["RoomDurableObject"],
+    },
+  ],
+}

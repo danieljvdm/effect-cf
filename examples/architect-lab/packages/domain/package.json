@@ -1,0 +1,22 @@
+{
+  "name": "@architect-lab/domain",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "vp check",
+    "test": "vp test"
+  },
+  "dependencies": {
+    "effect": "catalog:",
+    "effect-cf": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260421.1",
+    "vite-plus": "0.1.20",
+    "vitest": "catalog:"
+  }
+}

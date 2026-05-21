@@ -77,7 +77,9 @@ export default Worker.make(Layer.mergeAll(HttpRouter.layer, CounterLayer), app);
 
 ## Examples
 
-The `examples/` directory demonstrates package usage across Workers, Durable Objects, service bindings, and frontend consumers.
+The previous examples have been removed while the new flagship Architect Lab demo is being
+specified. See [docs/architect-lab](./docs/architect-lab/README.md) for the replacement plan and
+the preserved patterns from the old examples.
 
 ## Changelog
 

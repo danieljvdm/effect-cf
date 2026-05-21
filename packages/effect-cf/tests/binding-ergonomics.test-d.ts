@@ -120,7 +120,12 @@ const r2Program = Effect.gen(function* () {
   const bucket = yield* ArtifactBucket;
 
   expectTypeOf(bucket.get("avatars/u1.png")).toEqualTypeOf<
-    Effect.Effect<Option.Option<R2ObjectBody>, R2.R2OperationError>
+    Effect.Effect<Option.Option<R2.R2ObjectBodyClient>, R2.R2OperationError>
+  >();
+
+  const object = yield* bucket.get("avatars/u1.png").pipe(Effect.map(Option.getOrThrow));
+  expectTypeOf(object.json<{ readonly ok: true }>()).toEqualTypeOf<
+    Effect.Effect<{ readonly ok: true }, R2.R2OperationError>
   >();
 
   yield* bucket.put("avatars/u1.png", "image-bytes");

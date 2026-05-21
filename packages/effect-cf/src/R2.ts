@@ -24,6 +24,18 @@ export type R2UploadPartOptions = globalThis.R2UploadPartOptions;
 export type R2PutValue = ReadableStream | ArrayBuffer | ArrayBufferView | string | null | Blob;
 export type R2UploadPartValue = ReadableStream | ArrayBuffer | ArrayBufferView | string | Blob;
 
+export interface R2ObjectBodyClient extends Omit<
+  globalThis.R2ObjectBody,
+  "arrayBuffer" | "blob" | "bytes" | "json" | "text"
+> {
+  readonly raw: globalThis.R2ObjectBody;
+  readonly arrayBuffer: Effect.Effect<ArrayBuffer, R2OperationError>;
+  readonly bytes: Effect.Effect<Uint8Array, R2OperationError>;
+  readonly text: Effect.Effect<string, R2OperationError>;
+  readonly json: <T = unknown>() => Effect.Effect<T, R2OperationError>;
+  readonly blob: Effect.Effect<Blob, R2OperationError>;
+}
+
 export interface R2MultipartUploadClient {
   readonly raw: globalThis.R2MultipartUpload;
   readonly key: string;
@@ -47,14 +59,11 @@ export interface R2Client {
     (
       key: string,
       options: R2GetOptions & { readonly onlyIf: globalThis.R2Conditional | Headers },
-    ): Effect.Effect<
-      Option.Option<globalThis.R2ObjectBody | globalThis.R2Object>,
-      R2OperationError
-    >;
+    ): Effect.Effect<Option.Option<R2ObjectBodyClient | globalThis.R2Object>, R2OperationError>;
     (
       key: string,
       options?: R2GetOptions,
-    ): Effect.Effect<Option.Option<globalThis.R2ObjectBody>, R2OperationError>;
+    ): Effect.Effect<Option.Option<R2ObjectBodyClient>, R2OperationError>;
   };
   readonly put: {
     (
@@ -136,6 +145,53 @@ const tryR2Sync = <A>(
 const maybe = <A>(value: A | null): Option.Option<A> =>
   value === null ? Option.none() : Option.some(value);
 
+const isR2ObjectBody = (
+  value: globalThis.R2ObjectBody | globalThis.R2Object,
+): value is globalThis.R2ObjectBody =>
+  "body" in value &&
+  typeof (value as globalThis.R2ObjectBody).arrayBuffer === "function" &&
+  typeof (value as globalThis.R2ObjectBody).bytes === "function" &&
+  typeof (value as globalThis.R2ObjectBody).text === "function" &&
+  typeof (value as globalThis.R2ObjectBody).json === "function" &&
+  typeof (value as globalThis.R2ObjectBody).blob === "function";
+
+const wrapObjectBody = (binding: string, object: globalThis.R2ObjectBody): R2ObjectBodyClient => ({
+  key: object.key,
+  version: object.version,
+  size: object.size,
+  etag: object.etag,
+  httpEtag: object.httpEtag,
+  checksums: object.checksums,
+  uploaded: object.uploaded,
+  httpMetadata: object.httpMetadata,
+  customMetadata: object.customMetadata,
+  range: object.range,
+  storageClass: object.storageClass,
+  ssecKeyMd5: object.ssecKeyMd5,
+  writeHttpMetadata: (headers) => object.writeHttpMetadata(headers),
+  raw: object,
+  body: object.body,
+  get bodyUsed() {
+    return object.bodyUsed;
+  },
+  arrayBuffer: tryR2Promise(binding, "arrayBuffer", () => object.arrayBuffer()),
+  bytes: tryR2Promise(binding, "bytes", () => object.bytes()),
+  text: tryR2Promise(binding, "text", () => object.text()),
+  json: <T = unknown>() => tryR2Promise(binding, "json", () => object.json<T>()),
+  blob: tryR2Promise(binding, "blob", () => object.blob()),
+});
+
+const wrapGetResult = (
+  binding: string,
+  object: globalThis.R2ObjectBody | globalThis.R2Object | null,
+): R2ObjectBodyClient | globalThis.R2Object | null => {
+  if (object === null || !isR2ObjectBody(object)) {
+    return object;
+  }
+
+  return wrapObjectBody(binding, object);
+};
+
 export const isR2Bucket = (value: unknown): value is globalThis.R2Bucket => {
   if (typeof value !== "object" || value === null) {
     return false;
@@ -172,43 +228,47 @@ export const makeClient = (
       ),
   });
 
-  return (bucket) => ({
-    definition,
-    head: (key) =>
-      tryR2Promise(definition.binding, "head", () => bucket.head(key)).pipe(Effect.map(maybe)),
-    get: ((key: string, options?: R2GetOptions) =>
+  return (bucket) => {
+    const get = ((key: string, options?: R2GetOptions) =>
       tryR2Promise(definition.binding, "get", () => bucket.get(key, options)).pipe(
-        Effect.map(maybe),
-      )) as R2Client["get"],
-    put: ((key: string, value: R2PutValue, options?: R2PutOptions) =>
-      tryR2Promise(definition.binding, "put", () => bucket.put(key, value, options)).pipe(
-        Effect.map((object) => {
-          if (object === null) {
-            return Option.none<globalThis.R2Object>();
-          }
+        Effect.map((object) => maybe(wrapGetResult(definition.binding, object))),
+      )) as R2Client["get"];
 
-          if (options !== undefined && "onlyIf" in options) {
-            return Option.some(object);
-          }
+    return {
+      definition,
+      head: (key) =>
+        tryR2Promise(definition.binding, "head", () => bucket.head(key)).pipe(Effect.map(maybe)),
+      get,
+      put: ((key: string, value: R2PutValue, options?: R2PutOptions) =>
+        tryR2Promise(definition.binding, "put", () => bucket.put(key, value, options)).pipe(
+          Effect.map((object) => {
+            if (object === null) {
+              return Option.none<globalThis.R2Object>();
+            }
 
-          return object;
-        }),
-      )) as R2Client["put"],
-    createMultipartUpload: (key, options) =>
-      tryR2Promise(definition.binding, "createMultipartUpload", () =>
-        bucket.createMultipartUpload(key, options),
-      ).pipe(Effect.map(wrapUpload)),
-    resumeMultipartUpload: (key, uploadId) =>
-      tryR2Sync(definition.binding, "resumeMultipartUpload", () =>
-        wrapUpload(bucket.resumeMultipartUpload(key, uploadId)),
-      ),
-    delete: (keys) => {
-      const nativeKeys = typeof keys === "string" ? keys : [...keys];
-      return tryR2Promise(definition.binding, "delete", () => bucket.delete(nativeKeys));
-    },
-    list: (options) => tryR2Promise(definition.binding, "list", () => bucket.list(options)),
-    unsafeRaw: Effect.succeed(bucket),
-  });
+            if (options !== undefined && "onlyIf" in options) {
+              return Option.some(object);
+            }
+
+            return object;
+          }),
+        )) as R2Client["put"],
+      createMultipartUpload: (key, options) =>
+        tryR2Promise(definition.binding, "createMultipartUpload", () =>
+          bucket.createMultipartUpload(key, options),
+        ).pipe(Effect.map(wrapUpload)),
+      resumeMultipartUpload: (key, uploadId) =>
+        tryR2Sync(definition.binding, "resumeMultipartUpload", () =>
+          wrapUpload(bucket.resumeMultipartUpload(key, uploadId)),
+        ),
+      delete: (keys) => {
+        const nativeKeys = typeof keys === "string" ? keys : [...keys];
+        return tryR2Promise(definition.binding, "delete", () => bucket.delete(nativeKeys));
+      },
+      list: (options) => tryR2Promise(definition.binding, "list", () => bucket.list(options)),
+      unsafeRaw: Effect.succeed(bucket),
+    };
+  };
 };
 
 export const layer = <Self>(tag: Context.Service<Self, R2Client>, definition: R2Definition) =>

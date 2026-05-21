@@ -7,14 +7,14 @@ enabled.
 
 ## Status
 
-Partially implemented. The domain package now defines semantic resource and edge schemas, a
-resource catalog, and deterministic `effect-cf` snippet generation for Workers, Durable Objects,
-D1, R2, KV, Queues, Workflows, Images, and service bindings. The web shell exposes that catalog as
-a resource palette, attaches semantic metadata to tldraw resource nodes, and shows a
-selection-driven code panel.
+Implemented and manually verified. The domain package defines semantic resource and edge schemas, a
+resource catalog, deterministic `effect-cf` snippet generation, and latest/published architecture
+read-model contracts. The web shell exposes the catalog as a resource palette, attaches semantic
+metadata to tldraw resource nodes, shows a selection-driven code panel, and projects semantic state
+to the API. The API stores `room-latest:{roomId}` and `published:{shareSlug}` read models in KV.
 
-Remaining scope: semantic state is still stored only inside tldraw shape metadata, and the
-KV-backed latest/published read model has not been implemented.
+Manual verification: the resource palette, tldraw semantic nodes, sync connection, generated code
+panel, latest read-model write/read endpoint, and publish endpoint have been exercised locally.
 
 ## Product Requirement
 

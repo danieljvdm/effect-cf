@@ -12,9 +12,10 @@ real Cloudflare application architecture.
 
 ## Implementation Status
 
-The current implementation has completed the foundational Cloudflare transport slice and integrated
-real tldraw sync in a room Durable Object. It does not yet implement the AI collaborator, semantic
-architecture model, code panel, trace mode, export workflow, or deployed real-provider mode.
+The current implementation has completed the foundational Cloudflare transport slice, integrated
+real tldraw sync in a room Durable Object, and added semantic resource nodes with a generated code
+panel plus KV-backed latest/published read models. It does not yet implement the AI collaborator,
+trace mode, export workflow, or deployed real-provider mode.
 
 ## Goals
 

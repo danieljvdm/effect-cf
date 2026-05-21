@@ -1,5 +1,20 @@
 const root = new URL("../../../", import.meta.url).pathname;
+const effectCfRoot = new URL("../../../packages/effect-cf/", import.meta.url).pathname;
+const webRoot = new URL(".", import.meta.url).pathname;
 const persistTo = `${root}.wrangler/state/architect-lab`;
+
+const buildEffectCf = Bun.spawn(["bun", "run", "build"], {
+  cwd: effectCfRoot,
+  stdin: "inherit",
+  stdout: "inherit",
+  stderr: "inherit",
+});
+
+const buildExitCode = await buildEffectCf.exited;
+if (buildExitCode !== 0) {
+  console.error(`effect-cf build exited with code ${buildExitCode}`);
+  process.exit(buildExitCode);
+}
 
 const commands = [
   {
@@ -36,6 +51,7 @@ const commands = [
 
 const children = commands.map((command) => {
   const child = Bun.spawn(command.args, {
+    cwd: webRoot,
     stdin: "inherit",
     stdout: "inherit",
     stderr: "inherit",

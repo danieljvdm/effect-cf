@@ -1,5 +1,7 @@
-import { Config } from "effect";
-import { DurableObject, Worker, WorkerConfig } from "effect-cf";
+import { Config, Schema as S } from "effect";
+import { DurableObject, Kv, Worker, WorkerConfig } from "effect-cf";
+
+import { ArchitectureReadModel, PublishedArchitectureReadModel } from "./architecture.js";
 
 import {
   ApiHealth,
@@ -50,3 +52,19 @@ export class ApiWorker extends Worker.Tag<ApiWorker>()("ArchitectApiWorker", {
     success: RoomHealth,
   }),
 }) {}
+
+export class LatestArchitectureReadModels extends Kv.Tag<LatestArchitectureReadModels>()(
+  "ArchitectLatestArchitectureReadModels",
+  {
+    key: S.String,
+    value: ArchitectureReadModel,
+  },
+) {}
+
+export class PublishedArchitectureReadModels extends Kv.Tag<PublishedArchitectureReadModels>()(
+  "ArchitectPublishedArchitectureReadModels",
+  {
+    key: S.String,
+    value: PublishedArchitectureReadModel,
+  },
+) {}

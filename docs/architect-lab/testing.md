@@ -10,12 +10,16 @@ This file is the backlog of scenarios that matter. Keep it current as implementa
 
 - Local Architect Lab tldraw sync has been manually verified.
 - The room can be opened locally, edited, and shared across browser tabs.
+- Phase 3 semantic resource palette and code panel have been manually verified with visible
+  semantic nodes and selected-resource snippets.
+- Phase 3 latest/published KV read model has been manually verified through the local API.
 
 ## Existing Automated Coverage
 
 - Domain schema contract tests.
 - API Worker room creation and room health tests through the typed room namespace.
 - Web Worker shell and typed service-binding forwarding tests.
+- API Worker latest and published architecture read-model tests through KV.
 - Room Durable Object metadata persistence and health tests.
 - `effect-cf` Durable Object SQLite SQL layer tests.
 - Semantic resource catalog and snippet template tests.
@@ -26,6 +30,8 @@ This file is the backlog of scenarios that matter. Keep it current as implementa
 
 - Browser smoke test that starts the local app, opens a room, and verifies the tldraw canvas renders
   nonblank.
+- Fresh-checkout dev smoke test that verifies `examples/architect-lab/web` builds local
+  `effect-cf` package output before Wrangler starts.
 - Two-tab browser sync test: create or edit a shape in one tab and verify it appears in the other.
 - Reload/reconnect test: create a representative document, reload the room, and verify the latest
   document state is restored.
@@ -38,8 +44,8 @@ This file is the backlog of scenarios that matter. Keep it current as implementa
 
 - Additional unit tests for semantic edge schemas and invalid resource metadata.
 - Additional unit tests for code generation templates across every supported resource kind.
-- Runtime test for KV-backed latest/published read model updates.
 - Browser smoke test for selecting a diagram element and seeing the matching code panel snippet.
+- Browser smoke test for saving latest read-model updates and publishing a room.
 
 ### Phase 4 AI Jobs
 

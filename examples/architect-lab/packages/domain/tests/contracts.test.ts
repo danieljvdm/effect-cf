@@ -1,7 +1,13 @@
 import { describe, expect, test } from "vitest";
 import { Schema as S } from "effect";
 
-import { ArchitectureResource, architectureResourceTemplates } from "../src/architecture.ts";
+import {
+  ArchitectureReadModel,
+  ArchitectureResource,
+  architectureResourceTemplates,
+  latestArchitectureReadModelKey,
+  publishedArchitectureReadModelKey,
+} from "../src/architecture.ts";
 import { RoomMetadata, PresenceSnapshot } from "../src/contracts.ts";
 import { renderResourceSnippet } from "../src/snippets.ts";
 
@@ -76,5 +82,39 @@ describe("architect-lab domain contracts", () => {
 
     expect(snippet).toContain("class D1Database extends D1.Service");
     expect(snippet).toContain("D1Database.sqlLayer()");
+  });
+
+  test("uses readable default class names for short resource labels", () => {
+    const resource = S.decodeUnknownSync(ArchitectureResource)({
+      id: "shape:kv",
+      kind: "kv",
+      name: "KV",
+      bindingName: "KV",
+    });
+
+    const snippet = renderResourceSnippet(resource);
+
+    expect(snippet).toContain("class KVStore extends Kv.Tag");
+    expect(snippet).toContain("kvStoreLayer");
+  });
+
+  test("decodes the KV latest architecture read model", () => {
+    const model = S.decodeUnknownSync(ArchitectureReadModel)({
+      roomId: "room_a",
+      updatedAt: "2026-05-21T12:00:00.000Z",
+      resources: [
+        {
+          id: "shape:worker",
+          kind: "worker",
+          name: "Worker",
+          bindingName: "WORKER",
+        },
+      ],
+      edges: [],
+    });
+
+    expect(model.resources).toHaveLength(1);
+    expect(latestArchitectureReadModelKey("room_a")).toBe("room-latest:room_a");
+    expect(publishedArchitectureReadModelKey("abc123")).toBe("published:abc123");
   });
 });

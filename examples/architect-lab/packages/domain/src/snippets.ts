@@ -13,6 +13,10 @@ export const toPascalIdentifier = (name: string): string =>
 
 export const toCamelIdentifier = (name: string): string => {
   const pascal = toPascalIdentifier(name);
+  const acronymPrefix = pascal.match(/^[A-Z]+(?=[A-Z][a-z])/);
+  if (acronymPrefix !== null) {
+    return acronymPrefix[0].toLowerCase() + pascal.slice(acronymPrefix[0].length);
+  }
   return pascal.charAt(0).toLowerCase() + pascal.slice(1);
 };
 
@@ -25,15 +29,15 @@ export const toBindingName = (name: string, fallbackPrefix = "RESOURCE"): string
 };
 
 const classNameSuffixes = {
-  worker: "Worker",
-  "durable-object": "DurableObject",
+  worker: "App",
+  "durable-object": "Room",
   d1: "Database",
-  r2: "Bucket",
-  kv: "Namespace",
-  queue: "Queue",
-  workflow: "Workflow",
-  images: "Images",
-  "service-binding": "Service",
+  r2: "Assets",
+  kv: "Store",
+  queue: "Messages",
+  workflow: "Flow",
+  images: "Processor",
+  "service-binding": "Client",
 } as const satisfies Record<ArchitectureResourceKind, string>;
 
 const reservedClassNames = new Set([

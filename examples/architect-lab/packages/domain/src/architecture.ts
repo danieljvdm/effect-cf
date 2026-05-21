@@ -41,6 +41,29 @@ export const ArchitectureEdge = S.Struct({
 });
 export type ArchitectureEdge = S.Schema.Type<typeof ArchitectureEdge>;
 
+const ArchitectureGraph = {
+  resources: S.Array(ArchitectureResource),
+  edges: S.Array(ArchitectureEdge),
+} as const;
+
+export const ArchitectureReadModelInput = S.Struct(ArchitectureGraph);
+export type ArchitectureReadModelInput = S.Schema.Type<typeof ArchitectureReadModelInput>;
+
+export const ArchitectureReadModel = S.Struct({
+  roomId: S.String,
+  updatedAt: S.String,
+  ...ArchitectureGraph,
+});
+export type ArchitectureReadModel = S.Schema.Type<typeof ArchitectureReadModel>;
+
+export const PublishedArchitectureReadModel = S.Struct({
+  shareSlug: S.String,
+  roomId: S.String,
+  publishedAt: S.String,
+  model: ArchitectureReadModel,
+});
+export type PublishedArchitectureReadModel = S.Schema.Type<typeof PublishedArchitectureReadModel>;
+
 export const ArchitectureResourceTemplate = S.Struct({
   kind: ArchitectureResourceKind,
   label: S.String,
@@ -121,3 +144,8 @@ export const getArchitectureResourceTemplate = (
 ): ArchitectureResourceTemplate =>
   architectureResourceTemplates.find((template) => template.kind === kind) ??
   architectureResourceTemplates[0];
+
+export const latestArchitectureReadModelKey = (roomId: string): string => `room-latest:${roomId}`;
+
+export const publishedArchitectureReadModelKey = (shareSlug: string): string =>
+  `published:${shareSlug}`;

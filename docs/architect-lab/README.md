@@ -8,8 +8,8 @@ The demo should be self-referential:
 - The implemented app currently covers Cloudflare Workers, service bindings, Durable Objects,
   Durable Object WebSockets, Durable Object storage, Durable Object SQLite, WorkerConfig, tldraw
   sync, and semantic `effect-cf` resource snippets through `effect-cf`.
-- Later roadmap phases add KV-backed latest/published read models, optional Hyperdrive,
-  AI-assisted architecture edits, trace mode, and export workflows.
+- Later roadmap phases add optional Hyperdrive, AI-assisted architecture edits, trace mode, and
+  export workflows.
 - The application helps users design Cloudflare architectures and generates `effect-cf` code from
   the diagrams they create.
 
@@ -18,8 +18,8 @@ The demo should be self-referential:
 - Phase 0 and Phase 1 are complete.
 - Phase 2 is implemented with direct tldraw sync hosted inside the room Durable Object. Browser-level
   two-tab sync, reconnect, conflict, and canvas smoke tests are tracked for final hardening.
-- Phase 3 is partially implemented with semantic resource nodes and a selection-driven code panel;
-  the KV-backed latest/published read model remains.
+- Phase 3 is implemented and manually verified with semantic resource nodes, selection-driven
+  snippets, visible canvas/code-panel behavior, and KV-backed latest/published read models.
 - Phase 4 through Phase 7 are planned.
 - Phase 8 is mostly complete because Architect Lab is now the only `examples/` app; a final
   traceability pass remains after later resource coverage is implemented or explicitly ruled out.

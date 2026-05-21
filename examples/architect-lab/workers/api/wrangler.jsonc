@@ -16,6 +16,12 @@
       },
     ],
   },
+  "kv_namespaces": [
+    {
+      "binding": "ARCHITECT_READ_MODELS",
+      "id": "architect-lab-read-models",
+    },
+  ],
   "migrations": [
     {
       "tag": "v1",

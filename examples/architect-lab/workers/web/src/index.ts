@@ -550,6 +550,10 @@ const renderShell = () => {
 
       const toCamelIdentifier = (name) => {
         const pascal = toPascalIdentifier(name);
+        const acronymPrefix = pascal.match(/^[A-Z]+(?=[A-Z][a-z])/);
+        if (acronymPrefix !== null) {
+          return acronymPrefix[0].toLowerCase() + pascal.slice(acronymPrefix[0].length);
+        }
         return pascal.charAt(0).toLowerCase() + pascal.slice(1);
       };
 
@@ -562,15 +566,15 @@ const renderShell = () => {
       };
 
       const classNameSuffixes = {
-        worker: "Worker",
-        "durable-object": "DurableObject",
+        worker: "App",
+        "durable-object": "Room",
         d1: "Database",
-        r2: "Bucket",
-        kv: "Namespace",
-        queue: "Queue",
-        workflow: "Workflow",
-        images: "Images",
-        "service-binding": "Service",
+        r2: "Assets",
+        kv: "Store",
+        queue: "Messages",
+        workflow: "Flow",
+        images: "Processor",
+        "service-binding": "Client",
       };
       const reservedClassNames = new Set([
         "Worker",
@@ -696,6 +700,7 @@ export const \${valueName}Layer = \${className}.layer({
         const [editor, setEditor] = useState(null);
         const [selectedResource, setSelectedResource] = useState(null);
         const [resourceCounts, setResourceCounts] = useState({});
+        const [readModelStatus, setReadModelStatus] = useState("not synced");
 
         const createRoom = async () => {
           setCreating(true);
@@ -715,6 +720,32 @@ export const \${valueName}Layer = \${className}.layer({
         };
 
         const copyUrl = () => navigator.clipboard?.writeText(location.href);
+
+        const saveReadModel = useCallback(
+          async (readModel) => {
+            if (!roomId) {
+              return;
+            }
+
+            setReadModelStatus("saving");
+            try {
+              const response = await fetch("/api/rooms/" + roomId + "/read-model", {
+                method: "PUT",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(readModel),
+              });
+
+              if (!response.ok) {
+                throw new Error("Unable to save read model");
+              }
+
+              setReadModelStatus("saved");
+            } catch {
+              setReadModelStatus("error");
+            }
+          },
+          [roomId],
+        );
 
         const handleSelectionChange = useCallback((resource) => {
           setSelectedResource(resource);
@@ -807,6 +838,7 @@ export const \${valueName}Layer = \${className}.layer({
               e("h2", { className: "section-label" }, "Room"),
               e("div", { className: "status-row" }, e("span", null, "Id"), e("strong", null, roomId || "none")),
               e("div", { className: "status-row" }, e("span", null, "User"), e("strong", null, label || "Guest")),
+              e("div", { className: "status-row" }, e("span", null, "Read model"), e("strong", null, readModelStatus)),
               e("p", { className: "note" }, "Open this URL in another tab to verify shared shapes, cursors, selection, and reload persistence."),
             ),
             e("p", { className: "note" }, "Assets are stored inline for this phase; R2-backed uploads are deferred."),
@@ -820,6 +852,7 @@ export const \${valueName}Layer = \${className}.layer({
                   label,
                   onEditorReady: setEditor,
                   onSelectionChange: handleSelectionChange,
+                  onReadModelChange: saveReadModel,
                 })
               : e(
                   "div",
@@ -884,7 +917,7 @@ export const \${valueName}Layer = \${className}.layer({
         );
       }
 
-      function RoomCanvas({ roomId, label, onEditorReady, onSelectionChange }) {
+      function RoomCanvas({ roomId, label, onEditorReady, onSelectionChange, onReadModelChange }) {
         const uri = useMemo(() => {
           const protocol = location.protocol === "https:" ? "wss:" : "ws:";
           const url = new URL(protocol + "//" + location.host + "/api/rooms/" + roomId + "/ws");
@@ -901,22 +934,49 @@ export const \${valueName}Layer = \${className}.layer({
         const handleMount = useCallback(
           (mountedEditor) => {
             onEditorReady(mountedEditor);
+            let readModelTimer;
 
             const updateSelection = () => {
               const selected = mountedEditor.getOnlySelectedShape();
               onSelectionChange(selected?.meta?.architect || null);
             };
 
+            const saveSemanticReadModel = () => {
+              const resources = mountedEditor
+                .getCurrentPageShapes()
+                .map((shape) =>
+                  shape?.meta?.architect
+                    ? {
+                        ...shape.meta.architect,
+                        id: String(shape.id),
+                      }
+                    : null,
+                )
+                .filter(Boolean);
+
+              onReadModelChange({ resources, edges: [] });
+            };
+
+            const scheduleReadModelSave = () => {
+              clearTimeout(readModelTimer);
+              readModelTimer = setTimeout(saveSemanticReadModel, 400);
+            };
+
             updateSelection();
-            const dispose = mountedEditor.store.listen(updateSelection);
+            scheduleReadModelSave();
+            const dispose = mountedEditor.store.listen(() => {
+              updateSelection();
+              scheduleReadModelSave();
+            });
 
             return () => {
+              clearTimeout(readModelTimer);
               dispose?.();
               onSelectionChange(null);
               onEditorReady(null);
             };
           },
-          [onEditorReady, onSelectionChange],
+          [onEditorReady, onReadModelChange, onSelectionChange],
         );
 
         if (remote.status === "loading") {

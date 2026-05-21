@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.9.0
+
+### Minor Changes
+
+- [#25](https://github.com/danieljvdm/effect-cf/pull/25) [`c7daaff`](https://github.com/danieljvdm/effect-cf/commit/c7daaff779934c83519ad9689e1f98dc100b5251) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add a Durable Object `initialize` hook for running Effect setup each time Cloudflare loads a Durable Object instance into memory.
+
 ## 0.8.0
 
 ### Minor Changes

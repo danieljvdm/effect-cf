@@ -87,7 +87,7 @@ const bucketLayer = (bucket: R2Bucket) =>
       seen.push({ key, value });
       return makeR2Object(key, 4);
     },
-    get: async (key) => makeR2ObjectBody(key, "data"),
+    get: async (key) => makeR2ObjectBody(key, `{"value":"data"}`),
   });
 
   layer(bucketLayer(bucket))("R2 object operations", (it) => {
@@ -97,11 +97,14 @@ const bucketLayer = (bucket: R2Bucket) =>
 
         const put = yield* r2.put("avatars/u1.png", "data");
         const object = yield* r2.get("avatars/u1.png");
+        const jsonObject = yield* r2.get("avatars/u1.png");
+        const decoded = yield* Option.getOrThrow(jsonObject).json<{ readonly value: string }>();
 
         assert.strictEqual(put.key, "avatars/u1.png");
         assert.strictEqual(seen[0]?.key, "avatars/u1.png");
         assert.strictEqual(seen[0]?.value, "data");
         assert.strictEqual(Option.getOrUndefined(object)?.key, "avatars/u1.png");
+        assert.deepStrictEqual(decoded, { value: "data" });
       }),
     );
 

@@ -150,6 +150,47 @@ test("rejects direct Durable Object RPC method names reserved by Cloudflare", ()
   ).toThrow(/reserved by Cloudflare Workers RPC/);
 });
 
+test("Durable Object initialize runs when the instance is constructed", async () => {
+  const calls: Array<string> = [];
+  let initialize: Promise<unknown> | undefined;
+  const state = {
+    id: durableObjectId,
+    storage: {} as globalThis.DurableObjectStorage,
+    waitUntil: (promise: Promise<unknown>) => {
+      initialize = promise;
+    },
+    blockConcurrencyWhile: (callback: () => Promise<unknown>) => {
+      calls.push("block");
+      return callback();
+    },
+    acceptWebSocket() {},
+    getWebSockets: () => [],
+    setWebSocketAutoResponse() {},
+    getWebSocketAutoResponse: () => null,
+    getWebSocketAutoResponseTimestamp: () => null,
+    setHibernatableWebSocketEventTimeout() {},
+    getHibernatableWebSocketEventTimeout: () => null,
+    getTags: () => [],
+    abort() {},
+  } as unknown as globalThis.DurableObjectState;
+
+  const Live = DurableObject.make(Layer.empty, {
+    initialize: Effect.gen(function* () {
+      const state = yield* DurableObjectState.DurableObjectState;
+      yield* state.blockConcurrencyWhile(
+        Effect.sync(() => {
+          calls.push(`initialize:${state.id.toString()}`);
+        }),
+      );
+    }),
+  });
+
+  new Live(state, {} as Cloudflare.Env);
+
+  await initialize;
+  expect(calls).toEqual(["block", "initialize:counter-id"]);
+});
+
 test("RPC-only Workers return a default 404 fetch response", async () => {
   const WorkerClass = Worker.make(Layer.empty, {
     rpc: {
@@ -277,6 +318,9 @@ test("DurableObject preserves server, client, handler, and namespace types", () 
     );
 
     DurableObject.make(Layer.empty, {
+      initialize: Effect.gen(function* () {
+        yield* DurableObjectState.DurableObjectState;
+      }),
       webSocketMessage: (socket, message) => {
         expectType<DurableObjectWebSocket.DurableWebSocket>(socket);
         expectType<string | ArrayBuffer>(message);

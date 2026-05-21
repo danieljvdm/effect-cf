@@ -73,6 +73,15 @@ export type RpcHandlers<ROut, Api> = {
  * Options for creating a Durable Object class backed by Effect handlers.
  */
 export interface DurableObjectOptions<ROut, Rpc extends DurableObjectRpc<ROut>> {
+  /**
+   * Effect run when Cloudflare loads this Durable Object instance into memory.
+   *
+   * Use `DurableObjectState.blockConcurrencyWhile` inside this hook when
+   * incoming events should wait for setup to finish. Cloudflare may construct
+   * the same Durable Object id again after eviction or restart; use Durable
+   * Object storage if work must happen only once per id.
+   */
+  readonly initialize?: Effect.Effect<void, unknown, HandlerContext<ROut>>;
   /** Optional RPC methods exposed as Durable Object instance methods. */
   readonly rpc?: Rpc;
   /** Optional fetch handler for HTTP/WebSocket requests. */
@@ -137,6 +146,11 @@ export const make = <
       const runtimeLayer = Entrypoint.provideEntrypointServices(layer, services);
 
       this.runtime = ManagedRuntime.make(runtimeLayer);
+
+      const initialize = options.initialize;
+      if (initialize !== undefined) {
+        state.waitUntil(this[RunSymbol](initialize));
+      }
     }
 
     [RunSymbol]<A, E>(effect: Effect.Effect<A, E, HandlerContext<ROut>>): Promise<A> {

@@ -240,6 +240,25 @@ In definition-backed workflows, the `payload` argument is the typed decoded payl
 
 ## Durable Object WebSockets
 
+Use `initialize` for work that should run each time Cloudflare loads a Durable
+Object instance into memory. Yield `state.blockConcurrencyWhile(...)` when
+later events should wait for initialize to finish. If work should happen only once
+for a Durable Object id, store a sentinel in Durable Object storage.
+
+```ts
+export const RoomLive = DurableObject.make(layer, {
+  initialize: Effect.gen(function* () {
+    const state = yield* DurableObjectState.DurableObjectState;
+    yield* state.blockConcurrencyWhile(
+      Effect.gen(function* () {
+        yield* state.storage.put("loadedAt", Date.now());
+      }),
+    );
+  }),
+  fetch,
+});
+```
+
 Durable Object application sockets should use the hibernation-compatible state API. Accept sockets with `DurableObjectWebSocket.acceptUpgrade(...)`; do not call `server.accept()` or attach native `message` listeners in application code.
 
 ```ts

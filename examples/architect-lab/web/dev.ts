@@ -1,6 +1,8 @@
 const root = new URL("../../../", import.meta.url).pathname;
 const effectCfRoot = new URL("../../../packages/effect-cf/", import.meta.url).pathname;
 const webRoot = new URL(".", import.meta.url).pathname;
+const webWorkerRoot = new URL("../workers/web/", import.meta.url).pathname;
+const wranglerBin = new URL("../../../node_modules/.bin/wrangler", import.meta.url).pathname;
 const persistTo = `${root}.wrangler/state/architect-lab`;
 
 const buildEffectCf = Bun.spawn(["bun", "run", "build"], {
@@ -16,11 +18,24 @@ if (buildExitCode !== 0) {
   process.exit(buildExitCode);
 }
 
+const buildWebClient = Bun.spawn(["bun", "run", "build:client"], {
+  cwd: webWorkerRoot,
+  stdin: "inherit",
+  stdout: "inherit",
+  stderr: "inherit",
+});
+
+const clientBuildExitCode = await buildWebClient.exited;
+if (clientBuildExitCode !== 0) {
+  console.error(`web client build exited with code ${clientBuildExitCode}`);
+  process.exit(clientBuildExitCode);
+}
+
 const commands = [
   {
     name: "api",
     args: [
-      "wrangler",
+      wranglerBin,
       "dev",
       "--config",
       "../workers/api/wrangler.jsonc",
@@ -35,7 +50,7 @@ const commands = [
   {
     name: "web",
     args: [
-      "wrangler",
+      wranglerBin,
       "dev",
       "--config",
       "../workers/web/wrangler.jsonc",

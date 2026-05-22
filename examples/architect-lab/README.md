@@ -26,8 +26,8 @@ the room remains DO-only; R2-backed asset uploads are deferred to later resource
 ```text
 examples/architect-lab/
   packages/domain/       Shared schemas and typed RPC definitions
-  web/                   Minimal browser shell and root dev command
-  workers/web/           Browser-facing Worker and service-binding bridge
+  web/                   Root dev command for the local Architect Lab stack
+  workers/web/           Browser-facing Worker, React client, and service-binding bridge
   workers/api/           API Worker and room routing
   durable-objects/room/  Room Durable Object
   packages/tldraw-effect-cf/

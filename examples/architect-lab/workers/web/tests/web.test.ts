@@ -15,26 +15,28 @@ test("serves the phase 1 web shell", async () => {
   } as unknown as Cloudflare.Env);
 
   const response = await worker.fetch(new Request("https://architect.test/room/room_a"));
+  const html = await response.text();
 
   expect(response.status).toBe(200);
-  await expect(response.text()).resolves.toContain("Architect Lab");
+  expect(html).toContain("Architect Lab");
+  expect(html).toContain("/assets/app.css");
+  expect(html).toContain("/assets/app.js");
 });
 
-test("serves the semantic resource palette and code panel", async () => {
+test("serves embedded React client assets", async () => {
   const worker = new WebWorker(executionContext, {
     API: {
       fetch: async () => Response.json({ ok: true }),
     },
   } as unknown as Cloudflare.Env);
 
-  const response = await worker.fetch(new Request("https://architect.test/room/room_a"));
-  const html = await response.text();
+  const script = await worker.fetch(new Request("https://architect.test/assets/app.js"));
+  const styles = await worker.fetch(new Request("https://architect.test/assets/app.css"));
 
-  expect(html).toContain("Resource palette");
-  expect(html).toContain("AI architect");
-  expect(html).toContain("Durable Object");
-  expect(html).toContain("Generated code");
-  expect(html).toContain("renderResourceSnippet");
+  expect(script.headers.get("content-type")).toContain("text/javascript");
+  await expect(script.text()).resolves.toContain("createRoot");
+  expect(styles.headers.get("content-type")).toContain("text/css");
+  await expect(styles.text()).resolves.toContain("tldraw");
 });
 
 test("forwards API traffic through the typed service binding", async () => {

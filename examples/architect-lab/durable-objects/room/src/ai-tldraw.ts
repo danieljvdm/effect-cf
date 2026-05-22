@@ -28,7 +28,7 @@ interface TldrawStore {
 const pageParentId = "page:page" as TLParentId;
 const resourceNodeSize = { w: 220, h: 104 };
 const annotationNodeSize = { w: 260, h: 92 };
-const aiLayoutScale = { x: 1.65, y: 1.45 };
+const aiLayoutScale = { x: 1, y: 1.25 };
 const aiDiagramGap = 320;
 const initialAiOrigin = { x: 160, y: 140 };
 
@@ -49,7 +49,7 @@ export const applyAiToolCallsToTldrawStore = (
   request: AiToolCallApplyRequest,
 ) => {
   const existingShapes = currentShapes(store);
-  const origin = getAiPlacementOrigin(existingShapes, request.toolCalls);
+  const origin = getAiPlacementOrigin(existingShapes, request);
   const shapeCount = request.toolCalls.filter(
     (toolCall) =>
       toolCall.type === "add_resource_node" ||
@@ -76,7 +76,7 @@ export const applyAiToolCallsToTldrawStore = (
       continue;
     }
 
-    const shape = makeResourceShape(toolCall, origin, nextIndex());
+    const shape = makeResourceShape(toolCall, origin, nextIndex(), request.jobId);
     resourceShapeIds.set(toolCall.id, shape.id);
     resourceShapes.set(shape.id, shape);
     store.put(shape);
@@ -107,7 +107,7 @@ export const applyAiToolCallsToTldrawStore = (
       continue;
     }
 
-    store.put(makeAnnotationShape(toolCall, origin, nextIndex()));
+    store.put(makeAnnotationShape(toolCall, origin, nextIndex(), request.jobId));
   }
 };
 
@@ -196,8 +196,14 @@ const getAiToolCallBounds = (toolCalls: ReadonlyArray<AiToolCall>): Bounds | nul
 
 const getAiPlacementOrigin = (
   existingShapes: ReadonlyArray<TLShape>,
-  toolCalls: ReadonlyArray<AiToolCall>,
+  request: AiToolCallApplyRequest,
 ): Position => {
+  const existingJobOrigin = getExistingAiJobOrigin(existingShapes, request.jobId);
+  if (existingJobOrigin !== null) {
+    return existingJobOrigin;
+  }
+
+  const toolCalls = request.toolCalls;
   const planBounds = getAiToolCallBounds(toolCalls);
   const existingBounds = mergeBounds(existingShapes.map(getShapeBounds));
 
@@ -219,10 +225,36 @@ const getAiPlacementOrigin = (
   };
 };
 
+const getExistingAiJobOrigin = (
+  existingShapes: ReadonlyArray<TLShape>,
+  jobId: string,
+): Position | null => {
+  for (const shape of existingShapes) {
+    const meta = shape.meta;
+    if (meta.aiJobId !== jobId) {
+      continue;
+    }
+
+    const planPosition = getMetaPosition(meta.aiPlanPosition);
+    if (planPosition === null) {
+      continue;
+    }
+
+    const scaledPlanPosition = scaledAiPosition(planPosition);
+    return {
+      x: shape.x - scaledPlanPosition.x,
+      y: shape.y - scaledPlanPosition.y,
+    };
+  }
+
+  return null;
+};
+
 const makeResourceShape = (
   toolCall: AiAddResourceNodeToolCall,
   origin: Position,
   index: IndexKey,
+  jobId?: string,
 ): TLGeoShape => {
   const id = createShapeId(toolCall.id);
   const template = getArchitectureResourceTemplate(toolCall.kind);
@@ -248,6 +280,9 @@ const makeResourceShape = (
         bindingName: toolCall.bindingName,
       },
       aiDescription: toolCall.description,
+      aiJobId: jobId,
+      aiResourceId: toolCall.id,
+      aiPlanPosition: toolCall.position,
     },
   });
 };
@@ -256,6 +291,7 @@ const makeAnnotationShape = (
   toolCall: AiAnnotateResourceToolCall,
   origin: Position,
   index: IndexKey,
+  jobId?: string,
 ): TLGeoShape => {
   const position = scaledAiPosition(toolCall.position);
 
@@ -273,6 +309,8 @@ const makeAnnotationShape = (
     text: toolCall.note,
     meta: {
       aiAnnotation: toolCall,
+      aiJobId: jobId,
+      aiPlanPosition: toolCall.position,
     },
   });
 };
@@ -435,16 +473,23 @@ const resolveResourceShapeId = (
     return created;
   }
 
-  const direct = store.get(resourceId);
+  const shapeId = toResourceShapeId(resourceId);
+  const direct = store.get(shapeId);
   if (direct?.typeName === "shape") {
     return direct.id;
   }
 
   const matching = currentShapes(store).find(
-    (shape) => getArchitectMetaId(shape) === resourceId || shape.id === resourceId,
+    (shape) =>
+      getArchitectMetaId(shape) === resourceId ||
+      getAiResourceId(shape) === resourceId ||
+      shape.id === shapeId,
   );
   return matching?.id;
 };
+
+const toResourceShapeId = (resourceId: string): TLShapeId =>
+  resourceId.startsWith("shape:") ? (resourceId as TLShapeId) : createShapeId(resourceId);
 
 const getArchitectMetaId = (shape: TLShape): string | undefined => {
   const architect = shape.meta.architect;
@@ -454,4 +499,20 @@ const getArchitectMetaId = (shape: TLShape): string | undefined => {
 
   const id = architect.id;
   return typeof id === "string" ? id : undefined;
+};
+
+const getAiResourceId = (shape: TLShape): string | undefined => {
+  const id = shape.meta.aiResourceId;
+  return typeof id === "string" ? id : undefined;
+};
+
+const getMetaPosition = (value: unknown): Position | null => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  const position = value as Record<string, unknown>;
+  return typeof position.x === "number" && typeof position.y === "number"
+    ? { x: position.x, y: position.y }
+    : null;
 };

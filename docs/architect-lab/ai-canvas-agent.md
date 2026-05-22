@@ -191,7 +191,9 @@ Required canned prompts:
 - image processing and publishing pipeline.
 
 The fake provider should still use the same tool-call interface as a real provider so tests and
-local demos exercise the real application path.
+local demos exercise the real application path. Current implementation uses `effect/unstable/ai`
+`Tool`, `Toolkit`, and a deterministic local `LanguageModel` layer, with tool resolution left to the
+application path.
 
 ## Safety And Trust
 

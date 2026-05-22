@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
-import { Schema as S } from "effect";
+import { Effect, Schema as S } from "effect";
 
-import { makeAiJob, makeFakeAiPromptResult } from "../src/ai.ts";
+import { generateFakeAiPromptResult, makeAiJob, makeFakeAiPromptResult } from "../src/ai.ts";
 import {
   ArchitectureReadModel,
   ArchitectureResource,
@@ -135,5 +135,23 @@ describe("architect-lab domain contracts", () => {
     expect(result.summary).toContain("collaborative architecture canvas");
     expect(result.toolCalls.map((call) => call.type)).toContain("add_resource_node");
     expect(result.toolCalls.map((call) => call.type)).toContain("connect_resources");
+  });
+
+  test("runs fake AI jobs through the effect AI language model contract", () => {
+    const job = makeAiJob(
+      "room_ai",
+      {
+        prompt: "Design a chat analytics worker",
+        actor: "Dana",
+        readModel: { resources: [], edges: [] },
+      },
+      new Date("2026-05-21T12:00:00.000Z"),
+    );
+    const result = Effect.runSync(generateFakeAiPromptResult(job));
+
+    expect(result.status).toBe("queued");
+    expect(result.summary).toContain("real-time chat with analytics");
+    expect(result.toolCalls[0]?.type).toBe("add_resource_node");
+    expect(result.toolCalls.map((call) => call.type)).toContain("annotate_resource");
   });
 });

@@ -1,4 +1,5 @@
-import { Schema as S } from "effect";
+import { Effect, Layer, Schema as S, Stream } from "effect";
+import { LanguageModel, Response, Tool, Toolkit, type Prompt } from "effect/unstable/ai";
 
 import {
   ArchitectureEdgeKind,
@@ -76,6 +77,50 @@ export const AiPromptResult = S.Struct({
 });
 export type AiPromptResult = S.Schema.Type<typeof AiPromptResult>;
 
+const AddResourceNodeTool = Tool.make("add_resource_node", {
+  description: "Add a semantic Cloudflare architecture resource to the canvas.",
+  parameters: S.Struct({
+    id: S.String,
+    kind: ArchitectureResourceKind,
+    name: S.String,
+    bindingName: S.String,
+    description: S.String,
+    position: AiResourcePosition,
+  }),
+  success: S.Struct({ accepted: S.Boolean }),
+});
+
+const ConnectResourcesTool = Tool.make("connect_resources", {
+  description: "Connect two semantic architecture resources with a labeled relationship.",
+  parameters: S.Struct({
+    id: S.String,
+    kind: ArchitectureEdgeKind,
+    sourceId: S.String,
+    targetId: S.String,
+    label: S.String,
+  }),
+  success: S.Struct({ accepted: S.Boolean }),
+});
+
+const AnnotateResourceTool = Tool.make("annotate_resource", {
+  description: "Attach an architecture review note to a resource or edge.",
+  parameters: S.Struct({
+    id: S.String,
+    subjectId: S.String,
+    note: S.String,
+    position: AiResourcePosition,
+  }),
+  success: S.Struct({ accepted: S.Boolean }),
+});
+
+export const ArchitectToolkit = Toolkit.make(
+  AddResourceNodeTool,
+  ConnectResourcesTool,
+  AnnotateResourceTool,
+);
+
+type ArchitectToolCallPart = Response.ToolCallParts<Toolkit.Tools<typeof ArchitectToolkit>>;
+
 interface ResourcePlan {
   readonly key: string;
   readonly kind: AiAddResourceNodeToolCall["kind"];
@@ -113,23 +158,102 @@ export const makeAiJob = (roomId: string, request: AiPromptRequest, now = new Da
   readModel: request.readModel ?? { resources: [], edges: [] },
 });
 
-export const makeFakeAiPromptResult = (job: AiJob): AiPromptResult => {
-  const plan = selectFakePlan(job.prompt);
+const makeFakeArchitectLanguageModelService = (job: AiJob) =>
+  LanguageModel.make({
+    generateText: (options) =>
+      Effect.succeed(renderFakeModelParts(job, promptText(options.prompt))),
+    streamText: (options) =>
+      Stream.fromIterable(renderFakeModelStreamParts(job, promptText(options.prompt))),
+  });
+
+export const FakeArchitectLanguageModel = (job: AiJob) =>
+  Layer.effect(LanguageModel.LanguageModel, makeFakeArchitectLanguageModelService(job));
+
+const provideFakeArchitectLanguageModel = <A, E, R>(effect: Effect.Effect<A, E, R>, job: AiJob) =>
+  Effect.provideServiceEffect(
+    effect,
+    LanguageModel.LanguageModel,
+    makeFakeArchitectLanguageModelService(job),
+  );
+
+const generateFakeAiPromptResultEffect = Effect.fn("generateFakeAiPromptResult")(function* (
+  job: AiJob,
+) {
+  const response = yield* LanguageModel.generateText({
+    prompt: [
+      {
+        role: "system",
+        content: "You are the Architect Lab fake provider. Return structured tool calls only.",
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              roomId: job.roomId,
+              jobId: job.id,
+              prompt: job.prompt,
+              readModel: job.readModel,
+            }),
+          },
+        ],
+      },
+    ],
+    toolkit: ArchitectToolkit,
+    toolChoice: {
+      mode: "required",
+      oneOf: ["add_resource_node", "connect_resources", "annotate_resource"],
+    },
+    disableToolCallResolution: true,
+  }).pipe((effect) => provideFakeArchitectLanguageModel(effect, job), Effect.orDie);
+
+  return yield* S.decodeUnknownEffect(AiPromptResult)({
+    jobId: job.id,
+    roomId: job.roomId,
+    status: "queued" as const,
+    summary: response.text || selectFakePlan(job.prompt).summary,
+    toolCalls: response.toolCalls.map(toAiToolCall),
+  }).pipe(Effect.orDie);
+});
+
+export const generateFakeAiPromptResult = (job: AiJob): Effect.Effect<AiPromptResult> =>
+  // `ToolkitInput` currently widens disabled tool-resolution context; the fake model is provided above.
+  generateFakeAiPromptResultEffect(job) as unknown as Effect.Effect<AiPromptResult>;
+
+export const makeFakeAiPromptResult = (job: AiJob): AiPromptResult =>
+  Effect.runSync(generateFakeAiPromptResult(job));
+
+const renderFakeModelParts = (
+  job: AiJob,
+  providerPromptText: string,
+): Array<Response.PartEncoded> => {
+  const plan = selectFakePlan(providerPromptText || job.prompt);
   const prefix = stablePrefix(job.id);
   const resourceIds = new Map<string, string>();
-  const toolCalls: Array<AiToolCall> = [];
+  const parts: Array<Response.PartEncoded> = [
+    {
+      type: "text",
+      text: plan.summary,
+    },
+  ];
 
   for (const resource of plan.resources) {
     const id = `${prefix}_${resource.key}`;
     resourceIds.set(resource.key, id);
-    toolCalls.push({
-      type: "add_resource_node",
-      id,
-      kind: resource.kind,
-      name: resource.name,
-      bindingName: bindingNameFor(resource.kind, resource.name),
-      description: resource.description,
-      position: resource.position,
+    parts.push({
+      type: "tool-call",
+      id: `${id}_call`,
+      name: "add_resource_node",
+      providerExecuted: false,
+      params: {
+        id,
+        kind: resource.kind,
+        name: resource.name,
+        bindingName: bindingNameFor(resource.kind, resource.name),
+        description: resource.description,
+        position: resource.position,
+      },
     });
   }
 
@@ -138,13 +262,18 @@ export const makeFakeAiPromptResult = (job: AiJob): AiPromptResult => {
     const targetId = resourceIds.get(edge.targetKey);
 
     if (sourceId !== undefined && targetId !== undefined) {
-      toolCalls.push({
-        type: "connect_resources",
-        id: `${prefix}_${edge.key}`,
-        kind: edge.kind,
-        sourceId,
-        targetId,
-        label: edge.label,
+      parts.push({
+        type: "tool-call",
+        id: `${prefix}_${edge.key}_call`,
+        name: "connect_resources",
+        providerExecuted: false,
+        params: {
+          id: `${prefix}_${edge.key}`,
+          kind: edge.kind,
+          sourceId,
+          targetId,
+          label: edge.label,
+        },
       });
     }
   }
@@ -153,23 +282,106 @@ export const makeFakeAiPromptResult = (job: AiJob): AiPromptResult => {
     const subjectId = resourceIds.get(annotation.subjectKey);
 
     if (subjectId !== undefined) {
-      toolCalls.push({
-        type: "annotate_resource",
-        id: `${prefix}_${annotation.key}`,
-        subjectId,
-        note: annotation.note,
-        position: annotation.position,
+      parts.push({
+        type: "tool-call",
+        id: `${prefix}_${annotation.key}_call`,
+        name: "annotate_resource",
+        providerExecuted: false,
+        params: {
+          id: `${prefix}_${annotation.key}`,
+          subjectId,
+          note: annotation.note,
+          position: annotation.position,
+        },
       });
     }
   }
 
-  return {
-    jobId: job.id,
-    roomId: job.roomId,
-    status: "queued",
-    summary: plan.summary,
-    toolCalls,
-  };
+  parts.push({
+    type: "finish",
+    reason: "tool-calls",
+    response: undefined,
+    usage: {
+      inputTokens: {
+        uncached: undefined,
+        total: undefined,
+        cacheRead: undefined,
+        cacheWrite: undefined,
+      },
+      outputTokens: {
+        total: undefined,
+        text: undefined,
+        reasoning: undefined,
+      },
+    },
+  });
+
+  return parts;
+};
+
+const renderFakeModelStreamParts = (
+  job: AiJob,
+  providerPromptText: string,
+): Array<Response.StreamPartEncoded> => {
+  const parts = renderFakeModelParts(job, providerPromptText);
+  const streamParts: Array<Response.StreamPartEncoded> = [];
+  const textId = `${stablePrefix(job.id)}_summary`;
+
+  for (const part of parts) {
+    if (part.type === "text") {
+      streamParts.push(
+        { type: "text-start", id: textId },
+        { type: "text-delta", id: textId, delta: part.text },
+        { type: "text-end", id: textId },
+      );
+      continue;
+    }
+
+    if (part.type === "tool-call" || part.type === "finish") {
+      streamParts.push(part);
+    }
+  }
+
+  return streamParts;
+};
+
+const toAiToolCall = (part: ArchitectToolCallPart): AiToolCall => {
+  switch (part.name) {
+    case "add_resource_node":
+      return {
+        type: "add_resource_node",
+        ...part.params,
+      };
+    case "connect_resources":
+      return {
+        type: "connect_resources",
+        ...part.params,
+      };
+    case "annotate_resource":
+      return {
+        type: "annotate_resource",
+        ...part.params,
+      };
+  }
+};
+
+const promptText = (prompt: Prompt.Prompt): string => {
+  const chunks: Array<string> = [];
+
+  for (const message of prompt.content) {
+    if (typeof message.content === "string") {
+      chunks.push(message.content);
+      continue;
+    }
+
+    for (const part of message.content) {
+      if (part.type === "text") {
+        chunks.push(part.text);
+      }
+    }
+  }
+
+  return chunks.join("\n");
 };
 
 const stablePrefix = (jobId: string): string => jobId.replace(/[^A-Za-z0-9_]/g, "_");

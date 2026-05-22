@@ -4,8 +4,8 @@ import { Worker, WorkerConfig } from "effect-cf";
 import {
   AiJob,
   AiPromptRequest,
+  generateFakeAiPromptResult,
   makeAiJob,
-  makeFakeAiPromptResult,
 } from "@architect-lab/domain/ai";
 import {
   ArchitectureReadModelInput,
@@ -125,7 +125,7 @@ const publishReadModel = Effect.fn("publishReadModel")(function* (roomId: RoomId
 const submitAiPrompt = Effect.fn("submitAiPrompt")(function* (roomId: RoomId, request: Request) {
   const input = yield* readJson(request).pipe(Effect.flatMap(decodeAiPromptRequest));
   const job = makeAiJob(roomId, input);
-  const result = makeFakeAiPromptResult(job);
+  const result = yield* generateFakeAiPromptResult(job);
 
   yield* RoomDurableObject.byName(roomId).recordTransportEvent({
     roomId,
@@ -143,7 +143,7 @@ const submitAiPrompt = Effect.fn("submitAiPrompt")(function* (roomId: RoomId, re
 });
 
 const processAiJob = Effect.fn("processAiJob")(function* (job: AiJob) {
-  const result = makeFakeAiPromptResult(job);
+  const result = yield* generateFakeAiPromptResult(job);
 
   yield* RoomDurableObject.byName(job.roomId).recordTransportEvent({
     roomId: job.roomId,

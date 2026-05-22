@@ -16,6 +16,8 @@ This file is the backlog of scenarios that matter. Keep it current as implementa
 - Phase 4 fake AI prompt flow has been manually verified locally: prompt submission returns `202`,
   the local Queue consumer runs, generated resource nodes/arrows/annotations appear on the canvas,
   the first generated resource is selected, and the code panel shows highlighted `effect-cf` code.
+- The fake AI provider now runs through the `effect/unstable/ai` `LanguageModel`/`Toolkit` contract;
+  final hardening should keep coverage on provider parity rather than only canned output shape.
 - Current browser accessibility audit still reports serious findings from tldraw internals and the
   Expect overlay, plus conservative focus-style warnings on Architect Lab controls. Keep these in
   the final hardening pass instead of blocking phase work.
@@ -56,6 +58,7 @@ This file is the backlog of scenarios that matter. Keep it current as implementa
 ### Phase 4 AI Jobs
 
 - Unit tests for fake provider outputs.
+- Unit tests for the fake `LanguageModel` layer and toolkit tool-call mapping.
 - Runtime tests for Queue message decoding and acknowledgement.
 - Durable Object test that AI operations pass through the same validation path as human edits.
 - Browser smoke test for submitting the default prompt and seeing generated canvas edits.

@@ -7,10 +7,10 @@ Make the demo compelling without requiring external AI credentials.
 ## Status
 
 In progress. The current implementation includes a prompt composer, domain-level AI job and tool
-call schemas, deterministic fake provider plans, an API prompt endpoint, local Queue-backed job
-submission/consumption, room event persistence for prompt and generated-tool-call events, and
-browser application of generated resource nodes, arrows, and annotations onto the synced tldraw
-canvas.
+call schemas, an `effect/unstable/ai` toolkit, deterministic fake `LanguageModel` layer, an API
+prompt endpoint, local Queue-backed job submission/consumption, room event persistence for prompt
+and generated-tool-call events, and browser application of generated resource nodes, arrows, and
+annotations onto the synced tldraw canvas.
 
 Remaining Phase 4 work: move from client-applied tool calls to a room-authoritative apply path,
 add richer edge/snippet handling, expose an AI activity log, and broaden canned prompt coverage once
@@ -26,20 +26,23 @@ shared canvas as a collaborator.
 - AI prompt submission is persisted as a room event. Implemented for the current prompt endpoint.
 - Queue messages drive async AI jobs. Implemented locally through `AI_JOBS`; the browser currently
   also receives the generated tool calls immediately so the demo is visible without polling.
-- Fake provider emits structured tool calls. Implemented with deterministic canned plans.
+- Fake provider emits structured tool calls. Implemented with deterministic canned plans through
+  `LanguageModel.generateText`, `Tool.make`, and `Toolkit.make`.
 - Room Durable Object validates and applies AI operations. Not yet implemented; the browser applies
   tool calls to tldraw, which then syncs through the room.
-- Fake and real providers use the same tool-call interface. The domain-level tool-call schema is in
-  place for this.
+- Fake and real providers use the same tool-call interface. The fake provider now disables automatic
+  tool resolution so the room/API path owns validation and apply behavior, matching the intended real
+  provider boundary.
 
 ## Deliverables
 
 - Prompt composer. Implemented.
 - AI job schema. Implemented.
-- Fake deterministic AI provider. Implemented.
+- Fake deterministic AI provider. Implemented as a local `LanguageModel` layer.
 - AI tool calls for adding nodes, edges, annotations, and snippets. Nodes, edges, and annotations
   are implemented; explicit snippet refresh calls remain pending.
-- Queue-backed AI job execution. Implemented for local fake jobs.
+- Queue-backed AI job execution. Implemented for local fake jobs through the same effect AI path as
+  prompt submission.
 - Room broadcast of AI status and tool calls. Partially implemented through tldraw sync after the
   browser applies tool calls; room-authoritative status broadcast remains pending.
 

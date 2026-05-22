@@ -6,8 +6,15 @@ Make the demo compelling without requiring external AI credentials.
 
 ## Status
 
-Planned. The current implementation does not yet include prompt submission, AI job schemas, a fake
-provider, Queue-backed AI execution, AI tool calls, or AI operation persistence/broadcasting.
+In progress. The current implementation includes a prompt composer, domain-level AI job and tool
+call schemas, deterministic fake provider plans, an API prompt endpoint, local Queue-backed job
+submission/consumption, room event persistence for prompt and generated-tool-call events, and
+browser application of generated resource nodes, arrows, and annotations onto the synced tldraw
+canvas.
+
+Remaining Phase 4 work: move from client-applied tool calls to a room-authoritative apply path,
+add richer edge/snippet handling, expose an AI activity log, and broaden canned prompt coverage once
+the visible flow settles.
 
 ## Product Requirement
 
@@ -16,20 +23,25 @@ shared canvas as a collaborator.
 
 ## Technical Requirement
 
-- AI prompt submission is persisted as a room event.
-- Queue messages drive async AI jobs.
-- Fake provider emits structured tool calls.
-- Room Durable Object validates and applies AI operations.
-- Fake and real providers use the same tool-call interface.
+- AI prompt submission is persisted as a room event. Implemented for the current prompt endpoint.
+- Queue messages drive async AI jobs. Implemented locally through `AI_JOBS`; the browser currently
+  also receives the generated tool calls immediately so the demo is visible without polling.
+- Fake provider emits structured tool calls. Implemented with deterministic canned plans.
+- Room Durable Object validates and applies AI operations. Not yet implemented; the browser applies
+  tool calls to tldraw, which then syncs through the room.
+- Fake and real providers use the same tool-call interface. The domain-level tool-call schema is in
+  place for this.
 
 ## Deliverables
 
-- Prompt composer.
-- AI job schema.
-- Fake deterministic AI provider.
-- AI tool calls for adding nodes, edges, annotations, and snippets.
-- Queue-backed AI job execution.
-- Room broadcast of AI status and tool calls.
+- Prompt composer. Implemented.
+- AI job schema. Implemented.
+- Fake deterministic AI provider. Implemented.
+- AI tool calls for adding nodes, edges, annotations, and snippets. Nodes, edges, and annotations
+  are implemented; explicit snippet refresh calls remain pending.
+- Queue-backed AI job execution. Implemented for local fake jobs.
+- Room broadcast of AI status and tool calls. Partially implemented through tldraw sync after the
+  browser applies tool calls; room-authoritative status broadcast remains pending.
 
 ## Resource Coverage Added
 
@@ -37,12 +49,15 @@ shared canvas as a collaborator.
 
 ## Acceptance Criteria
 
-- Default prompt generates a useful Cloudflare architecture diagram.
-- The generated diagram is credible enough for the README demo script.
-- AI operations are persisted and broadcast like human operations.
-- AI edits appear in all connected clients.
-- The app remains fully runnable offline/local.
-- Local demo works with no AI credentials.
+- Default prompt generates a useful Cloudflare architecture diagram. Implemented and manually
+  verified locally.
+- The generated diagram is credible enough for the README demo script. Initial version implemented.
+- AI operations are persisted and broadcast like human operations. Partially true through tldraw
+  sync after browser application; the room-authoritative operation path remains pending.
+- AI edits appear in all connected clients. Expected through tldraw sync; keep two-tab verification
+  in the final hardening log.
+- The app remains fully runnable offline/local. Implemented.
+- Local demo works with no AI credentials. Implemented.
 
 ## Testing Notes
 

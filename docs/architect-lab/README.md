@@ -20,7 +20,10 @@ The demo should be self-referential:
   two-tab sync, reconnect, conflict, and canvas smoke tests are tracked for final hardening.
 - Phase 3 is implemented and manually verified with semantic resource nodes, selection-driven
   snippets, visible canvas/code-panel behavior, and KV-backed latest/published read models.
-- Phase 4 through Phase 7 are planned.
+- Phase 4 is in progress. The first fake-provider slice adds a prompt composer, deterministic AI
+  plans, Queue-backed local job submission, room event persistence, and visible generated canvas
+  edits. The room-authoritative AI apply path and activity log remain pending.
+- Phase 5 through Phase 7 are planned.
 - Phase 8 is mostly complete because Architect Lab is now the only `examples/` app; a final
   traceability pass remains after later resource coverage is implemented or explicitly ruled out.
 

@@ -13,6 +13,12 @@ This file is the backlog of scenarios that matter. Keep it current as implementa
 - Phase 3 semantic resource palette and code panel have been manually verified with visible
   semantic nodes and selected-resource snippets.
 - Phase 3 latest/published KV read model has been manually verified through the local API.
+- Phase 4 fake AI prompt flow has been manually verified locally: prompt submission returns `202`,
+  the local Queue consumer runs, generated resource nodes/arrows/annotations appear on the canvas,
+  the first generated resource is selected, and the code panel shows highlighted `effect-cf` code.
+- Current browser accessibility audit still reports serious findings from tldraw internals and the
+  Expect overlay, plus conservative focus-style warnings on Architect Lab controls. Keep these in
+  the final hardening pass instead of blocking phase work.
 
 ## Existing Automated Coverage
 

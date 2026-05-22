@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./ai": "./src/ai.ts",
     "./architecture": "./src/architecture.ts",
     "./contracts": "./src/contracts.ts",
     "./runtime": "./src/runtime.ts",

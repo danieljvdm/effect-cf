@@ -2,11 +2,18 @@ import { Effect, Layer, Option, Schema as S } from "effect";
 import { Worker, WorkerConfig } from "effect-cf";
 
 import {
+  AiJob,
+  AiPromptRequest,
+  makeAiJob,
+  makeFakeAiPromptResult,
+} from "@architect-lab/domain/ai";
+import {
   ArchitectureReadModelInput,
   latestArchitectureReadModelKey,
   publishedArchitectureReadModelKey,
 } from "@architect-lab/domain/architecture";
 import {
+  AiJobQueue,
   ApiWorker as ApiDefinition,
   ArchitectConfig,
   LatestArchitectureReadModels,
@@ -18,6 +25,7 @@ export { RoomDurableObject } from "@architect-lab/room";
 
 const ApiLayer = Layer.mergeAll(
   RoomDurableObject.layer({ binding: "ROOMS" }),
+  AiJobQueue.layer({ binding: "AI_JOBS" }),
   LatestArchitectureReadModels.layer({ binding: "ARCHITECT_READ_MODELS" }),
   PublishedArchitectureReadModels.layer({ binding: "ARCHITECT_READ_MODELS" }),
   WorkerConfig.layer,
@@ -37,6 +45,8 @@ const withNoStore = (headersInit?: HeadersInit) => {
 };
 
 const decodeReadModelInput = S.decodeUnknownEffect(ArchitectureReadModelInput);
+const decodeAiPromptRequest = S.decodeUnknownEffect(AiPromptRequest);
+const decodeAiJob = S.decodeUnknownEffect(AiJob);
 
 const readJson = (request: Request) =>
   Effect.tryPromise({
@@ -112,6 +122,41 @@ const publishReadModel = Effect.fn("publishReadModel")(function* (roomId: RoomId
   };
 });
 
+const submitAiPrompt = Effect.fn("submitAiPrompt")(function* (roomId: RoomId, request: Request) {
+  const input = yield* readJson(request).pipe(Effect.flatMap(decodeAiPromptRequest));
+  const job = makeAiJob(roomId, input);
+  const result = makeFakeAiPromptResult(job);
+
+  yield* RoomDurableObject.byName(roomId).recordTransportEvent({
+    roomId,
+    actor: job.actor,
+    kind: "ai.prompt.submitted",
+    payloadJson: JSON.stringify({
+      jobId: job.id,
+      prompt: job.prompt,
+      toolCalls: result.toolCalls.length,
+    }),
+  });
+  yield* AiJobQueue.send(job);
+
+  return result;
+});
+
+const processAiJob = Effect.fn("processAiJob")(function* (job: AiJob) {
+  const result = makeFakeAiPromptResult(job);
+
+  yield* RoomDurableObject.byName(job.roomId).recordTransportEvent({
+    roomId: job.roomId,
+    actor: "ai-architect",
+    kind: "ai.tool-calls.generated",
+    payloadJson: JSON.stringify({
+      jobId: job.id,
+      summary: result.summary,
+      toolCalls: result.toolCalls.length,
+    }),
+  });
+});
+
 const getPublishedReadModel = Effect.fn("getPublishedReadModel")(function* (shareSlug: string) {
   const cache = yield* PublishedArchitectureReadModels;
   return yield* cache.get(publishedArchitectureReadModelKey(shareSlug));
@@ -161,6 +206,14 @@ const routeFetch = Effect.gen(function* () {
     return json(yield* publishReadModel(publishMatch[1]), { status: 201 });
   }
 
+  const aiPromptMatch = url.pathname.match(/^\/api\/rooms\/([^/]+)\/ai\/prompts$/);
+  if (request.method === "POST" && aiPromptMatch !== null) {
+    return yield* submitAiPrompt(aiPromptMatch[1], request).pipe(
+      Effect.map((result) => json(result, { status: 202 })),
+      Effect.catch(() => Effect.succeed(json({ error: "Invalid AI prompt" }, { status: 400 }))),
+    );
+  }
+
   const publishedMatch = url.pathname.match(/^\/api\/published\/([^/]+)$/);
   if (request.method === "GET" && publishedMatch !== null) {
     const published = yield* getPublishedReadModel(publishedMatch[1]);
@@ -189,6 +242,14 @@ const routeFetch = Effect.gen(function* () {
 
 export default ApiDefinition.make(ApiLayer, {
   fetch: routeFetch,
+  queue: (batch) =>
+    Effect.gen(function* () {
+      for (const message of batch.messages) {
+        const job = yield* decodeAiJob(message.body);
+        yield* processAiJob(job);
+        yield* message.ack;
+      }
+    }),
   rpc: {
     health: () => health(),
     createRoom: () => createRoom(),

@@ -163,6 +163,7 @@ const renderShell = () => {
         letter-spacing: 0.08em;
       }
 
+      textarea,
       input {
         width: 100%;
         min-width: 0;
@@ -171,6 +172,12 @@ const renderShell = () => {
         padding: 10px 11px;
         color: var(--ink);
         background: #ffffff;
+      }
+
+      textarea {
+        min-height: 104px;
+        resize: vertical;
+        line-height: 1.45;
       }
 
       .button-row {
@@ -221,8 +228,10 @@ const renderShell = () => {
 
       button:focus,
       input:focus,
+      textarea:focus,
       button:focus-visible,
-      input:focus-visible {
+      input:focus-visible,
+      textarea:focus-visible {
         outline: 3px solid #14b8a6;
         outline-offset: 2px;
       }
@@ -258,6 +267,27 @@ const renderShell = () => {
         color: var(--muted);
         font-size: 13px;
         line-height: 1.45;
+      }
+
+      .ai-composer {
+        display: grid;
+        gap: 9px;
+        padding: 12px;
+        border: 1px solid #d6dde3;
+        border-radius: 8px;
+        background: #ffffff;
+      }
+
+      .ai-composer button {
+        width: 100%;
+      }
+
+      .ai-status {
+        min-height: 34px;
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.35;
       }
 
       .inspector {
@@ -713,6 +743,33 @@ export const \${valueName}Layer = \${className}.layer({
         }
       };
 
+      const resourceTemplateByKind = Object.fromEntries(
+        resourceTemplates.map((template) => [template.kind, template]),
+      );
+
+      const collectArchitectureReadModel = (mountedEditor) => {
+        const resources = [];
+        const edges = [];
+
+        for (const shape of mountedEditor.getCurrentPageShapes()) {
+          if (shape?.meta?.architect) {
+            resources.push({
+              ...shape.meta.architect,
+              id: String(shape.id),
+            });
+          }
+
+          if (shape?.meta?.architectEdge) {
+            edges.push({
+              ...shape.meta.architectEdge,
+              id: String(shape.id),
+            });
+          }
+        }
+
+        return { resources, edges };
+      };
+
       function App() {
         const [roomId, setRoomId] = useState(getInitialRoomId);
         const [label, setLabel] = useState(() => localStorage.getItem("architect:label") || randomLabel());
@@ -721,6 +778,9 @@ export const \${valueName}Layer = \${className}.layer({
         const [selectedResource, setSelectedResource] = useState(null);
         const [resourceCounts, setResourceCounts] = useState({});
         const [readModelStatus, setReadModelStatus] = useState("not synced");
+        const [aiPrompt, setAiPrompt] = useState("Draw an AI architecture canvas");
+        const [aiStatus, setAiStatus] = useState("Fake provider ready");
+        const [aiRunning, setAiRunning] = useState(false);
 
         const createRoom = async () => {
           setCreating(true);
@@ -818,6 +878,169 @@ export const \${valueName}Layer = \${className}.layer({
           setSelectedResource(resource);
         };
 
+        const applyAiToolCalls = (toolCalls) => {
+          if (!editor) {
+            return;
+          }
+
+          const bounds = editor.getViewportPageBounds();
+          const origin = {
+            x: bounds.x + bounds.w / 2,
+            y: bounds.y + bounds.h / 2,
+          };
+          const resourceShapeIds = new Map();
+          const createdResourceIds = [];
+
+          for (const toolCall of toolCalls) {
+            if (toolCall.type !== "add_resource_node") {
+              continue;
+            }
+
+            const template = resourceTemplateByKind[toolCall.kind] || resourceTemplates[0];
+            const id = createShapeId();
+            const resource = {
+              id,
+              kind: toolCall.kind,
+              name: toolCall.name,
+              bindingName: toolCall.bindingName,
+            };
+
+            resourceShapeIds.set(toolCall.id, id);
+            createdResourceIds.push(id);
+            editor.createShape({
+              id,
+              type: "geo",
+              x: origin.x + toolCall.position.x,
+              y: origin.y + toolCall.position.y,
+              props: {
+                w: 220,
+                h: 104,
+                geo: "rectangle",
+                color: template.color,
+                fill: "solid",
+                dash: "draw",
+                size: "m",
+                font: "draw",
+                align: "middle",
+                verticalAlign: "middle",
+                richText: toRichText(toolCall.name),
+              },
+              meta: {
+                architect: resource,
+                aiDescription: toolCall.description,
+              },
+            });
+          }
+
+          for (const toolCall of toolCalls) {
+            if (toolCall.type !== "connect_resources") {
+              continue;
+            }
+
+            const sourceId = resourceShapeIds.get(toolCall.sourceId);
+            const targetId = resourceShapeIds.get(toolCall.targetId);
+            const source = sourceId ? editor.getShape(sourceId) : null;
+            const target = targetId ? editor.getShape(targetId) : null;
+
+            if (!source || !target) {
+              continue;
+            }
+
+            const id = createShapeId();
+            editor.createShape({
+              id,
+              type: "arrow",
+              x: 0,
+              y: 0,
+              props: {
+                color: "grey",
+                dash: "draw",
+                size: "m",
+                start: { x: source.x + 220, y: source.y + 52 },
+                end: { x: target.x, y: target.y + 52 },
+                richText: toRichText(toolCall.label),
+              },
+              meta: {
+                architectEdge: {
+                  id,
+                  kind: toolCall.kind,
+                  sourceId: String(sourceId),
+                  targetId: String(targetId),
+                  label: toolCall.label,
+                },
+              },
+            });
+          }
+
+          for (const toolCall of toolCalls) {
+            if (toolCall.type !== "annotate_resource") {
+              continue;
+            }
+
+            const id = createShapeId();
+            editor.createShape({
+              id,
+              type: "geo",
+              x: origin.x + toolCall.position.x,
+              y: origin.y + toolCall.position.y,
+              props: {
+                w: 260,
+                h: 92,
+                geo: "rectangle",
+                color: "grey",
+                fill: "none",
+                dash: "dashed",
+                size: "s",
+                font: "draw",
+                align: "middle",
+                verticalAlign: "middle",
+                richText: toRichText(toolCall.note),
+              },
+              meta: {
+                aiAnnotation: toolCall,
+              },
+            });
+          }
+
+          if (createdResourceIds.length > 0) {
+            editor.select(createdResourceIds[0]);
+            const selected = editor.getOnlySelectedShape();
+            setSelectedResource(selected?.meta?.architect || null);
+          }
+        };
+
+        const submitAiPrompt = async () => {
+          if (!roomId || !editor || aiPrompt.trim() === "") {
+            return;
+          }
+
+          setAiRunning(true);
+          setAiStatus("Queueing fake AI job");
+          try {
+            const response = await fetch("/api/rooms/" + roomId + "/ai/prompts", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                prompt: aiPrompt,
+                actor: label || "Guest",
+                readModel: collectArchitectureReadModel(editor),
+              }),
+            });
+
+            if (!response.ok) {
+              throw new Error("AI prompt failed");
+            }
+
+            const result = await response.json();
+            applyAiToolCalls(result.toolCalls || []);
+            setAiStatus(result.summary || "Fake AI job queued");
+          } catch {
+            setAiStatus("AI prompt failed");
+          } finally {
+            setAiRunning(false);
+          }
+        };
+
         const selectedSnippet = selectedResource ? renderResourceSnippet(selectedResource) : "";
         const highlightedSnippet = selectedSnippet ? highlight(selectedSnippet) : "";
 
@@ -852,6 +1075,27 @@ export const \${valueName}Layer = \${className}.layer({
                 e("button", { onClick: createRoom, disabled: creating }, creating ? "Creating" : "Create room"),
                 e("button", { className: "secondary", onClick: copyUrl, disabled: !roomId }, "Copy URL"),
               ),
+            ),
+            e(
+              "section",
+              { className: "ai-composer", "aria-label": "AI architect" },
+              e("h2", { className: "section-label" }, "AI architect"),
+              e(
+                "label",
+                { className: "field", htmlFor: "ai-prompt" },
+                e("span", null, "Prompt"),
+                e("textarea", {
+                  id: "ai-prompt",
+                  value: aiPrompt,
+                  onChange: (event) => setAiPrompt(event.target.value),
+                }),
+              ),
+              e(
+                "button",
+                { onClick: submitAiPrompt, disabled: !roomId || !editor || aiRunning || aiPrompt.trim() === "" },
+                aiRunning ? "Queueing" : "Run fake architect",
+              ),
+              e("p", { className: "ai-status" }, aiStatus),
             ),
             e(
               "section",
@@ -963,19 +1207,7 @@ export const \${valueName}Layer = \${className}.layer({
             };
 
             const saveSemanticReadModel = () => {
-              const resources = mountedEditor
-                .getCurrentPageShapes()
-                .map((shape) =>
-                  shape?.meta?.architect
-                    ? {
-                        ...shape.meta.architect,
-                        id: String(shape.id),
-                      }
-                    : null,
-                )
-                .filter(Boolean);
-
-              onReadModelChange({ resources, edges: [] });
+              onReadModelChange(collectArchitectureReadModel(mountedEditor));
             };
 
             const scheduleReadModelSave = () => {

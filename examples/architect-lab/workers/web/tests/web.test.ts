@@ -31,6 +31,7 @@ test("serves the semantic resource palette and code panel", async () => {
   const html = await response.text();
 
   expect(html).toContain("Resource palette");
+  expect(html).toContain("AI architect");
   expect(html).toContain("Durable Object");
   expect(html).toContain("Generated code");
   expect(html).toContain("renderResourceSnippet");

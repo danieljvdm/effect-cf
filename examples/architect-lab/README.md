@@ -1,8 +1,9 @@
 # Architect Lab
 
-Architect Lab is a Cloudflare/effect-cf multiplayer canvas example. Phase 2 hosts tldraw sync in a
-room Durable Object, persists tldraw records in Durable Object SQLite, and keeps typed Worker and
-Durable Object RPC for room metadata and health.
+Architect Lab is a Cloudflare/effect-cf multiplayer canvas example. It hosts tldraw sync in a room
+Durable Object, persists tldraw records in Durable Object SQLite, keeps typed Worker and Durable
+Object RPC for room metadata and health, and now includes a local fake AI architect flow that queues
+prompt jobs and draws semantic resources on the shared canvas.
 
 ## Run Locally
 
@@ -11,9 +12,10 @@ vp install
 vp run architect#dev
 ```
 
-Open <http://localhost:8787>. Create a room, draw on the tldraw canvas, then open the same room URL
-in a second tab to see shared document edits and presence. Reloading the room restores the latest
-document from Durable Object SQLite.
+Open <http://localhost:8787>. Create a room, draw on the tldraw canvas, or run the fake AI
+architect prompt to generate a Cloudflare architecture diagram. Open the same room URL in a second
+tab to see shared document edits and presence. Reloading the room restores the latest document from
+Durable Object SQLite.
 
 The tldraw sync strategy is documented in
 [tldraw-sync-strategy.md](./tldraw-sync-strategy.md). Phase 2 stores image/video assets inline so

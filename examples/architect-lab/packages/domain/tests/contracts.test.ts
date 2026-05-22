@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { Schema as S } from "effect";
 
+import { makeAiJob, makeFakeAiPromptResult } from "../src/ai.ts";
 import {
   ArchitectureReadModel,
   ArchitectureResource,
@@ -116,5 +117,23 @@ describe("architect-lab domain contracts", () => {
     expect(model.resources).toHaveLength(1);
     expect(latestArchitectureReadModelKey("room_a")).toBe("room-latest:room_a");
     expect(publishedArchitectureReadModelKey("abc123")).toBe("published:abc123");
+  });
+
+  test("returns deterministic fake AI tool calls for the default canvas prompt", () => {
+    const job = makeAiJob(
+      "room_ai",
+      {
+        prompt: "Draw an AI architecture canvas",
+        actor: "Dana",
+        readModel: { resources: [], edges: [] },
+      },
+      new Date("2026-05-21T12:00:00.000Z"),
+    );
+    const result = makeFakeAiPromptResult(job);
+
+    expect(result.status).toBe("queued");
+    expect(result.summary).toContain("collaborative architecture canvas");
+    expect(result.toolCalls.map((call) => call.type)).toContain("add_resource_node");
+    expect(result.toolCalls.map((call) => call.type)).toContain("connect_resources");
   });
 });

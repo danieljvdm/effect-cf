@@ -17,6 +17,7 @@ test("creates a room through the API Worker and typed Room Durable Object namesp
   const worker = new ApiWorker(executionContext, {
     ARCHITECT_PUBLIC_ORIGIN: "https://architect.test",
     ARCHITECT_DEFAULT_ROOM_TITLE: "Untitled architecture",
+    AI_JOBS: makeQueue(),
     ARCHITECT_READ_MODELS: makeKvNamespace(),
     ROOMS: makeRoomNamespace({
       getMetadata: async (roomId: string) => {
@@ -46,6 +47,7 @@ test("reads room health through the typed Room Durable Object RPC path", async (
   const worker = new ApiWorker(executionContext, {
     ARCHITECT_PUBLIC_ORIGIN: "https://architect.test",
     ARCHITECT_DEFAULT_ROOM_TITLE: "Untitled architecture",
+    AI_JOBS: makeQueue(),
     ARCHITECT_READ_MODELS: makeKvNamespace(),
     ROOMS: makeRoomNamespace({
       getHealth: async (roomId: string) => ({
@@ -74,6 +76,7 @@ test("writes and reads the latest architecture read model through KV", async () 
   const worker = new ApiWorker(executionContext, {
     ARCHITECT_PUBLIC_ORIGIN: "https://architect.test",
     ARCHITECT_DEFAULT_ROOM_TITLE: "Untitled architecture",
+    AI_JOBS: makeQueue(),
     ARCHITECT_READ_MODELS: kv,
     ROOMS: makeRoomNamespace({}),
   } as unknown as Cloudflare.Env);
@@ -115,6 +118,7 @@ test("publishes the latest architecture read model through KV", async () => {
   const worker = new ApiWorker(executionContext, {
     ARCHITECT_PUBLIC_ORIGIN: "https://architect.test",
     ARCHITECT_DEFAULT_ROOM_TITLE: "Untitled architecture",
+    AI_JOBS: makeQueue(),
     ARCHITECT_READ_MODELS: kv,
     ROOMS: makeRoomNamespace({}),
   } as unknown as Cloudflare.Env);
@@ -148,6 +152,47 @@ test("publishes the latest architecture read model through KV", async () => {
   await expect(kv.get(publishedArchitectureReadModelKey(published.shareSlug))).resolves.toContain(
     `"shareSlug":"${published.shareSlug}"`,
   );
+});
+
+test("submits a fake AI architect prompt and queues the job", async () => {
+  const calls: Array<unknown> = [];
+  const queue = makeQueue();
+  const worker = new ApiWorker(executionContext, {
+    ARCHITECT_PUBLIC_ORIGIN: "https://architect.test",
+    ARCHITECT_DEFAULT_ROOM_TITLE: "Untitled architecture",
+    AI_JOBS: queue,
+    ARCHITECT_READ_MODELS: makeKvNamespace(),
+    ROOMS: makeRoomNamespace({
+      recordTransportEvent: async (event: unknown) => {
+        calls.push(event);
+        return { roomId: "room_ai", sequence: calls.length };
+      },
+    }),
+  } as unknown as Cloudflare.Env);
+
+  const response = await worker.fetch(
+    new Request("https://worker.test/api/rooms/room_ai/ai/prompts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        prompt: "Draw an AI architecture canvas",
+        actor: "Dana",
+        readModel: { resources: [], edges: [] },
+      }),
+    }),
+  );
+  const body = (await response.json()) as {
+    status: string;
+    summary: string;
+    toolCalls: Array<{ type: string }>;
+  };
+
+  expect(response.status).toBe(202);
+  expect(body.status).toBe("queued");
+  expect(body.summary).toContain("collaborative architecture canvas");
+  expect(body.toolCalls.map((call) => call.type)).toContain("add_resource_node");
+  expect(queue.sent).toHaveLength(1);
+  expect(calls).toHaveLength(1);
 });
 
 function makeRoomNamespace(methods: Record<string, unknown>) {
@@ -198,4 +243,27 @@ function makeKvNamespace() {
       cacheStatus: null,
     }),
   } as unknown as KVNamespace;
+}
+
+function makeQueue() {
+  const sent: Array<unknown> = [];
+
+  return {
+    sent,
+    send: async (message: unknown) => {
+      sent.push(message);
+    },
+    sendBatch: async (messages: Iterable<MessageSendRequest<unknown>>) => {
+      for (const message of messages) {
+        sent.push(message.body);
+      }
+    },
+    metrics: async () => ({
+      backlog: 0,
+      consumers: 0,
+      messagesInFlight: 0,
+      messagesRetried: 0,
+      newestMessageTimestamp: null,
+    }),
+  } as unknown as Queue & { sent: Array<unknown> };
 }

@@ -1,6 +1,7 @@
 import { Config, Schema as S } from "effect";
-import { DurableObject, Kv, Worker, WorkerConfig } from "effect-cf";
+import { DurableObject, Kv, Queue, Worker, WorkerConfig } from "effect-cf";
 
+import { AiJob } from "./ai.js";
 import { ArchitectureReadModel, PublishedArchitectureReadModel } from "./architecture.js";
 
 import {
@@ -68,3 +69,7 @@ export class PublishedArchitectureReadModels extends Kv.Tag<PublishedArchitectur
     value: PublishedArchitectureReadModel,
   },
 ) {}
+
+export class AiJobQueue extends Queue.Tag<AiJobQueue>()("ArchitectAiJobQueue", {
+  message: AiJob,
+}) {}

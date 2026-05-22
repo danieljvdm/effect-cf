@@ -22,6 +22,19 @@
       "id": "architect-lab-read-models",
     },
   ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "AI_JOBS",
+        "queue": "architect-lab-ai-jobs",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "architect-lab-ai-jobs",
+      },
+    ],
+  },
   "migrations": [
     {
       "tag": "v1",

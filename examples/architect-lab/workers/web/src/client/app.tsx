@@ -330,7 +330,7 @@ export const App = () => {
       ? submitAiPromptResult.value.summary
       : submitAiPromptResult._tag === "Failure"
         ? "AI prompt failed"
-        : (lastAiActivityItem?.message ?? "Fake provider ready");
+        : (lastAiActivityItem?.message ?? "Architect ready");
   const traceRunning = startTraceResult.waiting || traceState?.status === "running";
   const exportRunning =
     startExportResult.waiting ||
@@ -648,7 +648,7 @@ export const App = () => {
             ) : (
               <Play aria-hidden="true" className="size-4" />
             )}
-            {aiRunning ? "Streaming" : "Run fake architect"}
+            {aiRunning ? "Streaming" : "Run architect"}
           </Button>
           <VoicePanel
             disabled={roomId === ""}

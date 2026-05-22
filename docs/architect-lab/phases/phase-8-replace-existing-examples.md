@@ -7,10 +7,11 @@ been removed.
 
 ## Status
 
-Complete. Architect Lab is the only directory under `examples/`, root `vp check` / `vp test`
-validate the workspace, the root README links directly to the demo and run command, deployed-mode
-resource requirements are documented, and preserved patterns from the removed examples have been
-reviewed against the final Phase 0-7 implementation.
+Not merge-ready while Phase 7 real-provider validation is blocked. Architect Lab is the only
+directory under `examples/`, root `vp check` / `vp test` validate the workspace, the root README
+links directly to the demo and run command, deployed-mode resource requirements are documented, and
+preserved patterns from the removed examples have been reviewed. The replacement claim still needs
+a live real-AI smoke with a usable provider key before this branch should merge.
 
 ## Product Requirement
 

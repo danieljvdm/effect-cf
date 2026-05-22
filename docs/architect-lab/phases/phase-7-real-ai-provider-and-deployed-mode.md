@@ -6,11 +6,12 @@ Make the example usable beyond deterministic demos while keeping local developme
 
 ## Status
 
-Complete. The fake provider remains the local default, and the API Worker now has a configurable
-OpenAI-compatible real-provider path selected through WorkerConfig. Fake and real provider modes
-share the same AI job, tool-call schemas, and room-validated apply path. Timeout, retry,
-max-output, max-tool-call, and estimated-cost controls are explicit config values. Hyperdrive
-remains optional and omitted from the core bindings.
+Not complete for merge. The fake provider remains the local default, and the API Worker now has a
+configurable OpenAI-compatible real-provider path selected through WorkerConfig. The real-provider
+path uses required strict tool calls, validates tool-call arguments, and shares the same room
+application path as the fake provider. However, live OpenAI validation is currently blocked by the
+available local key returning `insufficient_quota`, so this phase is not PR-ready as "real AI
+works" until a usable provider key validates the browser/API flow end to end.
 
 ## Product Requirement
 
@@ -43,11 +44,14 @@ remains deterministic and free of external credentials.
 
 - Local fake provider remains default.
 - Real provider can be enabled by config without changing code.
+- Real provider has been validated against a usable provider key and creates canvas edits in a room.
 - Deployed README lists all required Cloudflare resources.
 - Hyperdrive can be omitted without broken bindings.
 
 ## Testing Notes
 
 - Domain tests cover provider-mode selection and real-provider response decoding with mocked fetch.
+- Direct live-provider smoke against the local `OPENAI_API_KEY` reached OpenAI but failed with
+  `insufficient_quota`; rerun with a valid key before review.
 - API Worker tests keep fake mode credential-free.
 - No test requires real provider credentials.

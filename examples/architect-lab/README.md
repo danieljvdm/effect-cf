@@ -27,6 +27,7 @@ Local development defaults to the deterministic fake provider and does not requi
 The API Worker can use an OpenAI-compatible provider by setting:
 
 ```sh
+cp examples/architect-lab/web/.dev.vars.example examples/architect-lab/web/.dev.vars
 ARCHITECT_AI_PROVIDER=real
 ARCHITECT_AI_PROVIDER_API_KEY=...
 ARCHITECT_AI_PROVIDER_BASE_URL=https://api.openai.com/v1
@@ -39,7 +40,8 @@ ARCHITECT_AI_MAX_ESTIMATED_COST_CENTS=10
 ```
 
 The fake and real providers share the same room-validated tool-call contract. Real-provider mode
-requires the key above as a secret; fake mode ignores it.
+requires the key above as a secret; fake mode ignores it. Do not review this branch as real-AI
+ready until a live provider smoke has created canvas edits with a usable provider key.
 
 ## Deployed Mode
 

@@ -331,8 +331,54 @@ describe("architect-lab domain contracts", () => {
       expect(requests[0]).toMatchObject({
         max_tokens: 600,
         model: "test-model",
-        tool_choice: "auto",
+        parallel_tool_calls: false,
+        tool_choice: "required",
       });
+      expect(
+        (requests[0] as { tools: Array<{ function: { strict: boolean } }> }).tools[0]?.function
+          .strict,
+      ).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("fails real provider results that contain no valid tool calls", async () => {
+    const job = makeAiJob(
+      "room_ai",
+      {
+        prompt: "Design a worker and queue",
+        actor: "Dana",
+        readModel: { resources: [], edges: [] },
+      },
+      new Date("2026-05-21T12:00:00.000Z"),
+    );
+    const originalFetch = globalThis.fetch;
+
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "Here is some prose but no tool calls." } }],
+          usage: { total_tokens: 10 },
+        }),
+        { status: 200 },
+      );
+
+    try {
+      await expect(
+        Effect.runPromise(
+          generateRealAiPromptResult(job, {
+            apiKey: "test",
+            baseUrl: "https://provider.test/v1",
+            maxEstimatedCostCents: 10,
+            maxOutputTokens: 600,
+            maxToolCalls: 4,
+            model: "test-model",
+            retryAttempts: 0,
+            timeoutMs: 1000,
+          }),
+        ),
+      ).rejects.toThrow("Real provider returned no valid architecture tool calls");
     } finally {
       globalThis.fetch = originalFetch;
     }

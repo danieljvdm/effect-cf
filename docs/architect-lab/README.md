@@ -29,12 +29,15 @@ The demo should be self-referential:
 - Phase 6 is complete. Export Workflow starts durable package generation from the room side panel,
   persists status in D1, stores generated files and the manifest in R2, broadcasts export activity,
   and reloads the last export status from persisted state.
-- Phase 7 is complete. Fake provider mode remains the credential-free local default, and deployed
-  real-provider mode can be enabled through WorkerConfig with documented model, key, timeout,
-  retry, token, tool-call, and estimated-cost controls.
-- Phase 8 is complete. Architect Lab is the only `examples/` app, the root README points at it as
-  the flagship demo, deployed-mode resources are documented, and preserved patterns from the removed
-  examples have been reviewed against the implementation.
+- Phase 7 is not merge-ready as real AI. Fake provider mode remains the credential-free local
+  default, and deployed real-provider mode is config-gated with documented model, key, timeout,
+  retry, token, tool-call, and estimated-cost controls. A direct live OpenAI smoke reached the API
+  but failed with `insufficient_quota` for the available local key; this must pass with a usable key
+  before the PR should claim real AI support.
+- Phase 8 is not merge-ready while Phase 7 live real-provider validation is blocked. Architect Lab
+  is the only `examples/` app, the root README points at it as the flagship demo, deployed-mode
+  resources are documented, and preserved patterns from the removed examples have been reviewed
+  against the implementation.
 - Phase 9 is complete. Browser dictation can fill the AI prompt, transcript events are room
   activity, passive voice suggestions require accept/reject, and auto-act remains disabled.
 

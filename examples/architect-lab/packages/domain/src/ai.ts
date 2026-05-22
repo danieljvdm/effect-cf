@@ -375,6 +375,12 @@ export const generateRealAiPromptResult = (
       );
     }
 
+    if (toolCalls.length === 0) {
+      return yield* Effect.fail(
+        new Error("Real provider returned no valid architecture tool calls"),
+      );
+    }
+
     return yield* S.decodeUnknownEffect(AiPromptResult)({
       jobId: job.id,
       roomId: job.roomId,
@@ -439,7 +445,8 @@ const requestRealProvider = (
                   },
                 ],
                 model: options.model,
-                tool_choice: "auto",
+                parallel_tool_calls: false,
+                tool_choice: "required",
                 tools: realProviderTools,
               }),
               headers: {
@@ -451,7 +458,9 @@ const requestRealProvider = (
             });
 
             if (!response.ok) {
-              lastError = new Error(`Provider returned ${response.status}`);
+              lastError = new Error(
+                `Provider returned ${response.status}: ${await response.text()}`,
+              );
               continue;
             }
 
@@ -475,6 +484,7 @@ const realProviderTools = [
     function: {
       name: "add_resource_node",
       description: "Add a semantic Cloudflare architecture resource to the canvas.",
+      strict: true,
       parameters: {
         type: "object",
         additionalProperties: false,
@@ -516,6 +526,7 @@ const realProviderTools = [
     function: {
       name: "connect_resources",
       description: "Connect two semantic architecture resources with a labeled relationship.",
+      strict: true,
       parameters: {
         type: "object",
         additionalProperties: false,
@@ -546,6 +557,7 @@ const realProviderTools = [
     function: {
       name: "annotate_resource",
       description: "Attach an architecture review note to a resource or edge.",
+      strict: true,
       parameters: {
         type: "object",
         additionalProperties: false,
@@ -583,11 +595,26 @@ const readRealProviderToolCall = (toolCall: {
     const parsed = JSON.parse(toolCall.function.arguments);
     switch (toolCall.function.name) {
       case "add_resource_node":
-        return [{ type: "add_resource_node", ...parsed } as AiToolCall];
+        return [
+          S.decodeUnknownSync(AiAddResourceNodeToolCall)({
+            type: "add_resource_node",
+            ...parsed,
+          }),
+        ];
       case "connect_resources":
-        return [{ type: "connect_resources", ...parsed } as AiToolCall];
+        return [
+          S.decodeUnknownSync(AiConnectResourcesToolCall)({
+            type: "connect_resources",
+            ...parsed,
+          }),
+        ];
       case "annotate_resource":
-        return [{ type: "annotate_resource", ...parsed } as AiToolCall];
+        return [
+          S.decodeUnknownSync(AiAnnotateResourceToolCall)({
+            type: "annotate_resource",
+            ...parsed,
+          }),
+        ];
       default:
         return [];
     }

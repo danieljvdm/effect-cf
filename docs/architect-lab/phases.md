@@ -13,3 +13,4 @@ The roadmap is split into standalone phase files under [phases/](./phases/).
 - [Phase 6: Export Workflow](./phases/phase-6-export-workflow.md) - Planned
 - [Phase 7: Real AI Provider And Deployed Mode](./phases/phase-7-real-ai-provider-and-deployed-mode.md) - Planned
 - [Phase 8: Validate Architect Lab As The Replacement](./phases/phase-8-replace-existing-examples.md) - Mostly complete, final docs/review pass remains
+- [Phase 9: Voice Collaboration](./phases/phase-9-voice-collaboration.md) - Planned after final validation

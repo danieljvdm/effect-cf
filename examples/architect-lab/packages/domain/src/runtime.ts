@@ -1,7 +1,7 @@
 import { Config, Schema as S } from "effect";
 import { DurableObject, Kv, Queue, Worker, WorkerConfig } from "effect-cf";
 
-import { AiJob } from "./ai.js";
+import { AiJob, AiPromptResult, AiToolCallApplyRequest } from "./ai.js";
 import { ArchitectureReadModel, PublishedArchitectureReadModel } from "./architecture.js";
 
 import {
@@ -37,6 +37,10 @@ export class RoomDurableObject extends DurableObject.Tag<RoomDurableObject>()(
     recordTransportEvent: DurableObject.method({
       args: [TransportEventInput] as const,
       success: TransportEventReceipt,
+    }),
+    applyAiToolCalls: DurableObject.method({
+      args: [AiToolCallApplyRequest] as const,
+      success: AiPromptResult,
     }),
   },
 ) {}

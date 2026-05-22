@@ -14,3 +14,4 @@ through these in order unless a later discovery changes the dependency graph.
 - [Phase 6: Export Workflow](./phase-6-export-workflow.md) - Planned
 - [Phase 7: Real AI Provider And Deployed Mode](./phase-7-real-ai-provider-and-deployed-mode.md) - Planned
 - [Phase 8: Validate Architect Lab As The Replacement](./phase-8-replace-existing-examples.md) - Mostly complete, final docs/review pass remains
+- [Phase 9: Voice Collaboration](./phase-9-voice-collaboration.md) - Planned after final validation

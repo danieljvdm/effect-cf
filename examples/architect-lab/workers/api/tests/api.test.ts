@@ -167,6 +167,21 @@ test("submits a fake AI architect prompt and queues the job", async () => {
         calls.push(event);
         return { roomId: "room_ai", sequence: calls.length };
       },
+      applyAiToolCalls: async (request: {
+        roomId: string;
+        jobId: string;
+        summary: string;
+        toolCalls: Array<{ type: string }>;
+      }) => {
+        calls.push(request);
+        return {
+          roomId: request.roomId,
+          jobId: request.jobId,
+          status: "queued",
+          summary: request.summary,
+          toolCalls: request.toolCalls,
+        };
+      },
     }),
   } as unknown as Cloudflare.Env);
 
@@ -192,7 +207,7 @@ test("submits a fake AI architect prompt and queues the job", async () => {
   expect(body.summary).toContain("collaborative architecture canvas");
   expect(body.toolCalls.map((call) => call.type)).toContain("add_resource_node");
   expect(queue.sent).toHaveLength(1);
-  expect(calls).toHaveLength(1);
+  expect(calls).toHaveLength(2);
 });
 
 function makeRoomNamespace(methods: Record<string, unknown>) {

@@ -5,6 +5,7 @@ import { DurableObjectSqlite, Worker } from "effect-cf";
 import { TldrawRoom } from "@architect-lab/tldraw-effect-cf";
 
 import { RoomDurableObject as RoomDefinition } from "@architect-lab/domain/runtime";
+import { type AiToolCallApplyRequest } from "@architect-lab/domain/ai";
 import {
   type RoomId,
   type RoomMetadata,
@@ -104,6 +105,30 @@ const recordTransportEvent = Effect.fn("recordTransportEvent")(function* (
   return { roomId: event.roomId, sequence: row.sequence };
 });
 
+const applyAiToolCalls = Effect.fn("applyAiToolCalls")(function* (request: AiToolCallApplyRequest) {
+  yield* ensureRoom(request.roomId);
+  yield* validateAiToolCalls(request);
+  yield* recordTransportEvent({
+    roomId: request.roomId,
+    actor: request.actor,
+    kind: "ai.tool-calls.applied",
+    payloadJson: JSON.stringify({
+      jobId: request.jobId,
+      summary: request.summary,
+      toolCalls: request.toolCalls.length,
+      toolCallTypes: request.toolCalls.map((toolCall) => toolCall.type),
+    }),
+  });
+
+  return {
+    jobId: request.jobId,
+    roomId: request.roomId,
+    status: "queued" as const,
+    summary: request.summary,
+    toolCalls: request.toolCalls,
+  };
+});
+
 const acceptRoomSocket = Effect.fn("acceptRoomSocket")(function* (
   request: Request,
   roomId: RoomId,
@@ -177,6 +202,7 @@ export const RoomDurableObject = RoomDefinition.make(AppLayer, {
     getMetadata: (roomId) => ensureRoom(roomId),
     getHealth,
     recordTransportEvent,
+    applyAiToolCalls,
   },
   webSocketMessage: (socket, message) => {
     const tldrawMessage = Effect.gen(function* () {
@@ -219,3 +245,43 @@ export const RoomDurableObject = RoomDefinition.make(AppLayer, {
 });
 
 export { RoomDefinition };
+
+const validateAiToolCalls = (request: AiToolCallApplyRequest) =>
+  Effect.sync(() => {
+    const resourceIds = new Set(request.readModel.resources.map((resource) => resource.id));
+    const edgeIds = new Set(request.readModel.edges.map((edge) => edge.id));
+    const toolCallIds = new Set<string>();
+
+    for (const toolCall of request.toolCalls) {
+      if (toolCallIds.has(toolCall.id)) {
+        throw new Error(`Duplicate AI tool call id: ${toolCall.id}`);
+      }
+      toolCallIds.add(toolCall.id);
+
+      switch (toolCall.type) {
+        case "add_resource_node": {
+          if (resourceIds.has(toolCall.id)) {
+            throw new Error(`AI resource already exists: ${toolCall.id}`);
+          }
+          resourceIds.add(toolCall.id);
+          break;
+        }
+        case "connect_resources": {
+          if (!resourceIds.has(toolCall.sourceId) || !resourceIds.has(toolCall.targetId)) {
+            throw new Error(`AI edge has unknown endpoint: ${toolCall.id}`);
+          }
+          if (edgeIds.has(toolCall.id)) {
+            throw new Error(`AI edge already exists: ${toolCall.id}`);
+          }
+          edgeIds.add(toolCall.id);
+          break;
+        }
+        case "annotate_resource": {
+          if (!resourceIds.has(toolCall.subjectId) && !edgeIds.has(toolCall.subjectId)) {
+            throw new Error(`AI annotation has unknown subject: ${toolCall.id}`);
+          }
+          break;
+        }
+      }
+    }
+  }).pipe(Effect.orDie);

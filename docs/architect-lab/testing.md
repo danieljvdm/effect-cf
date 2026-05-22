@@ -29,6 +29,7 @@ This file is the backlog of scenarios that matter. Keep it current as implementa
 - Web Worker shell and typed service-binding forwarding tests.
 - API Worker latest and published architecture read-model tests through KV.
 - Room Durable Object metadata persistence and health tests.
+- Room Durable Object AI tool-call validation and accepted-application event tests.
 - `effect-cf` Durable Object SQLite SQL layer tests.
 - Semantic resource catalog and snippet template tests.
 
@@ -60,7 +61,8 @@ This file is the backlog of scenarios that matter. Keep it current as implementa
 - Unit tests for fake provider outputs.
 - Unit tests for the fake `LanguageModel` layer and toolkit tool-call mapping.
 - Runtime tests for Queue message decoding and acknowledgement.
-- Durable Object test that AI operations pass through the same validation path as human edits.
+- Additional Durable Object tests for direct room-owned tldraw mutation once accepted AI tool calls
+  stop being rendered by the browser.
 - Browser smoke test for submitting the default prompt and seeing generated canvas edits.
 
 ### Phase 5 Trace And Review
@@ -89,3 +91,12 @@ This file is the backlog of scenarios that matter. Keep it current as implementa
 - Root `vp test`.
 - Targeted Architect Lab tests.
 - Preserved example pattern traceability review.
+
+### Phase 9 Voice Collaboration
+
+- Browser smoke test for dictating an AI prompt and submitting the transcript through the normal
+  prompt route.
+- Unit tests for transcript event and voice-agent suggestion schemas.
+- Integration test that transcript-derived suggestions remain proposed edits until accepted.
+- Browser smoke test for accepting a voice-agent suggestion and seeing validated canvas edits.
+- Permission/undo test before enabling any automatic voice-driven apply mode.

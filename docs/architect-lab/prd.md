@@ -13,9 +13,11 @@ real Cloudflare application architecture.
 ## Implementation Status
 
 The current implementation has completed the foundational Cloudflare transport slice, integrated
-real tldraw sync in a room Durable Object, and added semantic resource nodes with a generated code
-panel plus KV-backed latest/published read models. It does not yet implement the AI collaborator,
-trace mode, export workflow, or deployed real-provider mode.
+real tldraw sync in a room Durable Object, added semantic resource nodes with a generated code panel
+plus KV-backed latest/published read models, and implemented the first fake AI architect flow. The
+AI flow currently uses room-authoritative tool-call acceptance before browser-rendered canvas edits;
+direct room-owned tldraw mutation, trace mode, export workflow, and deployed real-provider mode
+remain pending.
 
 ## Goals
 
@@ -146,6 +148,23 @@ Acceptance criteria:
 - The exported README explains which generated code is illustrative and which parts are runnable.
 - Export jobs are asynchronous and inspectable.
 
+### Voice Collaboration
+
+Voice collaboration is a final roadmap extension after the core demo is validated. It should not
+change the typed prompt path; it layers voice on top of the same AI architect workflow.
+
+- User can dictate an AI prompt instead of typing it.
+- The room can retain transcript events and summaries as optional architectural context.
+- A passive voice agent can listen for architectural intent and propose structured canvas edits.
+- Automatic voice-driven edits are opt-in and visibly reversible.
+
+Acceptance criteria:
+
+- Speech-to-text prompt input uses the same AI apply path as typed prompts.
+- Transcript-derived suggestions explain what discussion triggered them.
+- Passive listening starts in suggest mode, not automatic apply mode.
+- Voice-derived edits are constrained to validated canvas tools.
+
 ## Resource Coverage Target
 
 Required for the canonical path:
@@ -194,3 +213,5 @@ Optional deployed-mode extension:
   before allowing broad generation.
 - Requiring real AI credentials would reduce local demo reliability. The fake provider is part of
   the product, not just a test utility.
+- Passive voice collaboration can feel invasive if it edits without consent. Keep voice autonomy
+  behind explicit room settings, visible transcript linkage, and undo.

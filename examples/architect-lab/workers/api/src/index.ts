@@ -137,9 +137,17 @@ const submitAiPrompt = Effect.fn("submitAiPrompt")(function* (roomId: RoomId, re
       toolCalls: result.toolCalls.length,
     }),
   });
+  const accepted = yield* RoomDurableObject.byName(roomId).applyAiToolCalls({
+    jobId: job.id,
+    roomId,
+    actor: "ai-architect",
+    summary: result.summary,
+    readModel: job.readModel,
+    toolCalls: result.toolCalls,
+  });
   yield* AiJobQueue.send(job);
 
-  return result;
+  return accepted;
 });
 
 const processAiJob = Effect.fn("processAiJob")(function* (job: AiJob) {

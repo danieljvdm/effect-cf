@@ -22,11 +22,13 @@ The demo should be self-referential:
   snippets, visible canvas/code-panel behavior, and KV-backed latest/published read models.
 - Phase 4 is in progress. The first fake-provider slice adds a prompt composer, deterministic AI
   plans backed by `effect/unstable/ai`, Queue-backed local job submission, room event persistence,
-  and visible generated canvas edits. The room-authoritative AI apply path and activity log remain
-  pending.
+  room-authoritative acceptance of generated tool calls, and visible generated canvas edits. Direct
+  room-owned tldraw mutation and the AI activity log remain pending.
 - Phase 5 through Phase 7 are planned.
 - Phase 8 is mostly complete because Architect Lab is now the only `examples/` app; a final
   traceability pass remains after later resource coverage is implemented or explicitly ruled out.
+- Phase 9 tracks voice collaboration as a post-validation extension: speech-to-text prompting,
+  transcript-aware context, and passive voice-agent suggestions.
 
 ## Documents
 
@@ -58,3 +60,11 @@ Use `Architect Lab` in docs and planning. The canonical example directory is
 6. Ask for a change and watch the AI update the architecture.
 7. Run trace mode to animate a request through the system.
 8. Export a generated architecture package.
+
+## Later Voice Mode
+
+Voice collaboration is intentionally planned after the core demo and final validation. The intended
+sequence is speech-to-text prompt input first, then room transcript context, then a passive
+voice-agent suggest mode that can propose structured canvas edits from architectural discussion.
+Automatic voice-driven edits should remain opt-in and pass through the same room-authoritative AI
+apply path as typed prompts.

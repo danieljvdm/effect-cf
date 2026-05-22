@@ -77,6 +77,16 @@ export const AiPromptResult = S.Struct({
 });
 export type AiPromptResult = S.Schema.Type<typeof AiPromptResult>;
 
+export const AiToolCallApplyRequest = S.Struct({
+  jobId: S.String,
+  roomId: S.String,
+  actor: S.String,
+  summary: S.String,
+  readModel: ArchitectureReadModelInput,
+  toolCalls: S.Array(AiToolCall),
+});
+export type AiToolCallApplyRequest = S.Schema.Type<typeof AiToolCallApplyRequest>;
+
 const AddResourceNodeTool = Tool.make("add_resource_node", {
   description: "Add a semantic Cloudflare architecture resource to the canvas.",
   parameters: S.Struct({

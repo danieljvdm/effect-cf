@@ -11,8 +11,9 @@ exports, public artifacts, and cache/read-model storage.
 ## Implementation Status
 
 The current implementation includes the web shell, web Worker, API Worker, room Durable Object,
-domain package, and tldraw Durable Object adapter. It has not yet added AI, queue, workflow, export,
-or deployed-provider packages.
+domain package, tldraw Durable Object adapter, KV read models, Queue-backed fake AI jobs, and
+room-authoritative acceptance for generated AI tool calls. It has not yet added direct room-owned
+tldraw mutation for AI edits, workflow/export packages, or deployed-provider packages.
 
 ## Current Package Layout
 
@@ -143,6 +144,8 @@ The domain package should own schemas for cross-boundary contracts:
 - `TraceStep`
 - `ExportJob`
 - `ExportManifest`
+- `TranscriptEvent`
+- `VoiceAgentSuggestion`
 
 The canvas model should distinguish raw tldraw records from semantic architecture resources. The
 semantic model is what drives code generation and review.
@@ -260,6 +263,23 @@ The AI should operate through constrained tools:
 
 Tool results should be structured and persisted. Avoid accepting arbitrary generated tldraw JSON as
 the primary mutation format until the semantic operation layer is stable.
+
+## Voice Collaboration Model
+
+Voice collaboration is planned after the core Architect Lab replacement is validated. The first
+technical layer should be speech-to-text prompt input in the browser or API/provider boundary. The
+room Durable Object should receive transcript events and AI suggestions; it should not perform STT
+or store raw audio by default.
+
+Planned layers:
+
+- Speech-to-text prompt input that submits through the existing AI prompt route.
+- Transcript events stored as room events and optionally summarized for AI context.
+- Passive voice-agent suggest mode that listens for architectural intent and emits proposed AI tool
+  calls for approval.
+- Optional auto-act mode behind explicit room permissions, visible activity logging, and undo.
+
+Voice-derived edits must enter the same room-authoritative validation path as typed AI tool calls.
 
 ## Code Generation Strategy
 

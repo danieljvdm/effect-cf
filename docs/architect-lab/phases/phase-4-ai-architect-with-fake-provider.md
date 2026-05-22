@@ -9,12 +9,13 @@ Make the demo compelling without requiring external AI credentials.
 In progress. The current implementation includes a prompt composer, domain-level AI job and tool
 call schemas, an `effect/unstable/ai` toolkit, deterministic fake `LanguageModel` layer, an API
 prompt endpoint, local Queue-backed job submission/consumption, room event persistence for prompt
-and generated-tool-call events, and browser application of generated resource nodes, arrows, and
-annotations onto the synced tldraw canvas.
+and generated-tool-call events, room-authoritative validation/acceptance of generated AI tool
+calls, and browser application of accepted resource nodes, arrows, and annotations onto the synced
+tldraw canvas.
 
-Remaining Phase 4 work: move from client-applied tool calls to a room-authoritative apply path,
-add richer edge/snippet handling, expose an AI activity log, and broaden canned prompt coverage once
-the visible flow settles.
+Remaining Phase 4 work: move from accepted tool calls to direct room-owned tldraw mutation and
+broadcast, add richer edge/snippet handling, expose an AI activity log, and broaden canned prompt
+coverage once the visible flow settles.
 
 ## Product Requirement
 
@@ -28,8 +29,9 @@ shared canvas as a collaborator.
   also receives the generated tool calls immediately so the demo is visible without polling.
 - Fake provider emits structured tool calls. Implemented with deterministic canned plans through
   `LanguageModel.generateText`, `Tool.make`, and `Toolkit.make`.
-- Room Durable Object validates and applies AI operations. Not yet implemented; the browser applies
-  tool calls to tldraw, which then syncs through the room.
+- Room Durable Object validates and applies AI operations. Partially implemented: generated tool
+  calls now pass through a typed `applyAiToolCalls` room RPC that validates resource/edge references
+  and records an applied event before the browser renders the accepted calls into tldraw.
 - Fake and real providers use the same tool-call interface. The fake provider now disables automatic
   tool resolution so the room/API path owns validation and apply behavior, matching the intended real
   provider boundary.
@@ -43,8 +45,9 @@ shared canvas as a collaborator.
   are implemented; explicit snippet refresh calls remain pending.
 - Queue-backed AI job execution. Implemented for local fake jobs through the same effect AI path as
   prompt submission.
-- Room broadcast of AI status and tool calls. Partially implemented through tldraw sync after the
-  browser applies tool calls; room-authoritative status broadcast remains pending.
+- Room broadcast of AI status and tool calls. Partially implemented through room acceptance plus
+  tldraw sync after the browser applies accepted calls; direct room-owned tldraw mutation and status
+  broadcast remain pending.
 
 ## Resource Coverage Added
 
@@ -55,8 +58,9 @@ shared canvas as a collaborator.
 - Default prompt generates a useful Cloudflare architecture diagram. Implemented and manually
   verified locally.
 - The generated diagram is credible enough for the README demo script. Initial version implemented.
-- AI operations are persisted and broadcast like human operations. Partially true through tldraw
-  sync after browser application; the room-authoritative operation path remains pending.
+- AI operations are persisted and broadcast like human operations. Partially true: generated tool
+  calls are now accepted and logged by the room before browser application, then synced through
+  tldraw. Direct room-owned tldraw mutation remains pending.
 - AI edits appear in all connected clients. Expected through tldraw sync; keep two-tab verification
   in the final hardening log.
 - The app remains fully runnable offline/local. Implemented.

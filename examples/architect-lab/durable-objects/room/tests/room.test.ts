@@ -36,6 +36,82 @@ test("records transport events and reports health through typed Durable Object R
   });
 });
 
+test("validates and records AI tool-call application through the room authority", async () => {
+  const state = makeState();
+  const room = new RoomDurableObject(state, {} as Cloudflare.Env);
+
+  const result = await room.applyAiToolCalls({
+    roomId: "room_ai",
+    jobId: "ai_job_1",
+    actor: "ai-architect",
+    summary: "Apply generated architecture edits.",
+    readModel: { resources: [], edges: [] },
+    toolCalls: [
+      {
+        type: "add_resource_node",
+        id: "ai_worker",
+        kind: "worker",
+        name: "AI Worker",
+        bindingName: "AI_WORKER",
+        description: "Handles generated prompts.",
+        position: { x: 0, y: 0 },
+      },
+      {
+        type: "add_resource_node",
+        id: "ai_queue",
+        kind: "queue",
+        name: "AI Queue",
+        bindingName: "AI_QUEUE",
+        description: "Buffers generated jobs.",
+        position: { x: 260, y: 0 },
+      },
+      {
+        type: "connect_resources",
+        id: "ai_worker_queue",
+        kind: "queue-message",
+        sourceId: "ai_worker",
+        targetId: "ai_queue",
+        label: "Prompt job",
+      },
+    ],
+  });
+
+  const health = await room.getHealth("room_ai");
+
+  expect(result).toMatchObject({
+    roomId: "room_ai",
+    jobId: "ai_job_1",
+    status: "queued",
+  });
+  expect(result.toolCalls).toHaveLength(3);
+  expect(health.transportEvents).toBe(1);
+});
+
+test("rejects AI tool calls with unknown edge endpoints", async () => {
+  const state = makeState();
+  const room = new RoomDurableObject(state, {} as Cloudflare.Env);
+
+  await expect(
+    room.applyAiToolCalls({
+      roomId: "room_ai",
+      jobId: "ai_job_1",
+      actor: "ai-architect",
+      summary: "Invalid generated architecture edits.",
+      readModel: { resources: [], edges: [] },
+      toolCalls: [
+        {
+          type: "connect_resources",
+          id: "missing_edge",
+          kind: "queue-message",
+          sourceId: "missing_source",
+          targetId: "missing_target",
+          label: "Invalid edge",
+        },
+      ],
+    }),
+  ).rejects.toThrow();
+});
+
 interface RoomRow {
   readonly [key: string]: SqlStorageValue;
   readonly id: string;

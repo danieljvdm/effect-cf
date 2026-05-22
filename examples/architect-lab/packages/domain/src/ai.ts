@@ -1,4 +1,4 @@
-import { Effect, Layer, Schema as S, Stream } from "effect";
+import { Duration, Effect, Layer, Schedule, Schema as S, Stream } from "effect";
 import { LanguageModel, Response, Tool, Toolkit, type Prompt } from "effect/unstable/ai";
 
 import {
@@ -131,6 +131,27 @@ export const ArchitectToolkit = Toolkit.make(
 
 type ArchitectToolCallPart = Response.ToolCallParts<Toolkit.Tools<typeof ArchitectToolkit>>;
 
+export interface FakeArchitectLanguageModelOptions {
+  readonly responseDelay?: Duration.Input;
+  readonly streamPartDelay?: Duration.Input;
+  readonly simulateLatency?: boolean;
+}
+
+const defaultFakeArchitectLanguageModelOptions = {
+  responseDelay: "850 millis",
+  streamPartDelay: "140 millis",
+} satisfies FakeArchitectLanguageModelOptions;
+
+const withFakeLatency = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+  options: FakeArchitectLanguageModelOptions,
+): Effect.Effect<A, E, R> =>
+  options.simulateLatency === false
+    ? effect
+    : Effect.sleep(
+        options.responseDelay ?? defaultFakeArchitectLanguageModelOptions.responseDelay,
+      ).pipe(Effect.andThen(effect));
+
 interface ResourcePlan {
   readonly key: string;
   readonly kind: AiAddResourceNodeToolCall["kind"];
@@ -168,26 +189,52 @@ export const makeAiJob = (roomId: string, request: AiPromptRequest, now = new Da
   readModel: request.readModel ?? { resources: [], edges: [] },
 });
 
-const makeFakeArchitectLanguageModelService = (job: AiJob) =>
+const makeFakeArchitectLanguageModelService = (
+  job: AiJob,
+  serviceOptions: FakeArchitectLanguageModelOptions = {},
+) =>
   LanguageModel.make({
     generateText: (options) =>
-      Effect.succeed(renderFakeModelParts(job, promptText(options.prompt))),
-    streamText: (options) =>
-      Stream.fromIterable(renderFakeModelStreamParts(job, promptText(options.prompt))),
+      withFakeLatency(
+        Effect.succeed(renderFakeModelParts(job, promptText(options.prompt))),
+        serviceOptions,
+      ),
+    streamText: (streamOptions) => {
+      const stream = Stream.fromIterable(
+        renderFakeModelStreamParts(job, promptText(streamOptions.prompt)),
+      );
+      return serviceOptions.simulateLatency === false
+        ? stream
+        : stream.pipe(
+            Stream.schedule(
+              Schedule.spaced(
+                serviceOptions.streamPartDelay ??
+                  defaultFakeArchitectLanguageModelOptions.streamPartDelay,
+              ),
+            ),
+          );
+    },
   });
 
-export const FakeArchitectLanguageModel = (job: AiJob) =>
-  Layer.effect(LanguageModel.LanguageModel, makeFakeArchitectLanguageModelService(job));
+export const FakeArchitectLanguageModel = (
+  job: AiJob,
+  options?: FakeArchitectLanguageModelOptions,
+) => Layer.effect(LanguageModel.LanguageModel, makeFakeArchitectLanguageModelService(job, options));
 
-const provideFakeArchitectLanguageModel = <A, E, R>(effect: Effect.Effect<A, E, R>, job: AiJob) =>
+const provideFakeArchitectLanguageModel = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+  job: AiJob,
+  options?: FakeArchitectLanguageModelOptions,
+) =>
   Effect.provideServiceEffect(
     effect,
     LanguageModel.LanguageModel,
-    makeFakeArchitectLanguageModelService(job),
+    makeFakeArchitectLanguageModelService(job, options),
   );
 
 const generateFakeAiPromptResultEffect = Effect.fn("generateFakeAiPromptResult")(function* (
   job: AiJob,
+  options?: FakeArchitectLanguageModelOptions,
 ) {
   const response = yield* LanguageModel.generateText({
     prompt: [
@@ -216,7 +263,7 @@ const generateFakeAiPromptResultEffect = Effect.fn("generateFakeAiPromptResult")
       oneOf: ["add_resource_node", "connect_resources", "annotate_resource"],
     },
     disableToolCallResolution: true,
-  }).pipe((effect) => provideFakeArchitectLanguageModel(effect, job), Effect.orDie);
+  }).pipe((effect) => provideFakeArchitectLanguageModel(effect, job, options), Effect.orDie);
 
   return yield* S.decodeUnknownEffect(AiPromptResult)({
     jobId: job.id,
@@ -227,9 +274,12 @@ const generateFakeAiPromptResultEffect = Effect.fn("generateFakeAiPromptResult")
   }).pipe(Effect.orDie);
 });
 
-export const generateFakeAiPromptResult = (job: AiJob): Effect.Effect<AiPromptResult> =>
+export const generateFakeAiPromptResult = (
+  job: AiJob,
+  options?: FakeArchitectLanguageModelOptions,
+): Effect.Effect<AiPromptResult> =>
   // `ToolkitInput` currently widens disabled tool-resolution context; the fake model is provided above.
-  generateFakeAiPromptResultEffect(job) as unknown as Effect.Effect<AiPromptResult>;
+  generateFakeAiPromptResultEffect(job, options) as unknown as Effect.Effect<AiPromptResult>;
 
 const renderFakeModelParts = (
   job: AiJob,

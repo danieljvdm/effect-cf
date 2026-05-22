@@ -129,7 +129,7 @@ describe("architect-lab domain contracts", () => {
       },
       new Date("2026-05-21T12:00:00.000Z"),
     );
-    const result = Effect.runSync(generateFakeAiPromptResult(job));
+    const result = Effect.runSync(generateFakeAiPromptResult(job, { simulateLatency: false }));
 
     expect(result.status).toBe("queued");
     expect(result.summary).toContain("collaborative architecture canvas");
@@ -147,7 +147,7 @@ describe("architect-lab domain contracts", () => {
       },
       new Date("2026-05-21T12:00:00.000Z"),
     );
-    const result = Effect.runSync(generateFakeAiPromptResult(job));
+    const result = Effect.runSync(generateFakeAiPromptResult(job, { simulateLatency: false }));
 
     expect(result.status).toBe("queued");
     expect(result.summary).toContain("real-time chat with analytics");

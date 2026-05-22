@@ -11,10 +11,14 @@ Implemented and manually verified. The domain package defines semantic resource 
 resource catalog, deterministic `effect-cf` snippet generation, and latest/published architecture
 read-model contracts. The web shell exposes the catalog as a resource palette, attaches semantic
 metadata to tldraw resource nodes, shows a selection-driven code panel, and projects semantic state
-to the API. The API stores `room-latest:{roomId}` and `published:{shareSlug}` read models in KV.
+to the API through `AtomHttpApi`. The shared `ArchitectHttpApi` contract is owned by the domain
+package and implemented by the API Worker with `HttpApiBuilder`. The API stores
+`room-latest:{roomId}` and `published:{shareSlug}` read models in KV.
 
 Manual verification: the resource palette, tldraw semantic nodes, sync connection, generated code
-panel, latest read-model write/read endpoint, and publish endpoint have been exercised locally.
+panel, latest read-model write/read endpoint, and publish endpoint have been exercised locally. The
+web client now uses `@effect/atom-react` for React bindings and derives create/save/AI statuses
+from Atom async results.
 
 ## Product Requirement
 
@@ -28,6 +32,7 @@ code.
 - Code snippets are generated from deterministic templates.
 - KV stores a lightweight latest/published read model.
 - Semantic state is persisted separately from raw canvas records.
+- Client API calls go through Effect HTTP/Atom boundaries instead of direct app-level `fetch`.
 
 ## Deliverables
 
@@ -37,6 +42,7 @@ code.
 - Selection-driven code panel.
 - Template-generated `effect-cf` snippets.
 - KV cache for published/latest read models.
+- Domain-owned `ArchitectHttpApi` endpoints consumed by both API Worker and web client.
 
 ## Resource Coverage Added
 

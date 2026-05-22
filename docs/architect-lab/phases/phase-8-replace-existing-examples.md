@@ -7,10 +7,10 @@ been removed.
 
 ## Status
 
-Mostly complete. Architect Lab is currently the only directory under `examples/`, and root
-`vp check` / `vp test` validate the workspace. The remaining work is a final documentation and
-traceability pass once planned Phase 3-7 resource coverage is either implemented or explicitly
-documented as out of scope.
+Mostly complete. Architect Lab is currently the only directory under `examples/`, root `vp check` /
+`vp test` validate the workspace, and the current docs now track the Phase 1-4 implementation
+state. The remaining work is final traceability once planned Phase 5-7 resource coverage is either
+implemented or explicitly documented as out of scope.
 
 ## Product Requirement
 
@@ -25,6 +25,8 @@ spread across the removed examples.
 - Documentation states which optional resources require deployed configuration.
 - Preserved patterns from the removed examples are either implemented in Architect Lab or explicitly
   documented as out of scope.
+- Current Effect HTTP/Atom integration decisions are documented so the flagship example does not
+  teach ad hoc API or React state patterns.
 
 ## Deliverables
 
@@ -32,6 +34,7 @@ spread across the removed examples.
 - README examples section rewritten.
 - Validation includes Architect Lab checks/tests.
 - Traceability from preserved patterns to Architect Lab implementation/docs.
+- Effect HTTP/Atom integration review and cleanup notes.
 
 ## Acceptance Criteria
 

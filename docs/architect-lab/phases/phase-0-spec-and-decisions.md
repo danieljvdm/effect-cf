@@ -16,8 +16,9 @@ implementation uses the chosen split topology:
 - `examples/architect-lab/packages/domain`
 - `examples/architect-lab/packages/tldraw-effect-cf`
 
-The Phase 1 transport slice and Phase 2 tldraw strategy have both been implemented. Later AI
-provider details remain deferred to Phase 4.
+The Phase 1 transport slice, Phase 2 tldraw strategy, Phase 3 semantic read model, and the core
+Phase 4 fake AI provider flow have been implemented. Real provider configuration remains deferred
+to Phase 7.
 
 ## Product Requirement
 
@@ -58,4 +59,4 @@ example and what the first implementation slice must prove.
 
 ## Deferred Decisions
 
-- The local fake AI prompt catalog belongs to Phase 4.
+- Real provider configuration, limits, and secrets belong to Phase 7.

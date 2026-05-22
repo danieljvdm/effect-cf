@@ -14,6 +14,11 @@ to the room Durable Object.
 Current implementation has moved beyond the original Phase 1 shell:
 
 - Phase 2 tldraw sync is now integrated.
+- The shared JSON API contract lives in `@architect-lab/domain/http-api`.
+- The API Worker implements normal JSON endpoints with `HttpApiBuilder`; only the tldraw WebSocket
+  upgrade remains a manual Worker/Durable Object transport handoff.
+- The web client consumes API endpoints through `AtomHttpApi` and `FetchHttpClient` rather than
+  app-level browser `fetch` calls.
 - Room metadata and transport events are stored in Durable Object SQLite.
 - Room-local SQL now uses `effect/unstable/sql` through `effect-cf`'s
   `DurableObjectSqlite.layer()` helper backed by `@effect/sql-sqlite-do`.
@@ -29,6 +34,7 @@ presence/health state. The app does not need to host a real tldraw document yet.
   components.
 - Web Worker serves or proxies the frontend and forwards API/WebSocket traffic.
 - API Worker creates room ids and routes room WebSocket upgrades to the Durable Object.
+- API Worker JSON endpoints are implemented from the shared `ArchitectHttpApi` contract.
 - Room Durable Object owns room-local lifetime, WebSocket sessions, and basic in-memory presence.
 - Room Durable Object is the authoritative persistence boundary for room-local state.
 - Durable Object SQLite stores minimal room metadata and transport test events.
@@ -42,6 +48,7 @@ presence/health state. The app does not need to host a real tldraw document yet.
 - Minimal React app or placeholder web shell.
 - Web Worker.
 - API Worker.
+- Shared domain HTTP API definition.
 - Room Durable Object.
 - Typed service binding from web/API boundary where applicable.
 - Typed Durable Object namespace/RPC method for room metadata or health.
@@ -58,6 +65,7 @@ presence/health state. The app does not need to host a real tldraw document yet.
 - Durable Object storage
 - Durable Object RPC or typed namespace method
 - WorkerConfig
+- Effect HTTP API / HTTP client boundary
 
 Deferred resource coverage:
 

@@ -6,9 +6,10 @@ Make the example usable beyond deterministic demos while keeping local developme
 
 ## Status
 
-Planned. No fake/real provider interface has been implemented yet, so deployed AI provider
-configuration, timeout/retry/cost controls, and the optional Hyperdrive extension remain future
-work.
+Planned. The fake provider now exercises the shared AI job/tool-call contract through
+`effect/unstable/ai`, and room/API validation owns tool-call application. A configurable real
+provider implementation, deployed provider mode, timeout/retry/cost controls, and the optional
+Hyperdrive extension remain future work.
 
 ## Product Requirement
 
@@ -18,6 +19,7 @@ remains deterministic and free of external credentials.
 ## Technical Requirement
 
 - Provider interface supports fake and real implementations.
+- Fake and real providers share the same AI job and room-validated tool-call contract.
 - WorkerConfig owns provider mode, limits, and public origin.
 - Secrets are documented but not required for local default.
 - Timeout, retry, and cost controls are explicit.

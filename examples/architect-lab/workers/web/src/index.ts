@@ -61,6 +61,15 @@ const renderShell = () => {
         --accent-strong: #0b4f4a;
         --code-bg: #101418;
         --code-ink: #edf2f7;
+        --sh-class: #93c5fd;
+        --sh-identifier: #d6e3ef;
+        --sh-sign: #8fa3b8;
+        --sh-property: #7dd3fc;
+        --sh-entity: #facc15;
+        --sh-jsxliterals: #c4b5fd;
+        --sh-string: #86efac;
+        --sh-keyword: #fda4af;
+        --sh-comment: #7f8c99;
         font-family:
           ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         background: var(--canvas);
@@ -286,11 +295,12 @@ const renderShell = () => {
         gap: 3px;
       }
 
-      .resource-copy strong {
+      .resource-title {
         min-width: 0;
         overflow-wrap: anywhere;
         font-size: 14px;
         line-height: 1.15;
+        font-weight: 700;
       }
 
       .resource-copy span {
@@ -346,6 +356,14 @@ const renderShell = () => {
           12px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
           "Liberation Mono", "Courier New", monospace;
         white-space: pre;
+      }
+
+      .code-panel code {
+        display: block;
+      }
+
+      .code-panel .sh__line {
+        min-height: 1.55em;
       }
 
       .code-empty {
@@ -502,6 +520,7 @@ const renderShell = () => {
         "imports": {
           "react": "https://esm.sh/react@19.2.6",
           "react-dom/client": "https://esm.sh/react-dom@19.2.6/client",
+          "sugar-high": "https://esm.sh/sugar-high@1.2.0",
           "tldraw": "https://esm.sh/tldraw@5.0.1?deps=react@19.2.6,react-dom@19.2.6",
           "@tldraw/sync": "https://esm.sh/@tldraw/sync@5.0.1?deps=react@19.2.6,react-dom@19.2.6,tldraw@5.0.1"
         }
@@ -510,6 +529,7 @@ const renderShell = () => {
     <script type="module">
       import React, { useCallback, useMemo, useState } from "react";
       import { createRoot } from "react-dom/client";
+      import { highlight } from "sugar-high";
       import { Tldraw, createShapeId, toRichText } from "tldraw";
       import { useSync } from "@tldraw/sync";
 
@@ -799,6 +819,7 @@ export const \${valueName}Layer = \${className}.layer({
         };
 
         const selectedSnippet = selectedResource ? renderResourceSnippet(selectedResource) : "";
+        const highlightedSnippet = selectedSnippet ? highlight(selectedSnippet) : "";
 
         return e(
           "div",
@@ -889,7 +910,7 @@ export const \${valueName}Layer = \${className}.layer({
                     e(
                       "span",
                       { className: "resource-copy" },
-                      e("strong", null, template.label),
+                      e("span", { className: "resource-title" }, template.label),
                       e("span", null, template.description),
                     ),
                   ),
@@ -910,7 +931,7 @@ export const \${valueName}Layer = \${className}.layer({
                 ),
               ),
               selectedResource
-                ? e("pre", null, e("code", null, selectedSnippet))
+                ? e("pre", null, e("code", { dangerouslySetInnerHTML: { __html: highlightedSnippet } }))
                 : e("div", { className: "code-empty" }, "Add or select a resource to inspect its effect-cf snippet."),
             ),
           ),

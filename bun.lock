@@ -109,6 +109,7 @@
         "effect-cf": "workspace:*",
         "react": "^19.2.6",
         "react-dom": "^19.2.6",
+        "sugar-high": "^1.2.0",
         "tldraw": "^5.0.1",
       },
       "devDependencies": {
@@ -1130,6 +1131,8 @@
     "strip-ansi": ["strip-ansi@6.0.1", "", { "dependencies": { "ansi-regex": "^5.0.1" } }, "sha512-Y38VPSHcqkFrCpFnQ9vuSXmquuv5oXOKpGeT6aGrr3o3Gc9AlVa6JBfUSOCnbxGGZF+/0ooI7KrPuUSztUdU5A=="],
 
     "strip-bom": ["strip-bom@3.0.0", "", {}, "sha512-vavAMRXOgBVNF6nyEEmL3DBK19iRpDcoIwW+swQ+CbGiu7lju6t+JklA1MHweoWtadgt4ISVUsXLyDq34ddcwA=="],
+
+    "sugar-high": ["sugar-high@1.2.0", "", {}, "sha512-tDChykLsm/+arY5Fb3cOiptiW75WQMkm/J/zQFuOaU0eB6tTVg/C5ANwh9bFw/3JrYaLK2mMm0F9VdXHbNtOhQ=="],
 
     "supports-color": ["supports-color@10.2.2", "", {}, "sha512-SS+jx45GF1QjgEXQx4NJZV9ImqmO2NPz5FNsIHrsDjh2YsHnawpan7SNQ1o8NuhrbHZy9AZhIoCUiCeaW/C80g=="],
 

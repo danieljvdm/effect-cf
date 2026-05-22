@@ -1,15 +1,32 @@
 import { Effect } from "effect";
-import { Worker } from "effect-cf";
+import { Worker, WorkerEnvironment } from "effect-cf";
 
 import { ApiWorker } from "@architect-lab/domain/runtime";
 
-import { clientScript, clientStyles } from "./generated/client-assets.js";
-import { renderShell } from "./server/render-shell.js";
-
 const ApiLayer = ApiWorker.layer({ binding: "API" });
+
+interface AssetsBinding {
+  readonly fetch: (request: Request) => Promise<Response>;
+}
+
+type WebEnvironment = Cloudflare.Env & {
+  readonly ASSETS: AssetsBinding;
+};
+
+const getClientAssetRequest = (request: Request, url: URL): Request => {
+  if (url.pathname === "/" || url.pathname.startsWith("/room/")) {
+    const assetUrl = new URL(request.url);
+    assetUrl.pathname = "/index.html";
+    assetUrl.search = "";
+    return new Request(assetUrl, request);
+  }
+
+  return request;
+};
 
 const routeFetch = Effect.gen(function* () {
   const request = yield* Worker.NativeRequest;
+  const env = (yield* WorkerEnvironment) as WebEnvironment;
   const url = new URL(request.url);
 
   if (url.pathname.startsWith("/api/")) {
@@ -22,34 +39,7 @@ const routeFetch = Effect.gen(function* () {
     return yield* ApiWorker.fetch(new Request(apiUrl, request));
   }
 
-  if (url.pathname === "/assets/app.js") {
-    return new Response(clientScript, {
-      headers: {
-        "cache-control": "no-store",
-        "content-type": "text/javascript; charset=utf-8",
-      },
-    });
-  }
-
-  if (url.pathname === "/assets/app.css") {
-    return new Response(clientStyles, {
-      headers: {
-        "cache-control": "no-store",
-        "content-type": "text/css; charset=utf-8",
-      },
-    });
-  }
-
-  if (url.pathname === "/" || url.pathname.startsWith("/room/")) {
-    return new Response(renderShell(), {
-      headers: {
-        "cache-control": "no-store",
-        "content-type": "text/html; charset=utf-8",
-      },
-    });
-  }
-
-  return new Response("Not found", { status: 404 });
+  return yield* Effect.promise(() => env.ASSETS.fetch(getClientAssetRequest(request, url)));
 });
 
 export default Worker.make(ApiLayer, {

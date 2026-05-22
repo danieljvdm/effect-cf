@@ -20,7 +20,6 @@ export const ResourcePalette = ({ disabled, onAddResource, templates }: Resource
     <div className="grid min-h-0 content-start gap-2 overflow-auto pr-1">
       {templates.map((template) => (
         <button
-          aria-label={`Add ${template.label}`}
           className="grid min-h-16 w-full grid-cols-[16px_minmax(0,1fr)_20px] items-start gap-2 rounded-md border border-slate-300 bg-white p-2.5 text-left transition-colors hover:border-slate-500 hover:bg-slate-50 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-teal-500 disabled:pointer-events-none disabled:opacity-55"
           disabled={disabled}
           key={template.kind}

@@ -4,6 +4,13 @@
   "main": "./src/index.ts",
   "compatibility_date": "2026-05-14",
   "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "./dist/client",
+    "html_handling": "none",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true,
+  },
   "vars": {
     "ARCHITECT_PUBLIC_ORIGIN": "http://localhost:8787",
     "ARCHITECT_DEFAULT_ROOM_TITLE": "Untitled architecture",

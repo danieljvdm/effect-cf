@@ -1,7 +1,6 @@
 import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
 import { defineConfig } from "vite-plus";
 
-const architectLabGenerated = "examples/architect-lab/workers/web/src/generated/**";
 const testExcludes = ["**/node_modules/**", "**/dist/**", "**/.git/**", "repos/**"];
 
 export default defineConfig({
@@ -41,10 +40,10 @@ export default defineConfig({
     ],
   },
   fmt: {
-    ignorePatterns: ["apps/example/worker-configuration.d.ts", architectLabGenerated, "repos/**"],
+    ignorePatterns: ["apps/example/worker-configuration.d.ts", "repos/**"],
   },
   lint: {
-    ignorePatterns: ["apps/example/worker-configuration.d.ts", architectLabGenerated, "repos/**"],
+    ignorePatterns: ["apps/example/worker-configuration.d.ts", "repos/**"],
     options: { typeAware: true, typeCheck: true },
   },
   run: {

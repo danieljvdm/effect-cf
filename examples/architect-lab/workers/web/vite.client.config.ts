@@ -2,27 +2,19 @@ import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 
 export default defineConfig({
+  root: "src/client",
   build: {
     cssCodeSplit: false,
     emptyOutDir: true,
     minify: false,
     modulePreload: false,
-    outDir: "dist/client",
+    outDir: "../../dist/client",
     rollupOptions: {
-      external: [
-        "@tldraw/sync",
-        "react",
-        "react-dom",
-        "react-dom/client",
-        "react/jsx-runtime",
-        "sugar-high",
-        "tldraw",
-      ],
-      input: "./src/client/main.tsx",
+      input: "./index.html",
       output: {
-        assetFileNames: "app.[ext]",
-        chunkFileNames: "chunk-[name].js",
-        entryFileNames: "app.js",
+        assetFileNames: "assets/app.[ext]",
+        chunkFileNames: "assets/chunk-[name].js",
+        entryFileNames: "assets/app.js",
       },
     },
     target: "es2022",

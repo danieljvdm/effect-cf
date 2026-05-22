@@ -242,8 +242,9 @@ export const App = () => {
             </h2>
           </div>
           <FieldRoot>
-            <FieldLabel>Prompt</FieldLabel>
+            <FieldLabel htmlFor="architect-ai-prompt">Prompt</FieldLabel>
             <Textarea
+              id="architect-ai-prompt"
               value={aiPrompt}
               onChange={(event) => setAiPrompt(event.currentTarget.value)}
             />

@@ -1,7 +1,7 @@
 import { Field } from "@base-ui-components/react/field";
 import type * as React from "react";
 
-import { cn } from "../../lib/utils.js";
+import { cn } from "../../lib/utils";
 
 export const FieldRoot = ({ className, ...props }: React.ComponentProps<typeof Field.Root>) => (
   <Field.Root className={cn("grid gap-1.5", className)} {...props} />

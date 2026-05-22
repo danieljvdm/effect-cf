@@ -12,7 +12,7 @@ import {
   type TransportEventInput,
 } from "@architect-lab/domain/contracts";
 
-import { applyAiToolCallsToTldrawStore } from "./ai-tldraw.js";
+import { applyAiToolCallsToTldrawStore } from "./ai-tldraw";
 
 interface RoomInfoRow {
   readonly [key: string]: unknown;

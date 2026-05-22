@@ -1,8 +1,8 @@
 import { Config, Schema as S } from "effect";
 import { DurableObject, Kv, Queue, Worker, WorkerConfig } from "effect-cf";
 
-import { AiJob, AiPromptResult, AiToolCallApplyRequest } from "./ai.js";
-import { ArchitectureReadModel, PublishedArchitectureReadModel } from "./architecture.js";
+import { AiJob, AiPromptResult, AiToolCallApplyRequest } from "./ai";
+import { ArchitectureReadModel, PublishedArchitectureReadModel } from "./architecture";
 
 import {
   ApiHealth,
@@ -12,7 +12,7 @@ import {
   RoomMetadata,
   TransportEventInput,
   TransportEventReceipt,
-} from "./contracts.js";
+} from "./contracts";
 
 export const ArchitectConfig = Config.all({
   publicOrigin: WorkerConfig.string("ARCHITECT_PUBLIC_ORIGIN").pipe(

@@ -2,8 +2,8 @@ import { Plus } from "lucide-react";
 
 import type { ArchitectureResourceTemplate } from "@architect-lab/domain/architecture";
 
-import { resourceColorClass } from "./lib/resource-colors.js";
-import { cn } from "./lib/utils.js";
+import { resourceColorClass } from "./lib/resource-colors";
+import { cn } from "./lib/utils";
 
 export type ResourcePaletteProps = {
   readonly disabled: boolean;

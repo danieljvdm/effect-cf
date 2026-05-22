@@ -1,4 +1,4 @@
-import type { ArchitectureResourceKind, ArchitectureResourceTemplate } from "./architecture.js";
+import type { ArchitectureResourceKind, ArchitectureResourceTemplate } from "./architecture";
 
 export const architectureResourceTemplates = [
   {

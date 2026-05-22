@@ -1,1 +1,1 @@
-export { ApiWorker, ArchitectConfig, RoomDurableObject } from "./runtime.js";
+export { ApiWorker, ArchitectConfig, RoomDurableObject } from "./runtime";

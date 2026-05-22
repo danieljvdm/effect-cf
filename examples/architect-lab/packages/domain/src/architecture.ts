@@ -76,7 +76,7 @@ export type ArchitectureResourceTemplate = S.Schema.Type<typeof ArchitectureReso
 export {
   architectureResourceTemplates,
   getArchitectureResourceTemplate,
-} from "./resource-templates.js";
+} from "./resource-templates";
 
 export const latestArchitectureReadModelKey = (roomId: string): string => `room-latest:${roomId}`;
 

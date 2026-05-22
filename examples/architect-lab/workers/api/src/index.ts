@@ -1,4 +1,5 @@
 import { Effect, Layer, Option, Schema as S } from "effect";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { Worker, WorkerConfig } from "effect-cf";
 
 import {
@@ -31,12 +32,9 @@ const ApiLayer = Layer.mergeAll(
   WorkerConfig.layer,
 );
 
-const json = (value: unknown, init?: ResponseInit) =>
-  Response.json(value, {
-    headers: withNoStore(init?.headers),
-    status: init?.status,
-    statusText: init?.statusText,
-  });
+const RoomParams = S.Struct({ roomId: S.String });
+const PublishedParams = S.Struct({ shareSlug: S.String });
+const decodeAiJob = S.decodeUnknownEffect(AiJob);
 
 const withNoStore = (headersInit?: HeadersInit) => {
   const headers = new Headers(headersInit);
@@ -44,15 +42,12 @@ const withNoStore = (headersInit?: HeadersInit) => {
   return headers;
 };
 
-const decodeReadModelInput = S.decodeUnknownEffect(ArchitectureReadModelInput);
-const decodeAiPromptRequest = S.decodeUnknownEffect(AiPromptRequest);
-const decodeAiJob = S.decodeUnknownEffect(AiJob);
-
-const readJson = (request: Request) =>
-  Effect.tryPromise({
-    try: () => request.json(),
-    catch: (cause) => cause,
-  });
+const jsonResponse = (value: unknown, init?: ResponseInit) =>
+  HttpServerResponse.json(value, {
+    headers: withNoStore(init?.headers),
+    status: init?.status,
+    statusText: init?.statusText,
+  }).pipe(Effect.orDie);
 
 const createRoom = Effect.fn("createRoom")(function* () {
   const config = yield* ArchitectConfig;
@@ -86,10 +81,9 @@ const getLatestReadModel = Effect.fn("getLatestReadModel")(function* (roomId: Ro
 
 const saveLatestReadModel = Effect.fn("saveLatestReadModel")(function* (
   roomId: RoomId,
-  request: Request,
+  input: ArchitectureReadModelInput,
 ) {
   const cache = yield* LatestArchitectureReadModels;
-  const input = yield* readJson(request).pipe(Effect.flatMap(decodeReadModelInput));
   const model = {
     roomId,
     resources: input.resources,
@@ -122,8 +116,10 @@ const publishReadModel = Effect.fn("publishReadModel")(function* (roomId: RoomId
   };
 });
 
-const submitAiPrompt = Effect.fn("submitAiPrompt")(function* (roomId: RoomId, request: Request) {
-  const input = yield* readJson(request).pipe(Effect.flatMap(decodeAiPromptRequest));
+const submitAiPrompt = Effect.fn("submitAiPrompt")(function* (
+  roomId: RoomId,
+  input: AiPromptRequest,
+) {
   const job = makeAiJob(roomId, input);
   const result = yield* generateFakeAiPromptResult(job);
 
@@ -179,62 +175,82 @@ const health = Effect.fn("health")(function* () {
   };
 });
 
+const ApiRoutes = Layer.mergeAll(
+  HttpRouter.add("GET", "/api/health", health().pipe(Effect.orDie, Effect.flatMap(jsonResponse))),
+  HttpRouter.add(
+    "POST",
+    "/api/rooms",
+    createRoom().pipe(
+      Effect.orDie,
+      Effect.flatMap((room) => jsonResponse(room, { status: 201 })),
+    ),
+  ),
+  HttpRouter.add(
+    "GET",
+    "/api/rooms/:roomId/read-model",
+    Effect.gen(function* () {
+      const { roomId } = yield* HttpRouter.schemaPathParams(RoomParams);
+      return yield* getLatestReadModel(roomId).pipe(Effect.orDie, Effect.flatMap(jsonResponse));
+    }),
+  ),
+  HttpRouter.add(
+    "PUT",
+    "/api/rooms/:roomId/read-model",
+    Effect.gen(function* () {
+      const { roomId } = yield* HttpRouter.schemaPathParams(RoomParams);
+      const input = yield* HttpServerRequest.schemaBodyJson(ArchitectureReadModelInput).pipe(
+        Effect.orDie,
+      );
+      return yield* saveLatestReadModel(roomId, input).pipe(
+        Effect.orDie,
+        Effect.flatMap(jsonResponse),
+      );
+    }),
+  ),
+  HttpRouter.add(
+    "POST",
+    "/api/rooms/:roomId/publish",
+    Effect.gen(function* () {
+      const { roomId } = yield* HttpRouter.schemaPathParams(RoomParams);
+      const published = yield* publishReadModel(roomId).pipe(Effect.orDie);
+      return yield* jsonResponse(published, { status: 201 });
+    }),
+  ),
+  HttpRouter.add(
+    "POST",
+    "/api/rooms/:roomId/ai/prompts",
+    Effect.gen(function* () {
+      const { roomId } = yield* HttpRouter.schemaPathParams(RoomParams);
+      const input = yield* HttpServerRequest.schemaBodyJson(AiPromptRequest).pipe(Effect.orDie);
+      const result = yield* submitAiPrompt(roomId, input).pipe(Effect.orDie);
+      return yield* jsonResponse(result, { status: 202 });
+    }),
+  ),
+  HttpRouter.add(
+    "GET",
+    "/api/published/:shareSlug",
+    Effect.gen(function* () {
+      const { shareSlug } = yield* HttpRouter.schemaPathParams(PublishedParams);
+      const published = yield* getPublishedReadModel(shareSlug).pipe(Effect.orDie);
+      return yield* Option.match(published, {
+        onNone: () => jsonResponse({ error: "Published architecture not found" }, { status: 404 }),
+        onSome: jsonResponse,
+      });
+    }),
+  ),
+  HttpRouter.add(
+    "GET",
+    "/api/rooms/:roomId/health",
+    Effect.gen(function* () {
+      const { roomId } = yield* HttpRouter.schemaPathParams(RoomParams);
+      return yield* roomHealth(roomId).pipe(Effect.orDie, Effect.flatMap(jsonResponse));
+    }),
+  ),
+);
+
 const routeFetch = Effect.gen(function* () {
   const request = yield* Worker.NativeRequest;
   const url = new URL(request.url);
-
-  if (request.method === "GET" && url.pathname === "/api/health") {
-    return json(yield* health());
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/rooms") {
-    return json(yield* createRoom(), { status: 201 });
-  }
-
-  const readModelMatch = url.pathname.match(/^\/api\/rooms\/([^/]+)\/read-model$/);
-  if (readModelMatch !== null) {
-    const roomId = readModelMatch[1];
-
-    if (request.method === "GET") {
-      return json(yield* getLatestReadModel(roomId));
-    }
-
-    if (request.method === "PUT") {
-      return yield* saveLatestReadModel(roomId, request).pipe(
-        Effect.map((model) => json(model)),
-        Effect.catch(() =>
-          Effect.succeed(json({ error: "Invalid architecture read model" }, { status: 400 })),
-        ),
-      );
-    }
-  }
-
-  const publishMatch = url.pathname.match(/^\/api\/rooms\/([^/]+)\/publish$/);
-  if (request.method === "POST" && publishMatch !== null) {
-    return json(yield* publishReadModel(publishMatch[1]), { status: 201 });
-  }
-
-  const aiPromptMatch = url.pathname.match(/^\/api\/rooms\/([^/]+)\/ai\/prompts$/);
-  if (request.method === "POST" && aiPromptMatch !== null) {
-    return yield* submitAiPrompt(aiPromptMatch[1], request).pipe(
-      Effect.map((result) => json(result, { status: 202 })),
-      Effect.catch(() => Effect.succeed(json({ error: "Invalid AI prompt" }, { status: 400 }))),
-    );
-  }
-
-  const publishedMatch = url.pathname.match(/^\/api\/published\/([^/]+)$/);
-  if (request.method === "GET" && publishedMatch !== null) {
-    const published = yield* getPublishedReadModel(publishedMatch[1]);
-    return Option.match(published, {
-      onNone: () => json({ error: "Published architecture not found" }, { status: 404 }),
-      onSome: (model) => json(model),
-    });
-  }
-
-  const roomHealthMatch = url.pathname.match(/^\/api\/rooms\/([^/]+)\/health$/);
-  if (request.method === "GET" && roomHealthMatch !== null) {
-    return json(yield* roomHealth(roomHealthMatch[1]));
-  }
 
   const roomSocketMatch = url.pathname.match(/^\/api\/rooms\/([^/]+)\/ws$/);
   if (request.method === "GET" && roomSocketMatch !== null) {
@@ -242,10 +258,15 @@ const routeFetch = Effect.gen(function* () {
     const room = yield* RoomDurableObject.getByName(roomId);
     const target = new URL(request.url);
     target.searchParams.set("roomId", roomId);
-    return yield* RoomDurableObject.fetch(room, new Request(target, request));
+    return yield* RoomDurableObject.fetch(room, new Request(target, request)).pipe(Effect.orDie);
   }
 
-  return json({ error: "Not found" }, { status: 404 });
+  const httpEffect = yield* HttpRouter.toHttpEffect(ApiRoutes);
+  return yield* httpEffect.pipe(
+    Effect.catch(() =>
+      HttpServerResponse.json({ error: "Not found" }, { status: 404 }).pipe(Effect.orDie),
+    ),
+  );
 });
 
 export default ApiDefinition.make(ApiLayer, {

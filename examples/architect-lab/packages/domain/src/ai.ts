@@ -6,7 +6,7 @@ import {
   ArchitectureReadModelInput,
   ArchitectureResourceKind,
   getArchitectureResourceTemplate,
-} from "./architecture.js";
+} from "./architecture";
 
 export const AiPromptRequest = S.Struct({
   prompt: S.String,

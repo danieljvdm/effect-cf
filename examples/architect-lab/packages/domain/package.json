@@ -8,6 +8,7 @@
     "./ai": "./src/ai.ts",
     "./architecture": "./src/architecture.ts",
     "./contracts": "./src/contracts.ts",
+    "./http-api": "./src/http-api.ts",
     "./resource-templates": "./src/resource-templates.ts",
     "./runtime": "./src/runtime.ts",
     "./snippets": "./src/snippets.ts"

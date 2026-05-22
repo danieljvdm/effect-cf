@@ -1,4 +1,4 @@
-import type { ArchitectureResource, ArchitectureResourceKind } from "./architecture.js";
+import type { ArchitectureResource, ArchitectureResourceKind } from "./architecture";
 
 const wordsFromName = (name: string): ReadonlyArray<string> => {
   const words = name.match(/[A-Za-z0-9]+/g) ?? [];

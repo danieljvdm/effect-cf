@@ -1,7 +1,6 @@
 import { Field } from "@base-ui-components/react/field";
 import { Clipboard, LoaderCircle, Network, Play, Plus, Sparkles } from "lucide-react";
-import { useCallback, useState } from "react";
-import { createShapeId, toRichText, type Editor } from "tldraw";
+import { createShapeId, toRichText } from "tldraw";
 
 import type {
   ArchitectureReadModelInput,
@@ -11,15 +10,30 @@ import type {
 import { architectureResourceTemplates } from "@architect-lab/domain/resource-templates";
 import { toBindingName } from "@architect-lab/domain/snippets";
 
-import { CodePanel } from "./code-panel.js";
-import { Button } from "./components/ui/button.js";
-import { FieldLabel, FieldRoot } from "./components/ui/field.js";
-import { Input } from "./components/ui/input.js";
-import { Textarea } from "./components/ui/textarea.js";
-import { collectArchitectureReadModel } from "./lib/read-model.js";
-import { getInitialRoomId, randomLabel } from "./lib/identity.js";
-import { RoomCanvas } from "./room-canvas.js";
-import { ResourcePalette } from "./resource-palette.js";
+import { CodePanel } from "./code-panel";
+import { Button } from "./components/ui/button";
+import { FieldLabel, FieldRoot } from "./components/ui/field";
+import { Input } from "./components/ui/input";
+import { Textarea } from "./components/ui/textarea";
+import { collectArchitectureReadModel } from "./lib/read-model";
+import { createRoomAtom, saveSemanticReadModelAtom, submitAiPromptAtom } from "./api";
+import { RoomCanvas } from "./room-canvas";
+import { ResourcePalette } from "./resource-palette";
+import {
+  aiPromptAtom,
+  aiRunningAtom,
+  aiStatusAtom,
+  creatingAtom,
+  editorAtom,
+  labelAtom,
+  readModelStatusAtom,
+  resourceCountsAtom,
+  roomIdAtom,
+  saveLabelAtom,
+  selectedResourceAtom,
+  useAtomSet,
+  useAtomValue,
+} from "./state";
 
 const resourceNodeSize = { h: 104, w: 220 } as const;
 const emptyReadModel: ArchitectureReadModelInput = { edges: [], resources: [] };
@@ -52,63 +66,26 @@ const toTldrawResourceColor = (color: string): TldrawResourceColor => {
 };
 
 export const App = () => {
-  const [roomId, setRoomId] = useState(getInitialRoomId);
-  const [label, setLabel] = useState(
-    () => localStorage.getItem("architect:label") ?? randomLabel(),
-  );
-  const [creating, setCreating] = useState(false);
-  const [editor, setEditor] = useState<Editor | null>(null);
-  const [selectedResource, setSelectedResource] = useState<ArchitectureResource | null>(null);
-  const [resourceCounts, setResourceCounts] = useState<Record<string, number>>({});
-  const [readModelStatus, setReadModelStatus] = useState("not synced");
-  const [aiPrompt, setAiPrompt] = useState("Draw an AI architecture canvas");
-  const [aiStatus, setAiStatus] = useState("Fake provider ready");
-  const [aiRunning, setAiRunning] = useState(false);
-
-  const createRoom = async () => {
-    setCreating(true);
-    try {
-      const response = await fetch("/api/rooms", { method: "POST" });
-      const body = (await response.json()) as { roomId: string };
-      history.pushState(null, "", `/room/${body.roomId}`);
-      setRoomId(body.roomId);
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  const saveLabel = (value: string) => {
-    setLabel(value);
-    localStorage.setItem("architect:label", value);
-  };
+  const roomId = useAtomValue(roomIdAtom);
+  const label = useAtomValue(labelAtom);
+  const creating = useAtomValue(creatingAtom);
+  const editor = useAtomValue(editorAtom);
+  const selectedResource = useAtomValue(selectedResourceAtom);
+  const readModelStatus = useAtomValue(readModelStatusAtom);
+  const aiPrompt = useAtomValue(aiPromptAtom);
+  const aiStatus = useAtomValue(aiStatusAtom);
+  const aiRunning = useAtomValue(aiRunningAtom);
+  const resourceCounts = useAtomValue(resourceCountsAtom);
+  const createRoom = useAtomSet(createRoomAtom);
+  const saveSemanticReadModel = useAtomSet(saveSemanticReadModelAtom);
+  const submitAiPromptRequest = useAtomSet(submitAiPromptAtom);
+  const saveLabel = useAtomSet(saveLabelAtom);
+  const setAiPrompt = useAtomSet(aiPromptAtom);
+  const setEditor = useAtomSet(editorAtom);
+  const setSelectedResource = useAtomSet(selectedResourceAtom);
+  const setResourceCounts = useAtomSet(resourceCountsAtom);
 
   const copyUrl = () => navigator.clipboard?.writeText(location.href);
-
-  const saveReadModel = useCallback(
-    async (readModel: ArchitectureReadModelInput) => {
-      if (roomId === "") {
-        return;
-      }
-
-      setReadModelStatus("saving");
-      try {
-        const response = await fetch(`/api/rooms/${roomId}/read-model`, {
-          body: JSON.stringify(readModel),
-          headers: { "content-type": "application/json" },
-          method: "PUT",
-        });
-
-        if (!response.ok) {
-          throw new Error("Unable to save read model");
-        }
-
-        setReadModelStatus("saved");
-      } catch {
-        setReadModelStatus("error");
-      }
-    },
-    [roomId],
-  );
 
   const addResource = (template: ArchitectureResourceTemplate) => {
     if (editor === null) {
@@ -150,42 +127,31 @@ export const App = () => {
       y: bounds.y + bounds.h / 2 - resourceNodeSize.h / 2 + nextCount * 12,
     });
     editor.select(id);
-    setResourceCounts((counts) => ({
-      ...counts,
+    setResourceCounts({
+      ...resourceCounts,
       [template.kind]: nextCount,
-    }));
+    });
     setSelectedResource(resource);
   };
 
-  const submitAiPrompt = async () => {
-    if (roomId === "" || aiPrompt.trim() === "") {
+  const saveReadModel = (readModel: ArchitectureReadModelInput) => {
+    saveSemanticReadModel({ readModel, roomId });
+  };
+
+  const submitAiPrompt = () => {
+    const currentPrompt = aiPrompt.trim();
+    if (roomId === "" || currentPrompt === "") {
       return;
     }
 
-    setAiRunning(true);
-    setAiStatus("Queueing fake AI job");
-    try {
-      const response = await fetch(`/api/rooms/${roomId}/ai/prompts`, {
-        body: JSON.stringify({
-          actor: label || "Guest",
-          prompt: aiPrompt,
-          readModel: editor === null ? emptyReadModel : collectArchitectureReadModel(editor),
-        }),
-        headers: { "content-type": "application/json" },
-        method: "POST",
-      });
-
-      if (!response.ok) {
-        throw new Error("AI prompt failed");
-      }
-
-      const result = (await response.json()) as { summary?: string };
-      setAiStatus(result.summary ?? "Fake AI job queued");
-    } catch {
-      setAiStatus("AI prompt failed");
-    } finally {
-      setAiRunning(false);
-    }
+    submitAiPromptRequest({
+      roomId,
+      prompt: {
+        actor: label || "Guest",
+        prompt: currentPrompt,
+        readModel: editor === null ? emptyReadModel : collectArchitectureReadModel(editor),
+      },
+    });
   };
 
   return (
@@ -216,7 +182,7 @@ export const App = () => {
             />
           </FieldRoot>
           <div className="grid grid-cols-2 gap-2">
-            <Button disabled={creating} onClick={createRoom}>
+            <Button disabled={creating} onClick={() => createRoom(void 0)}>
               {creating ? (
                 <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
               ) : (
@@ -298,7 +264,7 @@ export const App = () => {
                 The canvas will connect to a room Durable Object and persist tldraw records in
                 Durable Object SQLite.
               </p>
-              <Button className="w-fit" disabled={creating} onClick={createRoom}>
+              <Button className="w-fit" disabled={creating} onClick={() => createRoom(void 0)}>
                 {creating ? (
                   <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
                 ) : (

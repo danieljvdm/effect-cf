@@ -7,9 +7,9 @@ import type {
   ArchitectureResource,
 } from "@architect-lab/domain/architecture";
 
-import { getPersistentUserId } from "./lib/identity.js";
-import { inlineAssetStore } from "./lib/inline-asset-store.js";
-import { collectArchitectureReadModel, getShapeResource } from "./lib/read-model.js";
+import { getPersistentUserId } from "./lib/identity";
+import { inlineAssetStore } from "./lib/inline-asset-store";
+import { collectArchitectureReadModel, getShapeResource } from "./lib/read-model";
 
 const userId = getPersistentUserId();
 

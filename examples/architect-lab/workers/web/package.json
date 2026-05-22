@@ -15,6 +15,7 @@
   "dependencies": {
     "@architect-lab/domain": "workspace:*",
     "@base-ui-components/react": "^1.0.0-rc.0",
+    "@effect/atom-react": "4.0.0-beta.65",
     "@tldraw/sync": "^5.0.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -23,6 +24,7 @@
     "lucide-react": "^1.16.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
+    "scheduler": "^0.27.0",
     "sugar-high": "^1.2.0",
     "tailwind-merge": "^3.6.0",
     "tldraw": "^5.0.1"

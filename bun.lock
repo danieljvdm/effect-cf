@@ -107,6 +107,7 @@
       "dependencies": {
         "@architect-lab/domain": "workspace:*",
         "@base-ui-components/react": "^1.0.0-rc.0",
+        "@effect/atom-react": "4.0.0-beta.65",
         "@tldraw/sync": "^5.0.1",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
@@ -115,6 +116,7 @@
         "lucide-react": "^1.16.0",
         "react": "^19.2.6",
         "react-dom": "^19.2.6",
+        "scheduler": "^0.27.0",
         "sugar-high": "^1.2.0",
         "tailwind-merge": "^3.6.0",
         "tldraw": "^5.0.1",
@@ -247,6 +249,8 @@
     "@cloudflare/workers-types": ["@cloudflare/workers-types@4.20260523.1", "", {}, "sha512-Kr66Jip2K3t0srdoLLImzblTTx2T409Zk2J6AHANmlB950rlHr2henMQx7+cdQOLm2p1CttuBcYB1UVjdiFN8Q=="],
 
     "@cspotcode/source-map-support": ["@cspotcode/source-map-support@0.8.1", "", { "dependencies": { "@jridgewell/trace-mapping": "0.3.9" } }, "sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw=="],
+
+    "@effect/atom-react": ["@effect/atom-react@4.0.0-beta.65", "", { "peerDependencies": { "effect": "^4.0.0-beta.65", "react": "^19.2.4", "scheduler": "*" } }, "sha512-QU8U4qXzMcPPd484px7SIFxyt7dybR7KcMqA6xilAvqRVE1O7wzOtayfejw/NPTKTFEvy94z8c1w53Wk6PcIaw=="],
 
     "@effect/platform-bun": ["@effect/platform-bun@4.0.0-beta.70", "", { "dependencies": { "@effect/platform-node-shared": "^4.0.0-beta.70" }, "peerDependencies": { "effect": "^4.0.0-beta.70" } }, "sha512-u8fhg9RX46034Ee5s461z680LUr2A/4AKo7kWbP7rDQsLDyNyT9Z4/WlzcYl2Oo5E4fJIQmqG6cyieWFQD1Ppg=="],
 

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { Effect, Schema as S } from "effect";
 
-import { generateFakeAiPromptResult, makeAiJob, makeFakeAiPromptResult } from "../src/ai.ts";
+import { generateFakeAiPromptResult, makeAiJob } from "../src/ai.ts";
 import {
   ArchitectureReadModel,
   ArchitectureResource,
@@ -129,7 +129,7 @@ describe("architect-lab domain contracts", () => {
       },
       new Date("2026-05-21T12:00:00.000Z"),
     );
-    const result = makeFakeAiPromptResult(job);
+    const result = Effect.runSync(generateFakeAiPromptResult(job));
 
     expect(result.status).toBe("queued");
     expect(result.summary).toContain("collaborative architecture canvas");

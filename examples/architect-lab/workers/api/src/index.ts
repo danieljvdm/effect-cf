@@ -1,5 +1,6 @@
 import { Effect, Layer, Option, Schema as S } from "effect";
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http";
+import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { Worker, WorkerConfig } from "effect-cf";
 
 import {
@@ -22,6 +23,7 @@ import {
   RoomDurableObject,
 } from "@architect-lab/domain/runtime";
 import { type RoomHealth, type RoomId } from "@architect-lab/domain/contracts";
+import { ArchitectHttpApi } from "@architect-lab/domain/http-api";
 export { RoomDurableObject } from "@architect-lab/room";
 
 const ApiLayer = Layer.mergeAll(
@@ -32,22 +34,7 @@ const ApiLayer = Layer.mergeAll(
   WorkerConfig.layer,
 );
 
-const RoomParams = S.Struct({ roomId: S.String });
-const PublishedParams = S.Struct({ shareSlug: S.String });
 const decodeAiJob = S.decodeUnknownEffect(AiJob);
-
-const withNoStore = (headersInit?: HeadersInit) => {
-  const headers = new Headers(headersInit);
-  headers.set("cache-control", "no-store");
-  return headers;
-};
-
-const jsonResponse = (value: unknown, init?: ResponseInit) =>
-  HttpServerResponse.json(value, {
-    headers: withNoStore(init?.headers),
-    status: init?.status,
-    statusText: init?.statusText,
-  }).pipe(Effect.orDie);
 
 const createRoom = Effect.fn("createRoom")(function* () {
   const config = yield* ArchitectConfig;
@@ -175,77 +162,35 @@ const health = Effect.fn("health")(function* () {
   };
 });
 
-const ApiRoutes = Layer.mergeAll(
-  HttpRouter.add("GET", "/api/health", health().pipe(Effect.orDie, Effect.flatMap(jsonResponse))),
-  HttpRouter.add(
-    "POST",
-    "/api/rooms",
-    createRoom().pipe(
-      Effect.orDie,
-      Effect.flatMap((room) => jsonResponse(room, { status: 201 })),
-    ),
-  ),
-  HttpRouter.add(
-    "GET",
-    "/api/rooms/:roomId/read-model",
-    Effect.gen(function* () {
-      const { roomId } = yield* HttpRouter.schemaPathParams(RoomParams);
-      return yield* getLatestReadModel(roomId).pipe(Effect.orDie, Effect.flatMap(jsonResponse));
-    }),
-  ),
-  HttpRouter.add(
-    "PUT",
-    "/api/rooms/:roomId/read-model",
-    Effect.gen(function* () {
-      const { roomId } = yield* HttpRouter.schemaPathParams(RoomParams);
-      const input = yield* HttpServerRequest.schemaBodyJson(ArchitectureReadModelInput).pipe(
+const ApiGroupLive = HttpApiBuilder.group(ArchitectHttpApi, "api", (handlers) =>
+  handlers
+    .handle("health", () => health().pipe(Effect.orDie))
+    .handle("createRoom", () => createRoom().pipe(Effect.orDie))
+    .handle("getReadModel", ({ params }) => getLatestReadModel(params.roomId).pipe(Effect.orDie))
+    .handle("saveReadModel", ({ params, payload }) =>
+      saveLatestReadModel(params.roomId, payload).pipe(Effect.orDie),
+    )
+    .handle("publishReadModel", ({ params }) => publishReadModel(params.roomId).pipe(Effect.orDie))
+    .handle("submitAiPrompt", ({ params, payload }) =>
+      submitAiPrompt(params.roomId, payload).pipe(Effect.orDie),
+    )
+    .handle("getPublishedReadModel", ({ params }) =>
+      getPublishedReadModel(params.shareSlug).pipe(
         Effect.orDie,
-      );
-      return yield* saveLatestReadModel(roomId, input).pipe(
-        Effect.orDie,
-        Effect.flatMap(jsonResponse),
-      );
-    }),
-  ),
-  HttpRouter.add(
-    "POST",
-    "/api/rooms/:roomId/publish",
-    Effect.gen(function* () {
-      const { roomId } = yield* HttpRouter.schemaPathParams(RoomParams);
-      const published = yield* publishReadModel(roomId).pipe(Effect.orDie);
-      return yield* jsonResponse(published, { status: 201 });
-    }),
-  ),
-  HttpRouter.add(
-    "POST",
-    "/api/rooms/:roomId/ai/prompts",
-    Effect.gen(function* () {
-      const { roomId } = yield* HttpRouter.schemaPathParams(RoomParams);
-      const input = yield* HttpServerRequest.schemaBodyJson(AiPromptRequest).pipe(Effect.orDie);
-      const result = yield* submitAiPrompt(roomId, input).pipe(Effect.orDie);
-      return yield* jsonResponse(result, { status: 202 });
-    }),
-  ),
-  HttpRouter.add(
-    "GET",
-    "/api/published/:shareSlug",
-    Effect.gen(function* () {
-      const { shareSlug } = yield* HttpRouter.schemaPathParams(PublishedParams);
-      const published = yield* getPublishedReadModel(shareSlug).pipe(Effect.orDie);
-      return yield* Option.match(published, {
-        onNone: () => jsonResponse({ error: "Published architecture not found" }, { status: 404 }),
-        onSome: jsonResponse,
-      });
-    }),
-  ),
-  HttpRouter.add(
-    "GET",
-    "/api/rooms/:roomId/health",
-    Effect.gen(function* () {
-      const { roomId } = yield* HttpRouter.schemaPathParams(RoomParams);
-      return yield* roomHealth(roomId).pipe(Effect.orDie, Effect.flatMap(jsonResponse));
-    }),
-  ),
+        Effect.flatMap(
+          Option.match({
+            onNone: () => Effect.fail({ error: "Published architecture not found" }),
+            onSome: Effect.succeed,
+          }),
+        ),
+      ),
+    )
+    .handle("roomHealth", ({ params }) => roomHealth(params.roomId).pipe(Effect.orDie)),
+);
+
+const ApiRoutes = HttpApiBuilder.layer(ArchitectHttpApi).pipe(
+  Layer.provide(ApiGroupLive),
+  Layer.provide(HttpServer.layerServices),
 );
 
 const routeFetch = Effect.gen(function* () {
@@ -261,11 +206,15 @@ const routeFetch = Effect.gen(function* () {
     return yield* RoomDurableObject.fetch(room, new Request(target, request)).pipe(Effect.orDie);
   }
 
-  const httpEffect = yield* HttpRouter.toHttpEffect(ApiRoutes);
-  return yield* httpEffect.pipe(
-    Effect.catch(() =>
-      HttpServerResponse.json({ error: "Not found" }, { status: 404 }).pipe(Effect.orDie),
-    ),
+  return yield* Effect.scoped(
+    Effect.gen(function* () {
+      const httpEffect = yield* HttpRouter.toHttpEffect(ApiRoutes);
+      return yield* httpEffect.pipe(
+        Effect.catch(() =>
+          HttpServerResponse.json({ error: "Not found" }, { status: 404 }).pipe(Effect.orDie),
+        ),
+      );
+    }),
   );
 });
 

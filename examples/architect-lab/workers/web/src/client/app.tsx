@@ -1,4 +1,5 @@
 import { Field } from "@base-ui-components/react/field";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { Clipboard, LoaderCircle, Network, Play, Plus, Sparkles } from "lucide-react";
 import { createShapeId, toRichText } from "tldraw";
 
@@ -21,18 +22,12 @@ import { RoomCanvas } from "./room-canvas";
 import { ResourcePalette } from "./resource-palette";
 import {
   aiPromptAtom,
-  aiRunningAtom,
-  aiStatusAtom,
-  creatingAtom,
   editorAtom,
   labelAtom,
-  readModelStatusAtom,
   resourceCountsAtom,
   roomIdAtom,
   saveLabelAtom,
   selectedResourceAtom,
-  useAtomSet,
-  useAtomValue,
 } from "./state";
 
 const resourceNodeSize = { h: 104, w: 220 } as const;
@@ -68,22 +63,36 @@ const toTldrawResourceColor = (color: string): TldrawResourceColor => {
 export const App = () => {
   const roomId = useAtomValue(roomIdAtom);
   const label = useAtomValue(labelAtom);
-  const creating = useAtomValue(creatingAtom);
   const editor = useAtomValue(editorAtom);
   const selectedResource = useAtomValue(selectedResourceAtom);
-  const readModelStatus = useAtomValue(readModelStatusAtom);
   const aiPrompt = useAtomValue(aiPromptAtom);
-  const aiStatus = useAtomValue(aiStatusAtom);
-  const aiRunning = useAtomValue(aiRunningAtom);
   const resourceCounts = useAtomValue(resourceCountsAtom);
+  const createRoomResult = useAtomValue(createRoomAtom);
+  const saveReadModelResult = useAtomValue(saveSemanticReadModelAtom);
+  const submitAiPromptResult = useAtomValue(submitAiPromptAtom);
   const createRoom = useAtomSet(createRoomAtom);
-  const saveSemanticReadModel = useAtomSet(saveSemanticReadModelAtom);
   const submitAiPromptRequest = useAtomSet(submitAiPromptAtom);
   const saveLabel = useAtomSet(saveLabelAtom);
   const setAiPrompt = useAtomSet(aiPromptAtom);
-  const setEditor = useAtomSet(editorAtom);
   const setSelectedResource = useAtomSet(selectedResourceAtom);
   const setResourceCounts = useAtomSet(resourceCountsAtom);
+
+  const creating = createRoomResult.waiting;
+  const readModelStatus = saveReadModelResult.waiting
+    ? "saving"
+    : saveReadModelResult._tag === "Success"
+      ? "saved"
+      : saveReadModelResult._tag === "Failure"
+        ? "error"
+        : "not synced";
+  const aiRunning = submitAiPromptResult.waiting;
+  const aiStatus = aiRunning
+    ? "Queueing fake AI job"
+    : submitAiPromptResult._tag === "Success" && submitAiPromptResult.value !== undefined
+      ? submitAiPromptResult.value.summary
+      : submitAiPromptResult._tag === "Failure"
+        ? "AI prompt failed"
+        : "Fake provider ready";
 
   const copyUrl = () => navigator.clipboard?.writeText(location.href);
 
@@ -132,10 +141,6 @@ export const App = () => {
       [template.kind]: nextCount,
     });
     setSelectedResource(resource);
-  };
-
-  const saveReadModel = (readModel: ArchitectureReadModelInput) => {
-    saveSemanticReadModel({ readModel, roomId });
   };
 
   const submitAiPrompt = () => {
@@ -247,13 +252,7 @@ export const App = () => {
 
       <section className="relative min-h-0 min-w-0 bg-[linear-gradient(#e0e6eb_1px,transparent_1px),linear-gradient(90deg,#e0e6eb_1px,transparent_1px)] bg-[length:28px_28px]">
         {roomId !== "" ? (
-          <RoomCanvas
-            label={label}
-            onEditorReady={setEditor}
-            onReadModelChange={saveReadModel}
-            onSelectionChange={setSelectedResource}
-            roomId={roomId}
-          />
+          <RoomCanvas label={label} roomId={roomId} />
         ) : (
           <div className="grid h-full place-items-center p-7">
             <div className="grid w-[min(480px,100%)] gap-3 rounded-md border border-slate-300 bg-white/90 p-6 shadow-xl">

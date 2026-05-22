@@ -1,3 +1,4 @@
+import { RegistryProvider } from "@effect/atom-react";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./app";
@@ -9,4 +10,8 @@ if (root === null) {
   throw new Error("Architect Lab root element was not found");
 }
 
-createRoot(root).render(<App />);
+createRoot(root).render(
+  <RegistryProvider>
+    <App />
+  </RegistryProvider>,
+);

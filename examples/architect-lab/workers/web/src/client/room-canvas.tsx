@@ -1,34 +1,28 @@
 import { useSync } from "@tldraw/sync";
+import { useAtomSet } from "@effect/atom-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Tldraw, type Editor } from "tldraw";
 
-import type {
-  ArchitectureReadModelInput,
-  ArchitectureResource,
-} from "@architect-lab/domain/architecture";
-
 import { getPersistentUserId } from "./lib/identity";
 import { inlineAssetStore } from "./lib/inline-asset-store";
-import { collectArchitectureReadModel, getShapeResource } from "./lib/read-model";
+import {
+  roomCanvasChangedAtom,
+  roomCanvasMountedAtom,
+  roomCanvasUnmountedAtom,
+} from "./room-canvas-atoms";
 
 const userId = getPersistentUserId();
 
 export type RoomCanvasProps = {
   readonly label: string;
-  readonly onEditorReady: (editor: Editor | null) => void;
-  readonly onReadModelChange: (readModel: ArchitectureReadModelInput) => void;
-  readonly onSelectionChange: (resource: ArchitectureResource | null) => void;
   readonly roomId: string;
 };
 
-export const RoomCanvas = ({
-  label,
-  onEditorReady,
-  onReadModelChange,
-  onSelectionChange,
-  roomId,
-}: RoomCanvasProps) => {
+export const RoomCanvas = ({ label, roomId }: RoomCanvasProps) => {
   const cleanupRef = useRef<(() => void) | null>(null);
+  const roomCanvasMounted = useAtomSet(roomCanvasMountedAtom);
+  const roomCanvasChanged = useAtomSet(roomCanvasChangedAtom);
+  const roomCanvasUnmounted = useAtomSet(roomCanvasUnmountedAtom);
 
   const uri = useMemo(() => {
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
@@ -46,41 +40,17 @@ export const RoomCanvas = ({
   const handleMount = useCallback(
     (mountedEditor: Editor) => {
       cleanupRef.current?.();
-      onEditorReady(mountedEditor);
-      let readModelTimer: ReturnType<typeof setTimeout> | undefined;
-
-      const updateSelection = () => {
-        onSelectionChange(getShapeResource(mountedEditor.getOnlySelectedShape()));
-      };
-
-      const saveSemanticReadModel = () => {
-        onReadModelChange(collectArchitectureReadModel(mountedEditor));
-      };
-
-      const scheduleReadModelSave = () => {
-        if (readModelTimer !== undefined) {
-          clearTimeout(readModelTimer);
-        }
-        readModelTimer = setTimeout(saveSemanticReadModel, 400);
-      };
-
-      updateSelection();
-      scheduleReadModelSave();
+      roomCanvasMounted({ editor: mountedEditor, roomId });
       const dispose = mountedEditor.store.listen(() => {
-        updateSelection();
-        scheduleReadModelSave();
+        roomCanvasChanged({ editor: mountedEditor, roomId });
       });
 
       cleanupRef.current = () => {
-        if (readModelTimer !== undefined) {
-          clearTimeout(readModelTimer);
-        }
         dispose?.();
-        onSelectionChange(null);
-        onEditorReady(null);
+        roomCanvasUnmounted(void 0);
       };
     },
-    [onEditorReady, onReadModelChange, onSelectionChange],
+    [roomCanvasChanged, roomCanvasMounted, roomCanvasUnmounted, roomId],
   );
 
   useEffect(

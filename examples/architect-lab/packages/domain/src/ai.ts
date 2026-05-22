@@ -231,9 +231,6 @@ export const generateFakeAiPromptResult = (job: AiJob): Effect.Effect<AiPromptRe
   // `ToolkitInput` currently widens disabled tool-resolution context; the fake model is provided above.
   generateFakeAiPromptResultEffect(job) as unknown as Effect.Effect<AiPromptResult>;
 
-export const makeFakeAiPromptResult = (job: AiJob): AiPromptResult =>
-  Effect.runSync(generateFakeAiPromptResult(job));
-
 const renderFakeModelParts = (
   job: AiJob,
   providerPromptText: string,

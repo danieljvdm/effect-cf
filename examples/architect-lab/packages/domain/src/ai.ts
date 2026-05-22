@@ -68,12 +68,20 @@ export const AiToolCall = S.Union([
 ]);
 export type AiToolCall = S.Schema.Type<typeof AiToolCall>;
 
+export const AiPromptTraceEvent = S.Struct({
+  kind: S.Literals(["reasoning", "tool-call", "completion"] as const),
+  message: S.String,
+  detail: S.optional(S.String),
+});
+export type AiPromptTraceEvent = S.Schema.Type<typeof AiPromptTraceEvent>;
+
 export const AiPromptResult = S.Struct({
   jobId: S.String,
   roomId: S.String,
   status: S.Literal("queued"),
   summary: S.String,
   toolCalls: S.Array(AiToolCall),
+  traceEvents: S.Array(AiPromptTraceEvent),
 });
 export type AiPromptResult = S.Schema.Type<typeof AiPromptResult>;
 
@@ -130,6 +138,7 @@ export const ArchitectToolkit = Toolkit.make(
 );
 
 type ArchitectToolCallPart = Response.ToolCallParts<Toolkit.Tools<typeof ArchitectToolkit>>;
+export type ArchitectStreamPart = Response.StreamPart<Toolkit.Tools<typeof ArchitectToolkit>>;
 
 export interface FakeArchitectLanguageModelOptions {
   readonly responseDelay?: Duration.Input;
@@ -271,6 +280,14 @@ const generateFakeAiPromptResultEffect = Effect.fn("generateFakeAiPromptResult")
     status: "queued" as const,
     summary: response.text || selectFakePlan(job.prompt).summary,
     toolCalls: response.toolCalls.map(toAiToolCall),
+    traceEvents: response.toolCalls.map((part) => {
+      const toolCall = toAiToolCall(part);
+      return {
+        kind: "tool-call" as const,
+        message: describeAiToolCall(toolCall),
+        detail: toolCall.type,
+      };
+    }),
   }).pipe(Effect.orDie);
 });
 
@@ -280,6 +297,64 @@ export const generateFakeAiPromptResult = (
 ): Effect.Effect<AiPromptResult> =>
   // `ToolkitInput` currently widens disabled tool-resolution context; the fake model is provided above.
   generateFakeAiPromptResultEffect(job, options) as unknown as Effect.Effect<AiPromptResult>;
+
+export const streamFakeAiPromptParts = (
+  job: AiJob,
+  options?: FakeArchitectLanguageModelOptions,
+): Stream.Stream<ArchitectStreamPart> =>
+  LanguageModel.streamText({
+    prompt: [
+      {
+        role: "system",
+        content: "You are the Architect Lab fake provider. Return structured tool calls only.",
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              roomId: job.roomId,
+              jobId: job.id,
+              prompt: job.prompt,
+              readModel: job.readModel,
+            }),
+          },
+        ],
+      },
+    ],
+    toolkit: ArchitectToolkit,
+    toolChoice: {
+      mode: "required",
+      oneOf: ["add_resource_node", "connect_resources", "annotate_resource"],
+    },
+    disableToolCallResolution: true,
+  }).pipe(
+    Stream.provideServiceEffect(
+      LanguageModel.LanguageModel,
+      makeFakeArchitectLanguageModelService(job, options),
+    ),
+    Stream.orDie,
+  ) as Stream.Stream<ArchitectStreamPart>;
+
+export const isAiToolCallPart = (part: ArchitectStreamPart): part is ArchitectToolCallPart =>
+  part.type === "tool-call";
+
+export const aiToolCallFromPart = (part: ArchitectToolCallPart): AiToolCall => toAiToolCall(part);
+
+export const describeAiToolCall = (toolCall: AiToolCall): string => {
+  switch (toolCall.type) {
+    case "add_resource_node":
+      return `Placed ${resourceLabel(toolCall.kind)} "${toolCall.name}"`;
+    case "connect_resources":
+      return `Connected ${toolCall.sourceId} to ${toolCall.targetId}`;
+    case "annotate_resource":
+      return `Annotated ${toolCall.subjectId}`;
+  }
+};
+
+const resourceLabel = (kind: AiAddResourceNodeToolCall["kind"]) =>
+  getArchitectureResourceTemplate(kind).label;
 
 const renderFakeModelParts = (
   job: AiJob,
@@ -383,20 +458,46 @@ const renderFakeModelStreamParts = (
   const parts = renderFakeModelParts(job, providerPromptText);
   const streamParts: Array<Response.StreamPartEncoded> = [];
   const textId = `${stablePrefix(job.id)}_summary`;
+  const reasoningId = `${stablePrefix(job.id)}_reasoning`;
+  const textPart = parts.find((part) => part.type === "text");
+  const finishPart = parts.find((part) => part.type === "finish");
+
+  streamParts.push(
+    { type: "reasoning-start", id: reasoningId },
+    {
+      type: "reasoning-delta",
+      id: reasoningId,
+      delta: "Reading the prompt, current canvas read model, and available Cloudflare primitives.",
+    },
+    { type: "reasoning-end", id: reasoningId },
+  );
 
   for (const part of parts) {
-    if (part.type === "text") {
+    if (part.type === "tool-call") {
+      const toolCall = toAiToolCall(part as ArchitectToolCallPart);
       streamParts.push(
-        { type: "text-start", id: textId },
-        { type: "text-delta", id: textId, delta: part.text },
-        { type: "text-end", id: textId },
+        { type: "reasoning-start", id: `${part.id}_reasoning` },
+        {
+          type: "reasoning-delta",
+          id: `${part.id}_reasoning`,
+          delta: describeAiToolCall(toolCall),
+        },
+        { type: "reasoning-end", id: `${part.id}_reasoning` },
       );
-      continue;
-    }
-
-    if (part.type === "tool-call" || part.type === "finish") {
       streamParts.push(part);
     }
+  }
+
+  if (textPart?.type === "text") {
+    streamParts.push(
+      { type: "text-start", id: textId },
+      { type: "text-delta", id: textId, delta: textPart.text },
+      { type: "text-end", id: textId },
+    );
+  }
+
+  if (finishPart?.type === "finish") {
+    streamParts.push(finishPart);
   }
 
   return streamParts;

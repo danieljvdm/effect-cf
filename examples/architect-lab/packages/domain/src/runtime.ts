@@ -21,6 +21,9 @@ export const ArchitectConfig = Config.all({
   defaultRoomTitle: WorkerConfig.string("ARCHITECT_DEFAULT_ROOM_TITLE").pipe(
     Config.withDefault("Untitled architecture"),
   ),
+  fakeAiStreamDelayMs: WorkerConfig.number("ARCHITECT_FAKE_AI_STREAM_DELAY_MS").pipe(
+    Config.withDefault(180),
+  ),
 });
 
 export class RoomDurableObject extends DurableObject.Tag<RoomDurableObject>()(

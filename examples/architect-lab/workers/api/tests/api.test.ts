@@ -160,6 +160,7 @@ test("submits a fake AI architect prompt and queues the job", async () => {
   const worker = new ApiWorker(executionContext, {
     ARCHITECT_PUBLIC_ORIGIN: "https://architect.test",
     ARCHITECT_DEFAULT_ROOM_TITLE: "Untitled architecture",
+    ARCHITECT_FAKE_AI_STREAM_DELAY_MS: 0,
     AI_JOBS: queue,
     ARCHITECT_READ_MODELS: makeKvNamespace(),
     ROOMS: makeRoomNamespace({
@@ -180,6 +181,7 @@ test("submits a fake AI architect prompt and queues the job", async () => {
           status: "queued",
           summary: request.summary,
           toolCalls: request.toolCalls,
+          traceEvents: [],
         };
       },
     }),
@@ -199,15 +201,19 @@ test("submits a fake AI architect prompt and queues the job", async () => {
   const body = (await response.json()) as {
     status: string;
     summary: string;
+    traceEvents: Array<{ kind: string; message: string }>;
     toolCalls: Array<{ type: string }>;
   };
 
   expect(response.status).toBe(202);
   expect(body.status).toBe("queued");
   expect(body.summary).toContain("collaborative architecture canvas");
+  expect(body.traceEvents.map((event) => event.kind)).toContain("reasoning");
+  expect(body.traceEvents.map((event) => event.kind)).toContain("tool-call");
+  expect(body.traceEvents.map((event) => event.kind)).toContain("completion");
   expect(body.toolCalls.map((call) => call.type)).toContain("add_resource_node");
   expect(queue.sent).toHaveLength(1);
-  expect(calls).toHaveLength(2);
+  expect(calls.length).toBeGreaterThan(2);
 });
 
 function makeRoomNamespace(methods: Record<string, unknown>) {

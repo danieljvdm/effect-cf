@@ -16,6 +16,10 @@ This file is the backlog of scenarios that matter. Keep it current as implementa
 - Phase 4 fake AI prompt flow has been manually verified locally: prompt submission returns `202`,
   the local Queue consumer runs, generated resource nodes/arrows/annotations appear on the canvas,
   the first generated resource is selected, and the code panel shows highlighted `effect-cf` code.
+- Phase 4 streaming fake AI flow has been manually verified locally: the prompt route keeps the
+  request open while room-owned tool calls apply progressively, the side panel shows
+  reasoning/tool-call/completion activity summaries, and a browser reload reports no console
+  warnings or page errors.
 - The fake AI provider now runs through the `effect/unstable/ai` `LanguageModel`/`Toolkit` contract;
   final hardening should keep coverage on provider parity rather than only canned output shape.
 - Current browser accessibility audit still reports serious findings from tldraw internals and the
@@ -28,6 +32,8 @@ This file is the backlog of scenarios that matter. Keep it current as implementa
 - API Worker room creation and room health tests through the typed room namespace.
 - Web Worker shell and typed service-binding forwarding tests.
 - API Worker latest and published architecture read-model tests through KV.
+- API Worker fake AI prompt submission tests assert returned activity trace event kinds and disable
+  artificial fake-provider latency through test config.
 - Room Durable Object metadata persistence and health tests.
 - Room Durable Object AI tool-call validation and accepted-application event tests.
 - `effect-cf` Durable Object SQLite SQL layer tests.
@@ -63,7 +69,8 @@ This file is the backlog of scenarios that matter. Keep it current as implementa
 - Runtime tests for Queue message decoding and acknowledgement.
 - Additional Durable Object tests for direct room-owned tldraw mutation once accepted AI tool calls
   stop being rendered by the browser.
-- Browser smoke test for submitting the default prompt and seeing generated canvas edits.
+- Browser smoke test for submitting the default prompt and seeing generated canvas edits. Initial
+  manual smoke exists; automate it in final hardening.
 
 ### Phase 5 Trace And Review
 

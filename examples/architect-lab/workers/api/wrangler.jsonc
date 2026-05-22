@@ -7,6 +7,7 @@
   "vars": {
     "ARCHITECT_PUBLIC_ORIGIN": "http://localhost:8787",
     "ARCHITECT_DEFAULT_ROOM_TITLE": "Untitled architecture",
+    "ARCHITECT_FAKE_AI_STREAM_DELAY_MS": 180,
   },
   "durable_objects": {
     "bindings": [

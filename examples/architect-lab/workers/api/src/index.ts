@@ -1,4 +1,4 @@
-import { Effect, Layer, Option, Schema as S } from "effect";
+import { Effect, Layer, Option, Schema as S, Stream } from "effect";
 import { HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { Worker, WorkerConfig } from "effect-cf";
@@ -6,11 +6,19 @@ import { Worker, WorkerConfig } from "effect-cf";
 import {
   AiJob,
   AiPromptRequest,
+  AiPromptResult,
+  AiPromptTraceEvent,
+  AiToolCall,
+  aiToolCallFromPart,
+  describeAiToolCall,
   generateFakeAiPromptResult,
+  isAiToolCallPart,
   makeAiJob,
+  streamFakeAiPromptParts,
 } from "@architect-lab/domain/ai";
 import {
   ArchitectureReadModelInput,
+  type ArchitectureReadModelInput as ArchitectureReadModelInputType,
   latestArchitectureReadModelKey,
   publishedArchitectureReadModelKey,
 } from "@architect-lab/domain/architecture";
@@ -107,34 +115,113 @@ const submitAiPrompt = Effect.fn("submitAiPrompt")(function* (
   roomId: RoomId,
   input: AiPromptRequest,
 ) {
+  const config = yield* ArchitectConfig;
   const job = makeAiJob(roomId, input);
-  const result = yield* generateFakeAiPromptResult(job);
+  const room = RoomDurableObject.byName(roomId);
+  const traceEvents: Array<AiPromptTraceEvent> = [];
+  const toolCalls: Array<AiToolCall> = [];
+  let summary = "";
+  let rollingReadModel: ArchitectureReadModelInputType = job.readModel;
 
-  yield* RoomDurableObject.byName(roomId).recordTransportEvent({
+  const trace = (event: AiPromptTraceEvent) => {
+    traceEvents.push(event);
+    return room.recordTransportEvent({
+      roomId,
+      actor: "ai-architect",
+      kind: `ai.${event.kind}`,
+      payloadJson: JSON.stringify({
+        jobId: job.id,
+        ...event,
+      }),
+    });
+  };
+
+  yield* room.recordTransportEvent({
     roomId,
     actor: job.actor,
     kind: "ai.prompt.submitted",
     payloadJson: JSON.stringify({
       jobId: job.id,
       prompt: job.prompt,
-      toolCalls: result.toolCalls.length,
     }),
   });
-  const accepted = yield* RoomDurableObject.byName(roomId).applyAiToolCalls({
-    jobId: job.id,
-    roomId,
-    actor: "ai-architect",
-    summary: result.summary,
-    readModel: job.readModel,
-    toolCalls: result.toolCalls,
+
+  yield* trace({
+    kind: "reasoning",
+    message: "Queued prompt and opened a streaming fake-provider run",
+    detail: job.prompt,
+  });
+
+  yield* streamFakeAiPromptParts(job, {
+    simulateLatency: config.fakeAiStreamDelayMs > 0,
+    streamPartDelay: `${config.fakeAiStreamDelayMs} millis`,
+  }).pipe(
+    Stream.runForEach((part) =>
+      Effect.gen(function* () {
+        switch (part.type) {
+          case "reasoning-delta": {
+            yield* trace({
+              kind: "reasoning",
+              message: part.delta,
+            });
+            break;
+          }
+          case "text-delta": {
+            summary += part.delta;
+            break;
+          }
+          case "tool-call": {
+            if (!isAiToolCallPart(part)) {
+              return;
+            }
+
+            const toolCall = aiToolCallFromPart(part);
+            const message = describeAiToolCall(toolCall);
+
+            yield* trace({
+              kind: "tool-call",
+              message,
+              detail: toolCall.type,
+            });
+            const accepted = yield* room.applyAiToolCalls({
+              jobId: job.id,
+              roomId,
+              actor: "ai-architect",
+              summary: summary || "Streaming fake AI architecture plan",
+              readModel: rollingReadModel,
+              toolCalls: [toolCall],
+            });
+
+            rollingReadModel = addToolCallToReadModel(rollingReadModel, toolCall);
+            toolCalls.push(...accepted.toolCalls);
+            break;
+          }
+        }
+      }),
+    ),
+  );
+
+  const finalSummary = summary || "Streaming fake AI architecture plan complete.";
+
+  yield* trace({
+    kind: "completion",
+    message: finalSummary,
+    detail: `${toolCalls.length} accepted tool calls`,
   });
   yield* AiJobQueue.send(job);
 
-  return accepted;
+  return yield* S.decodeUnknownEffect(AiPromptResult)({
+    jobId: job.id,
+    roomId,
+    status: "queued" as const,
+    summary: finalSummary,
+    toolCalls,
+    traceEvents,
+  }).pipe(Effect.orDie);
 });
 
 const processAiJob = Effect.fn("processAiJob")(function* (job: AiJob) {
-  const result = yield* generateFakeAiPromptResult(job);
+  const result = yield* generateFakeAiPromptResult(job, { simulateLatency: false });
 
   yield* RoomDurableObject.byName(job.roomId).recordTransportEvent({
     roomId: job.roomId,
@@ -147,6 +234,43 @@ const processAiJob = Effect.fn("processAiJob")(function* (job: AiJob) {
     }),
   });
 });
+
+const addToolCallToReadModel = (
+  readModel: ArchitectureReadModelInputType,
+  toolCall: AiToolCall,
+): ArchitectureReadModelInputType => {
+  switch (toolCall.type) {
+    case "add_resource_node":
+      return {
+        ...readModel,
+        resources: [
+          ...readModel.resources,
+          {
+            bindingName: toolCall.bindingName,
+            id: toolCall.id,
+            kind: toolCall.kind,
+            name: toolCall.name,
+          },
+        ],
+      };
+    case "connect_resources":
+      return {
+        ...readModel,
+        edges: [
+          ...readModel.edges,
+          {
+            id: toolCall.id,
+            kind: toolCall.kind,
+            label: toolCall.label,
+            sourceId: toolCall.sourceId,
+            targetId: toolCall.targetId,
+          },
+        ],
+      };
+    case "annotate_resource":
+      return readModel;
+  }
+};
 
 const getPublishedReadModel = Effect.fn("getPublishedReadModel")(function* (shareSlug: string) {
   const cache = yield* PublishedArchitectureReadModels;

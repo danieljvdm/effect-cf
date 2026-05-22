@@ -1,8 +1,19 @@
 import { Field } from "@base-ui-components/react/field";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
-import { Clipboard, LoaderCircle, Network, Play, Plus, Sparkles } from "lucide-react";
+import {
+  BrainCircuit,
+  CheckCircle2,
+  Clipboard,
+  LoaderCircle,
+  Network,
+  Play,
+  Plus,
+  Sparkles,
+  Wrench,
+} from "lucide-react";
 import { createShapeId, toRichText } from "tldraw";
 
+import type { AiPromptTraceEvent } from "@architect-lab/domain/ai";
 import type {
   ArchitectureReadModelInput,
   ArchitectureResource,
@@ -87,12 +98,16 @@ export const App = () => {
         : "not synced";
   const aiRunning = submitAiPromptResult.waiting;
   const aiStatus = aiRunning
-    ? "Queueing fake AI job"
+    ? "Streaming architecture plan"
     : submitAiPromptResult._tag === "Success" && submitAiPromptResult.value !== undefined
       ? submitAiPromptResult.value.summary
       : submitAiPromptResult._tag === "Failure"
         ? "AI prompt failed"
         : "Fake provider ready";
+  const aiTraceEvents =
+    submitAiPromptResult._tag === "Success" && submitAiPromptResult.value !== undefined
+      ? submitAiPromptResult.value.traceEvents
+      : [];
 
   const copyUrl = () => navigator.clipboard?.writeText(location.href);
 
@@ -202,10 +217,7 @@ export const App = () => {
           </div>
         </section>
 
-        <Field.Root
-          aria-label="AI architect"
-          className="grid content-start gap-2.5 rounded-md border border-slate-300 bg-white p-3"
-        >
+        <Field.Root aria-label="AI architect" className="grid content-start gap-2.5">
           <div className="flex items-center gap-2">
             <Sparkles aria-hidden="true" className="size-4 text-teal-700" />
             <h2 className="text-xs font-bold uppercase tracking-wider text-slate-600">
@@ -229,9 +241,9 @@ export const App = () => {
             ) : (
               <Play aria-hidden="true" className="size-4" />
             )}
-            {aiRunning ? "Queueing" : "Run fake architect"}
+            {aiRunning ? "Streaming" : "Run fake architect"}
           </Button>
-          <p className="min-h-9 text-sm leading-5 text-slate-600">{aiStatus}</p>
+          <AiActivityPanel events={aiTraceEvents} running={aiRunning} status={aiStatus} />
         </Field.Root>
 
         <section className="grid content-start gap-2" aria-label="Room status">
@@ -299,3 +311,87 @@ const StatusRow = ({ label, value }: { readonly label: string; readonly value: s
     </strong>
   </div>
 );
+
+const runningAiEvents: ReadonlyArray<AiPromptTraceEvent> = [
+  {
+    kind: "reasoning",
+    message: "Reading canvas state and choosing Cloudflare primitives",
+  },
+  {
+    kind: "tool-call",
+    message: "Applying accepted tool calls through the room authority",
+    detail: "streaming",
+  },
+];
+
+const AiActivityPanel = ({
+  events,
+  running,
+  status,
+}: {
+  readonly events: ReadonlyArray<AiPromptTraceEvent>;
+  readonly running: boolean;
+  readonly status: string;
+}) => {
+  const visibleEvents = running ? runningAiEvents : events.slice(-6);
+
+  return (
+    <div className="grid gap-2 rounded-md border border-slate-900 bg-slate-950 p-3 text-slate-100 shadow-[0_10px_24px_rgba(15,23,42,0.24)]">
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <p className="min-w-0 text-sm font-bold leading-5 text-white">{status}</p>
+        {running ? (
+          <span className="mt-0.5 inline-flex h-2.5 w-2.5 shrink-0 rounded-full bg-teal-300 shadow-[0_0_0_4px_rgba(94,234,212,0.14)]" />
+        ) : (
+          <CheckCircle2 aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-teal-300" />
+        )}
+      </div>
+
+      {visibleEvents.length > 0 ? (
+        <ol className="grid gap-1.5" aria-label="AI activity">
+          {visibleEvents.map((event, index) => (
+            <li
+              className="grid grid-cols-[18px_minmax(0,1fr)] gap-2 rounded border border-white/10 bg-white/[0.04] px-2 py-1.5"
+              key={`${event.kind}-${event.message}-${index}`}
+            >
+              <AiActivityIcon
+                event={event}
+                running={running && index === visibleEvents.length - 1}
+              />
+              <div className="min-w-0">
+                <p className="truncate text-xs font-bold leading-4 text-slate-100">
+                  {event.message}
+                </p>
+                {event.detail !== undefined ? (
+                  <p className="truncate text-[11px] leading-4 text-slate-400">{event.detail}</p>
+                ) : null}
+              </div>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="text-xs leading-5 text-slate-400">No AI run in this room yet.</p>
+      )}
+    </div>
+  );
+};
+
+const AiActivityIcon = ({
+  event,
+  running,
+}: {
+  readonly event: AiPromptTraceEvent;
+  readonly running: boolean;
+}) => {
+  const className = running
+    ? "mt-0.5 size-4 animate-pulse text-teal-300"
+    : "mt-0.5 size-4 text-slate-400";
+
+  switch (event.kind) {
+    case "reasoning":
+      return <BrainCircuit aria-hidden="true" className={className} />;
+    case "tool-call":
+      return <Wrench aria-hidden="true" className={className} />;
+    case "completion":
+      return <CheckCircle2 aria-hidden="true" className="mt-0.5 size-4 text-teal-300" />;
+  }
+};

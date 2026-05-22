@@ -133,6 +133,7 @@ const applyAiToolCalls = Effect.fn("applyAiToolCalls")(function* (request: AiToo
     status: "queued" as const,
     summary: request.summary,
     toolCalls: request.toolCalls,
+    traceEvents: [],
   };
 });
 

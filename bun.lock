@@ -26,6 +26,8 @@
         "@architect-lab/domain": "workspace:*",
         "@architect-lab/tldraw-effect-cf": "workspace:*",
         "@effect/sql-sqlite-do": "catalog:",
+        "@tldraw/tlschema": "^5.0.1",
+        "@tldraw/utils": "^5.0.1",
         "effect": "catalog:",
         "effect-cf": "workspace:*",
       },

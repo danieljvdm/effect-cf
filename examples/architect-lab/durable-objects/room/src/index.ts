@@ -12,6 +12,8 @@ import {
   type TransportEventInput,
 } from "@architect-lab/domain/contracts";
 
+import { applyAiToolCallsToTldrawStore } from "./ai-tldraw.js";
+
 interface RoomInfoRow {
   readonly [key: string]: unknown;
   readonly id: string;
@@ -106,8 +108,13 @@ const recordTransportEvent = Effect.fn("recordTransportEvent")(function* (
 });
 
 const applyAiToolCalls = Effect.fn("applyAiToolCalls")(function* (request: AiToolCallApplyRequest) {
+  const tldraw = yield* TldrawRoom;
+
   yield* ensureRoom(request.roomId);
   yield* validateAiToolCalls(request);
+  yield* tldraw.updateStore((store) => {
+    applyAiToolCallsToTldrawStore(store, request);
+  });
   yield* recordTransportEvent({
     roomId: request.roomId,
     actor: request.actor,

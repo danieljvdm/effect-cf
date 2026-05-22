@@ -2,6 +2,7 @@ import {
   DurableObjectSqliteSyncWrapper,
   SQLiteSyncStorage,
   TLSocketRoom,
+  type RoomStoreMethods,
   type SessionStateSnapshot,
   type TLSyncLog,
 } from "@tldraw/sync-core";
@@ -65,6 +66,9 @@ export interface TldrawRoomService {
   readonly handleError: (
     socket: DurableObjectWebSocket.DurableWebSocket,
   ) => Effect.Effect<Option.Option<TldrawSocketAttachment>, unknown>;
+  readonly updateStore: (
+    updater: (store: RoomStoreMethods<TLRecord>) => Promise<void> | void,
+  ) => Effect.Effect<void, unknown>;
   readonly getDocumentClock: Effect.Effect<number>;
   readonly getActiveSessionCount: Effect.Effect<number>;
 }
@@ -209,6 +213,15 @@ export class TldrawRoom extends Context.Service<TldrawRoom, TldrawRoomService>()
             }),
           handleClose: (socket) => closeSession(socket, "close"),
           handleError: (socket) => closeSession(socket, "error"),
+          updateStore: (updater) =>
+            Effect.tryPromise({
+              try: async () => {
+                await Promise.resolve();
+                await room.updateStore(updater);
+                await Promise.resolve();
+              },
+              catch: (error) => error,
+            }),
           getDocumentClock: Effect.sync(() => room.getCurrentDocumentClock()),
           getActiveSessionCount: Effect.sync(() => room.getNumActiveSessions()),
         });

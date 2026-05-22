@@ -77,6 +77,8 @@ test("validates and records AI tool-call application through the room authority"
   });
 
   const health = await room.getHealth("room_ai");
+  const reloaded = new RoomDurableObject(state, {} as Cloudflare.Env);
+  const reloadedHealth = await reloaded.getHealth("room_ai");
 
   expect(result).toMatchObject({
     roomId: "room_ai",
@@ -85,6 +87,8 @@ test("validates and records AI tool-call application through the room authority"
   });
   expect(result.toolCalls).toHaveLength(3);
   expect(health.transportEvents).toBe(1);
+  expect(health.documentClock).toBeGreaterThan(0);
+  expect(reloadedHealth.documentClock).toBe(health.documentClock);
 });
 
 test("rejects AI tool calls with unknown edge endpoints", async () => {
@@ -135,6 +139,12 @@ function makeState(): DurableObjectState {
   const events: Array<RoomEvent> = [];
   let tldrawSchema = "";
   let tldrawDocumentClock = 0;
+  let tldrawTombstoneHistoryStartsAtClock = 0;
+  const tldrawDocuments = new Map<
+    string,
+    { readonly state: Uint8Array; readonly lastChangedClock: number }
+  >();
+  const tldrawTombstones = new Map<string, number>();
 
   return {
     id: { toString: () => "room-do-id" },
@@ -164,21 +174,131 @@ function makeState(): DurableObjectState {
           }
 
           if (normalized.startsWith("DELETE FROM tldraw_documents")) {
+            tldrawDocuments.clear();
+            tldrawTombstones.clear();
             return makeCursor([]);
           }
 
           if (normalized.startsWith("INSERT OR REPLACE INTO tldraw_documents")) {
+            const [id, state, lastChangedClock] = bindings as [string, Uint8Array, number];
+            tldrawDocuments.set(id, { state, lastChangedClock });
+            return makeCursor([]);
+          }
+
+          if (
+            normalized.startsWith("UPDATE tldraw_metadata SET documentClock = documentClock + 1")
+          ) {
+            tldrawDocumentClock += 1;
             return makeCursor([]);
           }
 
           if (normalized.startsWith("UPDATE tldraw_metadata SET documentClock")) {
             tldrawDocumentClock = bindings[0] as number;
+            tldrawTombstoneHistoryStartsAtClock = bindings[1] as number;
             tldrawSchema = bindings[2] as string;
+            return makeCursor([]);
+          }
+
+          if (normalized.startsWith("UPDATE tldraw_metadata SET tombstoneHistoryStartsAtClock")) {
+            tldrawTombstoneHistoryStartsAtClock = bindings[0] as number;
             return makeCursor([]);
           }
 
           if (normalized.startsWith("SELECT documentClock FROM tldraw_metadata")) {
             return makeCursor([{ documentClock: tldrawDocumentClock }]);
+          }
+
+          if (normalized.startsWith("SELECT tombstoneHistoryStartsAtClock FROM tldraw_metadata")) {
+            return makeCursor([
+              { tombstoneHistoryStartsAtClock: tldrawTombstoneHistoryStartsAtClock },
+            ]);
+          }
+
+          if (normalized.startsWith("SELECT state, lastChangedClock FROM tldraw_documents")) {
+            return makeCursor(
+              Array.from(tldrawDocuments.values()).map((document) => ({
+                state: document.state as unknown as SqlStorageValue,
+                lastChangedClock: document.lastChangedClock,
+              })),
+            );
+          }
+
+          if (normalized.startsWith("SELECT id, state FROM tldraw_documents")) {
+            return makeCursor(
+              Array.from(tldrawDocuments.entries()).map(([id, document]) => ({
+                id,
+                state: document.state as unknown as SqlStorageValue,
+              })),
+            );
+          }
+
+          if (normalized.startsWith("SELECT id FROM tldraw_documents WHERE id")) {
+            return makeCursor(
+              tldrawDocuments.has(bindings[0] as string) ? [{ id: bindings[0] }] : [],
+            );
+          }
+
+          if (normalized.startsWith("SELECT id FROM tldraw_documents")) {
+            return makeCursor(Array.from(tldrawDocuments.keys()).map((id) => ({ id })));
+          }
+
+          if (normalized.startsWith("SELECT state FROM tldraw_documents WHERE id")) {
+            const document = tldrawDocuments.get(bindings[0] as string);
+            return makeCursor(
+              document === undefined
+                ? []
+                : [{ state: document.state as unknown as SqlStorageValue }],
+            );
+          }
+
+          if (normalized.startsWith("SELECT state FROM tldraw_documents")) {
+            return makeCursor(
+              Array.from(tldrawDocuments.values()).map((document) => ({
+                state: document.state as unknown as SqlStorageValue,
+              })),
+            );
+          }
+
+          if (normalized.startsWith("DELETE FROM tldraw_tombstones WHERE id")) {
+            tldrawTombstones.delete(bindings[0] as string);
+            return makeCursor([]);
+          }
+
+          if (normalized.startsWith("INSERT OR REPLACE INTO tldraw_tombstones")) {
+            const [id, clock] = bindings as [string, number];
+            tldrawTombstones.set(id, clock);
+            return makeCursor([]);
+          }
+
+          if (normalized.startsWith("DELETE FROM tldraw_tombstones WHERE clock")) {
+            const cutoff = bindings[0] as number;
+            for (const [id, clock] of tldrawTombstones) {
+              if (clock < cutoff) {
+                tldrawTombstones.delete(id);
+              }
+            }
+            return makeCursor([]);
+          }
+
+          if (normalized.startsWith("SELECT count(*) as count FROM tldraw_tombstones")) {
+            return makeCursor([{ count: tldrawTombstones.size }]);
+          }
+
+          if (normalized.startsWith("SELECT id, clock FROM tldraw_tombstones")) {
+            return makeCursor(
+              Array.from(tldrawTombstones.entries())
+                .sort((a, b) => a[1] - b[1])
+                .map(([id, clock]) => ({ id, clock })),
+            );
+          }
+
+          if (normalized.startsWith("SELECT id FROM tldraw_tombstones WHERE clock")) {
+            const cutoff = bindings[0] as number;
+            return makeCursor(
+              Array.from(tldrawTombstones.entries())
+                .filter(([, clock]) => clock > cutoff)
+                .map(([id]) => ({ id })),
+            );
           }
 
           if (normalized.startsWith("INSERT INTO room_info")) {

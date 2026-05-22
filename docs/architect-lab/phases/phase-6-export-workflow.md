@@ -6,8 +6,10 @@ Demonstrate long-running durable work and produce a tangible artifact from the c
 
 ## Status
 
-Planned. The current implementation does not yet include export commands, Workflows, D1 export
-status, R2 artifact storage, export manifests, or Images-backed preview generation.
+Complete. The app now starts a typed export Workflow from the room side panel, persists export
+status in D1, writes generated files and a manifest to R2, broadcasts export activity through the
+room activity socket, and reloads the latest export status from persisted state. Images-backed
+preview generation remains intentionally deferred.
 
 ## Product Requirement
 
@@ -19,21 +21,24 @@ Users can export an architecture package that contains generated documentation a
 - Workflow coordinates export generation.
 - Export status is stored in D1.
 - Generated files and manifest are stored in R2.
-- Optional preview rendering uses Images.
+- Optional preview rendering uses Images. Deferred until preview rendering becomes part of the
+  product surface.
 - Export status is visible in the UI and survives reload.
 
 ## Deliverables
 
-- Export starter command.
+- Export starter command in the room side panel.
 - Workflow for export package generation.
 - R2 export manifest and generated files.
 - D1 export status tracking.
-- Optional preview thumbnail through Images.
+- Optional preview thumbnail through Images. Deferred.
 
 ## Resource Coverage Added
 
 - Workflow
-- Images used by app internals if preview generation is implemented.
+- D1
+- R2
+- Images remains deferred because preview generation is not implemented.
 
 ## Acceptance Criteria
 
@@ -47,6 +52,8 @@ Users can export an architecture package that contains generated documentation a
 
 ## Testing Notes
 
-Automated coverage is not a blocker for moving through the product phases. Keep the important
-scenarios in [Architect Lab Testing Log](../testing.md) and implement them during the final
-hardening pass.
+- Domain tests verify the generated manifest includes the starter examples for Worker, Durable
+  Object, D1, R2, KV, Queue, and Workflow.
+- API Worker tests start an export, run the Workflow entrypoint against fake D1/R2 bindings, read
+  persisted status, read the manifest endpoint, and assert room activity events.
+- Browser smoke should still be automated during final hardening.

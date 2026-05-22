@@ -52,6 +52,22 @@ export const TransportEventReceipt = S.Struct({
 });
 export type TransportEventReceipt = S.Schema.Type<typeof TransportEventReceipt>;
 
+export const RoomActivityEvent = S.Struct({
+  sequence: S.Number,
+  roomId: RoomId,
+  actor: S.String,
+  kind: S.String,
+  payloadJson: S.String,
+  createdAt: S.String,
+});
+export type RoomActivityEvent = S.Schema.Type<typeof RoomActivityEvent>;
+
+export const RoomActivityEventMessage = S.Struct({
+  type: S.Literal("room.activity.event"),
+  event: RoomActivityEvent,
+});
+export type RoomActivityEventMessage = S.Schema.Type<typeof RoomActivityEventMessage>;
+
 export const PresenceMember = S.Struct({
   sessionId: S.String,
   userId: UserId,

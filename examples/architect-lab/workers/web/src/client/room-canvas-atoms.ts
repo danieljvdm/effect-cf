@@ -2,8 +2,8 @@ import { Atom } from "effect/unstable/reactivity";
 import type { Editor } from "tldraw";
 
 import { saveSemanticReadModelAtom } from "./api";
-import { collectArchitectureReadModel, getShapeResource } from "./lib/read-model";
-import { editorAtom, selectedResourceAtom } from "./state";
+import { collectArchitectureReadModel, getShapeArchitectureSelection } from "./lib/read-model";
+import { architectureReadModelAtom, editorAtom, selectedArchitectureAtom } from "./state";
 
 export interface RoomCanvasEditorArgs {
   readonly editor: Editor;
@@ -29,11 +29,14 @@ export const roomCanvasChangedAtom = Atom.fnSync<RoomCanvasEditorArgs>()((
   { editor, roomId },
   get,
 ) => {
-  get.set(selectedResourceAtom, getShapeResource(editor.getOnlySelectedShape()));
+  const readModel = collectArchitectureReadModel(editor);
+
+  get.set(selectedArchitectureAtom, getShapeArchitectureSelection(editor.getOnlySelectedShape()));
+  get.set(architectureReadModelAtom, readModel);
   clearPendingReadModelSave();
   readModelTimer = setTimeout(() => {
     get.set(saveSemanticReadModelAtom, {
-      readModel: collectArchitectureReadModel(editor),
+      readModel,
       roomId,
     });
   }, 400);
@@ -41,6 +44,7 @@ export const roomCanvasChangedAtom = Atom.fnSync<RoomCanvasEditorArgs>()((
 
 export const roomCanvasUnmountedAtom = Atom.fnSync<void>()((_, get) => {
   clearPendingReadModelSave();
-  get.set(selectedResourceAtom, null);
+  get.set(selectedArchitectureAtom, null);
+  get.set(architectureReadModelAtom, { edges: [], resources: [] });
   get.set(editorAtom, null);
 });

@@ -8,6 +8,23 @@ import {
   PublishedArchitectureReadModel,
 } from "./architecture";
 import { ApiHealth, CreateRoomResult, RoomHealth } from "./contracts";
+import { ExportJobStatus, ExportManifest, ExportStartRequest } from "./export";
+import {
+  ArchitectureReviewRequest,
+  ArchitectureReviewResult,
+  ReviewFindingDecisionRequest,
+  ReviewFindingDecisionResult,
+  TraceStartRequest,
+  TraceState,
+} from "./trace";
+import {
+  VoiceSuggestionDecisionRequest,
+  VoiceSuggestionDecisionResult,
+  VoiceSuggestionRequest,
+  VoiceSuggestionResult,
+  VoiceTranscriptEvent,
+  VoiceTranscriptRequest,
+} from "./voice";
 
 const RoomParams = {
   roomId: S.String,
@@ -56,6 +73,67 @@ export const ArchitectHttpApi = HttpApi.make("ArchitectHttpApi").add(
       params: RoomParams,
       payload: AiPromptRequest,
       success: AiPromptResult.pipe(HttpApiSchema.status(202)),
+    }),
+    HttpApiEndpoint.post("startTrace", "/api/rooms/:roomId/traces/start", {
+      params: RoomParams,
+      payload: TraceStartRequest,
+      success: TraceState.pipe(HttpApiSchema.status(202)),
+    }),
+    HttpApiEndpoint.post("reviewArchitecture", "/api/rooms/:roomId/reviews", {
+      params: RoomParams,
+      payload: ArchitectureReviewRequest,
+      success: ArchitectureReviewResult.pipe(HttpApiSchema.status(201)),
+    }),
+    HttpApiEndpoint.post("acceptReviewFinding", "/api/rooms/:roomId/reviews/accept", {
+      params: RoomParams,
+      payload: ReviewFindingDecisionRequest,
+      success: AiPromptResult.pipe(HttpApiSchema.status(202)),
+    }),
+    HttpApiEndpoint.post("rejectReviewFinding", "/api/rooms/:roomId/reviews/reject", {
+      params: RoomParams,
+      payload: ReviewFindingDecisionRequest,
+      success: ReviewFindingDecisionResult,
+    }),
+    HttpApiEndpoint.post("startExport", "/api/rooms/:roomId/exports", {
+      params: RoomParams,
+      payload: ExportStartRequest,
+      success: ExportJobStatus.pipe(HttpApiSchema.status(202)),
+    }),
+    HttpApiEndpoint.get("getExportStatus", "/api/rooms/:roomId/exports/:exportId", {
+      params: {
+        roomId: S.String,
+        exportId: S.String,
+      },
+      success: ExportJobStatus,
+      error: ApiNotFound,
+    }),
+    HttpApiEndpoint.get("getExportManifest", "/api/rooms/:roomId/exports/:exportId/manifest", {
+      params: {
+        roomId: S.String,
+        exportId: S.String,
+      },
+      success: ExportManifest,
+      error: ApiNotFound,
+    }),
+    HttpApiEndpoint.post("recordVoiceTranscript", "/api/rooms/:roomId/voice/transcripts", {
+      params: RoomParams,
+      payload: VoiceTranscriptRequest,
+      success: VoiceTranscriptEvent.pipe(HttpApiSchema.status(201)),
+    }),
+    HttpApiEndpoint.post("suggestFromVoice", "/api/rooms/:roomId/voice/suggestions", {
+      params: RoomParams,
+      payload: VoiceSuggestionRequest,
+      success: VoiceSuggestionResult.pipe(HttpApiSchema.status(201)),
+    }),
+    HttpApiEndpoint.post("acceptVoiceSuggestion", "/api/rooms/:roomId/voice/suggestions/accept", {
+      params: RoomParams,
+      payload: VoiceSuggestionDecisionRequest,
+      success: AiPromptResult.pipe(HttpApiSchema.status(202)),
+    }),
+    HttpApiEndpoint.post("rejectVoiceSuggestion", "/api/rooms/:roomId/voice/suggestions/reject", {
+      params: RoomParams,
+      payload: VoiceSuggestionDecisionRequest,
+      success: VoiceSuggestionDecisionResult,
     }),
     HttpApiEndpoint.get("getPublishedReadModel", "/api/published/:shareSlug", {
       params: PublishedParams,

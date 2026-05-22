@@ -6,10 +6,11 @@ Make the example usable beyond deterministic demos while keeping local developme
 
 ## Status
 
-Planned. The fake provider now exercises the shared AI job/tool-call contract through
-`effect/unstable/ai`, and room/API validation owns tool-call application. A configurable real
-provider implementation, deployed provider mode, timeout/retry/cost controls, and the optional
-Hyperdrive extension remain future work.
+Complete. The fake provider remains the local default, and the API Worker now has a configurable
+OpenAI-compatible real-provider path selected through WorkerConfig. Fake and real provider modes
+share the same AI job, tool-call schemas, and room-validated apply path. Timeout, retry,
+max-output, max-tool-call, and estimated-cost controls are explicit config values. Hyperdrive
+remains optional and omitted from the core bindings.
 
 ## Product Requirement
 
@@ -31,11 +32,12 @@ remains deterministic and free of external credentials.
 - Config docs for provider keys and model selection.
 - Timeout, retry, and cost controls.
 - Deployed-mode README.
-- Optional Hyperdrive extension for an external architecture catalog.
+- Optional Hyperdrive extension for an external architecture catalog. Deferred and not bound by the
+  core app.
 
 ## Resource Coverage Added
 
-- Optional Hyperdrive
+- Optional Hyperdrive. Omitted from the default binding set.
 
 ## Acceptance Criteria
 
@@ -46,6 +48,6 @@ remains deterministic and free of external credentials.
 
 ## Testing Notes
 
-Automated coverage is not a blocker for moving through the product phases. Keep the important
-scenarios in [Architect Lab Testing Log](../testing.md) and implement them during the final
-hardening pass. Tests should not require real provider credentials.
+- Domain tests cover provider-mode selection and real-provider response decoding with mocked fetch.
+- API Worker tests keep fake mode credential-free.
+- No test requires real provider credentials.

@@ -95,6 +95,23 @@ export const AiToolCallApplyRequest = S.Struct({
 });
 export type AiToolCallApplyRequest = S.Schema.Type<typeof AiToolCallApplyRequest>;
 
+export const AiProviderMode = S.Literals(["fake", "real"] as const);
+export type AiProviderMode = S.Schema.Type<typeof AiProviderMode>;
+
+export interface RealArchitectProviderOptions {
+  readonly apiKey: string;
+  readonly baseUrl: string;
+  readonly maxEstimatedCostCents: number;
+  readonly maxOutputTokens: number;
+  readonly maxToolCalls: number;
+  readonly model: string;
+  readonly retryAttempts: number;
+  readonly timeoutMs: number;
+}
+
+export const resolveAiProviderMode = (value: string | undefined): AiProviderMode =>
+  value === "real" ? "real" : "fake";
+
 const AddResourceNodeTool = Tool.make("add_resource_node", {
   description: "Add a semantic Cloudflare architecture resource to the canvas.",
   parameters: S.Struct({
@@ -337,6 +354,250 @@ export const streamFakeAiPromptParts = (
     Stream.orDie,
   ) as Stream.Stream<ArchitectStreamPart>;
 
+export const generateRealAiPromptResult = (
+  job: AiJob,
+  options: RealArchitectProviderOptions,
+): Effect.Effect<AiPromptResult, unknown> =>
+  Effect.gen(function* () {
+    const response = yield* requestRealProvider(job, options);
+    const message = response.choices[0]?.message;
+    const toolCalls = (message?.tool_calls ?? [])
+      .slice(0, options.maxToolCalls)
+      .flatMap(readRealProviderToolCall);
+    const totalTokens = response.usage?.total_tokens ?? 0;
+    const estimatedCostCents = estimateCostCents(totalTokens);
+
+    if (estimatedCostCents > options.maxEstimatedCostCents) {
+      return yield* Effect.fail(
+        new Error(
+          `Estimated provider cost ${estimatedCostCents.toFixed(4)} cents exceeded configured cap`,
+        ),
+      );
+    }
+
+    return yield* S.decodeUnknownEffect(AiPromptResult)({
+      jobId: job.id,
+      roomId: job.roomId,
+      status: "queued" as const,
+      summary: message?.content ?? "Real provider returned architecture tool calls.",
+      toolCalls,
+      traceEvents: toolCalls.map((toolCall) => ({
+        kind: "tool-call" as const,
+        message: describeAiToolCall(toolCall),
+        detail: toolCall.type,
+      })),
+    });
+  });
+
+interface RealProviderResponse {
+  readonly choices: ReadonlyArray<{
+    readonly message?: {
+      readonly content?: string | null;
+      readonly tool_calls?: ReadonlyArray<{
+        readonly function?: {
+          readonly arguments?: string;
+          readonly name?: string;
+        };
+      }>;
+    };
+  }>;
+  readonly usage?: {
+    readonly total_tokens?: number;
+  };
+}
+
+const requestRealProvider = (
+  job: AiJob,
+  options: RealArchitectProviderOptions,
+): Effect.Effect<RealProviderResponse, unknown> =>
+  Effect.tryPromise({
+    try: async () => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), options.timeoutMs);
+
+      try {
+        let lastError: unknown;
+        for (let attempt = 0; attempt <= options.retryAttempts; attempt += 1) {
+          try {
+            const response = await fetch(`${options.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+              body: JSON.stringify({
+                max_tokens: options.maxOutputTokens,
+                messages: [
+                  {
+                    role: "system",
+                    content:
+                      "You are Architect Lab. Return concise text and function tool calls for the Cloudflare architecture canvas.",
+                  },
+                  {
+                    role: "user",
+                    content: JSON.stringify({
+                      jobId: job.id,
+                      prompt: job.prompt,
+                      readModel: job.readModel,
+                      roomId: job.roomId,
+                    }),
+                  },
+                ],
+                model: options.model,
+                tool_choice: "auto",
+                tools: realProviderTools,
+              }),
+              headers: {
+                authorization: `Bearer ${options.apiKey}`,
+                "content-type": "application/json",
+              },
+              method: "POST",
+              signal: controller.signal,
+            });
+
+            if (!response.ok) {
+              lastError = new Error(`Provider returned ${response.status}`);
+              continue;
+            }
+
+            return (await response.json()) as RealProviderResponse;
+          } catch (error) {
+            lastError = error;
+          }
+        }
+
+        throw lastError instanceof Error ? lastError : new Error("Provider request failed");
+      } finally {
+        clearTimeout(timeout);
+      }
+    },
+    catch: (cause) => cause,
+  });
+
+const realProviderTools = [
+  {
+    type: "function",
+    function: {
+      name: "add_resource_node",
+      description: "Add a semantic Cloudflare architecture resource to the canvas.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "kind", "name", "bindingName", "description", "position"],
+        properties: {
+          id: { type: "string" },
+          kind: {
+            type: "string",
+            enum: [
+              "worker",
+              "durable-object",
+              "d1",
+              "r2",
+              "kv",
+              "queue",
+              "workflow",
+              "images",
+              "service-binding",
+            ],
+          },
+          name: { type: "string" },
+          bindingName: { type: "string" },
+          description: { type: "string" },
+          position: {
+            type: "object",
+            additionalProperties: false,
+            required: ["x", "y"],
+            properties: {
+              x: { type: "number" },
+              y: { type: "number" },
+            },
+          },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "connect_resources",
+      description: "Connect two semantic architecture resources with a labeled relationship.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "kind", "sourceId", "targetId", "label"],
+        properties: {
+          id: { type: "string" },
+          kind: {
+            type: "string",
+            enum: [
+              "http",
+              "service-binding",
+              "websocket",
+              "queue-message",
+              "workflow-start",
+              "storage-read",
+              "storage-write",
+            ],
+          },
+          sourceId: { type: "string" },
+          targetId: { type: "string" },
+          label: { type: "string" },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "annotate_resource",
+      description: "Attach an architecture review note to a resource or edge.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "subjectId", "note", "position"],
+        properties: {
+          id: { type: "string" },
+          subjectId: { type: "string" },
+          note: { type: "string" },
+          position: {
+            type: "object",
+            additionalProperties: false,
+            required: ["x", "y"],
+            properties: {
+              x: { type: "number" },
+              y: { type: "number" },
+            },
+          },
+        },
+      },
+    },
+  },
+] as const;
+
+const readRealProviderToolCall = (toolCall: {
+  readonly function?: {
+    readonly arguments?: string;
+    readonly name?: string;
+  };
+}): ReadonlyArray<AiToolCall> => {
+  if (toolCall.function?.arguments === undefined) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(toolCall.function.arguments);
+    switch (toolCall.function.name) {
+      case "add_resource_node":
+        return [{ type: "add_resource_node", ...parsed } as AiToolCall];
+      case "connect_resources":
+        return [{ type: "connect_resources", ...parsed } as AiToolCall];
+      case "annotate_resource":
+        return [{ type: "annotate_resource", ...parsed } as AiToolCall];
+      default:
+        return [];
+    }
+  } catch {
+    return [];
+  }
+};
+
+const estimateCostCents = (totalTokens: number): number => (totalTokens / 1000) * 0.1;
+
 export const isAiToolCallPart = (part: ArchitectStreamPart): part is ArchitectToolCallPart =>
   part.type === "tool-call";
 
@@ -556,6 +817,32 @@ const selectFakePlan = (prompt: string): FakePlan => {
 
   if (normalized.includes("image") || normalized.includes("publish")) {
     return imagePipelinePlan;
+  }
+
+  if (
+    normalized.includes("shop") ||
+    normalized.includes("checkout") ||
+    normalized.includes("commerce") ||
+    normalized.includes("order")
+  ) {
+    return commerceCheckoutPlan;
+  }
+
+  if (
+    normalized.includes("auth") ||
+    normalized.includes("login") ||
+    normalized.includes("session") ||
+    normalized.includes("identity")
+  ) {
+    return identityGatewayPlan;
+  }
+
+  if (
+    normalized.includes("api gateway") ||
+    normalized.includes("microservice") ||
+    normalized.includes("service binding")
+  ) {
+    return apiGatewayPlan;
   }
 
   if (normalized.includes("chat") || normalized.includes("analytics")) {
@@ -867,6 +1154,257 @@ const imagePipelinePlan: FakePlan = {
       subjectKey: "images",
       note: "Images is represented now; generated preview assets belong to the export phase.",
       position: { x: -90, y: 230 },
+    },
+  ],
+};
+
+const commerceCheckoutPlan: FakePlan = {
+  summary: "Queued a local fake AI plan for a checkout and order-processing system.",
+  resources: [
+    {
+      key: "storefront",
+      kind: "worker",
+      name: "Storefront Worker",
+      description: "Serves product pages and checkout requests.",
+      position: { x: -430, y: -170 },
+    },
+    {
+      key: "cart",
+      kind: "durable-object",
+      name: "Cart Session",
+      description: "Keeps per-customer cart state close to the edge.",
+      position: { x: -130, y: -170 },
+    },
+    {
+      key: "orders",
+      kind: "queue",
+      name: "Order Queue",
+      description: "Buffers checkout work and payment reconciliation.",
+      position: { x: 170, y: -170 },
+    },
+    {
+      key: "fulfillment",
+      kind: "workflow",
+      name: "Fulfillment Workflow",
+      description: "Coordinates inventory, payment, email, and rollback steps.",
+      position: { x: 170, y: 40 },
+    },
+    {
+      key: "db",
+      kind: "d1",
+      name: "Order Database",
+      description: "Stores orders, line items, and fulfillment state.",
+      position: { x: -130, y: 40 },
+    },
+    {
+      key: "cache",
+      kind: "kv",
+      name: "Product Cache",
+      description: "Caches catalog and price display data.",
+      position: { x: -430, y: 40 },
+    },
+  ],
+  edges: [
+    {
+      key: "catalog",
+      kind: "storage-read",
+      sourceKey: "storefront",
+      targetKey: "cache",
+      label: "Read catalog cache",
+    },
+    {
+      key: "cart-session",
+      kind: "websocket",
+      sourceKey: "storefront",
+      targetKey: "cart",
+      label: "Live cart session",
+    },
+    {
+      key: "checkout",
+      kind: "queue-message",
+      sourceKey: "storefront",
+      targetKey: "orders",
+      label: "Checkout command",
+    },
+    {
+      key: "fulfill",
+      kind: "workflow-start",
+      sourceKey: "orders",
+      targetKey: "fulfillment",
+      label: "Start fulfillment",
+    },
+    {
+      key: "persist",
+      kind: "storage-write",
+      sourceKey: "fulfillment",
+      targetKey: "db",
+      label: "Persist order state",
+    },
+  ],
+  annotations: [
+    {
+      key: "checkout-boundary",
+      subjectKey: "fulfillment",
+      note: "Workflow owns compensating steps so checkout stays fast and retryable.",
+      position: { x: 170, y: 230 },
+    },
+  ],
+};
+
+const identityGatewayPlan: FakePlan = {
+  summary: "Queued a local fake AI plan for an identity-aware API gateway.",
+  resources: [
+    {
+      key: "gateway",
+      kind: "worker",
+      name: "Identity Gateway",
+      description: "Terminates requests, validates sessions, and routes API calls.",
+      position: { x: -390, y: -160 },
+    },
+    {
+      key: "sessions",
+      kind: "kv",
+      name: "Session Store",
+      description: "Caches short-lived session metadata.",
+      position: { x: -90, y: -160 },
+    },
+    {
+      key: "profile",
+      kind: "service-binding",
+      name: "Profile Service",
+      description: "Typed service binding for user profile lookups.",
+      position: { x: 210, y: -160 },
+    },
+    {
+      key: "audit",
+      kind: "queue",
+      name: "Audit Queue",
+      description: "Streams auth events into asynchronous audit processing.",
+      position: { x: -90, y: 40 },
+    },
+    {
+      key: "db",
+      kind: "d1",
+      name: "Audit Database",
+      description: "Stores login attempts and security review events.",
+      position: { x: 210, y: 40 },
+    },
+  ],
+  edges: [
+    {
+      key: "session-read",
+      kind: "storage-read",
+      sourceKey: "gateway",
+      targetKey: "sessions",
+      label: "Validate session",
+    },
+    {
+      key: "profile-call",
+      kind: "service-binding",
+      sourceKey: "gateway",
+      targetKey: "profile",
+      label: "Load profile",
+    },
+    {
+      key: "audit-event",
+      kind: "queue-message",
+      sourceKey: "gateway",
+      targetKey: "audit",
+      label: "Audit event",
+    },
+    {
+      key: "audit-write",
+      kind: "storage-write",
+      sourceKey: "audit",
+      targetKey: "db",
+      label: "Persist audit record",
+    },
+  ],
+  annotations: [
+    {
+      key: "session-risk",
+      subjectKey: "sessions",
+      note: "Keep session values small and expire aggressively; durable user state belongs elsewhere.",
+      position: { x: -90, y: 230 },
+    },
+  ],
+};
+
+const apiGatewayPlan: FakePlan = {
+  summary: "Queued a local fake AI plan for a service-binding API gateway.",
+  resources: [
+    {
+      key: "gateway",
+      kind: "worker",
+      name: "API Gateway Worker",
+      description: "Validates requests and routes to internal services.",
+      position: { x: -390, y: -140 },
+    },
+    {
+      key: "billing",
+      kind: "service-binding",
+      name: "Billing Service",
+      description: "Handles account and invoice commands through typed RPC.",
+      position: { x: -90, y: -220 },
+    },
+    {
+      key: "content",
+      kind: "service-binding",
+      name: "Content Service",
+      description: "Serves product and CMS read paths through a binding.",
+      position: { x: -90, y: -60 },
+    },
+    {
+      key: "limits",
+      kind: "durable-object",
+      name: "Rate Limit Bucket",
+      description: "Coordinates per-tenant rate limit counters.",
+      position: { x: 210, y: -140 },
+    },
+    {
+      key: "metrics",
+      kind: "queue",
+      name: "Metrics Queue",
+      description: "Buffers request metrics for asynchronous aggregation.",
+      position: { x: 210, y: 70 },
+    },
+  ],
+  edges: [
+    {
+      key: "billing-call",
+      kind: "service-binding",
+      sourceKey: "gateway",
+      targetKey: "billing",
+      label: "Billing RPC",
+    },
+    {
+      key: "content-call",
+      kind: "service-binding",
+      sourceKey: "gateway",
+      targetKey: "content",
+      label: "Content RPC",
+    },
+    {
+      key: "limit-check",
+      kind: "http",
+      sourceKey: "gateway",
+      targetKey: "limits",
+      label: "Rate limit check",
+    },
+    {
+      key: "metrics-event",
+      kind: "queue-message",
+      sourceKey: "gateway",
+      targetKey: "metrics",
+      label: "Request metric",
+    },
+  ],
+  annotations: [
+    {
+      key: "gateway-note",
+      subjectKey: "gateway",
+      note: "Keep routing and policy at the gateway; move domain behavior into bound services.",
+      position: { x: -390, y: 80 },
     },
   ],
 };

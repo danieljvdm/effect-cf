@@ -7,10 +7,10 @@ been removed.
 
 ## Status
 
-Mostly complete. Architect Lab is currently the only directory under `examples/`, root `vp check` /
-`vp test` validate the workspace, and the current docs now track the Phase 1-4 implementation
-state. The remaining work is final traceability once planned Phase 5-7 resource coverage is either
-implemented or explicitly documented as out of scope.
+Complete. Architect Lab is the only directory under `examples/`, root `vp check` / `vp test`
+validate the workspace, the root README links directly to the demo and run command, deployed-mode
+resource requirements are documented, and preserved patterns from the removed examples have been
+reviewed against the final Phase 0-7 implementation.
 
 ## Product Requirement
 
@@ -46,6 +46,9 @@ spread across the removed examples.
 
 ## Testing Notes
 
-Phase 8 includes the final hardening pass from [Architect Lab Testing Log](../testing.md). At a
-minimum, run root `vp check`, root `vp test`, targeted Architect Lab tests, and any retained package
-tests affected by root script or workspace changes.
+- Root `vp check` passes.
+- Root `vp test` passes.
+- Architect Lab web client build passes.
+- Browser smoke for the export workflow passes.
+- Additional browser/platform hardening backlog remains tracked in
+  [Architect Lab Testing Log](../testing.md).

@@ -100,3 +100,20 @@ Architect Lab should use this for AI jobs, export jobs, and generated-package wo
   exports.
 - Do not make the browser call internal Workers directly; keep the web Worker as the bridge.
 - Do not claim generic WebSocket broadcast is tldraw sync.
+
+## Traceability Review - 2026-05-22
+
+- Shared domain package: implemented through `@architect-lab/domain` schemas, typed Worker/Durable
+  Object definitions, HTTP API contracts, AI job messages, trace/review schemas, and export
+  manifests.
+- Web Worker as browser bridge: implemented in `workers/web`; browser traffic stays on the web
+  origin and `/api/*` is forwarded to the internal API Worker service binding.
+- Service-binding-backed API path: implemented through the web Worker `API` binding and shared
+  `ArchitectHttpApi` client/server contracts.
+- Durable Object WebSockets: implemented for tldraw sync and room activity broadcasts; generic
+  WebSocket broadcast is not presented as tldraw sync.
+- Hibernatable WebSocket attachments: implemented for room sync/activity metadata and presence.
+- Multi-config Wrangler dev: implemented as `vp run architect#dev`.
+- Queue and Workflow contracts: implemented through `AiJobQueue` and `ArchitectExportWorkflow`.
+- Avoided patterns: D1 is used for export job status, not room authority; R2 is used for generated
+  export artifacts, not ordinary room snapshots; Hyperdrive remains optional and unbound.

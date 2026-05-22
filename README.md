@@ -77,8 +77,18 @@ export default Worker.make(Layer.mergeAll(HttpRouter.layer, CounterLayer), app);
 
 ## Examples
 
-The previous examples have been removed while the new flagship Architect Lab demo is being
-specified. See [docs/architect-lab](./docs/architect-lab/README.md) for the replacement plan and
+Architect Lab is the flagship example under [examples/architect-lab](./examples/architect-lab).
+It demonstrates a browser-facing Worker, internal API Worker, typed service binding, Durable
+Object room authority, Durable Object WebSockets/SQLite, KV read models, Queue-backed AI jobs,
+Workflow exports, D1 export status, and R2 export artifacts.
+
+Run it locally with:
+
+```bash
+vp run architect#dev
+```
+
+See [docs/architect-lab](./docs/architect-lab/README.md) for the roadmap, deployed-mode notes, and
 the preserved patterns from the old examples.
 
 ## Changelog

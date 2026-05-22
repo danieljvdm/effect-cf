@@ -8,6 +8,14 @@
     "ARCHITECT_PUBLIC_ORIGIN": "http://localhost:8787",
     "ARCHITECT_DEFAULT_ROOM_TITLE": "Untitled architecture",
     "ARCHITECT_FAKE_AI_STREAM_DELAY_MS": 180,
+    "ARCHITECT_AI_PROVIDER": "fake",
+    "ARCHITECT_AI_PROVIDER_BASE_URL": "https://api.openai.com/v1",
+    "ARCHITECT_AI_MODEL": "gpt-4.1-mini",
+    "ARCHITECT_AI_TIMEOUT_MS": 20000,
+    "ARCHITECT_AI_RETRY_ATTEMPTS": 1,
+    "ARCHITECT_AI_MAX_TOOL_CALLS": 12,
+    "ARCHITECT_AI_MAX_OUTPUT_TOKENS": 1200,
+    "ARCHITECT_AI_MAX_ESTIMATED_COST_CENTS": 10,
   },
   "durable_objects": {
     "bindings": [
@@ -21,6 +29,25 @@
     {
       "binding": "ARCHITECT_READ_MODELS",
       "id": "architect-lab-read-models",
+    },
+  ],
+  "d1_databases": [
+    {
+      "binding": "ARCHITECT_EXPORTS_DB",
+      "database_name": "architect-lab-exports",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ARCHITECT_EXPORTS",
+      "bucket_name": "architect-lab-exports",
+    },
+  ],
+  "workflows": [
+    {
+      "binding": "ARCHITECT_EXPORT_WORKFLOW",
+      "name": "architect-lab-export-workflow",
+      "class_name": "ExportWorkflow",
     },
   ],
   "queues": {

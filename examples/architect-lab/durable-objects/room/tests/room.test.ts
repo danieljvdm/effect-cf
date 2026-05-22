@@ -116,6 +116,57 @@ test("rejects AI tool calls with unknown edge endpoints", async () => {
   ).rejects.toThrow();
 });
 
+test("broadcasts trace state through persisted room events", async () => {
+  const state = makeState();
+  const room = new RoomDurableObject(state, {} as Cloudflare.Env);
+
+  const result = await room.startTrace({
+    roomId: "room_trace",
+    actor: "Dana",
+    definition: {
+      id: "trace_1",
+      name: "Simulate request",
+      steps: [
+        {
+          id: "step_1",
+          edgeId: "edge_1",
+          sourceId: "worker",
+          targetId: "queue",
+          title: "Worker -> Queue",
+          description: "Queue message.",
+          dataShape: "{ id: string }",
+          codeHint: "queue.send",
+        },
+      ],
+    },
+  });
+  const health = await room.getHealth("room_trace");
+
+  expect(result).toMatchObject({
+    status: "completed",
+    activeStepIndex: 0,
+  });
+  expect(health.transportEvents).toBe(3);
+});
+
+test("schedules and processes room maintenance alarms", async () => {
+  const state = makeState();
+  const controls = state as unknown as {
+    readonly __forceDueAlarms: () => void;
+    readonly __getPlatformAlarm: () => number | null;
+  };
+  const room = new RoomDurableObject(state, {} as Cloudflare.Env);
+
+  await room.getMetadata("room_alarm");
+  expect(controls.__getPlatformAlarm()).not.toBeNull();
+
+  controls.__forceDueAlarms();
+  await (room as unknown as { readonly alarm: () => Promise<void> }).alarm();
+
+  const health = await room.getHealth("room_alarm");
+  expect(health.transportEvents).toBe(1);
+});
+
 interface RoomRow {
   readonly [key: string]: SqlStorageValue;
   readonly id: string;
@@ -134,9 +185,22 @@ interface RoomEvent {
   readonly created_at: string;
 }
 
+interface StoredAlarmRow {
+  readonly [key: string]: SqlStorageValue;
+  readonly alarm_id: string;
+  readonly payload: string;
+  readonly repeat_every_ms: number | null;
+  readonly run_at: number;
+  readonly storage_id: string;
+  readonly tag: string;
+}
+
 function makeState(): DurableObjectState {
   const rooms = new Map<string, RoomRow>();
   const events: Array<RoomEvent> = [];
+  const alarms = new Map<string, StoredAlarmRow>();
+  const traceStates = new Map<string, string>();
+  let platformAlarm: number | null = null;
   let tldrawSchema = "";
   let tldrawDocumentClock = 0;
   let tldrawTombstoneHistoryStartsAtClock = 0;
@@ -155,6 +219,59 @@ function makeState(): DurableObjectState {
 
           if (normalized.startsWith("CREATE TABLE")) {
             return makeCursor([]);
+          }
+
+          if (normalized.startsWith("INSERT OR REPLACE INTO effect_cf_scheduled_alarms")) {
+            const [storageId, alarmId, tag, runAt, repeatEveryMs, payload] = bindings as [
+              string,
+              string,
+              string,
+              number,
+              number | null,
+              string,
+            ];
+            alarms.set(storageId, {
+              storage_id: storageId,
+              alarm_id: alarmId,
+              tag,
+              run_at: runAt,
+              repeat_every_ms: repeatEveryMs,
+              payload,
+            });
+            return makeCursor([], 1);
+          }
+
+          if (normalized.startsWith("SELECT run_at FROM effect_cf_scheduled_alarms")) {
+            const next = Array.from(alarms.values()).sort(
+              (left, right) =>
+                left.run_at - right.run_at || left.storage_id.localeCompare(right.storage_id),
+            )[0];
+            return makeCursor(next === undefined ? [] : [{ run_at: next.run_at }]);
+          }
+
+          if (normalized.startsWith("SELECT storage_id, alarm_id, tag, run_at")) {
+            const [now, limit] = bindings as [number, number];
+            return makeCursor(
+              Array.from(alarms.values())
+                .filter((alarm) => alarm.run_at <= now)
+                .sort(
+                  (left, right) =>
+                    left.run_at - right.run_at || left.storage_id.localeCompare(right.storage_id),
+                )
+                .slice(0, limit),
+            );
+          }
+
+          if (normalized.startsWith("DELETE FROM effect_cf_scheduled_alarms")) {
+            const [storageId] = bindings as [string];
+            const row = alarms.get(storageId);
+            const matchesSelectedOccurrence =
+              bindings.length === 1 ||
+              (row !== undefined &&
+                row.run_at === bindings[1] &&
+                row.payload === bindings[bindings.length - 1]);
+            const deleted = matchesSelectedOccurrence ? alarms.delete(storageId) : false;
+            return makeCursor([], deleted ? 1 : 0);
           }
 
           if (normalized.includes("CREATE TABLE tldraw_documents")) {
@@ -338,6 +455,12 @@ function makeState(): DurableObjectState {
             return makeCursor([]);
           }
 
+          if (normalized.startsWith("INSERT INTO room_trace_state")) {
+            const [roomId, stateJson] = bindings as [string, string, string];
+            traceStates.set(roomId, stateJson);
+            return makeCursor([], 1);
+          }
+
           if (normalized.startsWith("SELECT last_insert_rowid()")) {
             return makeCursor([{ sequence: events.length }]);
           }
@@ -354,18 +477,37 @@ function makeState(): DurableObjectState {
         },
         databaseSize: 0,
       },
+      transaction: (callback: (txn: DurableObjectTransaction) => Promise<unknown>) =>
+        callback({} as DurableObjectTransaction),
       transactionSync: (callback: () => unknown) => callback(),
+      getAlarm: () => Promise.resolve(platformAlarm),
+      setAlarm: (scheduledTime: number | Date) => {
+        platformAlarm = typeof scheduledTime === "number" ? scheduledTime : scheduledTime.getTime();
+        return Promise.resolve();
+      },
+      deleteAlarm: () => {
+        platformAlarm = null;
+        return Promise.resolve();
+      },
       sync: () => undefined,
     },
     blockConcurrencyWhile: (callback: () => Promise<unknown>) => void callback(),
     waitUntil: () => undefined,
     acceptWebSocket: () => undefined,
     getWebSockets: () => [],
+    __forceDueAlarms: () => {
+      for (const [key, alarm] of alarms) {
+        alarms.set(key, { ...alarm, run_at: 0 });
+      }
+      platformAlarm = 0;
+    },
+    __getPlatformAlarm: () => platformAlarm,
   } as unknown as DurableObjectState;
 }
 
 function makeCursor<T extends Record<string, SqlStorageValue>>(
   rows: Array<T>,
+  rowsWritten = 0,
 ): SqlStorageCursor<T> {
   const cursorRows = [...rows];
   return {
@@ -391,6 +533,6 @@ function makeCursor<T extends Record<string, SqlStorageValue>>(
     },
     columnNames: Object.keys(cursorRows[0] ?? {}),
     rowsRead: cursorRows.length,
-    rowsWritten: 0,
+    rowsWritten,
   } as unknown as SqlStorageCursor<T>;
 }

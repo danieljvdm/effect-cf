@@ -20,6 +20,13 @@ This file is the backlog of scenarios that matter. Keep it current as implementa
   request open while room-owned tool calls apply progressively, the side panel shows
   reasoning/tool-call/completion activity summaries, and a browser reload reports no console
   warnings or page errors.
+- Phase 4 room activity broadcast has been manually smoke-tested locally: a second tab in the same
+  room receives AI application and queue status events over the room activity socket while the first
+  tab runs the fake architect.
+- Phase 5 trace/review flow has been manually smoke-tested locally: after generating an
+  architecture, Trace completes with active edge selection plus data-shape details in the side panel,
+  Review returns an actionable finding, and accepting it emits the expected room activity event with
+  no browser console errors.
 - The fake AI provider now runs through the `effect/unstable/ai` `LanguageModel`/`Toolkit` contract;
   final hardening should keep coverage on provider parity rather than only canned output shape.
 - Current browser accessibility audit still reports serious findings from tldraw internals and the
@@ -69,41 +76,44 @@ This file is the backlog of scenarios that matter. Keep it current as implementa
 - Runtime tests for Queue message decoding and acknowledgement.
 - Additional Durable Object tests for direct room-owned tldraw mutation once accepted AI tool calls
   stop being rendered by the browser.
-- Browser smoke test for submitting the default prompt and seeing generated canvas edits. Initial
-  manual smoke exists; automate it in final hardening.
+- Browser smoke test for submitting the default prompt and seeing generated canvas edits and
+  multi-client activity events. Initial manual smoke exists; automate it in final hardening.
 
 ### Phase 5 Trace And Review
 
-- Unit tests for trace definitions.
-- Durable Object test for trace broadcast state.
-- Durable Object alarm test for checkpoint or cleanup scheduling.
+- Unit tests for trace definitions. Initial coverage exists.
+- Durable Object test for trace broadcast state. Initial coverage exists.
+- Durable Object alarm test for checkpoint or cleanup scheduling. Initial coverage exists.
 - Browser smoke test for trace mode updating the canvas and side panel.
 
 ### Phase 6 Export
 
-- Workflow test for successful manifest generation.
+- Workflow test for successful manifest generation. Initial API/Workflow coverage exists.
 - Workflow test for failure status persistence.
-- R2 test for generated file and manifest writes.
+- R2 test for generated file and manifest writes. Initial API/Workflow coverage exists.
 - Browser smoke test for starting an export and seeing durable status updates.
 
 ### Phase 7 Deployed Provider
 
-- Unit tests for provider selection from config.
-- Unit tests for fake provider parity with the real provider interface.
+- Unit tests for provider selection from config. Initial coverage exists.
+- Unit tests for fake provider parity with the real provider interface. Initial real-provider
+  decoding coverage exists; broaden parity coverage during final hardening.
 - No tests should require real provider credentials.
 
 ### Phase 8 Replacement Validation
 
-- Root `vp check`.
-- Root `vp test`.
-- Targeted Architect Lab tests.
-- Preserved example pattern traceability review.
+- Root `vp check`. Current pass exists.
+- Root `vp test`. Current pass exists.
+- Targeted Architect Lab tests. Current root pass includes them.
+- Preserved example pattern traceability review. Current review is recorded in
+  [Preserved Example Patterns](./preserved-example-patterns.md).
 
 ### Phase 9 Voice Collaboration
 
 - Browser smoke test for dictating an AI prompt and submitting the transcript through the normal
   prompt route.
-- Unit tests for transcript event and voice-agent suggestion schemas.
+- Unit tests for transcript event and voice-agent suggestion schemas. Initial coverage exists.
 - Integration test that transcript-derived suggestions remain proposed edits until accepted.
+  Initial API coverage exists.
 - Browser smoke test for accepting a voice-agent suggestion and seeing validated canvas edits.
 - Permission/undo test before enabling any automatic voice-driven apply mode.

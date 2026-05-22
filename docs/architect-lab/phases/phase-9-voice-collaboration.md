@@ -7,7 +7,10 @@ typed-prompt product path.
 
 ## Status
 
-Planned as a post-validation extension. This phase should not block Phase 4 through Phase 8 work.
+Complete. Voice collaboration starts with browser speech-to-text prompt composition, stores
+schema-backed transcript events as room activity, supports transcript-aware typed AI prompts, and
+adds passive voice-derived suggestions that must be accepted before room-authoritative tool-call
+application. Auto-act mode remains disabled by default and is not implemented.
 
 ## Product Requirement
 
@@ -32,7 +35,7 @@ context, and eventually allow an AI collaborator to propose canvas edits from li
 - Room transcript/activity surface.
 - Transcript-aware AI prompts.
 - Passive voice-agent suggest mode.
-- Optional auto-act mode with permissions and undo.
+- Optional auto-act mode with permissions and undo. Deferred; auto-act remains disabled by default.
 
 ## Resource Coverage Added
 
@@ -50,6 +53,8 @@ context, and eventually allow an AI collaborator to propose canvas edits from li
 
 ## Testing Notes
 
-Automated coverage is not a blocker for earlier product phases. Keep important voice scenarios in
-[Architect Lab Testing Log](../testing.md) and implement them after the core demo has completed the
-Phase 8 hardening pass.
+- Domain tests cover transcript and suggestion schemas.
+- API Worker tests record transcripts, create passive suggestions, and verify suggestions follow
+  the accept path before applying tool calls.
+- Browser STT availability depends on the browser; unsupported browsers keep typed prompts and
+  passive suggestions available.

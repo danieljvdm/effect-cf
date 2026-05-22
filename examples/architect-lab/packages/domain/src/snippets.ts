@@ -1,4 +1,9 @@
-import type { ArchitectureResource, ArchitectureResourceKind } from "./architecture";
+import type {
+  ArchitectureEdge,
+  ArchitectureEdgeKind,
+  ArchitectureResource,
+  ArchitectureResourceKind,
+} from "./architecture";
 
 const wordsFromName = (name: string): ReadonlyArray<string> => {
   const words = name.match(/[A-Za-z0-9]+/g) ?? [];
@@ -154,6 +159,128 @@ export class ${className} extends Worker.Tag<${className}>()("${className}", {
 
 export const ${valueName}Layer = ${className}.layer({
   binding: "${bindingName}",
+});`;
+  }
+};
+
+const edgeMethodNames = {
+  http: "request",
+  "service-binding": "call",
+  websocket: "connect",
+  "queue-message": "send",
+  "workflow-start": "start",
+  "storage-read": "read",
+  "storage-write": "write",
+} as const satisfies Record<ArchitectureEdgeKind, string>;
+
+const edgeComments = {
+  http: "HTTP request between Workers or public endpoints.",
+  "service-binding": "Typed Worker service binding call.",
+  websocket: "WebSocket upgrade into a room or live session.",
+  "queue-message": "Queue producer message for asynchronous work.",
+  "workflow-start": "Workflow instance creation.",
+  "storage-read": "Storage read dependency.",
+  "storage-write": "Storage write dependency.",
+} as const satisfies Record<ArchitectureEdgeKind, string>;
+
+export const renderEdgeSnippet = (
+  edge: ArchitectureEdge,
+  resources: ReadonlyArray<ArchitectureResource> = [],
+): string => {
+  const source = resources.find((resource) => resource.id === edge.sourceId);
+  const target = resources.find((resource) => resource.id === edge.targetId);
+  const sourceName = source?.name ?? "Source";
+  const targetName = target?.name ?? "Target";
+  const sourceClassName = toResourceClassName({
+    bindingName: source?.bindingName ?? "SOURCE",
+    id: edge.sourceId,
+    kind: source?.kind ?? "worker",
+    name: sourceName,
+  });
+  const targetClassName = toResourceClassName({
+    bindingName: target?.bindingName ?? "TARGET",
+    id: edge.targetId,
+    kind: target?.kind ?? "worker",
+    name: targetName,
+  });
+  const methodName = toCamelIdentifier(`${edgeMethodNames[edge.kind]} ${targetName}`);
+  const label = edge.label ?? edge.kind;
+
+  switch (edge.kind) {
+    case "service-binding":
+      return `import { Effect } from "effect";
+
+import { ${targetClassName} } from "./${toCamelIdentifier(targetClassName)}";
+
+// ${label}: ${edgeComments[edge.kind]}
+export const ${methodName} = Effect.fn("${sourceClassName}.${methodName}")(function* () {
+  const target = yield* ${targetClassName};
+  return yield* target.health();
+});`;
+    case "queue-message":
+      return `import { Effect, Schema as S } from "effect";
+
+import { ${targetClassName} } from "./${toCamelIdentifier(targetClassName)}";
+
+const ${toCamelIdentifier(targetClassName)}Message = S.Struct({
+  id: S.String,
+  requestedAt: S.String,
+});
+
+// ${label}: ${edgeComments[edge.kind]}
+export const ${methodName} = Effect.fn("${sourceClassName}.${methodName}")(function* (id: string) {
+  const queue = yield* ${targetClassName};
+  yield* queue.send({ id, requestedAt: new Date().toISOString() });
+});`;
+    case "workflow-start":
+      return `import { Effect } from "effect";
+
+import { ${targetClassName} } from "./${toCamelIdentifier(targetClassName)}";
+
+// ${label}: ${edgeComments[edge.kind]}
+export const ${methodName} = Effect.fn("${sourceClassName}.${methodName}")(function* (id: string) {
+  const workflow = yield* ${targetClassName};
+  return yield* workflow.create({ id });
+});`;
+    case "storage-read":
+      return `import { Effect } from "effect";
+
+import { ${targetClassName} } from "./${toCamelIdentifier(targetClassName)}";
+
+// ${label}: ${edgeComments[edge.kind]}
+export const ${methodName} = Effect.fn("${sourceClassName}.${methodName}")(function* (key: string) {
+  const store = yield* ${targetClassName};
+  return yield* store.get(key);
+});`;
+    case "storage-write":
+      return `import { Effect } from "effect";
+
+import { ${targetClassName} } from "./${toCamelIdentifier(targetClassName)}";
+
+// ${label}: ${edgeComments[edge.kind]}
+export const ${methodName} = Effect.fn("${sourceClassName}.${methodName}")(function* (key: string, value: unknown) {
+  const store = yield* ${targetClassName};
+  yield* store.put(key, value);
+});`;
+    case "websocket":
+      return `import { Effect } from "effect";
+import { Worker } from "effect-cf";
+
+// ${label}: ${edgeComments[edge.kind]}
+export const ${methodName} = Effect.fn("${sourceClassName}.${methodName}")(function* (request: Request) {
+  if (!Worker.isWebSocketUpgrade(request)) {
+    return new Response("Expected WebSocket upgrade", { status: 426 });
+  }
+
+  return yield* ${targetClassName}.getByName("room").fetch(request);
+});`;
+    case "http":
+      return `import { Effect } from "effect";
+
+// ${label}: ${edgeComments[edge.kind]}
+export const ${methodName} = Effect.fn("${sourceClassName}.${methodName}")(function* (request: Request) {
+  const response = yield* Effect.tryPromise(() => fetch(request));
+  return response;
 });`;
   }
 };

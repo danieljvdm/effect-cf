@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.10.0
+
+### Minor Changes
+
+- [#32](https://github.com/danieljvdm/effect-cf/pull/32) [`4812c94`](https://github.com/danieljvdm/effect-cf/commit/4812c9457592f3416f6f303f0b8620ba52e46765) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Raise the minimum supported Effect beta to `4.0.0-beta.70` and update service tag access to use beta 70's direct yieldable tags instead of the removed `.asEffect()` helper.
+
 ## 0.9.2
 
 ### Patch Changes

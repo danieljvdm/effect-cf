@@ -223,7 +223,7 @@ export const step = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
   config?: WorkflowStepConfig,
 ): Effect.Effect<A, unknown, WorkflowStep | Exclude<R, WorkflowStepContext>> =>
-  Effect.flatMap(WorkflowStep.asEffect(), (workflowStep) =>
+  Effect.flatMap(WorkflowStep, (workflowStep) =>
     workflowStep.do(name, effect, config),
   ) as Effect.Effect<A, unknown, WorkflowStep | Exclude<R, WorkflowStepContext>>;
 
@@ -231,15 +231,13 @@ export const sleep = (
   name: string,
   duration: WorkflowSleepDuration,
 ): Effect.Effect<void, unknown, WorkflowStep> =>
-  Effect.flatMap(WorkflowStep.asEffect(), (workflowStep) => workflowStep.sleep(name, duration));
+  Effect.flatMap(WorkflowStep, (workflowStep) => workflowStep.sleep(name, duration));
 
 export const sleepUntil = (
   name: string,
   timestamp: Date | number,
 ): Effect.Effect<void, unknown, WorkflowStep> =>
-  Effect.flatMap(WorkflowStep.asEffect(), (workflowStep) =>
-    workflowStep.sleepUntil(name, timestamp),
-  );
+  Effect.flatMap(WorkflowStep, (workflowStep) => workflowStep.sleepUntil(name, timestamp));
 
 export const waitForEvent = <Payload>(
   name: string,
@@ -248,9 +246,7 @@ export const waitForEvent = <Payload>(
     readonly timeout?: WorkflowTimeoutDuration | number;
   },
 ): Effect.Effect<WorkflowStepEvent<Payload>, unknown, WorkflowStep> =>
-  Effect.flatMap(WorkflowStep.asEffect(), (workflowStep) =>
-    workflowStep.waitForEvent<Payload>(name, options),
-  );
+  Effect.flatMap(WorkflowStep, (workflowStep) => workflowStep.waitForEvent<Payload>(name, options));
 
 export type Definition<
   Id extends string = string,

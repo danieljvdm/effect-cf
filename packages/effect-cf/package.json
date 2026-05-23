@@ -42,7 +42,7 @@
     "@cloudflare/vitest-pool-workers": "^0.15.0",
     "@cloudflare/workers-types": "^4.20260421.1",
     "@effect/sql-d1": "catalog:",
-    "@effect/sql-pg": "4.0.0-beta.65",
+    "@effect/sql-pg": "catalog:",
     "@effect/vitest": "catalog:",
     "effect": "catalog:",
     "typescript": "^6.0.2",
@@ -50,9 +50,9 @@
     "vitest": "catalog:"
   },
   "peerDependencies": {
-    "@effect/sql-d1": "^4.0.0-beta.65",
-    "@effect/sql-pg": "^4.0.0-beta.65",
-    "effect": "^4.0.0-beta.65"
+    "@effect/sql-d1": "^4.0.0-beta.70",
+    "@effect/sql-pg": "^4.0.0-beta.70",
+    "effect": "^4.0.0-beta.70"
   },
   "peerDependenciesMeta": {
     "@effect/sql-pg": {

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { BunRuntime, BunServices } from "@effect/platform-bun";
-import { Clock, Effect, Inspectable, Path, Result, Schema as S } from "effect";
+import { Clock, Effect, Inspectable, Path, Schema as S } from "effect";
 import { Command } from "effect/unstable/cli";
 
 import { formatTiming, startProgressBoard } from "./utils/step-progress.ts";
@@ -95,7 +95,7 @@ const runStep = Effect.fn("runStep")(function* (
   if (result._tag === "Failure") {
     const reason = formatUnknown(result.failure);
     progress.setStatus(index, { kind: "fail", timing, reason });
-    return yield* Result.fail(result.failure);
+    return yield* Effect.fail(result.failure);
   }
 
   progress.setStatus(index, { kind: "ok", timing, summary: label });

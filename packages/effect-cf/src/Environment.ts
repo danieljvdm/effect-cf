@@ -80,7 +80,7 @@ export namespace WorkerConfig {
    * conversion function.
    */
   export const providerWith = (makeProvider: (env: WorkerEnv) => ConfigProvider.ConfigProvider) =>
-    Effect.map(WorkerEnvironment.asEffect(), makeProvider);
+    Effect.map(WorkerEnvironment, makeProvider);
 
   /** Build a `ConfigProvider` from the current `WorkerEnvironment`. */
   export const provider = providerWith(providerFromEnv);

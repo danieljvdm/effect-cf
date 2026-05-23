@@ -10,12 +10,16 @@
     "ARCHITECT_FAKE_AI_STREAM_DELAY_MS": 180,
     "ARCHITECT_AI_PROVIDER": "fake",
     "ARCHITECT_AI_PROVIDER_BASE_URL": "https://api.openai.com/v1",
-    "ARCHITECT_AI_MODEL": "gpt-4.1-mini",
+    "ARCHITECT_AI_MODEL": "gpt-5-mini",
     "ARCHITECT_AI_TIMEOUT_MS": 20000,
     "ARCHITECT_AI_RETRY_ATTEMPTS": 1,
     "ARCHITECT_AI_MAX_TOOL_CALLS": 12,
-    "ARCHITECT_AI_MAX_OUTPUT_TOKENS": 1200,
+    "ARCHITECT_AI_MAX_OUTPUT_TOKENS": 4000,
     "ARCHITECT_AI_MAX_ESTIMATED_COST_CENTS": 10,
+    "AI_GATEWAY_ACCOUNT_ID": "",
+    "AI_GATEWAY_GATEWAY_ID": "default",
+    "AI_GATEWAY_CHAT_COMPLETIONS_ENDPOINT": "",
+    "AI_GATEWAY_MODEL": "openai/gpt-5-mini",
   },
   "durable_objects": {
     "bindings": [
@@ -69,4 +73,77 @@
       "new_sqlite_classes": ["RoomDurableObject"],
     },
   ],
+  "env": {
+    "production": {
+      "vars": {
+        "ARCHITECT_PUBLIC_ORIGIN": "https://architect-lab-web-production.<your-workers-subdomain>.workers.dev",
+        "ARCHITECT_DEFAULT_ROOM_TITLE": "Untitled architecture",
+        "ARCHITECT_FAKE_AI_STREAM_DELAY_MS": 0,
+        "ARCHITECT_AI_PROVIDER": "real",
+        "ARCHITECT_AI_PROVIDER_BASE_URL": "https://api.openai.com/v1",
+        "ARCHITECT_AI_MODEL": "gpt-5-mini",
+        "ARCHITECT_AI_TIMEOUT_MS": 20000,
+        "ARCHITECT_AI_RETRY_ATTEMPTS": 1,
+        "ARCHITECT_AI_MAX_TOOL_CALLS": 12,
+        "ARCHITECT_AI_MAX_OUTPUT_TOKENS": 4000,
+        "ARCHITECT_AI_MAX_ESTIMATED_COST_CENTS": 10,
+        "AI_GATEWAY_ACCOUNT_ID": "",
+        "AI_GATEWAY_GATEWAY_ID": "default",
+        "AI_GATEWAY_CHAT_COMPLETIONS_ENDPOINT": "",
+        "AI_GATEWAY_MODEL": "openai/gpt-5-mini",
+      },
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "ROOMS",
+            "class_name": "RoomDurableObject",
+          },
+        ],
+      },
+      "kv_namespaces": [
+        {
+          "binding": "ARCHITECT_READ_MODELS",
+          "id": "architect-lab-read-models-production",
+        },
+      ],
+      "d1_databases": [
+        {
+          "binding": "ARCHITECT_EXPORTS_DB",
+          "database_name": "architect-lab-exports-production",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "ARCHITECT_EXPORTS",
+          "bucket_name": "architect-lab-exports-production",
+        },
+      ],
+      "workflows": [
+        {
+          "binding": "ARCHITECT_EXPORT_WORKFLOW",
+          "name": "architect-lab-export-workflow-production",
+          "class_name": "ExportWorkflow",
+        },
+      ],
+      "queues": {
+        "producers": [
+          {
+            "binding": "AI_JOBS",
+            "queue": "architect-lab-ai-jobs-production",
+          },
+        ],
+        "consumers": [
+          {
+            "queue": "architect-lab-ai-jobs-production",
+          },
+        ],
+      },
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": ["RoomDurableObject"],
+        },
+      ],
+    },
+  },
 }

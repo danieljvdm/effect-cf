@@ -19,20 +19,38 @@ import {
   XCircle,
 } from "lucide-react";
 import { useEffect } from "react";
+import { Schema as S } from "effect";
 import { createShapeId, toRichText, type TLShape } from "tldraw";
 
-import type { AiPromptTraceEvent } from "@architect-lab/domain/ai";
+import {
+  AiGatewayModel,
+  AiGatewayModelIds,
+  type AiPromptTraceEvent,
+} from "@architect-lab/domain/ai";
 import type {
   ArchitectureReadModelInput,
   ArchitectureResource,
   ArchitectureResourceTemplate,
 } from "@architect-lab/domain/architecture";
-import type { RoomActivityEvent } from "@architect-lab/domain/contracts";
-import type { ExportJobStatus } from "@architect-lab/domain/export";
+import { RoomActivityEventMessage, type RoomActivityEvent } from "@architect-lab/domain/contracts";
+import {
+  ExportJobStatus as ExportJobStatusSchema,
+  type ExportJobStatus,
+} from "@architect-lab/domain/export";
 import { architectureResourceTemplates } from "@architect-lab/domain/resource-templates";
 import { toBindingName } from "@architect-lab/domain/snippets";
-import type { ArchitectureReviewFinding, TraceState } from "@architect-lab/domain/trace";
-import type { VoiceSuggestion, VoiceTranscriptEvent } from "@architect-lab/domain/voice";
+import {
+  ArchitectureReviewFinding as ArchitectureReviewFindingSchema,
+  TraceState as TraceStateSchema,
+  type ArchitectureReviewFinding,
+  type TraceState,
+} from "@architect-lab/domain/trace";
+import {
+  VoiceSuggestion as VoiceSuggestionSchema,
+  VoiceTranscriptEvent as VoiceTranscriptEventSchema,
+  type VoiceSuggestion,
+  type VoiceTranscriptEvent,
+} from "@architect-lab/domain/voice";
 
 import { CodePanel } from "./code-panel";
 import { Button } from "./components/ui/button";
@@ -59,6 +77,7 @@ import { RoomCanvas } from "./room-canvas";
 import { ResourcePalette } from "./resource-palette";
 import {
   aiActivityEventsAtom,
+  aiModelAtom,
   aiPromptAtom,
   architectureReadModelAtom,
   editorAtom,
@@ -67,6 +86,7 @@ import {
   resourceCountsAtom,
   reviewFindingsAtom,
   roomIdAtom,
+  saveAiModelAtom,
   saveLabelAtom,
   selectedArchitectureAtom,
   traceStateAtom,
@@ -108,6 +128,7 @@ const toTldrawResourceColor = (color: string): TldrawResourceColor => {
 export const App = () => {
   const roomId = useAtomValue(roomIdAtom);
   const label = useAtomValue(labelAtom);
+  const aiModel = useAtomValue(aiModelAtom);
   const editor = useAtomValue(editorAtom);
   const selectedArchitecture = useAtomValue(selectedArchitectureAtom);
   const architectureReadModel = useAtomValue(architectureReadModelAtom);
@@ -145,6 +166,7 @@ export const App = () => {
   const rejectVoiceSuggestionRequest = useAtomSet(rejectVoiceSuggestionAtom);
   const saveLabel = useAtomSet(saveLabelAtom);
   const setAiPrompt = useAtomSet(aiPromptAtom);
+  const saveAiModel = useAtomSet(saveAiModelAtom);
   const setAiActivityEvents = useAtomSet(aiActivityEventsAtom);
   const setTraceState = useAtomSet(traceStateAtom);
   const setReviewFindings = useAtomSet(reviewFindingsAtom);
@@ -412,6 +434,7 @@ export const App = () => {
       roomId,
       prompt: {
         actor: label || "Guest",
+        model: aiModel,
         prompt,
         readModel: editor === null ? emptyReadModel : collectArchitectureReadModel(editor),
       },
@@ -631,6 +654,23 @@ export const App = () => {
               AI architect
             </h2>
           </div>
+          <FieldRoot>
+            <FieldLabel htmlFor="architect-ai-model">Model</FieldLabel>
+            <select
+              className="h-10 w-full min-w-0 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-950 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-teal-500"
+              id="architect-ai-model"
+              value={aiModel}
+              onChange={(event) => {
+                saveAiModel(S.decodeUnknownSync(AiGatewayModel)(event.currentTarget.value));
+              }}
+            >
+              {AiGatewayModelIds.map((model) => (
+                <option key={model} value={model}>
+                  {model}
+                </option>
+              ))}
+            </select>
+          </FieldRoot>
           <FieldRoot>
             <FieldLabel htmlFor="architect-ai-prompt">Prompt</FieldLabel>
             <Textarea
@@ -1119,13 +1159,8 @@ const parseRoomActivityMessage = (
   }
 
   try {
-    const message = JSON.parse(value) as {
-      readonly event?: RoomActivityEvent;
-      readonly type?: string;
-    };
-    return message.type === "room.activity.event" && message.event !== undefined
-      ? { type: message.type, event: message.event }
-      : null;
+    const message = S.decodeUnknownSync(RoomActivityEventMessage)(JSON.parse(value));
+    return { type: message.type, event: message.event };
   } catch {
     return null;
   }
@@ -1329,50 +1364,57 @@ const parsePayload = (payloadJson: string): Record<string, unknown> => {
 
 const readTraceState = (payload: Record<string, unknown>): TraceState | null => {
   const state = payload.state;
-  return isRecord(state) &&
-    typeof state.roomId === "string" &&
-    typeof state.traceId === "string" &&
-    typeof state.traceName === "string"
-    ? (state as TraceState)
-    : null;
+  try {
+    return S.decodeUnknownSync(TraceStateSchema)(state);
+  } catch {
+    return null;
+  }
 };
 
 const readReviewFindings = (
   payload: Record<string, unknown>,
-): ReadonlyArray<ArchitectureReviewFinding> | null =>
-  Array.isArray(payload.findings) ? (payload.findings as Array<ArchitectureReviewFinding>) : null;
+): ReadonlyArray<ArchitectureReviewFinding> | null => {
+  try {
+    return S.decodeUnknownSync(S.Array(ArchitectureReviewFindingSchema))(payload.findings);
+  } catch {
+    return null;
+  }
+};
 
 const readReviewFinding = (payload: Record<string, unknown>): ArchitectureReviewFinding | null => {
   const finding = payload.finding;
-  return isRecord(finding) && typeof finding.id === "string"
-    ? (finding as ArchitectureReviewFinding)
-    : null;
+  try {
+    return S.decodeUnknownSync(ArchitectureReviewFindingSchema)(finding);
+  } catch {
+    return null;
+  }
 };
 
 const readExportStatus = (payload: Record<string, unknown>): ExportJobStatus | null => {
   const status = payload.status;
-  return isRecord(status) &&
-    typeof status.exportId === "string" &&
-    typeof status.roomId === "string" &&
-    typeof status.status === "string"
-    ? (status as ExportJobStatus)
-    : null;
+  try {
+    return S.decodeUnknownSync(ExportJobStatusSchema)(status);
+  } catch {
+    return null;
+  }
 };
 
 const readVoiceTranscript = (payload: Record<string, unknown>): VoiceTranscriptEvent | null => {
   const transcript = payload.transcript;
-  return isRecord(transcript) &&
-    typeof transcript.id === "string" &&
-    typeof transcript.transcript === "string"
-    ? (transcript as VoiceTranscriptEvent)
-    : null;
+  try {
+    return S.decodeUnknownSync(VoiceTranscriptEventSchema)(transcript);
+  } catch {
+    return null;
+  }
 };
 
 const readVoiceSuggestion = (payload: Record<string, unknown>): VoiceSuggestion | null => {
   const suggestion = payload.suggestion;
-  return isRecord(suggestion) && typeof suggestion.id === "string"
-    ? (suggestion as VoiceSuggestion)
-    : null;
+  try {
+    return S.decodeUnknownSync(VoiceSuggestionSchema)(suggestion);
+  } catch {
+    return null;
+  }
 };
 
 const fetchExportStatus = async (
@@ -1384,7 +1426,11 @@ const fetchExportStatus = async (
     return null;
   }
 
-  return (await response.json()) as ExportJobStatus;
+  try {
+    return S.decodeUnknownSync(ExportJobStatusSchema)(await response.json());
+  } catch {
+    return null;
+  }
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

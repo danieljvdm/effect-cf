@@ -231,6 +231,236 @@ test("submits a fake AI architect prompt and queues the job", async () => {
   expect(calls.length).toBeGreaterThan(2);
 });
 
+test("queues selected AI Gateway model for real architect prompts", async () => {
+  const calls: Array<unknown> = [];
+  const queue = makeQueue();
+  const originalFetch = globalThis.fetch;
+  let providerBody: { model?: string } | undefined;
+  let providerHeaders: Headers | undefined;
+
+  globalThis.fetch = async (_input, init) => {
+    providerBody = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as {
+      model?: string;
+    };
+    providerHeaders = new Headers(init?.headers);
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: "Real provider architecture plan.",
+              tool_calls: [
+                {
+                  function: {
+                    name: "add_resource_node",
+                    arguments: JSON.stringify({
+                      bindingName: "API",
+                      description: "Handles requests.",
+                      id: "worker",
+                      kind: "worker",
+                      name: "API Worker",
+                      position: { x: 0, y: 0 },
+                    }),
+                  },
+                },
+              ],
+            },
+          },
+        ],
+        usage: { total_tokens: 100 },
+      }),
+      { status: 200 },
+    );
+  };
+
+  const worker = new ApiWorker(
+    executionContext,
+    makeApiEnv({
+      ARCHITECT_AI_PROVIDER: "real",
+      AI_GATEWAY_ACCOUNT_ID: "account",
+      AI_GATEWAY_API_KEY: "gateway-key",
+      AI_GATEWAY_CHAT_COMPLETIONS_ENDPOINT:
+        "https://api.cloudflare.com/client/v4/accounts/account/ai/v1/chat/completions",
+      AI_GATEWAY_GATEWAY_ID: "effect-cf",
+      AI_GATEWAY_MODEL: "openai/gpt-5-mini",
+      ARCHITECT_PUBLIC_ORIGIN: "https://architect.test",
+      ARCHITECT_DEFAULT_ROOM_TITLE: "Untitled architecture",
+      ARCHITECT_FAKE_AI_STREAM_DELAY_MS: 0,
+      AI_JOBS: queue,
+      ARCHITECT_READ_MODELS: makeKvNamespace(),
+      ROOMS: makeRoomNamespace({
+        recordTransportEvent: async (event: unknown) => {
+          calls.push(event);
+          return { roomId: "room_ai", sequence: calls.length };
+        },
+        applyAiToolCalls: async (request: {
+          roomId: string;
+          jobId: string;
+          summary: string;
+          toolCalls: Array<{ type: string }>;
+        }) => {
+          calls.push(request);
+          return {
+            roomId: request.roomId,
+            jobId: request.jobId,
+            status: "queued",
+            summary: request.summary,
+            toolCalls: request.toolCalls,
+            traceEvents: [],
+          };
+        },
+      }),
+    }),
+  );
+
+  try {
+    const response = await worker.fetch(
+      new Request("https://worker.test/api/rooms/room_ai/ai/prompts", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          prompt: "Draw an AI architecture canvas",
+          actor: "Dana",
+          model: "grok/grok-4-fast-non-reasoning",
+          readModel: { resources: [], edges: [] },
+        }),
+      }),
+    );
+    const body = (await response.json()) as {
+      status: string;
+      summary: string;
+      toolCalls: Array<{ type: string }>;
+    };
+
+    expect(response.status).toBe(202);
+    expect(body.status).toBe("queued");
+    expect(body.summary).toBe("Queued real AI provider job.");
+    expect(body.toolCalls).toEqual([]);
+    expect(providerBody).toBeUndefined();
+    expect(providerHeaders).toBeUndefined();
+    expect(queue.sent).toHaveLength(1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("processes real architect prompts from the queue", async () => {
+  const calls: Array<unknown> = [];
+  const acked: Array<string> = [];
+  const originalFetch = globalThis.fetch;
+  let providerBody: { model?: string } | undefined;
+  let providerHeaders: Headers | undefined;
+  const worker = new ApiWorker(
+    executionContext,
+    makeApiEnv({
+      ARCHITECT_AI_PROVIDER: "real",
+      AI_GATEWAY_ACCOUNT_ID: "account",
+      AI_GATEWAY_API_KEY: "gateway-key",
+      AI_GATEWAY_CHAT_COMPLETIONS_ENDPOINT:
+        "https://api.cloudflare.com/client/v4/accounts/account/ai/v1/chat/completions",
+      AI_GATEWAY_GATEWAY_ID: "effect-cf",
+      AI_GATEWAY_MODEL: "openai/gpt-5-mini",
+      ARCHITECT_PUBLIC_ORIGIN: "https://architect.test",
+      ARCHITECT_DEFAULT_ROOM_TITLE: "Untitled architecture",
+      ARCHITECT_FAKE_AI_STREAM_DELAY_MS: 0,
+      AI_JOBS: makeQueue(),
+      ARCHITECT_READ_MODELS: makeKvNamespace(),
+      ROOMS: makeRoomNamespace({
+        recordTransportEvent: async (event: unknown) => {
+          calls.push(event);
+          return { roomId: "room_ai", sequence: calls.length };
+        },
+        applyAiToolCalls: async (request: {
+          roomId: string;
+          jobId: string;
+          summary: string;
+          toolCalls: Array<{ type: string }>;
+        }) => {
+          calls.push(request);
+          return {
+            roomId: request.roomId,
+            jobId: request.jobId,
+            status: "queued",
+            summary: request.summary,
+            toolCalls: request.toolCalls,
+            traceEvents: [],
+          };
+        },
+      }),
+    }),
+  );
+
+  globalThis.fetch = async (_input, init) => {
+    providerBody = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as {
+      model?: string;
+    };
+    providerHeaders = new Headers(init?.headers);
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            finish_reason: "tool_calls",
+            message: {
+              content: "Real provider architecture plan.",
+              tool_calls: [
+                {
+                  function: {
+                    name: "add_resource_node",
+                    arguments: JSON.stringify({
+                      bindingName: "API",
+                      description: "Handles requests.",
+                      id: "worker",
+                      kind: "worker",
+                      name: "API Worker",
+                      position: { x: 0, y: 0 },
+                    }),
+                  },
+                },
+              ],
+            },
+          },
+        ],
+        usage: { completion_tokens: 75, prompt_tokens: 25, total_tokens: 100 },
+      }),
+      { status: 200 },
+    );
+  };
+
+  try {
+    await worker.queue(
+      makeMessageBatch("AI_JOBS", [
+        makeMessage(
+          "job_message_1",
+          {
+            actor: "Dana",
+            id: "job_1",
+            model: "grok/grok-4-fast-non-reasoning",
+            prompt: "Draw an AI architecture canvas",
+            readModel: { resources: [], edges: [] },
+            roomId: "room_ai",
+            submittedAt: "2026-05-22T00:00:00.000Z",
+          },
+          acked,
+        ),
+      ]),
+    );
+
+    expect(providerBody?.model).toBe("grok/grok-4-fast-non-reasoning");
+    expect(providerHeaders?.get("authorization")).toBe("Bearer gateway-key");
+    expect(providerHeaders?.get("cf-aig-gateway-id")).toBe("effect-cf");
+    expect(calls).toContainEqual(
+      expect.objectContaining({
+        jobId: "job_1",
+        summary: "Real provider architecture plan.",
+        toolCalls: [expect.objectContaining({ type: "add_resource_node" })],
+      }),
+    );
+    expect(acked).toEqual(["job_message_1"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("starts traces and reviews through typed room APIs", async () => {
   const calls: Array<unknown> = [];
   const worker = new ApiWorker(
@@ -558,6 +788,32 @@ function makeQueue() {
       newestMessageTimestamp: null,
     }),
   } as unknown as Queue & { sent: Array<unknown> };
+}
+
+function makeMessage(id: string, body: unknown, acked: Array<string>): globalThis.Message<unknown> {
+  return {
+    ack: () => {
+      acked.push(id);
+    },
+    attempts: 1,
+    body,
+    id,
+    retry: () => undefined,
+    timestamp: new Date("2026-05-22T00:00:00.000Z"),
+  } as unknown as globalThis.Message<unknown>;
+}
+
+function makeMessageBatch(
+  queue: string,
+  messages: ReadonlyArray<globalThis.Message<unknown>>,
+): globalThis.MessageBatch<unknown> {
+  return {
+    ackAll: () => undefined,
+    messages,
+    metadata: { metrics: { backlogBytes: 0, backlogCount: messages.length } },
+    queue,
+    retryAll: () => undefined,
+  } as unknown as globalThis.MessageBatch<unknown>;
 }
 
 function makeD1Database() {

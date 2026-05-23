@@ -1,4 +1,4 @@
-import { Effect, Layer, Option, Schema as S, Stream } from "effect";
+import { Effect, Layer, Option, Redacted, Schema as S, Stream } from "effect";
 import { HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { Worker, WorkerConfig, Workflow } from "effect-cf";
@@ -9,15 +9,19 @@ import {
   AiPromptResult,
   AiPromptTraceEvent,
   AiToolCall,
+  resolveAiGatewayModelId,
+  resolveAiProviderMode,
+  resolveAiProviderModelId,
+} from "@architect-lab/domain/ai";
+import {
   aiToolCallFromPart,
   describeAiToolCall,
   generateFakeAiPromptResult,
   generateRealAiPromptResult,
   isAiToolCallPart,
   makeAiJob,
-  resolveAiProviderMode,
   streamFakeAiPromptParts,
-} from "@architect-lab/domain/ai";
+} from "./ai/provider";
 import {
   ArchitectureReadModelInput,
   type ArchitectureReadModelInput as ArchitectureReadModelInputType,
@@ -105,6 +109,21 @@ const emptyReadModel = (roomId: RoomId) => ({
   edges: [],
   updatedAt: new Date().toISOString(),
 });
+
+const resolveAiGatewayChatCompletionsEndpoint = (gateway: {
+  readonly accountId: string;
+  readonly chatCompletionsEndpoint: string;
+}): string | undefined => {
+  const explicitEndpoint = gateway.chatCompletionsEndpoint.trim();
+  if (explicitEndpoint !== "") {
+    return explicitEndpoint;
+  }
+
+  const accountId = gateway.accountId.trim();
+  return accountId === ""
+    ? undefined
+    : `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1/chat/completions`;
+};
 
 const getLatestReadModel = Effect.fn("getLatestReadModel")(function* (roomId: RoomId) {
   const cache = yield* LatestArchitectureReadModels;
@@ -367,56 +386,48 @@ const submitAiPrompt = Effect.fn("submitAiPrompt")(function* (
     kind: "ai.prompt.submitted",
     payloadJson: JSON.stringify({
       jobId: job.id,
+      model: input.model,
       prompt: job.prompt,
     }),
   });
 
   if (resolveAiProviderMode(config.aiProviderMode) === "real") {
+    const aiGatewayApiKey = Redacted.value(config.aiGateway.apiKey).trim();
+    const providerApiKey = config.aiProviderApiKey.trim();
+    const realProviderApiKey = aiGatewayApiKey === "" ? providerApiKey : aiGatewayApiKey;
+    const realProviderModel =
+      aiGatewayApiKey === ""
+        ? input.model === undefined
+          ? config.aiProviderModel
+          : resolveAiProviderModelId(input.model)
+        : resolveAiGatewayModelId(input.model ?? config.aiGateway.model);
+    const gatewayChatCompletionsEndpoint =
+      aiGatewayApiKey === ""
+        ? undefined
+        : resolveAiGatewayChatCompletionsEndpoint(config.aiGateway);
+
     yield* trace({
       kind: "reasoning",
-      message: `Calling configured real AI provider model ${config.aiProviderModel}`,
+      message: `Queued configured real AI provider model ${realProviderModel}`,
       detail: job.prompt,
     });
 
-    if (config.aiProviderApiKey.trim() === "") {
+    if (realProviderApiKey === "") {
       return yield* Effect.fail(
-        new Error("ARCHITECT_AI_PROVIDER_API_KEY is required when ARCHITECT_AI_PROVIDER=real"),
+        new Error(
+          "AI_GATEWAY_API_KEY or ARCHITECT_AI_PROVIDER_API_KEY is required when ARCHITECT_AI_PROVIDER=real",
+        ),
       );
     }
 
-    const result = yield* generateRealAiPromptResult(job, {
-      apiKey: config.aiProviderApiKey,
-      baseUrl: config.aiProviderBaseUrl,
-      maxEstimatedCostCents: config.aiProviderMaxEstimatedCostCents,
-      maxOutputTokens: config.aiProviderMaxOutputTokens,
-      maxToolCalls: config.aiProviderMaxToolCalls,
-      model: config.aiProviderModel,
-      retryAttempts: config.aiProviderRetryAttempts,
-      timeoutMs: config.aiProviderTimeoutMs,
-    });
-
-    for (const event of result.traceEvents) {
-      yield* trace(event);
+    if (aiGatewayApiKey !== "" && gatewayChatCompletionsEndpoint === undefined) {
+      return yield* Effect.fail(
+        new Error(
+          "AI_GATEWAY_ACCOUNT_ID or AI_GATEWAY_CHAT_COMPLETIONS_ENDPOINT is required when AI_GATEWAY_API_KEY is set",
+        ),
+      );
     }
 
-    if (result.toolCalls.length > 0) {
-      const accepted = yield* room.applyAiToolCalls({
-        jobId: job.id,
-        roomId,
-        actor: "ai-architect",
-        summary: result.summary,
-        readModel: rollingReadModel,
-        toolCalls: result.toolCalls,
-      });
-
-      toolCalls.push(...accepted.toolCalls);
-    }
-
-    yield* trace({
-      kind: "completion",
-      message: result.summary,
-      detail: `${toolCalls.length} accepted tool calls`,
-    });
     yield* AiJobQueue.send(job);
     yield* room.recordTransportEvent({
       roomId,
@@ -425,16 +436,18 @@ const submitAiPrompt = Effect.fn("submitAiPrompt")(function* (
       payloadJson: JSON.stringify({
         jobId: job.id,
         provider: "real",
-        summary: result.summary,
-        toolCalls: toolCalls.length,
+        model: realProviderModel,
       }),
     });
 
-    return {
-      ...result,
+    return yield* S.decodeUnknownEffect(AiPromptResult)({
+      jobId: job.id,
+      roomId,
+      status: "queued" as const,
+      summary: "Queued real AI provider job.",
       toolCalls,
       traceEvents,
-    };
+    });
   }
 
   yield* trace({
@@ -803,14 +816,96 @@ export class ExportWorkflow extends ExportWorkflowBase {}
 
 const processAiJob = Effect.fn("processAiJob")(function* (job: AiJob) {
   const config = yield* ArchitectConfig;
+  const room = RoomDurableObject.byName(job.roomId);
   if (resolveAiProviderMode(config.aiProviderMode) === "real") {
-    yield* RoomDurableObject.byName(job.roomId).recordTransportEvent({
+    const trace = (event: AiPromptTraceEvent) =>
+      room.recordTransportEvent({
+        roomId: job.roomId,
+        actor: "ai-architect",
+        kind: `ai.${event.kind}`,
+        payloadJson: JSON.stringify({
+          jobId: job.id,
+          ...event,
+        }),
+      });
+    const aiGatewayApiKey = Redacted.value(config.aiGateway.apiKey).trim();
+    const aiGatewayAuthToken = Redacted.value(config.aiGateway.authToken).trim();
+    const providerApiKey = config.aiProviderApiKey.trim();
+    const realProviderApiKey = aiGatewayApiKey === "" ? providerApiKey : aiGatewayApiKey;
+    const realProviderModel =
+      aiGatewayApiKey === ""
+        ? job.model === undefined
+          ? config.aiProviderModel
+          : resolveAiProviderModelId(job.model)
+        : resolveAiGatewayModelId(job.model ?? config.aiGateway.model);
+    const gatewayChatCompletionsEndpoint =
+      aiGatewayApiKey === ""
+        ? undefined
+        : resolveAiGatewayChatCompletionsEndpoint(config.aiGateway);
+
+    if (realProviderApiKey === "") {
+      return yield* Effect.fail(
+        new Error(
+          "AI_GATEWAY_API_KEY or ARCHITECT_AI_PROVIDER_API_KEY is required when ARCHITECT_AI_PROVIDER=real",
+        ),
+      );
+    }
+
+    if (aiGatewayApiKey !== "" && gatewayChatCompletionsEndpoint === undefined) {
+      return yield* Effect.fail(
+        new Error(
+          "AI_GATEWAY_ACCOUNT_ID or AI_GATEWAY_CHAT_COMPLETIONS_ENDPOINT is required when AI_GATEWAY_API_KEY is set",
+        ),
+      );
+    }
+
+    yield* trace({
+      kind: "reasoning",
+      message: `Calling configured real AI provider model ${realProviderModel}`,
+      detail: job.prompt,
+    });
+
+    const result = yield* generateRealAiPromptResult(job, {
+      apiKey: realProviderApiKey,
+      baseUrl: config.aiProviderBaseUrl,
+      chatCompletionsEndpoint: gatewayChatCompletionsEndpoint,
+      gatewayId: aiGatewayApiKey === "" ? undefined : config.aiGateway.gatewayId,
+      gatewayAuthToken: aiGatewayAuthToken === "" ? undefined : aiGatewayAuthToken,
+      maxEstimatedCostCents: config.aiProviderMaxEstimatedCostCents,
+      maxOutputTokens: config.aiProviderMaxOutputTokens,
+      maxToolCalls: config.aiProviderMaxToolCalls,
+      model: realProviderModel,
+      retryAttempts: config.aiProviderRetryAttempts,
+      timeoutMs: config.aiProviderTimeoutMs,
+    });
+
+    for (const event of result.traceEvents) {
+      yield* trace(event);
+    }
+
+    const accepted = yield* room.applyAiToolCalls({
+      jobId: job.id,
+      roomId: job.roomId,
+      actor: "ai-architect",
+      summary: result.summary,
+      readModel: job.readModel,
+      toolCalls: result.toolCalls,
+    });
+
+    yield* trace({
+      kind: "completion",
+      message: result.summary,
+      detail: `${accepted.toolCalls.length} accepted tool calls`,
+    });
+    yield* room.recordTransportEvent({
       roomId: job.roomId,
       actor: "ai-architect",
       kind: "ai.job.processed",
       payloadJson: JSON.stringify({
         jobId: job.id,
         provider: "real",
+        summary: result.summary,
+        toolCalls: accepted.toolCalls.length,
       }),
     });
     return;
@@ -818,7 +913,7 @@ const processAiJob = Effect.fn("processAiJob")(function* (job: AiJob) {
 
   const result = yield* generateFakeAiPromptResult(job, { simulateLatency: false });
 
-  yield* RoomDurableObject.byName(job.roomId).recordTransportEvent({
+  yield* room.recordTransportEvent({
     roomId: job.roomId,
     actor: "ai-architect",
     kind: "ai.tool-calls.generated",

@@ -9,6 +9,7 @@ export starter packages through Workflows, D1 status, and R2 artifacts.
 
 ```sh
 vp install
+cp examples/architect-lab/web/.env.example examples/architect-lab/web/.env
 vp run architect#dev
 ```
 
@@ -27,21 +28,36 @@ Local development defaults to the deterministic fake provider and does not requi
 The API Worker can use an OpenAI-compatible provider by setting:
 
 ```sh
-cp examples/architect-lab/web/.dev.vars.example examples/architect-lab/web/.dev.vars
+cp examples/architect-lab/web/.env.example examples/architect-lab/web/.env
 ARCHITECT_AI_PROVIDER=real
 ARCHITECT_AI_PROVIDER_API_KEY=...
 ARCHITECT_AI_PROVIDER_BASE_URL=https://api.openai.com/v1
-ARCHITECT_AI_MODEL=gpt-4.1-mini
+ARCHITECT_AI_MODEL=gpt-5-mini
 ARCHITECT_AI_TIMEOUT_MS=20000
 ARCHITECT_AI_RETRY_ATTEMPTS=1
 ARCHITECT_AI_MAX_TOOL_CALLS=12
-ARCHITECT_AI_MAX_OUTPUT_TOKENS=1200
+ARCHITECT_AI_MAX_OUTPUT_TOKENS=4000
 ARCHITECT_AI_MAX_ESTIMATED_COST_CENTS=10
 ```
 
+Cloudflare AI Gateway is also supported. When `AI_GATEWAY_API_KEY` is present, real-provider mode
+uses Cloudflare's AI Gateway REST chat-completions endpoint instead of the generic provider base
+URL. Set `AI_GATEWAY_ACCOUNT_ID` to derive the endpoint, or set
+`AI_GATEWAY_CHAT_COMPLETIONS_ENDPOINT` explicitly for a non-default route:
+
+```sh
+AI_GATEWAY_API_KEY=...
+AI_GATEWAY_AUTH_TOKEN=
+AI_GATEWAY_ACCOUNT_ID=...
+AI_GATEWAY_GATEWAY_ID=default
+AI_GATEWAY_CHAT_COMPLETIONS_ENDPOINT=
+AI_GATEWAY_MODEL=openai/gpt-5-mini
+```
+
 The fake and real providers share the same room-validated tool-call contract. Real-provider mode
-requires the key above as a secret; fake mode ignores it. Do not review this branch as real-AI
-ready until a live provider smoke has created canvas edits with a usable provider key.
+requires either `AI_GATEWAY_API_KEY` or `ARCHITECT_AI_PROVIDER_API_KEY` as a secret; fake mode
+ignores both. Do not review this branch as real-AI ready until a live provider smoke has created
+canvas edits with a usable provider key.
 
 ## Deployed Mode
 
@@ -49,6 +65,20 @@ Deploy the API Worker with these Cloudflare resources: `ROOMS` Durable Object, `
 `ARCHITECT_READ_MODELS` KV namespace, `ARCHITECT_EXPORTS_DB` D1 database, `ARCHITECT_EXPORTS` R2
 bucket, and `ARCHITECT_EXPORT_WORKFLOW` Workflow. Deploy the web Worker with the static Assets
 binding and the `API` service binding to the API Worker.
+
+Production deployment uses the `production` Wrangler environment plus a local
+`examples/architect-lab/web/.env.production` file for provider configuration and secrets:
+
+```sh
+cp examples/architect-lab/web/.env.production.example examples/architect-lab/web/.env.production
+vp run architect#deploy
+```
+
+The deploy helper builds `effect-cf`, builds the web client, deploys the API Worker with
+`--env production`, then deploys the web Worker with `--env production`. Non-secret values in
+`.env.production` are passed as deploy-time vars, while `AI_GATEWAY_API_KEY`,
+`AI_GATEWAY_AUTH_TOKEN`, and `ARCHITECT_AI_PROVIDER_API_KEY` are uploaded with the API Worker
+version as secrets.
 
 Hyperdrive is optional and is not bound by the core app.
 

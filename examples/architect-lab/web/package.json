@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "check": "vp check",
+    "deploy": "bun ./deploy.ts",
     "dev": "bun ./dev.ts",
     "test": "vp test"
   },

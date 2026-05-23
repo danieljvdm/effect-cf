@@ -1,4 +1,5 @@
 ---
 ---
 
-Harden Architect Lab real-provider validation and document the live OpenAI smoke blocker without releasing package changes.
+Harden Architect Lab real-provider validation, add Cloudflare AI Gateway configuration, and
+document the live provider smoke blockers without releasing package changes.

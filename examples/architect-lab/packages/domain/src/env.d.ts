@@ -13,6 +13,12 @@ declare global {
       readonly ARCHITECT_AI_MAX_TOOL_CALLS?: number;
       readonly ARCHITECT_AI_MAX_OUTPUT_TOKENS?: number;
       readonly ARCHITECT_AI_MAX_ESTIMATED_COST_CENTS?: number;
+      readonly AI_GATEWAY_ACCOUNT_ID?: string;
+      readonly AI_GATEWAY_API_KEY?: string;
+      readonly AI_GATEWAY_AUTH_TOKEN?: string;
+      readonly AI_GATEWAY_CHAT_COMPLETIONS_ENDPOINT?: string;
+      readonly AI_GATEWAY_GATEWAY_ID?: string;
+      readonly AI_GATEWAY_MODEL?: string;
       readonly ARCHITECT_EXPORTS_DB?: D1Database;
       readonly ARCHITECT_EXPORTS?: R2Bucket;
       readonly ARCHITECT_EXPORT_WORKFLOW?: globalThis.Workflow<unknown>;

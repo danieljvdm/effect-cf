@@ -1,12 +1,7 @@
 import { describe, expect, test } from "vitest";
-import { Effect, Schema as S } from "effect";
+import { Schema as S } from "effect";
 
-import {
-  generateFakeAiPromptResult,
-  generateRealAiPromptResult,
-  makeAiJob,
-  resolveAiProviderMode,
-} from "../src/ai.ts";
+import { AiGatewayModel, AiGatewayModelIds, resolveAiProviderMode } from "../src/ai.ts";
 import {
   ArchitectureReadModel,
   ArchitectureResource,
@@ -20,6 +15,16 @@ import { makeArchitectureReviewFindings, makeTraceDefinition } from "../src/trac
 import { VoiceSuggestion, makeVoiceTranscriptEvent } from "../src/voice.ts";
 
 describe("architect-lab domain contracts", () => {
+  test("limits selectable AI Gateway models to fast modern options", () => {
+    expect(AiGatewayModelIds).toEqual([
+      "openai/gpt-5-mini",
+      "openai/gpt-5-nano",
+      "grok/grok-4-fast-non-reasoning",
+    ]);
+    expect(S.decodeUnknownSync(AiGatewayModel)("openai/gpt-5-mini")).toBe("openai/gpt-5-mini");
+    expect(() => S.decodeUnknownSync(AiGatewayModel)("openai/gpt-4.1-mini")).toThrow();
+  });
+
   test("decodes room metadata shared across API and Durable Object boundaries", () => {
     const metadata = S.decodeUnknownSync(RoomMetadata)({
       id: "room_123",
@@ -220,193 +225,10 @@ describe("architect-lab domain contracts", () => {
     expect(suggestion.status).toBe("open");
   });
 
-  test("returns deterministic fake AI tool calls for the default canvas prompt", () => {
-    const job = makeAiJob(
-      "room_ai",
-      {
-        prompt: "Draw an AI architecture canvas",
-        actor: "Dana",
-        readModel: { resources: [], edges: [] },
-      },
-      new Date("2026-05-21T12:00:00.000Z"),
-    );
-    const result = Effect.runSync(generateFakeAiPromptResult(job, { simulateLatency: false }));
-
-    expect(result.status).toBe("queued");
-    expect(result.summary).toContain("collaborative architecture canvas");
-    expect(result.toolCalls.map((call) => call.type)).toContain("add_resource_node");
-    expect(result.toolCalls.map((call) => call.type)).toContain("connect_resources");
-  });
-
-  test("runs fake AI jobs through the effect AI language model contract", () => {
-    const job = makeAiJob(
-      "room_ai",
-      {
-        prompt: "Design a chat analytics worker",
-        actor: "Dana",
-        readModel: { resources: [], edges: [] },
-      },
-      new Date("2026-05-21T12:00:00.000Z"),
-    );
-    const result = Effect.runSync(generateFakeAiPromptResult(job, { simulateLatency: false }));
-
-    expect(result.status).toBe("queued");
-    expect(result.summary).toContain("real-time chat with analytics");
-    expect(result.toolCalls[0]?.type).toBe("add_resource_node");
-    expect(result.toolCalls.map((call) => call.type)).toContain("annotate_resource");
-  });
-
   test("selects fake provider mode unless real mode is explicitly configured", () => {
     expect(resolveAiProviderMode(undefined)).toBe("fake");
     expect(resolveAiProviderMode("fake")).toBe("fake");
     expect(resolveAiProviderMode("unknown")).toBe("fake");
     expect(resolveAiProviderMode("real")).toBe("real");
-  });
-
-  test("decodes real provider tool calls without requiring provider credentials", async () => {
-    const job = makeAiJob(
-      "room_ai",
-      {
-        prompt: "Design a worker and queue",
-        actor: "Dana",
-        readModel: { resources: [], edges: [] },
-      },
-      new Date("2026-05-21T12:00:00.000Z"),
-    );
-    const originalFetch = globalThis.fetch;
-    const requests: Array<unknown> = [];
-
-    globalThis.fetch = async (_input, init) => {
-      requests.push(JSON.parse(typeof init?.body === "string" ? init.body : "{}"));
-      return new Response(
-        JSON.stringify({
-          choices: [
-            {
-              message: {
-                content: "Real provider architecture plan.",
-                tool_calls: [
-                  {
-                    function: {
-                      name: "add_resource_node",
-                      arguments: JSON.stringify({
-                        bindingName: "API",
-                        description: "Handles requests",
-                        id: "worker",
-                        kind: "worker",
-                        name: "API Worker",
-                        position: { x: 0, y: 0 },
-                      }),
-                    },
-                  },
-                ],
-              },
-            },
-          ],
-          usage: { total_tokens: 100 },
-        }),
-        { status: 200 },
-      );
-    };
-
-    try {
-      const result = await Effect.runPromise(
-        generateRealAiPromptResult(job, {
-          apiKey: "test",
-          baseUrl: "https://provider.test/v1",
-          maxEstimatedCostCents: 10,
-          maxOutputTokens: 600,
-          maxToolCalls: 4,
-          model: "test-model",
-          retryAttempts: 0,
-          timeoutMs: 1000,
-        }),
-      );
-
-      expect(result.summary).toBe("Real provider architecture plan.");
-      expect(result.toolCalls[0]).toMatchObject({
-        bindingName: "API",
-        kind: "worker",
-        type: "add_resource_node",
-      });
-      expect(requests[0]).toMatchObject({
-        max_tokens: 600,
-        model: "test-model",
-        parallel_tool_calls: false,
-        tool_choice: "required",
-      });
-      expect(
-        (requests[0] as { tools: Array<{ function: { strict: boolean } }> }).tools[0]?.function
-          .strict,
-      ).toBe(true);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  test("fails real provider results that contain no valid tool calls", async () => {
-    const job = makeAiJob(
-      "room_ai",
-      {
-        prompt: "Design a worker and queue",
-        actor: "Dana",
-        readModel: { resources: [], edges: [] },
-      },
-      new Date("2026-05-21T12:00:00.000Z"),
-    );
-    const originalFetch = globalThis.fetch;
-
-    globalThis.fetch = async () =>
-      new Response(
-        JSON.stringify({
-          choices: [{ message: { content: "Here is some prose but no tool calls." } }],
-          usage: { total_tokens: 10 },
-        }),
-        { status: 200 },
-      );
-
-    try {
-      await expect(
-        Effect.runPromise(
-          generateRealAiPromptResult(job, {
-            apiKey: "test",
-            baseUrl: "https://provider.test/v1",
-            maxEstimatedCostCents: 10,
-            maxOutputTokens: 600,
-            maxToolCalls: 4,
-            model: "test-model",
-            retryAttempts: 0,
-            timeoutMs: 1000,
-          }),
-        ),
-      ).rejects.toThrow("Real provider returned no valid architecture tool calls");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  test("selects distinct fake AI plans for broader prompt families", () => {
-    const prompts = [
-      ["Design a checkout and order processing flow", "checkout and order-processing"],
-      ["Sketch an identity login gateway", "identity-aware API gateway"],
-      ["Create an api gateway with service binding microservices", "service-binding API gateway"],
-      ["Build an image publishing pipeline", "image processing and publishing"],
-    ] as const;
-
-    for (const [prompt, summary] of prompts) {
-      const job = makeAiJob(
-        "room_ai",
-        {
-          prompt,
-          actor: "Dana",
-          readModel: { resources: [], edges: [] },
-        },
-        new Date("2026-05-21T12:00:00.000Z"),
-      );
-      const result = Effect.runSync(generateFakeAiPromptResult(job, { simulateLatency: false }));
-
-      expect(result.summary).toContain(summary);
-      expect(result.toolCalls.map((call) => call.type)).toContain("connect_resources");
-      expect(result.toolCalls.map((call) => call.type)).toContain("annotate_resource");
-    }
   });
 });

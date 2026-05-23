@@ -12,6 +12,8 @@ import {
 } from "./room-canvas-atoms";
 
 const userId = getPersistentUserId();
+const tldrawLicenseKey =
+  "tldraw-2026-06-05/WyJzRWhuSjVyVSIsWyIqIl0sMTYsIjIwMjYtMDYtMDUiXQ.Y4FYCveLpUwqUtCpQCTmoRkPDCI5yjRu61Ah4Om1+uxPhbGf+ED9jphMm3AEIXFgZleTz7rjvRVitUj2iVfLlA";
 
 export type RoomCanvasProps = {
   readonly label: string;
@@ -80,7 +82,7 @@ export const RoomCanvas = ({ label, roomId }: RoomCanvasProps) => {
   return (
     <>
       <div className="absolute inset-0">
-        <Tldraw onMount={handleMount} store={remote.store} />
+        <Tldraw licenseKey={tldrawLicenseKey} onMount={handleMount} store={remote.store} />
       </div>
       <div className="absolute bottom-4 left-4 z-10 max-w-[min(420px,calc(100%-2rem))] rounded-md border border-slate-300 bg-white/95 px-3 py-2 text-sm text-slate-600 shadow-lg">
         Tldraw sync connected. Document changes and presence are room-scoped.

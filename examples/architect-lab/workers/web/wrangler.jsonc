@@ -21,4 +21,18 @@
       "service": "architect-lab-api",
     },
   ],
+  "env": {
+    "production": {
+      "vars": {
+        "ARCHITECT_PUBLIC_ORIGIN": "https://architect-lab-web-production.<your-workers-subdomain>.workers.dev",
+        "ARCHITECT_DEFAULT_ROOM_TITLE": "Untitled architecture",
+      },
+      "services": [
+        {
+          "binding": "API",
+          "service": "architect-lab-api-production",
+        },
+      ],
+    },
+  },
 }

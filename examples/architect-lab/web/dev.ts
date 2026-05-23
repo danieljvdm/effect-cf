@@ -4,6 +4,10 @@ const webRoot = new URL(".", import.meta.url).pathname;
 const webWorkerRoot = new URL("../workers/web/", import.meta.url).pathname;
 const wranglerBin = new URL("../../../node_modules/.bin/wrangler", import.meta.url).pathname;
 const persistTo = `${root}.wrangler/state/architect-lab`;
+const localEnvFile = `${webRoot}.env`;
+
+const envFileArgs = async (path: string) =>
+  (await Bun.file(path).exists()) ? ["--env-file", path] : [];
 
 const buildEffectCf = Bun.spawn(["bun", "run", "build"], {
   cwd: effectCfRoot,
@@ -45,6 +49,7 @@ const commands = [
       "9230",
       "--persist-to",
       persistTo,
+      ...(await envFileArgs(localEnvFile)),
     ],
   },
   {
@@ -60,6 +65,7 @@ const commands = [
       "9231",
       "--persist-to",
       persistTo,
+      ...(await envFileArgs(localEnvFile)),
     ],
   },
 ];

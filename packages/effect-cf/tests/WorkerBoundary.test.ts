@@ -74,7 +74,7 @@ test("Worker.fetch renders Effect HttpServerResponse values", async () => {
       }
 
       if (path === "/context-stream") {
-        const stream = RenderValue.asEffect().pipe(Stream.fromEffect, Stream.encodeText);
+        const stream = RenderValue.pipe(Stream.fromEffect, Stream.encodeText);
         return HttpServerResponse.stream(stream as Stream.Stream<Uint8Array, never, never>);
       }
 

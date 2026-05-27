@@ -86,15 +86,24 @@ const ExportWorkflowLayer = Layer.mergeAll(
 
 const decodeAiJob = S.decodeUnknownEffect(AiJob);
 
-const createRoom = Effect.fn("createRoom")(function* () {
+const requestPublicOrigin = Effect.fn("requestPublicOrigin")(function* () {
   const config = yield* ArchitectConfig;
+  const request = yield* Effect.serviceOption(Worker.NativeRequest);
+  return Option.match(request, {
+    onNone: () => config.publicOrigin,
+    onSome: (nativeRequest) => new URL(nativeRequest.url).origin,
+  });
+});
+
+const createRoom = Effect.fn("createRoom")(function* () {
+  const publicOrigin = yield* requestPublicOrigin();
   const roomId = `room_${crypto.randomUUID()}`;
   const metadata = yield* RoomDurableObject.byName(roomId).getMetadata(roomId);
 
   return {
     roomId,
     metadata,
-    roomUrl: `${config.publicOrigin}/room/${roomId}`,
+    roomUrl: `${publicOrigin}/room/${roomId}`,
   };
 });
 
@@ -149,7 +158,7 @@ const saveLatestReadModel = Effect.fn("saveLatestReadModel")(function* (
 });
 
 const publishReadModel = Effect.fn("publishReadModel")(function* (roomId: RoomId) {
-  const config = yield* ArchitectConfig;
+  const publicOrigin = yield* requestPublicOrigin();
   const cache = yield* PublishedArchitectureReadModels;
   const model = yield* getLatestReadModel(roomId);
   const shareSlug = crypto.randomUUID().slice(0, 8);
@@ -164,7 +173,7 @@ const publishReadModel = Effect.fn("publishReadModel")(function* (roomId: RoomId
 
   return {
     ...published,
-    shareUrl: `${config.publicOrigin}/published/${shareSlug}`,
+    shareUrl: `${publicOrigin}/published/${shareSlug}`,
   };
 });
 
@@ -391,9 +400,14 @@ const submitAiPrompt = Effect.fn("submitAiPrompt")(function* (
     }),
   });
 
-  if (resolveAiProviderMode(config.aiProviderMode) === "real") {
-    const aiGatewayApiKey = Redacted.value(config.aiGateway.apiKey).trim();
-    const providerApiKey = config.aiProviderApiKey.trim();
+  const aiGatewayApiKey = Redacted.value(config.aiGateway.apiKey).trim();
+  const providerApiKey = config.aiProviderApiKey.trim();
+  const realProviderEnabled =
+    aiGatewayApiKey !== "" ||
+    providerApiKey !== "" ||
+    resolveAiProviderMode(config.aiProviderMode) === "real";
+
+  if (realProviderEnabled) {
     const realProviderApiKey = aiGatewayApiKey === "" ? providerApiKey : aiGatewayApiKey;
     const realProviderModel =
       aiGatewayApiKey === ""
@@ -415,7 +429,7 @@ const submitAiPrompt = Effect.fn("submitAiPrompt")(function* (
     if (realProviderApiKey === "") {
       return yield* Effect.fail(
         new Error(
-          "AI_GATEWAY_API_KEY or ARCHITECT_AI_PROVIDER_API_KEY is required when ARCHITECT_AI_PROVIDER=real",
+          "AI_GATEWAY_API_KEY or ARCHITECT_AI_PROVIDER_API_KEY is required when real AI provider mode is enabled",
         ),
       );
     }
@@ -817,7 +831,14 @@ export class ExportWorkflow extends ExportWorkflowBase {}
 const processAiJob = Effect.fn("processAiJob")(function* (job: AiJob) {
   const config = yield* ArchitectConfig;
   const room = RoomDurableObject.byName(job.roomId);
-  if (resolveAiProviderMode(config.aiProviderMode) === "real") {
+  const aiGatewayApiKey = Redacted.value(config.aiGateway.apiKey).trim();
+  const providerApiKey = config.aiProviderApiKey.trim();
+  const realProviderEnabled =
+    aiGatewayApiKey !== "" ||
+    providerApiKey !== "" ||
+    resolveAiProviderMode(config.aiProviderMode) === "real";
+
+  if (realProviderEnabled) {
     const trace = (event: AiPromptTraceEvent) =>
       room.recordTransportEvent({
         roomId: job.roomId,
@@ -828,9 +849,7 @@ const processAiJob = Effect.fn("processAiJob")(function* (job: AiJob) {
           ...event,
         }),
       });
-    const aiGatewayApiKey = Redacted.value(config.aiGateway.apiKey).trim();
     const aiGatewayAuthToken = Redacted.value(config.aiGateway.authToken).trim();
-    const providerApiKey = config.aiProviderApiKey.trim();
     const realProviderApiKey = aiGatewayApiKey === "" ? providerApiKey : aiGatewayApiKey;
     const realProviderModel =
       aiGatewayApiKey === ""
@@ -846,7 +865,7 @@ const processAiJob = Effect.fn("processAiJob")(function* (job: AiJob) {
     if (realProviderApiKey === "") {
       return yield* Effect.fail(
         new Error(
-          "AI_GATEWAY_API_KEY or ARCHITECT_AI_PROVIDER_API_KEY is required when ARCHITECT_AI_PROVIDER=real",
+          "AI_GATEWAY_API_KEY or ARCHITECT_AI_PROVIDER_API_KEY is required when real AI provider mode is enabled",
         ),
       );
     }

@@ -18,9 +18,12 @@ import { ExportWorkflowPayload, ExportWorkflowResult } from "./export";
 
 export const AiGatewayChatCompletionsEndpoint =
   "https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/ai/v1/chat/completions";
+export const DefaultAiGatewayAccountId = "28f78bbddafff8e0d5ee5acef41f30bc";
 
 export const AiGatewayConfig = Config.all({
-  accountId: WorkerConfig.string("AI_GATEWAY_ACCOUNT_ID").pipe(Config.withDefault("")),
+  accountId: WorkerConfig.string("AI_GATEWAY_ACCOUNT_ID").pipe(
+    Config.withDefault(DefaultAiGatewayAccountId),
+  ),
   apiKey: WorkerConfig.redacted("AI_GATEWAY_API_KEY").pipe(Config.withDefault(Redacted.make(""))),
   authToken: WorkerConfig.redacted("AI_GATEWAY_AUTH_TOKEN").pipe(
     Config.withDefault(Redacted.make("")),

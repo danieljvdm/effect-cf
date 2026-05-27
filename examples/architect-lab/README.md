@@ -25,39 +25,25 @@ export packages use R2 for generated files and manifests.
 ## AI Provider
 
 Local development defaults to the deterministic fake provider and does not require credentials.
-The API Worker can use an OpenAI-compatible provider by setting:
-
-```sh
-cp examples/architect-lab/web/.env.example examples/architect-lab/web/.env
-ARCHITECT_AI_PROVIDER=real
-ARCHITECT_AI_PROVIDER_API_KEY=...
-ARCHITECT_AI_PROVIDER_BASE_URL=https://api.openai.com/v1
-ARCHITECT_AI_MODEL=gpt-5-mini
-ARCHITECT_AI_TIMEOUT_MS=20000
-ARCHITECT_AI_RETRY_ATTEMPTS=1
-ARCHITECT_AI_MAX_TOOL_CALLS=12
-ARCHITECT_AI_MAX_OUTPUT_TOKENS=4000
-ARCHITECT_AI_MAX_ESTIMATED_COST_CENTS=10
-```
-
-Cloudflare AI Gateway is also supported. When `AI_GATEWAY_API_KEY` is present, real-provider mode
-uses Cloudflare's AI Gateway REST chat-completions endpoint instead of the generic provider base
-URL. Set `AI_GATEWAY_ACCOUNT_ID` to derive the endpoint, or set
-`AI_GATEWAY_CHAT_COMPLETIONS_ENDPOINT` explicitly for a non-default route:
+The API Worker uses the deterministic fake provider until a real provider secret is present. To use
+Cloudflare AI Gateway locally or in production, set:
 
 ```sh
 AI_GATEWAY_API_KEY=...
 AI_GATEWAY_AUTH_TOKEN=
-AI_GATEWAY_ACCOUNT_ID=...
-AI_GATEWAY_GATEWAY_ID=default
-AI_GATEWAY_CHAT_COMPLETIONS_ENDPOINT=
-AI_GATEWAY_MODEL=openai/gpt-5-mini
+```
+
+The Gateway account ID, gateway ID, model, provider timeouts, and tool-call limits are code defaults
+in `@architect-lab/domain/runtime`. An OpenAI-compatible provider can also be used by setting:
+
+```sh
+ARCHITECT_AI_PROVIDER_API_KEY=...
 ```
 
 The fake and real providers share the same room-validated tool-call contract. Real-provider mode
-requires either `AI_GATEWAY_API_KEY` or `ARCHITECT_AI_PROVIDER_API_KEY` as a secret; fake mode
-ignores both. Do not review this branch as real-AI ready until a live provider smoke has created
-canvas edits with a usable provider key.
+is enabled by either `AI_GATEWAY_API_KEY` or `ARCHITECT_AI_PROVIDER_API_KEY`. Do not review this
+branch as real-AI ready until a live provider smoke has created canvas edits with a usable provider
+key.
 
 ## Deployed Mode
 
@@ -66,19 +52,19 @@ Deploy the API Worker with these Cloudflare resources: `ROOMS` Durable Object, `
 bucket, and `ARCHITECT_EXPORT_WORKFLOW` Workflow. Deploy the web Worker with the static Assets
 binding and the `API` service binding to the API Worker.
 
-Production deployment uses the `production` Wrangler environment plus a local
-`examples/architect-lab/web/.env.production` file for provider configuration and secrets:
+Production deployment uses Alchemy for resource and Worker orchestration plus a local
+`examples/architect-lab/web/.env.production` file for secrets:
 
 ```sh
 cp examples/architect-lab/web/.env.production.example examples/architect-lab/web/.env.production
+vp exec alchemy login examples/architect-lab/alchemy.run.ts
 vp run architect#deploy
 ```
 
-The deploy helper builds `effect-cf`, builds the web client, deploys the API Worker with
-`--env production`, then deploys the web Worker with `--env production`. Non-secret values in
-`.env.production` are passed as deploy-time vars, while `AI_GATEWAY_API_KEY`,
-`AI_GATEWAY_AUTH_TOKEN`, and `ARCHITECT_AI_PROVIDER_API_KEY` are uploaded with the API Worker
-version as secrets.
+The deploy helper builds `effect-cf`, builds the web client, then runs
+`alchemy deploy alchemy.run.ts --stage production --yes`. Wrangler remains the local development
+runner. `AI_GATEWAY_API_KEY`, `AI_GATEWAY_AUTH_TOKEN`, and `ARCHITECT_AI_PROVIDER_API_KEY` are
+uploaded as API Worker `secret_text` bindings when present.
 
 Hyperdrive is optional and is not bound by the core app.
 
@@ -87,6 +73,7 @@ Hyperdrive is optional and is not bound by the core app.
 ```text
 examples/architect-lab/
   packages/domain/       Shared schemas and typed RPC definitions
+  alchemy.run.ts         Production deploy orchestration
   web/                   Root dev command for the local Architect Lab stack
   workers/web/           Browser-facing Worker, React client, and service-binding bridge
   workers/api/           API Worker and room routing

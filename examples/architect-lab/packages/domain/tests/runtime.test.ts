@@ -1,7 +1,11 @@
 import { describe, expect, test } from "vitest";
 import { ConfigProvider, Effect, Redacted } from "effect";
 
-import { AiGatewayChatCompletionsEndpoint, AiGatewayConfig } from "../src/runtime.ts";
+import {
+  AiGatewayChatCompletionsEndpoint,
+  AiGatewayConfig,
+  DefaultAiGatewayAccountId,
+} from "../src/runtime.ts";
 
 describe("architect-lab runtime config", () => {
   test("reads Cloudflare AI Gateway config from Worker env", async () => {
@@ -44,7 +48,7 @@ describe("architect-lab runtime config", () => {
 
     expect(Redacted.value(config.apiKey)).toBe("");
     expect(Redacted.value(config.authToken)).toBe("");
-    expect(config.accountId).toBe("");
+    expect(config.accountId).toBe(DefaultAiGatewayAccountId);
     expect(config.chatCompletionsEndpoint).toBe("");
     expect(config.gatewayId).toBe("default");
     expect(AiGatewayChatCompletionsEndpoint).toContain(

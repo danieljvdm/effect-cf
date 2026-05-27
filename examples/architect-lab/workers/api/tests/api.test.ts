@@ -42,7 +42,7 @@ test("creates a room through the API Worker and typed Room Durable Object namesp
 
   expect(response.status).toBe(201);
   expect(body.roomId).toMatch(/^room_/);
-  expect(body.roomUrl).toBe(`https://architect.test/room/${body.roomId}`);
+  expect(body.roomUrl).toBe(`https://worker.test/room/${body.roomId}`);
   expect(calls).toEqual([["getMetadata", body.roomId]]);
 });
 
@@ -276,7 +276,6 @@ test("queues selected AI Gateway model for real architect prompts", async () => 
   const worker = new ApiWorker(
     executionContext,
     makeApiEnv({
-      ARCHITECT_AI_PROVIDER: "real",
       AI_GATEWAY_ACCOUNT_ID: "account",
       AI_GATEWAY_API_KEY: "gateway-key",
       AI_GATEWAY_CHAT_COMPLETIONS_ENDPOINT:
@@ -353,7 +352,6 @@ test("processes real architect prompts from the queue", async () => {
   const worker = new ApiWorker(
     executionContext,
     makeApiEnv({
-      ARCHITECT_AI_PROVIDER: "real",
       AI_GATEWAY_ACCOUNT_ID: "account",
       AI_GATEWAY_API_KEY: "gateway-key",
       AI_GATEWAY_CHAT_COMPLETIONS_ENDPOINT:

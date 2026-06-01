@@ -1,0 +1,59 @@
+@import "tailwindcss";
+@import "tldraw/tldraw.css";
+
+@layer base {
+  :root {
+    color-scheme: light;
+    --sh-class: #93c5fd;
+    --sh-identifier: #d6e3ef;
+    --sh-sign: #8fa3b8;
+    --sh-property: #7dd3fc;
+    --sh-entity: #facc15;
+    --sh-jsxliterals: #c4b5fd;
+    --sh-string: #86efac;
+    --sh-keyword: #fda4af;
+    --sh-comment: #7f8c99;
+    font-family:
+      ui-sans-serif,
+      system-ui,
+      -apple-system,
+      BlinkMacSystemFont,
+      "Segoe UI",
+      sans-serif;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    width: 100%;
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: #f4f6f8;
+  }
+
+  button,
+  input,
+  textarea {
+    font: inherit;
+  }
+
+  @media (max-width: 900px) {
+    body {
+      overflow: auto;
+    }
+  }
+}
+
+@layer components {
+  .sh__line {
+    min-height: 1.5rem;
+  }
+}

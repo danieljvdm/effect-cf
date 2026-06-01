@@ -1,0 +1,32 @@
+{
+  "name": "@architect-lab/domain",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./ai": "./src/ai.ts",
+    "./architecture": "./src/architecture.ts",
+    "./contracts": "./src/contracts.ts",
+    "./export": "./src/export.ts",
+    "./http-api": "./src/http-api.ts",
+    "./resource-templates": "./src/resource-templates.ts",
+    "./runtime": "./src/runtime.ts",
+    "./snippets": "./src/snippets.ts",
+    "./trace": "./src/trace.ts",
+    "./voice": "./src/voice.ts"
+  },
+  "scripts": {
+    "check": "vp check",
+    "test": "vp test"
+  },
+  "dependencies": {
+    "effect": "catalog:",
+    "effect-cf": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260421.1",
+    "vite-plus": "0.1.20",
+    "vitest": "catalog:"
+  }
+}

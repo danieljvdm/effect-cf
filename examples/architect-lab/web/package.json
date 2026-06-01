@@ -1,0 +1,28 @@
+{
+  "name": "architect",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "vp check",
+    "deploy": "bun ./deploy.ts",
+    "dev": "bun ./dev.ts",
+    "test": "vp test"
+  },
+  "dependencies": {
+    "@architect-lab/api-worker": "workspace:*",
+    "@architect-lab/domain": "workspace:*",
+    "@tldraw/sync": "^5.0.1",
+    "effect": "catalog:",
+    "effect-cf": "workspace:*",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "tldraw": "^5.0.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260421.1",
+    "vite-plus": "0.1.20",
+    "vitest": "catalog:",
+    "wrangler": "^4.93.1"
+  }
+}

@@ -19,6 +19,7 @@ Docs are local at `node_modules/vite-plus/docs` or online at https://viteplus.de
 - Reusable package code belongs under `packages/effect-cf/src` and should be exported from `packages/effect-cf/src/index.ts`.
 - Generated `worker-configuration.d.ts` files are local checks, not source-of-truth API definitions.
 - Effect source code can be referenced at `repos/effect-smol` for patterns and API style when changing Effect-heavy code. Do not edit files under `repos/effect-smol`; it is a reference checkout, not package source.
+- For Effect-heavy changes, progressively disclose repo style from `docs/effect-style.md` before editing. In particular, prefer `Effect.fn` for reusable functions that return Effects.
 
 # Repo-Local Skills
 

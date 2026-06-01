@@ -44,7 +44,16 @@ export default defineConfig({
   },
   lint: {
     ignorePatterns: ["apps/example/worker-configuration.d.ts", "repos/**"],
+    jsPlugins: ["./tools/oxlint/no-unsafe-effect-casts.js"],
     options: { typeAware: true, typeCheck: true },
+    overrides: [
+      {
+        files: ["examples/architect-lab/**/src/**/*.{ts,tsx}"],
+        rules: {
+          "effect-cf-local/no-unsafe-effect-casts": "error",
+        },
+      },
+    ],
   },
   run: {
     cache: true,

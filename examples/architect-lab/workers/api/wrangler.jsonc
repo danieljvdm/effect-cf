@@ -1,0 +1,115 @@
+{
+  "$schema": "../../../../node_modules/wrangler/config-schema.json",
+  "name": "architect-lab-api",
+  "main": "./src/index.ts",
+  "compatibility_date": "2026-05-14",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ROOMS",
+        "class_name": "RoomDurableObject",
+      },
+    ],
+  },
+  "kv_namespaces": [
+    {
+      "binding": "ARCHITECT_READ_MODELS",
+      "id": "architect-lab-read-models",
+    },
+  ],
+  "d1_databases": [
+    {
+      "binding": "ARCHITECT_EXPORTS_DB",
+      "database_name": "architect-lab-exports",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ARCHITECT_EXPORTS",
+      "bucket_name": "architect-lab-exports",
+    },
+  ],
+  "workflows": [
+    {
+      "binding": "ARCHITECT_EXPORT_WORKFLOW",
+      "name": "architect-lab-export-workflow",
+      "class_name": "ExportWorkflow",
+    },
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "AI_JOBS",
+        "queue": "architect-lab-ai-jobs",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "architect-lab-ai-jobs",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["RoomDurableObject"],
+    },
+  ],
+  "env": {
+    "production": {
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "ROOMS",
+            "class_name": "RoomDurableObject",
+          },
+        ],
+      },
+      "kv_namespaces": [
+        {
+          "binding": "ARCHITECT_READ_MODELS",
+          "id": "architect-lab-read-models-production",
+        },
+      ],
+      "d1_databases": [
+        {
+          "binding": "ARCHITECT_EXPORTS_DB",
+          "database_name": "architect-lab-exports-production",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "ARCHITECT_EXPORTS",
+          "bucket_name": "architect-lab-exports-production",
+        },
+      ],
+      "workflows": [
+        {
+          "binding": "ARCHITECT_EXPORT_WORKFLOW",
+          "name": "architect-lab-export-workflow-production",
+          "class_name": "ExportWorkflow",
+        },
+      ],
+      "queues": {
+        "producers": [
+          {
+            "binding": "AI_JOBS",
+            "queue": "architect-lab-ai-jobs-production",
+          },
+        ],
+        "consumers": [
+          {
+            "queue": "architect-lab-ai-jobs-production",
+          },
+        ],
+      },
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": ["RoomDurableObject"],
+        },
+      ],
+    },
+  },
+}

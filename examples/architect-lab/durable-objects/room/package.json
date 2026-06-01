@@ -1,0 +1,27 @@
+{
+  "name": "@architect-lab/room",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check": "vp check",
+    "test": "vp test"
+  },
+  "dependencies": {
+    "@architect-lab/domain": "workspace:*",
+    "@architect-lab/tldraw-effect-cf": "workspace:*",
+    "@effect/sql-sqlite-do": "catalog:",
+    "@tldraw/tlschema": "^5.0.1",
+    "@tldraw/utils": "^5.0.1",
+    "effect": "catalog:",
+    "effect-cf": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260421.1",
+    "vite-plus": "0.1.20",
+    "vitest": "catalog:"
+  }
+}

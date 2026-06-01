@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.11.0
+
+### Minor Changes
+
+- [#35](https://github.com/danieljvdm/effect-cf/pull/35) [`fc02f42`](https://github.com/danieljvdm/effect-cf/commit/fc02f421565451c9925f45841f45012473057966) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add a Durable Object SQLite layer for providing `effect/unstable/sql` through `@effect/sql-sqlite-do`.
+
 ## 0.10.0
 
 ### Minor Changes

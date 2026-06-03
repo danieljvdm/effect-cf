@@ -1,5 +1,12 @@
 # effect-cf
 
+## 0.13.1
+
+### Patch Changes
+
+- [#41](https://github.com/danieljvdm/effect-cf/pull/41) [`6e1ddc9`](https://github.com/danieljvdm/effect-cf/commit/6e1ddc9e246ee966dee7a66eae38739241d23816) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Provide an epoch-based Effect clock in Worker and Durable Object runtimes so OTLP
+  span and log timestamps are valid under Cloudflare workerd.
+
 ## 0.13.0
 
 ### Minor Changes

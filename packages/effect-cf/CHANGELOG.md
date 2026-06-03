@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.12.0
+
+### Minor Changes
+
+- [#37](https://github.com/danieljvdm/effect-cf/pull/37) [`4936579`](https://github.com/danieljvdm/effect-cf/commit/4936579eed9b2ad690f3fece468cc435e5bbf8e8) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add Cloudflare OTLP layers for Effect logs, traces, and metrics in Workers and Durable Objects.
+
 ## 0.11.0
 
 ### Minor Changes

@@ -1,4 +1,5 @@
 export * as Binding from "./Binding";
+export * as CloudflareOtlp from "./CloudflareOtlp";
 export * as D1 from "./D1";
 export * as DurableObject from "./DurableObject";
 export * as DurableObjectAlarm from "./DurableObjectAlarm";

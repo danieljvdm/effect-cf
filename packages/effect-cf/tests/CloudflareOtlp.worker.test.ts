@@ -11,10 +11,8 @@ const env: Cloudflare.Env = {};
 it.effect("CloudflareOtlp event instrumentation is compatible with the Workers runtime", () =>
   Effect.gen(function* () {
     const WorkerClass = Worker.make(Layer.empty, {
-      fetch: Effect.succeed(new Response("ok")).pipe(
-        Effect.withSpan("worker.fetch"),
-        Effect.provide(CloudflareOtlp.workerLayer({ signals: ["traces"] })),
-      ),
+      eventLayer: CloudflareOtlp.workerLayer({ signals: ["traces"] }),
+      fetch: Effect.succeed(new Response("ok")).pipe(Effect.withSpan("worker.fetch")),
     });
 
     const worker = new WorkerClass(createExecutionContext(), env);

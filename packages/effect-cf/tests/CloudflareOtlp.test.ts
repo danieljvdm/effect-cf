@@ -218,17 +218,15 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
     Effect.gen(function* () {
       const collector = yield* OtlpCollector;
       const handler = Worker.makeFetchHandler(Layer.empty, {
+        eventLayer: CloudflareOtlp.workerLayer({
+          signals: ["traces"],
+          serialization: "json",
+          serviceName: "effect-cf-test",
+          workerName: "api-worker",
+          tracerExportInterval: "1 hour",
+        }),
         fetch: Effect.succeed(new Response("ok")).pipe(
           Effect.withSpan("test.fetch", { attributes: { route: "/" } }),
-          Effect.provide(
-            CloudflareOtlp.workerLayer({
-              signals: ["traces"],
-              serialization: "json",
-              serviceName: "effect-cf-test",
-              workerName: "api-worker",
-              tracerExportInterval: "1 hour",
-            }),
-          ),
         ),
       });
 
@@ -273,16 +271,12 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
     Effect.gen(function* () {
       const collector = yield* OtlpCollector;
       const handler = Worker.makeFetchHandler(Layer.empty, {
-        fetch: Effect.succeed(new Response("ok")).pipe(
-          Effect.withSpan("resource.fetch"),
-          Effect.provide(
-            CloudflareOtlp.workerLayer({
-              signals: ["traces"],
-              serialization: "json",
-              tracerExportInterval: "1 hour",
-            }),
-          ),
-        ),
+        eventLayer: CloudflareOtlp.workerLayer({
+          signals: ["traces"],
+          serialization: "json",
+          tracerExportInterval: "1 hour",
+        }),
+        fetch: Effect.succeed(new Response("ok")).pipe(Effect.withSpan("resource.fetch")),
       });
 
       const response = yield* Effect.promise(() =>
@@ -343,51 +337,6 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
   );
 });
 
-it.effect("CloudflareOtlp Worker RPC instrumentation preserves method receivers", () =>
-  Effect.gen(function* () {
-    const instrumented = CloudflareOtlp.instrumentWorkerOptions()({
-      rpc: {
-        getPrefix() {
-          return Effect.succeed("rpc");
-        },
-        read(this: { readonly getPrefix: () => Effect.Effect<string> }, value: string) {
-          return Effect.map(this.getPrefix(), (prefix) => `${prefix}:${value}`);
-        },
-      },
-    });
-
-    const rpc = instrumented.rpc;
-    if (rpc === undefined) {
-      throw new Error("Expected instrumented RPC handlers");
-    }
-
-    const result = yield* rpc.read("ok");
-    expect(result).toBe("rpc:ok");
-  }),
-);
-
-it.effect("CloudflareOtlp Worker RPC instrumentation suspends synchronous throws", () =>
-  Effect.gen(function* () {
-    const explode = (): Effect.Effect<string> => {
-      throw new Error("boom");
-    };
-
-    const instrumented = CloudflareOtlp.instrumentWorkerOptions()({
-      rpc: {
-        explode,
-      },
-    });
-
-    const rpc = instrumented.rpc;
-    if (rpc === undefined) {
-      throw new Error("Expected instrumented RPC handlers");
-    }
-
-    const exit = yield* Effect.exit(rpc.explode());
-    expect(exit._tag).toBe("Failure");
-  }),
-);
-
 it.effect("CloudflareOtlp layer is disabled when no endpoint is configured", () =>
   Effect.gen(function* () {
     const originalFetch = globalThis.fetch;
@@ -399,10 +348,8 @@ it.effect("CloudflareOtlp layer is disabled when no endpoint is configured", () 
 
     try {
       const handler = Worker.makeFetchHandler(Layer.empty, {
-        fetch: Effect.succeed(new Response("ok")).pipe(
-          Effect.withSpan("test.fetch"),
-          Effect.provide(CloudflareOtlp.workerLayer({ signals: ["traces"] })),
-        ),
+        eventLayer: CloudflareOtlp.workerLayer({ signals: ["traces"] }),
+        fetch: Effect.succeed(new Response("ok")).pipe(Effect.withSpan("test.fetch")),
       });
 
       const response = yield* Effect.promise(() =>
@@ -428,16 +375,12 @@ it.effect("CloudflareOtlp layer is disabled when no endpoint is configured", () 
 mapleSmokeTest("CloudflareOtlp exports Worker spans to Maple local OTLP", () =>
   Effect.gen(function* () {
     const handler = Worker.makeFetchHandler(Layer.empty, {
-      fetch: Effect.succeed(new Response("ok")).pipe(
-        Effect.withSpan("maple.fetch"),
-        Effect.provide(
-          CloudflareOtlp.workerLayer({
-            signals: ["traces"],
-            serviceName: "effect-cf-maple-smoke",
-            tracerExportInterval: "1 hour",
-          }),
-        ),
-      ),
+      eventLayer: CloudflareOtlp.workerLayer({
+        signals: ["traces"],
+        serviceName: "effect-cf-maple-smoke",
+        tracerExportInterval: "1 hour",
+      }),
+      fetch: Effect.succeed(new Response("ok")).pipe(Effect.withSpan("maple.fetch")),
     });
 
     const response = yield* Effect.promise(() =>

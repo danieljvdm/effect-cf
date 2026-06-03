@@ -8,6 +8,10 @@ class RenderValue extends Context.Service<RenderValue, string>()(
   "effect-cf/test/WorkerBoundary/RenderValue",
 ) {}
 
+class EventValue extends Context.Service<EventValue, string>()(
+  "effect-cf/test/WorkerBoundary/EventValue",
+) {}
+
 const makeExecutionContext = () =>
   ({
     props: undefined,
@@ -167,3 +171,61 @@ test("WorkerConfig.layerWith derives Effect config from non-scalar env bindings"
 
   await expect(response.text()).resolves.toBe("postgres://hyperdrive.test/app");
 });
+
+test("Worker eventLayer applies to fetch, queue, and RPC events", async () => {
+  const events: Array<string> = [];
+  let nextEventId = 0;
+
+  const eventLayer = Layer.effect(
+    EventValue,
+    Effect.acquireRelease(
+      Effect.sync(() => {
+        nextEventId++;
+        events.push(`acquire:${nextEventId}`);
+        return `event:${nextEventId}`;
+      }),
+      (value) => Effect.sync(() => events.push(`release:${value}`)),
+    ),
+  );
+
+  const WorkerClass = Worker.make(Layer.empty, {
+    eventLayer,
+    fetch: Effect.gen(function* () {
+      const value = yield* EventValue;
+      return new Response(value);
+    }),
+    queue: () =>
+      Effect.gen(function* () {
+        const value = yield* EventValue;
+        events.push(`queue:${value}`);
+      }),
+    rpc: {
+      read: () => EventValue,
+    },
+  });
+  const worker = new WorkerClass(makeExecutionContext(), {} as Cloudflare.Env);
+
+  const response = await worker.fetch(new Request("https://worker.test/"));
+  await expect(response.text()).resolves.toBe("event:1");
+  await worker.queue(makeMessageBatch("events"));
+  await expect(worker.read()).resolves.toBe("event:3");
+
+  expect(events).toEqual([
+    "acquire:1",
+    "release:event:1",
+    "acquire:2",
+    "queue:event:2",
+    "release:event:2",
+    "acquire:3",
+    "release:event:3",
+  ]);
+});
+
+const makeMessageBatch = (queue: string): globalThis.MessageBatch<unknown> =>
+  ({
+    queue,
+    messages: [],
+    metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
+    ackAll: () => undefined,
+    retryAll: () => undefined,
+  }) as globalThis.MessageBatch<unknown>;

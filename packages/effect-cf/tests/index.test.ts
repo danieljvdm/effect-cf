@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Schema as S, type Scope } from "effect";
+import { Context, Effect, Layer, Option, Schema as S, type Scope } from "effect";
 import { expect, test } from "vite-plus/test";
 
 import {
@@ -22,6 +22,10 @@ const executionContext = {
 
 class TestService extends Context.Service<TestService, { readonly value: string }>()(
   "effect-cf/test/TestService",
+) {}
+
+class DurableObjectEventValue extends Context.Service<DurableObjectEventValue, string>()(
+  "effect-cf/test/DurableObjectEventValue",
 ) {}
 
 const durableObjectId = {
@@ -191,6 +195,95 @@ test("Durable Object initialize runs when the instance is constructed", async ()
   expect(calls).toEqual(["block", "initialize:counter-id"]);
 });
 
+test("Durable Object eventLayer applies to events but not initialize", async () => {
+  const events: Array<string> = [];
+  let nextEventId = 0;
+  const state = makeDurableObjectState();
+
+  const eventLayer = Layer.effect(
+    DurableObjectEventValue,
+    Effect.acquireRelease(
+      Effect.sync(() => {
+        nextEventId++;
+        events.push(`acquire:${nextEventId}`);
+        return `event:${nextEventId}`;
+      }),
+      (value) => Effect.sync(() => events.push(`release:${value}`)),
+    ),
+  );
+
+  const Live = DurableObject.make(Layer.empty, {
+    eventLayer,
+    initialize: Effect.gen(function* () {
+      const value = yield* Effect.serviceOption(DurableObjectEventValue);
+      events.push(Option.isSome(value) ? `initialize:${value.value}` : "initialize:none");
+    }),
+    fetch: Effect.gen(function* () {
+      const value = yield* DurableObjectEventValue;
+      return new Response(value);
+    }),
+    alarms: Effect.gen(function* () {
+      const value = yield* DurableObjectEventValue;
+      events.push(`alarms:${value}`);
+    }),
+    alarm: () =>
+      Effect.gen(function* () {
+        const value = yield* DurableObjectEventValue;
+        events.push(`alarm:${value}`);
+      }),
+    webSocketMessage: () =>
+      Effect.gen(function* () {
+        const value = yield* DurableObjectEventValue;
+        events.push(`websocket:${value}`);
+      }),
+    webSocketClose: () =>
+      Effect.gen(function* () {
+        const value = yield* DurableObjectEventValue;
+        events.push(`websocket-close:${value}`);
+      }),
+    webSocketError: () =>
+      Effect.gen(function* () {
+        const value = yield* DurableObjectEventValue;
+        events.push(`websocket-error:${value}`);
+      }),
+    rpc: {
+      read: () => DurableObjectEventValue,
+    },
+  });
+
+  const object = new Live(state.raw, {} as Cloudflare.Env);
+  await Promise.all(state.waitUntilPromises);
+
+  const response = await object.fetch!(new Request("https://do.test/"));
+  await expect(response.text()).resolves.toBe("event:1");
+  await object.alarm!();
+  await object.webSocketMessage!({} as WebSocket, "hello");
+  await object.webSocketClose!({} as WebSocket, 1000, "done", true);
+  await object.webSocketError!({} as WebSocket, new Error("boom"));
+  await expect(object.read()).resolves.toBe("event:6");
+
+  expect(events).toEqual([
+    "initialize:none",
+    "acquire:1",
+    "release:event:1",
+    "acquire:2",
+    "alarms:event:2",
+    "alarm:event:2",
+    "release:event:2",
+    "acquire:3",
+    "websocket:event:3",
+    "release:event:3",
+    "acquire:4",
+    "websocket-close:event:4",
+    "release:event:4",
+    "acquire:5",
+    "websocket-error:event:5",
+    "release:event:5",
+    "acquire:6",
+    "release:event:6",
+  ]);
+});
+
 test("RPC-only Workers return a default 404 fetch response", async () => {
   const WorkerClass = Worker.make(Layer.empty, {
     rpc: {
@@ -269,6 +362,13 @@ test("Worker.Api exposes Cloudflare RPC-style pipelining types", () => {
 
     expectType<Promise<{ readonly nested: { readonly value: string } }>>(server.getNested());
     expectType<Promise<string>>(client.getNested().nested.value);
+
+    void EchoWorker.make(Layer.empty, {
+      eventLayer: Layer.succeed(DurableObjectEventValue, "event"),
+      rpc: {
+        echo: () => DurableObjectEventValue,
+      },
+    });
   };
 
   void assertTypes;
@@ -334,6 +434,15 @@ test("DurableObject preserves server, client, handler, and namespace types", () 
         expectType<DurableObjectWebSocket.DurableWebSocket>(socket);
         expectType<unknown>(error);
         return Effect.void;
+      },
+    });
+
+    void Counter.make(Layer.empty, {
+      eventLayer: Layer.succeed(DurableObjectEventValue, "event"),
+      rpc: {
+        get: () => Effect.as(DurableObjectEventValue, 1),
+        add: (amount) => Effect.as(DurableObjectEventValue, amount),
+        resource: () => DurableObjectEventValue,
       },
     });
 
@@ -555,3 +664,26 @@ test("Service binding rpc uses the shared dynamic method validation", async () =
     ),
   ).resolves.toBe("hello");
 });
+
+const makeDurableObjectState = () => {
+  const waitUntilPromises: Array<Promise<unknown>> = [];
+  const raw = {
+    id: durableObjectId,
+    storage: {} as globalThis.DurableObjectStorage,
+    waitUntil: (promise: Promise<unknown>) => {
+      waitUntilPromises.push(promise);
+    },
+    blockConcurrencyWhile: (callback: () => Promise<unknown>) => callback(),
+    acceptWebSocket() {},
+    getWebSockets: () => [],
+    setWebSocketAutoResponse() {},
+    getWebSocketAutoResponse: () => null,
+    getWebSocketAutoResponseTimestamp: () => null,
+    setHibernatableWebSocketEventTimeout() {},
+    getHibernatableWebSocketEventTimeout: () => null,
+    getTags: () => [],
+    abort() {},
+  } as unknown as globalThis.DurableObjectState;
+
+  return { raw, waitUntilPromises };
+};

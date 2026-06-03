@@ -1,5 +1,13 @@
 # effect-cf
 
+## 0.13.0
+
+### Minor Changes
+
+- [#39](https://github.com/danieljvdm/effect-cf/pull/39) [`ac22ae2`](https://github.com/danieljvdm/effect-cf/commit/ac22ae2d84fbed6ac23a6a77c841a8305003aa6e) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add `eventLayer` options to Worker and Durable Object entrypoints for per-event
+  Effect layer provisioning, and remove the Cloudflare OTLP handler instrumentation
+  helper APIs.
+
 ## 0.12.0
 
 ### Minor Changes

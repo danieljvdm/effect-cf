@@ -18,6 +18,23 @@ const mapleSmokeTest = processEnv?.MAPLE_OTLP_SMOKE === "1" ? it.effect : it.eff
 
 const makeEnv = (env: Record<string, string> = {}): Cloudflare.Env => env;
 
+const makeSettings = (
+  settings: Partial<CloudflareOtlp.Settings> = {},
+): CloudflareOtlp.Settings => ({
+  endpoint: Option.none(),
+  logsEndpoint: Option.none(),
+  tracesEndpoint: Option.none(),
+  metricsEndpoint: Option.none(),
+  headers: Option.none(),
+  logsHeaders: Option.none(),
+  tracesHeaders: Option.none(),
+  metricsHeaders: Option.none(),
+  serviceName: Option.none(),
+  serviceVersion: Option.none(),
+  resourceAttributes: Option.none(),
+  ...settings,
+});
+
 const getTcpPort = (address: HttpServer.Address): number => {
   if (address._tag === "TcpAddress") {
     return address.port;
@@ -148,20 +165,41 @@ it.effect("CloudflareOtlp settings read standard OTEL config from WorkerEnvironm
   }),
 );
 
+it.effect("CloudflareOtlp settings treat empty OTEL env values as unset", () =>
+  Effect.gen(function* () {
+    const env = makeEnv({
+      OTEL_EXPORTER_OTLP_ENDPOINT: "",
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: " ",
+      OTEL_EXPORTER_OTLP_HEADERS: "",
+      OTEL_EXPORTER_OTLP_TRACES_HEADERS: " ",
+      OTEL_SERVICE_NAME: "",
+      OTEL_SERVICE_VERSION: " ",
+      OTEL_RESOURCE_ATTRIBUTES: "",
+    });
+
+    const settings = yield* CloudflareOtlp.CloudflareOtlpSettings.pipe(
+      Effect.provide(CloudflareOtlp.settingsLayer),
+      Effect.provide(Layer.succeed(WorkerEnvironment, env)),
+    );
+
+    expect(Option.isNone(settings.endpoint)).toBe(true);
+    expect(Option.isNone(settings.tracesEndpoint)).toBe(true);
+    expect(Option.isNone(settings.headers)).toBe(true);
+    expect(Option.isNone(settings.tracesHeaders)).toBe(true);
+    expect(Option.isNone(settings.serviceName)).toBe(true);
+    expect(Option.isNone(settings.serviceVersion)).toBe(true);
+    expect(Option.isNone(settings.resourceAttributes)).toBe(true);
+  }),
+);
+
 layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
   it.effect("accepts direct settings service overrides", () =>
     Effect.gen(function* () {
       const collector = yield* OtlpCollector;
-      const settings: CloudflareOtlp.Settings = {
-        endpoint: Option.none(),
-        logsEndpoint: Option.none(),
+      const settings = makeSettings({
         tracesEndpoint: Option.some(`${collector.endpoint}/v1/traces`),
-        metricsEndpoint: Option.none(),
-        headers: Option.none(),
         serviceName: Option.some("direct-settings-service"),
-        serviceVersion: Option.none(),
-        resourceAttributes: Option.none(),
-      };
+      });
 
       yield* Effect.succeed("ok").pipe(
         Effect.withSpan("direct.settings"),
@@ -200,6 +238,7 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
           makeEnv({
             OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.endpoint}/v1/traces`,
             OTEL_EXPORTER_OTLP_HEADERS: "x-api-key=test-secret",
+            OTEL_EXPORTER_OTLP_TRACES_HEADERS: "x-api-key=trace-secret,x-trace-key=trace-only",
           }),
           makeExecutionContext(),
         ),
@@ -209,7 +248,8 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
 
       const request = yield* collector.nextRequest;
       expect(request.path).toBe("/v1/traces");
-      expect(request.headers["x-api-key"]).toBe("test-secret");
+      expect(request.headers["x-api-key"]).toBe("trace-secret");
+      expect(request.headers["x-trace-key"]).toBe("trace-only");
 
       const payload: unknown = JSON.parse(request.body);
       const resourceSpans = getArray(payload, "resourceSpans");
@@ -228,7 +268,125 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
       expect(getStringAttribute(spanAttributes, "route")).toBe("/");
     }),
   );
+
+  it.effect("parses resource attributes and lets OTEL_SERVICE_NAME take precedence", () =>
+    Effect.gen(function* () {
+      const collector = yield* OtlpCollector;
+      const handler = Worker.makeFetchHandler(Layer.empty, {
+        fetch: Effect.succeed(new Response("ok")).pipe(
+          Effect.withSpan("resource.fetch"),
+          Effect.provide(
+            CloudflareOtlp.workerLayer({
+              signals: ["traces"],
+              serialization: "json",
+              tracerExportInterval: "1 hour",
+            }),
+          ),
+        ),
+      });
+
+      const response = yield* Effect.promise(() =>
+        handler.fetch(
+          new Request("https://worker.test/resource"),
+          makeEnv({
+            OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.endpoint}/v1/traces`,
+            OTEL_SERVICE_NAME: "env-service",
+            OTEL_RESOURCE_ATTRIBUTES:
+              "service.name=resource-service,service.version=1.2.3,deployment.environment=dev",
+          }),
+          makeExecutionContext(),
+        ),
+      );
+
+      expect(response.status).toBe(200);
+
+      const request = yield* collector.nextRequest;
+      const payload: unknown = JSON.parse(request.body);
+      const resourceSpans = getArray(payload, "resourceSpans");
+      const resource = getRecord(resourceSpans[0], "resource");
+      const resourceAttributes = getArray(resource, "attributes");
+
+      expect(getStringAttribute(resourceAttributes, "service.name")).toBe("env-service");
+      expect(getStringAttribute(resourceAttributes, "service.version")).toBe("1.2.3");
+      expect(getStringAttribute(resourceAttributes, "deployment.environment")).toBe("dev");
+    }),
+  );
+
+  it.effect("derives signal paths from the generic OTLP endpoint", () =>
+    Effect.gen(function* () {
+      const collector = yield* OtlpCollector;
+
+      yield* Effect.succeed("ok").pipe(
+        Effect.withSpan("generic.endpoint"),
+        Effect.provide(
+          CloudflareOtlp.workerLayer({
+            signals: ["traces"],
+            serialization: "json",
+            tracerExportInterval: "1 hour",
+          }),
+        ),
+        Effect.provide(
+          Layer.succeed(
+            CloudflareOtlp.CloudflareOtlpSettings,
+            makeSettings({
+              endpoint: Option.some(`${collector.endpoint}/base/`),
+              serviceName: Option.some("generic-endpoint-test"),
+            }),
+          ),
+        ),
+      );
+
+      const request = yield* collector.nextRequest;
+      expect(request.path).toBe("/base/v1/traces");
+      expect(request.body).toContain("generic.endpoint");
+    }),
+  );
 });
+
+it.effect("CloudflareOtlp Worker RPC instrumentation preserves method receivers", () =>
+  Effect.gen(function* () {
+    const instrumented = CloudflareOtlp.instrumentWorkerOptions()({
+      rpc: {
+        getPrefix() {
+          return Effect.succeed("rpc");
+        },
+        read(this: { readonly getPrefix: () => Effect.Effect<string> }, value: string) {
+          return Effect.map(this.getPrefix(), (prefix) => `${prefix}:${value}`);
+        },
+      },
+    });
+
+    const rpc = instrumented.rpc;
+    if (rpc === undefined) {
+      throw new Error("Expected instrumented RPC handlers");
+    }
+
+    const result = yield* rpc.read("ok");
+    expect(result).toBe("rpc:ok");
+  }),
+);
+
+it.effect("CloudflareOtlp Worker RPC instrumentation suspends synchronous throws", () =>
+  Effect.gen(function* () {
+    const explode = (): Effect.Effect<string> => {
+      throw new Error("boom");
+    };
+
+    const instrumented = CloudflareOtlp.instrumentWorkerOptions()({
+      rpc: {
+        explode,
+      },
+    });
+
+    const rpc = instrumented.rpc;
+    if (rpc === undefined) {
+      throw new Error("Expected instrumented RPC handlers");
+    }
+
+    const exit = yield* Effect.exit(rpc.explode());
+    expect(exit._tag).toBe("Failure");
+  }),
+);
 
 it.effect("CloudflareOtlp layer is disabled when no endpoint is configured", () =>
   Effect.gen(function* () {
@@ -248,7 +406,14 @@ it.effect("CloudflareOtlp layer is disabled when no endpoint is configured", () 
       });
 
       const response = yield* Effect.promise(() =>
-        handler.fetch(new Request("https://worker.test/"), makeEnv(), makeExecutionContext()),
+        handler.fetch(
+          new Request("https://worker.test/"),
+          makeEnv({
+            OTEL_EXPORTER_OTLP_ENDPOINT: "",
+            OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: " ",
+          }),
+          makeExecutionContext(),
+        ),
       );
 
       expect(response.status).toBe(200);

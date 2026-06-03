@@ -40,28 +40,41 @@ export interface Settings {
   readonly metricsEndpoint: Option.Option<string>;
   /** Comma-separated OTLP headers, read from `OTEL_EXPORTER_OTLP_HEADERS`. */
   readonly headers: Option.Option<string>;
+  /** Logs-specific OTLP headers, read from `OTEL_EXPORTER_OTLP_LOGS_HEADERS`. */
+  readonly logsHeaders: Option.Option<string>;
+  /** Traces-specific OTLP headers, read from `OTEL_EXPORTER_OTLP_TRACES_HEADERS`. */
+  readonly tracesHeaders: Option.Option<string>;
+  /** Metrics-specific OTLP headers, read from `OTEL_EXPORTER_OTLP_METRICS_HEADERS`. */
+  readonly metricsHeaders: Option.Option<string>;
   /** Service name, read from `OTEL_SERVICE_NAME`. */
   readonly serviceName: Option.Option<string>;
-  /** Service version, read from `OTEL_SERVICE_VERSION`. */
+  /** Service version, read from the effect-cf convenience alias `OTEL_SERVICE_VERSION`. */
   readonly serviceVersion: Option.Option<string>;
   /** Resource attributes, read from `OTEL_RESOURCE_ATTRIBUTES`. */
   readonly resourceAttributes: Option.Option<Record<string, string>>;
 }
 
 /**
- * Standard OpenTelemetry environment configuration for Cloudflare OTLP export.
+ * Supported OpenTelemetry environment configuration for Cloudflare OTLP export.
  *
  * This config intentionally uses the conventional `OTEL_*` variable names so
- * deployments can share the same settings used by other OpenTelemetry SDKs:
+ * deployments can share the same settings used by other OpenTelemetry SDKs.
+ * It covers the OTLP HTTP settings supported by the Effect OTLP layers:
  *
  * - `OTEL_EXPORTER_OTLP_ENDPOINT`
  * - `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`
  * - `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`
  * - `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`
  * - `OTEL_EXPORTER_OTLP_HEADERS`
+ * - `OTEL_EXPORTER_OTLP_LOGS_HEADERS`
+ * - `OTEL_EXPORTER_OTLP_TRACES_HEADERS`
+ * - `OTEL_EXPORTER_OTLP_METRICS_HEADERS`
  * - `OTEL_SERVICE_NAME`
- * - `OTEL_SERVICE_VERSION`
  * - `OTEL_RESOURCE_ATTRIBUTES`
+ *
+ * `OTEL_SERVICE_VERSION` is also accepted as an effect-cf convenience alias.
+ * The standard OpenTelemetry way to configure service version is
+ * `OTEL_RESOURCE_ATTRIBUTES=service.version=...`.
  *
  * Consumers with non-standard binding names should map those names into
  * {@link CloudflareOtlpSettings} rather than changing this config globally.
@@ -72,6 +85,9 @@ export const settingsConfig = Config.all({
   tracesEndpoint: Config.string("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT").pipe(Config.option),
   metricsEndpoint: Config.string("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT").pipe(Config.option),
   headers: Config.string("OTEL_EXPORTER_OTLP_HEADERS").pipe(Config.option),
+  logsHeaders: Config.string("OTEL_EXPORTER_OTLP_LOGS_HEADERS").pipe(Config.option),
+  tracesHeaders: Config.string("OTEL_EXPORTER_OTLP_TRACES_HEADERS").pipe(Config.option),
+  metricsHeaders: Config.string("OTEL_EXPORTER_OTLP_METRICS_HEADERS").pipe(Config.option),
   serviceName: Config.string("OTEL_SERVICE_NAME").pipe(Config.option),
   serviceVersion: Config.string("OTEL_SERVICE_VERSION").pipe(Config.option),
   resourceAttributes: Config.schema(
@@ -92,40 +108,16 @@ export const settingsConfig = Config.all({
  * ```ts
  * const CustomOtlpSettings = Layer.effect(
  *   CloudflareOtlp.CloudflareOtlpSettings,
- *   Effect.gen(function* () {
- *     const env = yield* WorkerEnvironment;
- *
- *     return {
- *       endpoint: Option.fromNullable(env.MY_OTLP_ENDPOINT),
- *       logsEndpoint: Option.none(),
- *       tracesEndpoint: Option.none(),
- *       metricsEndpoint: Option.none(),
- *       headers: Option.none(),
- *       serviceName: Option.some("api-worker"),
- *       serviceVersion: Option.none(),
- *       resourceAttributes: Option.none(),
- *     };
+ *   Config.all({
+ *     ...CloudflareOtlp.settingsConfig,
+ *     endpoint: Config.string("MY_OTLP_ENDPOINT").pipe(Config.option),
  *   }),
- * );
+ * ).pipe(Layer.provide(WorkerConfig.layer));
  * ```
  */
 export class CloudflareOtlpSettings extends Context.Service<CloudflareOtlpSettings, Settings>()(
   "effect-cf/CloudflareOtlpSettings",
 ) {}
-
-/**
- * Layer that reads standard OpenTelemetry settings from the current Cloudflare
- * `env` object.
- *
- * The layer depends on {@link WorkerEnvironment} and installs a
- * Cloudflare-backed Effect `ConfigProvider`, so `settingsConfig` reads from
- * Worker vars/secrets instead of Node process environment variables.
- */
-export const settingsLayer: Layer.Layer<
-  CloudflareOtlpSettings,
-  Config.ConfigError,
-  WorkerEnvironment
-> = Layer.effect(CloudflareOtlpSettings, settingsConfig).pipe(Layer.provide(WorkerConfig.layer));
 
 /** Resource metadata shared by Worker and Durable Object OTLP layers. */
 export interface ResourceOptions {
@@ -186,6 +178,47 @@ const allSignals: ReadonlyArray<Signal> = ["logs", "traces", "metrics"];
 const optionToUndefined = <A>(option: Option.Option<A>): A | undefined =>
   Option.isSome(option) ? option.value : undefined;
 
+const nonEmptyStringOption = (option: Option.Option<string>): Option.Option<string> =>
+  Option.flatMap(option, (value) => {
+    const trimmed = value.trim();
+    return trimmed === "" ? Option.none() : Option.some(trimmed);
+  });
+
+const nonEmptyRecordOption = (
+  option: Option.Option<Record<string, string>>,
+): Option.Option<Record<string, string>> =>
+  Option.filter(option, (value) => Object.keys(value).length > 0);
+
+const normalizeSettings = (settings: Settings): Settings => ({
+  endpoint: nonEmptyStringOption(settings.endpoint),
+  logsEndpoint: nonEmptyStringOption(settings.logsEndpoint),
+  tracesEndpoint: nonEmptyStringOption(settings.tracesEndpoint),
+  metricsEndpoint: nonEmptyStringOption(settings.metricsEndpoint),
+  headers: nonEmptyStringOption(settings.headers),
+  logsHeaders: nonEmptyStringOption(settings.logsHeaders),
+  tracesHeaders: nonEmptyStringOption(settings.tracesHeaders),
+  metricsHeaders: nonEmptyStringOption(settings.metricsHeaders),
+  serviceName: nonEmptyStringOption(settings.serviceName),
+  serviceVersion: nonEmptyStringOption(settings.serviceVersion),
+  resourceAttributes: nonEmptyRecordOption(settings.resourceAttributes),
+});
+
+/**
+ * Layer that reads standard OpenTelemetry settings from the current Cloudflare
+ * `env` object.
+ *
+ * The layer depends on {@link WorkerEnvironment} and installs a
+ * Cloudflare-backed Effect `ConfigProvider`, so `settingsConfig` reads from
+ * Worker vars/secrets instead of Node process environment variables.
+ */
+export const settingsLayer: Layer.Layer<
+  CloudflareOtlpSettings,
+  Config.ConfigError,
+  WorkerEnvironment
+> = Layer.effect(CloudflareOtlpSettings, settingsConfig.pipe(Config.map(normalizeSettings))).pipe(
+  Layer.provide(WorkerConfig.layer),
+);
+
 const selectedSignals = (signals: ReadonlyArray<Signal> | undefined): ReadonlySet<Signal> =>
   new Set(signals ?? allSignals);
 
@@ -199,7 +232,7 @@ const withDefinedAttributes = (attributes: Record<string, unknown>): Record<stri
   return out;
 };
 
-const parseHeaders = (input: Option.Option<string>): Headers.Input | undefined => {
+const parseHeaders = (input: Option.Option<string>): Record<string, string> | undefined => {
   if (Option.isNone(input) || input.value.trim() === "") {
     return undefined;
   }
@@ -219,6 +252,22 @@ const parseHeaders = (input: Option.Option<string>): Headers.Input | undefined =
   }
 
   return headers;
+};
+
+const mergeHeaders = (
+  common: Option.Option<string>,
+  signalSpecific: Option.Option<string>,
+): Headers.Input | undefined => {
+  const commonHeaders = parseHeaders(common);
+  const signalHeaders = parseHeaders(signalSpecific);
+  if (commonHeaders === undefined && signalHeaders === undefined) {
+    return undefined;
+  }
+
+  return {
+    ...commonHeaders,
+    ...signalHeaders,
+  };
 };
 
 const decodeHeaderComponent = (value: string): string => {
@@ -252,7 +301,6 @@ const commonOtlpOptions = (
   runtimeAttributes: Record<string, unknown>,
 ) => ({
   resource: makeResource(settings, options, runtimeAttributes),
-  headers: parseHeaders(settings.headers),
   maxBatchSize: options.maxBatchSize,
   loggerExportInterval: options.loggerExportInterval,
   loggerExcludeLogSpans: options.loggerExcludeLogSpans,
@@ -270,17 +318,18 @@ const serializationLayer = (serialization: Serialization | undefined) =>
 const resolveSettings: Effect.Effect<Settings, Config.ConfigError> = Effect.gen(function* () {
   const settings = yield* Effect.serviceOption(CloudflareOtlpSettings);
   if (Option.isSome(settings)) {
-    return settings.value;
+    return normalizeSettings(settings.value);
   }
 
   const env = yield* Effect.serviceOption(WorkerEnvironment);
   if (Option.isSome(env)) {
-    return yield* settingsConfig.pipe(
+    const settings = yield* settingsConfig.pipe(
       Effect.provide(ConfigProvider.layer(Effect.succeed(WorkerConfig.providerFromEnv(env.value)))),
     );
+    return normalizeSettings(settings);
   }
 
-  return yield* settingsConfig;
+  return normalizeSettings(yield* settingsConfig);
 });
 
 const mergeSignalLayers = (
@@ -297,12 +346,14 @@ const mergeSignalLayers = (
   return merged;
 };
 
+const emptyLayer: Layer.Layer<never, never, never> = Layer.empty;
+
 const makeLayerFromSettings = (
   options: LayerOptions = {},
   runtimeAttributes: Record<string, unknown> = {},
 ): Layer.Layer<never, never, never> =>
   Layer.unwrap(
-    Effect.map(resolveSettings.pipe(Effect.orDie), (settings) => {
+    Effect.map(resolveSettings, (settings) => {
       const signals = selectedSignals(options.signals);
       const endpoint = optionToUndefined(settings.endpoint);
       const logsEndpoint = optionToUndefined(settings.logsEndpoint);
@@ -310,11 +361,21 @@ const makeLayerFromSettings = (
       const metricsEndpoint = optionToUndefined(settings.metricsEndpoint);
       const hasSpecificEndpoint =
         logsEndpoint !== undefined || tracesEndpoint !== undefined || metricsEndpoint !== undefined;
+      const hasSpecificHeaders =
+        Option.isSome(settings.logsHeaders) ||
+        Option.isSome(settings.tracesHeaders) ||
+        Option.isSome(settings.metricsHeaders);
       const common = commonOtlpOptions(settings, options, runtimeAttributes);
 
-      if (endpoint !== undefined && !hasSpecificEndpoint && signals.size === 3) {
+      if (
+        endpoint !== undefined &&
+        !hasSpecificEndpoint &&
+        !hasSpecificHeaders &&
+        signals.size === 3
+      ) {
         return Otlp.layer({
           baseUrl: endpoint,
+          headers: parseHeaders(settings.headers),
           ...common,
         }).pipe(
           Layer.provide(serializationLayer(options.serialization)),
@@ -332,7 +393,7 @@ const makeLayerFromSettings = (
             OtlpLogger.layer({
               url,
               resource: common.resource,
-              headers: common.headers,
+              headers: mergeHeaders(settings.headers, settings.logsHeaders),
               exportInterval: common.loggerExportInterval,
               maxBatchSize: common.maxBatchSize,
               shutdownTimeout: common.shutdownTimeout,
@@ -355,7 +416,7 @@ const makeLayerFromSettings = (
             OtlpTracer.layer({
               url,
               resource: common.resource,
-              headers: common.headers,
+              headers: mergeHeaders(settings.headers, settings.tracesHeaders),
               exportInterval: common.tracerExportInterval,
               maxBatchSize: common.maxBatchSize,
               context: common.tracerContext,
@@ -377,7 +438,7 @@ const makeLayerFromSettings = (
             OtlpMetrics.layer({
               url,
               resource: common.resource,
-              headers: common.headers,
+              headers: mergeHeaders(settings.headers, settings.metricsHeaders),
               exportInterval: common.metricsExportInterval,
               shutdownTimeout: common.shutdownTimeout,
               temporality: common.metricsTemporality,
@@ -390,7 +451,13 @@ const makeLayerFromSettings = (
       }
 
       return mergeSignalLayers(layers);
-    }),
+    }).pipe(
+      Effect.catch((error: Config.ConfigError) =>
+        Effect.logWarning("CloudflareOtlp disabled because OTLP configuration is invalid", {
+          error: String(error),
+        }).pipe(Effect.as(emptyLayer)),
+      ),
+    ),
   );
 
 const makeLayer = (
@@ -468,7 +535,8 @@ const provideRpcLayer = <
         return handler;
       }
 
-      return (...args: Array<any>) => handler(...args).pipe(Effect.provide(layer));
+      return (...args: Array<any>) =>
+        Effect.suspend(() => Reflect.apply(handler, receiver, args)).pipe(Effect.provide(layer));
     },
   });
 };

@@ -10,6 +10,7 @@ import type * as Rpc from "./Rpc";
 import type * as RpcDefinition from "./RpcDefinition";
 import type * as ServiceBinding from "./ServiceBinding";
 import * as WorkerDefinition from "./WorkerDefinition";
+import * as CloudflareClock from "./internal/Clock";
 import * as Entrypoint from "./internal/Entrypoint";
 import { fromExecutionContext, type RunWaitUntilEffect } from "./internal/WorkerContext";
 
@@ -241,6 +242,7 @@ export function make<
         Promise.reject(new Error("WorkerContext runtime is not initialized"));
 
       const services = Layer.mergeAll(
+        CloudflareClock.layer,
         Layer.succeed(ExecutionContext, ctx),
         ConfigProvider.layer(Effect.succeed(WorkerConfig.providerFromEnv(env))),
         Layer.succeed(

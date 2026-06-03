@@ -10,6 +10,7 @@ import type * as Binding from "./Binding";
 import * as DurableObjectDefinition from "./DurableObjectDefinition";
 import type * as DurableObjectNamespace from "./DurableObjectNamespace";
 import type * as Rpc from "./Rpc";
+import * as CloudflareClock from "./internal/Clock";
 import * as Entrypoint from "./internal/Entrypoint";
 
 const reservedMethodNames = new Set<string>([
@@ -161,6 +162,7 @@ export const make = <
       super(state, env);
 
       const services = Layer.mergeAll(
+        CloudflareClock.layer,
         Layer.succeed(DurableObjectState, fromDurableObjectState(state)),
         Layer.succeed(WorkerEnvironment, env),
       );

@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Option, Schema as S, type Scope } from "effect";
+import { Clock, Context, Effect, Layer, Option, Schema as S, type Scope } from "effect";
 import { expect, test } from "vite-plus/test";
 
 import {
@@ -282,6 +282,29 @@ test("Durable Object eventLayer applies to events but not initialize", async () 
     "acquire:6",
     "release:event:6",
   ]);
+});
+
+test("Durable Object handlers use an epoch nanosecond clock derived from wall time", async () => {
+  const originalDateNow = Date.now;
+  const fixedMillis = Date.UTC(2030, 0, 2, 3, 4, 5);
+  Date.now = () => fixedMillis;
+
+  try {
+    const Live = DurableObject.make(Layer.empty, {
+      fetch: Effect.gen(function* () {
+        const nanos = yield* Clock.currentTimeNanos;
+        return Response.json({ nanos: nanos.toString() });
+      }),
+    });
+    const object = new Live(makeDurableObjectState().raw, {} as Cloudflare.Env);
+
+    const response = await object.fetch!(new Request("https://do.test/clock"));
+    const body = (await response.json()) as { readonly nanos: string };
+
+    expect(BigInt(body.nanos)).toBe(BigInt(fixedMillis) * BigInt(1_000_000));
+  } finally {
+    Date.now = originalDateNow;
+  }
 });
 
 test("RPC-only Workers return a default 404 fetch response", async () => {

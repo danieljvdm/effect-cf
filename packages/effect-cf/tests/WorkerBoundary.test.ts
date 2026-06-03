@@ -1,4 +1,4 @@
-import { Config, ConfigProvider, Context, Effect, Layer, Stream } from "effect";
+import { Clock, Config, ConfigProvider, Context, Effect, Layer, Stream } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
 import { expect, test } from "vite-plus/test";
 
@@ -170,6 +170,29 @@ test("WorkerConfig.layerWith derives Effect config from non-scalar env bindings"
   const response = await worker.fetch(new Request("https://worker.test/"));
 
   await expect(response.text()).resolves.toBe("postgres://hyperdrive.test/app");
+});
+
+test("Worker handlers use an epoch nanosecond clock derived from wall time", async () => {
+  const originalDateNow = Date.now;
+  const fixedMillis = Date.UTC(2030, 0, 2, 3, 4, 5);
+  Date.now = () => fixedMillis;
+
+  try {
+    const WorkerClass = Worker.make(Layer.empty, {
+      fetch: Effect.gen(function* () {
+        const nanos = yield* Clock.currentTimeNanos;
+        return Response.json({ nanos: nanos.toString() });
+      }),
+    });
+    const worker = new WorkerClass(makeExecutionContext(), {} as Cloudflare.Env);
+
+    const response = await worker.fetch(new Request("https://worker.test/clock"));
+    const body = (await response.json()) as { readonly nanos: string };
+
+    expect(BigInt(body.nanos)).toBe(BigInt(fixedMillis) * BigInt(1_000_000));
+  } finally {
+    Date.now = originalDateNow;
+  }
 });
 
 test("Worker eventLayer applies to fetch, queue, and RPC events", async () => {

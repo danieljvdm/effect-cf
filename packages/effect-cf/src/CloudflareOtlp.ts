@@ -10,10 +10,8 @@ import {
   OtlpTracer,
 } from "effect/unstable/observability";
 
-import * as DurableObject from "./DurableObject";
 import { DurableObjectState } from "./DurableObjectState";
 import { WorkerConfig, WorkerEnvironment } from "./Environment";
-import * as Worker from "./Worker";
 
 /** Telemetry signal groups supported by the Cloudflare OTLP layers. */
 export type Signal = "logs" | "traces" | "metrics";
@@ -516,113 +514,3 @@ export const durableObjectLayer = (options: LayerOptions & DurableObjectResource
       }),
     ),
   );
-
-const provideRpcLayer = <
-  Rpc extends Record<string, (...args: Array<any>) => Effect.Effect<any, any, any>>,
-  RLayer,
->(
-  rpc: Rpc | undefined,
-  layer: Layer.Layer<never, never, RLayer>,
-): Rpc | undefined => {
-  if (rpc === undefined) {
-    return undefined;
-  }
-
-  return new Proxy(rpc, {
-    get(target, property, receiver) {
-      const handler = Reflect.get(target, property, receiver);
-      if (typeof handler !== "function") {
-        return handler;
-      }
-
-      return (...args: Array<any>) =>
-        Effect.suspend(() => Reflect.apply(handler, receiver, args)).pipe(Effect.provide(layer));
-    },
-  });
-};
-
-/**
- * Instrument Worker lifecycle handlers with event-scoped OTLP telemetry.
- *
- * Each defined handler is provided with {@link workerLayer}. Because Worker
- * handlers run inside `Effect.scoped`, the exporter scope closes and flushes at
- * the end of each Cloudflare event.
- */
-export const instrumentWorkerOptions =
-  (options?: LayerOptions & WorkerResourceOptions) =>
-  <ROut, Rpc extends Worker.WorkerRpc<ROut>>(
-    handlers: Worker.WorkerOptions<ROut, Rpc>,
-  ): Worker.WorkerOptions<ROut | WorkerEnvironment | CloudflareOtlpSettings, Rpc> => {
-    const telemetryLayer = workerLayer(options);
-    const queue = handlers.queue;
-
-    return {
-      ...handlers,
-      fetch:
-        handlers.fetch === undefined
-          ? undefined
-          : handlers.fetch.pipe(Effect.provide(telemetryLayer)),
-      queue:
-        queue === undefined
-          ? undefined
-          : (batch) => queue(batch).pipe(Effect.provide(telemetryLayer)),
-      rpc: provideRpcLayer(handlers.rpc, telemetryLayer),
-    };
-  };
-
-/**
- * Instrument Durable Object lifecycle handlers with event-scoped OTLP telemetry.
- *
- * Each defined handler is provided with {@link durableObjectLayer}. Because
- * Durable Object handlers run inside `Effect.scoped`, the exporter scope closes
- * and flushes at the end of each Cloudflare event.
- */
-export const instrumentDurableObjectOptions =
-  (options?: LayerOptions & DurableObjectResourceOptions) =>
-  <ROut, Rpc extends DurableObject.DurableObjectRpc<ROut>>(
-    handlers: DurableObject.DurableObjectOptions<ROut, Rpc>,
-  ): DurableObject.DurableObjectOptions<
-    ROut | WorkerEnvironment | DurableObjectState | CloudflareOtlpSettings,
-    Rpc
-  > => {
-    const telemetryLayer = durableObjectLayer(options);
-    const alarm = handlers.alarm;
-    const webSocketMessage = handlers.webSocketMessage;
-    const webSocketClose = handlers.webSocketClose;
-    const webSocketError = handlers.webSocketError;
-
-    return {
-      ...handlers,
-      initialize:
-        handlers.initialize === undefined
-          ? undefined
-          : handlers.initialize.pipe(Effect.provide(telemetryLayer)),
-      fetch:
-        handlers.fetch === undefined
-          ? undefined
-          : handlers.fetch.pipe(Effect.provide(telemetryLayer)),
-      alarms:
-        handlers.alarms === undefined
-          ? undefined
-          : handlers.alarms.pipe(Effect.provide(telemetryLayer)),
-      alarm:
-        alarm === undefined
-          ? undefined
-          : (alarmInfo) => alarm(alarmInfo).pipe(Effect.provide(telemetryLayer)),
-      webSocketMessage:
-        webSocketMessage === undefined
-          ? undefined
-          : (socket, message) =>
-              webSocketMessage(socket, message).pipe(Effect.provide(telemetryLayer)),
-      webSocketClose:
-        webSocketClose === undefined
-          ? undefined
-          : (socket, code, reason, wasClean) =>
-              webSocketClose(socket, code, reason, wasClean).pipe(Effect.provide(telemetryLayer)),
-      webSocketError:
-        webSocketError === undefined
-          ? undefined
-          : (socket, error) => webSocketError(socket, error).pipe(Effect.provide(telemetryLayer)),
-      rpc: provideRpcLayer(handlers.rpc, telemetryLayer),
-    };
-  };

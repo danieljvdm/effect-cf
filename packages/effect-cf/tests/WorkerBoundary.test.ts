@@ -2,7 +2,7 @@ import { Clock, Config, ConfigProvider, Context, Effect, Layer, Stream } from "e
 import { HttpServerResponse } from "effect/unstable/http";
 import { expect, test } from "vite-plus/test";
 
-import { Worker, WorkerConfig } from "../src/index";
+import { DurableObject, Worker, WorkerConfig } from "../src/index";
 
 class RenderValue extends Context.Service<RenderValue, string>()(
   "effect-cf/test/WorkerBoundary/RenderValue",
@@ -18,6 +18,14 @@ const makeExecutionContext = () =>
     waitUntil: () => undefined,
     passThroughOnException: () => undefined,
   }) as unknown as globalThis.ExecutionContext;
+
+const makeDurableObjectState = () =>
+  ({
+    id: { toString: () => "durable-object:test" },
+    storage: {},
+    waitUntil: () => undefined,
+    blockConcurrencyWhile: async <T>(callback: () => Promise<T>) => callback(),
+  }) as unknown as globalThis.DurableObjectState;
 
 test("Worker.makeFetchHandler returns an ExportedHandler-compatible fetch object", async () => {
   const handler = Worker.makeFetchHandler(Layer.empty, {
@@ -143,6 +151,23 @@ test("Worker fetch handlers read Effect config from env by default", async () =>
   } as Cloudflare.Env);
 
   const response = await worker.fetch(new Request("https://worker.test/"));
+
+  await expect(response.text()).resolves.toBe("effect-cf");
+});
+
+test("Durable Object fetch handlers read Effect config from env by default", async () => {
+  const Live = DurableObject.make(Layer.empty, {
+    fetch: Effect.gen(function* () {
+      const value = yield* Config.string("APP_NAME");
+
+      return new Response(value);
+    }),
+  });
+  const durableObject = new Live(makeDurableObjectState(), {
+    APP_NAME: "effect-cf",
+  } as Cloudflare.Env);
+
+  const response = await durableObject.fetch!(new Request("https://worker.test/"));
 
   await expect(response.text()).resolves.toBe("effect-cf");
 });

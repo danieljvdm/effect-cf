@@ -1,9 +1,9 @@
 import { DurableObject as CloudflareDurableObject } from "cloudflare:workers";
-import { Effect, Layer, ManagedRuntime, type Context, type Scope } from "effect";
+import { ConfigProvider, Effect, Layer, ManagedRuntime, type Context, type Scope } from "effect";
 import type { Schema as S } from "effect";
 
 import { NativeRequest } from "./Worker";
-import { WorkerEnvironment, type WorkerEnv } from "./Environment";
+import { WorkerConfig, WorkerEnvironment, type WorkerEnv } from "./Environment";
 import { DurableObjectState, fromDurableObjectState } from "./DurableObjectState";
 import { fromWebSocket, type DurableWebSocket } from "./DurableObjectWebSocket";
 import type * as Binding from "./Binding";
@@ -163,6 +163,7 @@ export const make = <
 
       const services = Layer.mergeAll(
         CloudflareClock.layer,
+        ConfigProvider.layer(Effect.succeed(WorkerConfig.providerFromEnv(env))),
         Layer.succeed(DurableObjectState, fromDurableObjectState(state)),
         Layer.succeed(WorkerEnvironment, env),
       );

@@ -1,9 +1,7 @@
-import { Config, ConfigProvider, Context, Effect, Layer, Option, Schema } from "effect";
-import type * as Duration from "effect/Duration";
+import { ConfigProvider, Effect, Layer, Option } from "effect";
 import type * as Tracer from "effect/Tracer";
 import { FetchHttpClient, type Headers } from "effect/unstable/http";
 import {
-  Otlp,
   OtlpLogger,
   OtlpMetrics,
   OtlpSerialization,
@@ -19,122 +17,52 @@ export type Signal = "logs" | "traces" | "metrics";
 /** OTLP payload serialization used by the Effect OTLP exporters. */
 export type Serialization = "json" | "protobuf";
 
-/**
- * Resolved OpenTelemetry settings used by the Cloudflare OTLP layers.
- *
- * The default {@link settingsLayer} reads the standard OpenTelemetry
- * environment variable names from `WorkerEnvironment`. Applications that use
- * different binding names can provide {@link CloudflareOtlpSettings} directly
- * with a custom layer.
- */
-export interface Settings {
-  /** Generic OTLP base endpoint, read from `OTEL_EXPORTER_OTLP_ENDPOINT`. */
-  readonly endpoint: Option.Option<string>;
-  /** Logs-specific OTLP endpoint, read from `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`. */
-  readonly logsEndpoint: Option.Option<string>;
-  /** Traces-specific OTLP endpoint, read from `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`. */
-  readonly tracesEndpoint: Option.Option<string>;
-  /** Metrics-specific OTLP endpoint, read from `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`. */
-  readonly metricsEndpoint: Option.Option<string>;
-  /** Comma-separated OTLP headers, read from `OTEL_EXPORTER_OTLP_HEADERS`. */
-  readonly headers: Option.Option<string>;
-  /** Logs-specific OTLP headers, read from `OTEL_EXPORTER_OTLP_LOGS_HEADERS`. */
-  readonly logsHeaders: Option.Option<string>;
-  /** Traces-specific OTLP headers, read from `OTEL_EXPORTER_OTLP_TRACES_HEADERS`. */
-  readonly tracesHeaders: Option.Option<string>;
-  /** Metrics-specific OTLP headers, read from `OTEL_EXPORTER_OTLP_METRICS_HEADERS`. */
-  readonly metricsHeaders: Option.Option<string>;
-  /** Service name, read from `OTEL_SERVICE_NAME`. */
-  readonly serviceName: Option.Option<string>;
-  /** Service version, read from the effect-cf convenience alias `OTEL_SERVICE_VERSION`. */
-  readonly serviceVersion: Option.Option<string>;
-  /** Resource attributes, read from `OTEL_RESOURCE_ATTRIBUTES`. */
-  readonly resourceAttributes: Option.Option<Record<string, string>>;
-}
-
-/**
- * Supported OpenTelemetry environment configuration for Cloudflare OTLP export.
- *
- * This config intentionally uses the conventional `OTEL_*` variable names so
- * deployments can share the same settings used by other OpenTelemetry SDKs.
- * It covers the OTLP HTTP settings supported by the Effect OTLP layers:
- *
- * - `OTEL_EXPORTER_OTLP_ENDPOINT`
- * - `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`
- * - `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`
- * - `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`
- * - `OTEL_EXPORTER_OTLP_HEADERS`
- * - `OTEL_EXPORTER_OTLP_LOGS_HEADERS`
- * - `OTEL_EXPORTER_OTLP_TRACES_HEADERS`
- * - `OTEL_EXPORTER_OTLP_METRICS_HEADERS`
- * - `OTEL_SERVICE_NAME`
- * - `OTEL_RESOURCE_ATTRIBUTES`
- *
- * `OTEL_SERVICE_VERSION` is also accepted as an effect-cf convenience alias.
- * The standard OpenTelemetry way to configure service version is
- * `OTEL_RESOURCE_ATTRIBUTES=service.version=...`.
- *
- * Consumers with non-standard binding names should map those names into
- * {@link CloudflareOtlpSettings} rather than changing this config globally.
- */
-export const settingsConfig = Config.all({
-  endpoint: Config.string("OTEL_EXPORTER_OTLP_ENDPOINT").pipe(Config.option),
-  logsEndpoint: Config.string("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT").pipe(Config.option),
-  tracesEndpoint: Config.string("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT").pipe(Config.option),
-  metricsEndpoint: Config.string("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT").pipe(Config.option),
-  headers: Config.string("OTEL_EXPORTER_OTLP_HEADERS").pipe(Config.option),
-  logsHeaders: Config.string("OTEL_EXPORTER_OTLP_LOGS_HEADERS").pipe(Config.option),
-  tracesHeaders: Config.string("OTEL_EXPORTER_OTLP_TRACES_HEADERS").pipe(Config.option),
-  metricsHeaders: Config.string("OTEL_EXPORTER_OTLP_METRICS_HEADERS").pipe(Config.option),
-  serviceName: Config.string("OTEL_SERVICE_NAME").pipe(Config.option),
-  serviceVersion: Config.string("OTEL_SERVICE_VERSION").pipe(Config.option),
-  resourceAttributes: Config.schema(
-    Config.Record(Schema.String, Schema.String),
-    "OTEL_RESOURCE_ATTRIBUTES",
-  ).pipe(Config.option),
-});
-
-/**
- * Service carrying already-resolved Cloudflare OTLP settings.
- *
- * Provide this service directly when an application needs to map custom
- * Cloudflare binding names, compute settings dynamically, or override settings
- * in tests. When this service is present, the OTLP layers use it instead of
- * reading {@link settingsConfig}.
- *
- * @example
- * ```ts
- * const CustomOtlpSettings = Layer.effect(
- *   CloudflareOtlp.CloudflareOtlpSettings,
- *   Config.all({
- *     ...CloudflareOtlp.settingsConfig,
- *     endpoint: Config.string("MY_OTLP_ENDPOINT").pipe(Config.option),
- *   }),
- * ).pipe(Layer.provide(WorkerConfig.layer));
- * ```
- */
-export class CloudflareOtlpSettings extends Context.Service<CloudflareOtlpSettings, Settings>()(
-  "effect-cf/CloudflareOtlpSettings",
-) {}
-
 /** Resource metadata shared by Worker and Durable Object OTLP layers. */
 export interface ResourceOptions {
-  /** Explicit service name. Overrides `OTEL_SERVICE_NAME` when provided. */
+  /** Explicit service name. OTEL resource environment variables take precedence. */
   readonly serviceName?: string;
-  /** Explicit service version. Overrides `OTEL_SERVICE_VERSION` when provided. */
+  /** Explicit service version. OTEL resource environment variables take precedence. */
   readonly serviceVersion?: string;
-  /** Additional resource attributes attached to all exported telemetry. */
+  /** Additional resource attributes attached to exported telemetry. */
   readonly attributes?: Record<string, unknown>;
 }
 
+/** Options shared by all Cloudflare OTLP telemetry layers. */
+export interface LayerOptions {
+  /**
+   * Telemetry signals to export. Defaults to logs, traces, and metrics.
+   *
+   * Each selected signal is still controlled by standard OTEL exporter config,
+   * such as `OTEL_TRACES_EXPORTER=otlp`.
+   */
+  readonly signals?: ReadonlyArray<Signal>;
+  /** OTLP payload serialization. Defaults to protobuf. */
+  readonly serialization?: Serialization;
+  /** Resource metadata forwarded to Effect's OTLP resource resolver. */
+  readonly resource?: ResourceOptions;
+  /**
+   * Explicit headers for every selected signal.
+   *
+   * When omitted, Effect reads `OTEL_EXPORTER_OTLP_HEADERS` and the
+   * signal-specific `OTEL_EXPORTER_OTLP_*_HEADERS` variables.
+   */
+  readonly headers?: Headers.Input;
+  /** Exclude log records emitted for spans when exporting logs. */
+  readonly loggerExcludeLogSpans?: boolean;
+  /** Merge the OTLP logger with existing loggers instead of replacing them. */
+  readonly loggerMergeWithExisting?: boolean;
+  /** Custom trace context lookup used by the Effect OTLP tracer. */
+  readonly tracerContext?: <X>(primitive: Tracer.EffectPrimitive<X>, span: Tracer.AnySpan) => X;
+}
+
 /** Resource metadata specific to Cloudflare Workers. */
-export interface WorkerResourceOptions extends ResourceOptions {
+export interface WorkerLayerOptions extends LayerOptions {
   /** Cloudflare Worker name to attach as `cloudflare.worker.name`. */
   readonly workerName?: string;
 }
 
 /** Resource metadata specific to Cloudflare Durable Objects. */
-export interface DurableObjectResourceOptions extends ResourceOptions {
+export interface DurableObjectLayerOptions extends LayerOptions {
   /** Durable Object class name to attach as `cloudflare.durable_object.class`. */
   readonly className?: string;
   /**
@@ -145,76 +73,15 @@ export interface DurableObjectResourceOptions extends ResourceOptions {
   readonly includeObjectId?: boolean;
 }
 
-/** Options shared by all Cloudflare OTLP telemetry layers. */
-export interface LayerOptions extends ResourceOptions {
-  /** Telemetry signals to export. Defaults to logs, traces, and metrics. */
-  readonly signals?: ReadonlyArray<Signal>;
-  /** OTLP payload serialization. Defaults to protobuf. */
-  readonly serialization?: Serialization;
-  /** Maximum batch size for log and trace exporters. */
-  readonly maxBatchSize?: number;
-  /** Maximum time to wait for exporter shutdown/flush when a scope closes. */
-  readonly shutdownTimeout?: Duration.Input;
-  /** Export interval for the logs exporter. */
-  readonly loggerExportInterval?: Duration.Input;
-  /** Exclude log records emitted for spans when exporting logs. */
-  readonly loggerExcludeLogSpans?: boolean;
-  /** Merge the OTLP logger with existing loggers instead of replacing them. */
-  readonly loggerMergeWithExisting?: boolean;
-  /** Export interval for the traces exporter. */
-  readonly tracerExportInterval?: Duration.Input;
-  /** Custom trace context lookup used by the Effect OTLP tracer. */
-  readonly tracerContext?: <X>(primitive: Tracer.EffectPrimitive<X>, span: Tracer.AnySpan) => X;
-  /** Export interval for the metrics exporter. */
-  readonly metricsExportInterval?: Duration.Input;
-  /** Aggregation temporality for exported metrics. */
-  readonly metricsTemporality?: OtlpMetrics.AggregationTemporality;
-}
-
 const allSignals: ReadonlyArray<Signal> = ["logs", "traces", "metrics"];
 
-const optionToUndefined = <A>(option: Option.Option<A>): A | undefined =>
-  Option.isSome(option) ? option.value : undefined;
+const emptyConfigProvider = ConfigProvider.fromUnknown({});
 
-const nonEmptyStringOption = (option: Option.Option<string>): Option.Option<string> =>
-  Option.flatMap(option, (value) => {
-    const trimmed = value.trim();
-    return trimmed === "" ? Option.none() : Option.some(trimmed);
-  });
-
-const nonEmptyRecordOption = (
-  option: Option.Option<Record<string, string>>,
-): Option.Option<Record<string, string>> =>
-  Option.filter(option, (value) => Object.keys(value).length > 0);
-
-const normalizeSettings = (settings: Settings): Settings => ({
-  endpoint: nonEmptyStringOption(settings.endpoint),
-  logsEndpoint: nonEmptyStringOption(settings.logsEndpoint),
-  tracesEndpoint: nonEmptyStringOption(settings.tracesEndpoint),
-  metricsEndpoint: nonEmptyStringOption(settings.metricsEndpoint),
-  headers: nonEmptyStringOption(settings.headers),
-  logsHeaders: nonEmptyStringOption(settings.logsHeaders),
-  tracesHeaders: nonEmptyStringOption(settings.tracesHeaders),
-  metricsHeaders: nonEmptyStringOption(settings.metricsHeaders),
-  serviceName: nonEmptyStringOption(settings.serviceName),
-  serviceVersion: nonEmptyStringOption(settings.serviceVersion),
-  resourceAttributes: nonEmptyRecordOption(settings.resourceAttributes),
-});
-
-/**
- * Layer that reads standard OpenTelemetry settings from the current Cloudflare
- * `env` object.
- *
- * The layer depends on {@link WorkerEnvironment} and installs a
- * Cloudflare-backed Effect `ConfigProvider`, so `settingsConfig` reads from
- * Worker vars/secrets instead of Node process environment variables.
- */
-export const settingsLayer: Layer.Layer<
-  CloudflareOtlpSettings,
-  Config.ConfigError,
-  WorkerEnvironment
-> = Layer.effect(CloudflareOtlpSettings, settingsConfig.pipe(Config.map(normalizeSettings))).pipe(
-  Layer.provide(WorkerConfig.layer),
+const cloudflareConfigProviderLayer = ConfigProvider.layerAdd(
+  Effect.map(Effect.serviceOption(WorkerEnvironment), (env) =>
+    Option.isSome(env) ? WorkerConfig.providerFromEnv(env.value) : emptyConfigProvider,
+  ),
+  { asPrimary: true },
 );
 
 const selectedSignals = (signals: ReadonlyArray<Signal> | undefined): ReadonlySet<Signal> =>
@@ -230,109 +97,24 @@ const withDefinedAttributes = (attributes: Record<string, unknown>): Record<stri
   return out;
 };
 
-const parseHeaders = (input: Option.Option<string>): Record<string, string> | undefined => {
-  if (Option.isNone(input) || input.value.trim() === "") {
-    return undefined;
-  }
-
-  const headers: Record<string, string> = {};
-  for (const part of input.value.split(",")) {
-    const index = part.indexOf("=");
-    if (index <= 0) {
-      continue;
-    }
-
-    const key = part.slice(0, index).trim();
-    const value = part.slice(index + 1).trim();
-    if (key !== "") {
-      headers[decodeHeaderComponent(key)] = decodeHeaderComponent(value);
-    }
-  }
-
-  return headers;
-};
-
-const mergeHeaders = (
-  common: Option.Option<string>,
-  signalSpecific: Option.Option<string>,
-): Headers.Input | undefined => {
-  const commonHeaders = parseHeaders(common);
-  const signalHeaders = parseHeaders(signalSpecific);
-  if (commonHeaders === undefined && signalHeaders === undefined) {
-    return undefined;
-  }
-
-  return {
-    ...commonHeaders,
-    ...signalHeaders,
-  };
-};
-
-const decodeHeaderComponent = (value: string): string => {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-};
-
-const appendOtlpPath = (baseUrl: string, path: "/v1/logs" | "/v1/traces" | "/v1/metrics") =>
-  `${baseUrl.replace(/\/+$/, "")}${path}`;
-
 const makeResource = (
-  settings: Settings,
   options: LayerOptions,
   runtimeAttributes: Record<string, unknown>,
-) => ({
-  serviceName: options.serviceName ?? optionToUndefined(settings.serviceName),
-  serviceVersion: options.serviceVersion ?? optionToUndefined(settings.serviceVersion),
+): ResourceOptions => ({
+  serviceName: options.resource?.serviceName,
+  serviceVersion: options.resource?.serviceVersion,
   attributes: {
-    ...optionToUndefined(settings.resourceAttributes),
     ...withDefinedAttributes(runtimeAttributes),
-    ...options.attributes,
+    ...options.resource?.attributes,
   },
-});
-
-const commonOtlpOptions = (
-  settings: Settings,
-  options: LayerOptions,
-  runtimeAttributes: Record<string, unknown>,
-) => ({
-  resource: makeResource(settings, options, runtimeAttributes),
-  maxBatchSize: options.maxBatchSize,
-  loggerExportInterval: options.loggerExportInterval,
-  loggerExcludeLogSpans: options.loggerExcludeLogSpans,
-  loggerMergeWithExisting: options.loggerMergeWithExisting,
-  tracerExportInterval: options.tracerExportInterval,
-  tracerContext: options.tracerContext,
-  metricsExportInterval: options.metricsExportInterval,
-  metricsTemporality: options.metricsTemporality,
-  shutdownTimeout: options.shutdownTimeout,
 });
 
 const serializationLayer = (serialization: Serialization | undefined) =>
   serialization === "json" ? OtlpSerialization.layerJson : OtlpSerialization.layerProtobuf;
 
-const resolveSettings: Effect.Effect<Settings, Config.ConfigError> = Effect.gen(function* () {
-  const settings = yield* Effect.serviceOption(CloudflareOtlpSettings);
-  if (Option.isSome(settings)) {
-    return normalizeSettings(settings.value);
-  }
+type SignalLayer = ReturnType<typeof OtlpLogger.layerFromConfig>;
 
-  const env = yield* Effect.serviceOption(WorkerEnvironment);
-  if (Option.isSome(env)) {
-    const settings = yield* settingsConfig.pipe(
-      Effect.provide(ConfigProvider.layer(Effect.succeed(WorkerConfig.providerFromEnv(env.value)))),
-    );
-    return normalizeSettings(settings);
-  }
-
-  return normalizeSettings(yield* settingsConfig);
-});
-
-const mergeSignalLayers = (
-  layers: ReadonlyArray<Layer.Layer<never, never, never>>,
-): Layer.Layer<never, never, never> => {
+const mergeSignalLayers = (layers: ReadonlyArray<SignalLayer>): SignalLayer => {
   if (layers.length === 0) {
     return Layer.empty;
   }
@@ -344,136 +126,58 @@ const mergeSignalLayers = (
   return merged;
 };
 
-const emptyLayer: Layer.Layer<never, never, never> = Layer.empty;
-
-const makeLayerFromSettings = (
-  options: LayerOptions = {},
-  runtimeAttributes: Record<string, unknown> = {},
-): Layer.Layer<never, never, never> =>
-  Layer.unwrap(
-    Effect.map(resolveSettings, (settings) => {
-      const signals = selectedSignals(options.signals);
-      const endpoint = optionToUndefined(settings.endpoint);
-      const logsEndpoint = optionToUndefined(settings.logsEndpoint);
-      const tracesEndpoint = optionToUndefined(settings.tracesEndpoint);
-      const metricsEndpoint = optionToUndefined(settings.metricsEndpoint);
-      const hasSpecificEndpoint =
-        logsEndpoint !== undefined || tracesEndpoint !== undefined || metricsEndpoint !== undefined;
-      const hasSpecificHeaders =
-        Option.isSome(settings.logsHeaders) ||
-        Option.isSome(settings.tracesHeaders) ||
-        Option.isSome(settings.metricsHeaders);
-      const common = commonOtlpOptions(settings, options, runtimeAttributes);
-
-      if (
-        endpoint !== undefined &&
-        !hasSpecificEndpoint &&
-        !hasSpecificHeaders &&
-        signals.size === 3
-      ) {
-        return Otlp.layer({
-          baseUrl: endpoint,
-          headers: parseHeaders(settings.headers),
-          ...common,
-        }).pipe(
-          Layer.provide(serializationLayer(options.serialization)),
-          Layer.provide(FetchHttpClient.layer),
-        );
-      }
-
-      const layers: Array<Layer.Layer<never, never, never>> = [];
-      if (signals.has("logs")) {
-        const url =
-          logsEndpoint ??
-          (endpoint === undefined ? undefined : appendOtlpPath(endpoint, "/v1/logs"));
-        if (url !== undefined) {
-          layers.push(
-            OtlpLogger.layer({
-              url,
-              resource: common.resource,
-              headers: mergeHeaders(settings.headers, settings.logsHeaders),
-              exportInterval: common.loggerExportInterval,
-              maxBatchSize: common.maxBatchSize,
-              shutdownTimeout: common.shutdownTimeout,
-              excludeLogSpans: common.loggerExcludeLogSpans,
-              mergeWithExisting: common.loggerMergeWithExisting,
-            }).pipe(
-              Layer.provide(serializationLayer(options.serialization)),
-              Layer.provide(FetchHttpClient.layer),
-            ),
-          );
-        }
-      }
-
-      if (signals.has("traces")) {
-        const url =
-          tracesEndpoint ??
-          (endpoint === undefined ? undefined : appendOtlpPath(endpoint, "/v1/traces"));
-        if (url !== undefined) {
-          layers.push(
-            OtlpTracer.layer({
-              url,
-              resource: common.resource,
-              headers: mergeHeaders(settings.headers, settings.tracesHeaders),
-              exportInterval: common.tracerExportInterval,
-              maxBatchSize: common.maxBatchSize,
-              context: common.tracerContext,
-              shutdownTimeout: common.shutdownTimeout,
-            }).pipe(
-              Layer.provide(serializationLayer(options.serialization)),
-              Layer.provide(FetchHttpClient.layer),
-            ),
-          );
-        }
-      }
-
-      if (signals.has("metrics")) {
-        const url =
-          metricsEndpoint ??
-          (endpoint === undefined ? undefined : appendOtlpPath(endpoint, "/v1/metrics"));
-        if (url !== undefined) {
-          layers.push(
-            OtlpMetrics.layer({
-              url,
-              resource: common.resource,
-              headers: mergeHeaders(settings.headers, settings.metricsHeaders),
-              exportInterval: common.metricsExportInterval,
-              shutdownTimeout: common.shutdownTimeout,
-              temporality: common.metricsTemporality,
-            }).pipe(
-              Layer.provide(serializationLayer(options.serialization)),
-              Layer.provide(FetchHttpClient.layer),
-            ),
-          );
-        }
-      }
-
-      return mergeSignalLayers(layers);
-    }).pipe(
-      Effect.catch((error: Config.ConfigError) =>
-        Effect.logWarning("CloudflareOtlp disabled because OTLP configuration is invalid", {
-          error: String(error),
-        }).pipe(Effect.as(emptyLayer)),
-      ),
-    ),
-  );
-
 const makeLayer = (
   options: LayerOptions = {},
   runtimeAttributes: Record<string, unknown> = {},
-): Layer.Layer<never, never, never> => makeLayerFromSettings(options, runtimeAttributes);
+): Layer.Layer<never, never, never> => {
+  const signals = selectedSignals(options.signals);
+  const resource = makeResource(options, runtimeAttributes);
+  const layers: Array<SignalLayer> = [];
+
+  if (signals.has("logs")) {
+    layers.push(
+      OtlpLogger.layerFromConfig({
+        resource,
+        headers: options.headers,
+        excludeLogSpans: options.loggerExcludeLogSpans,
+        mergeWithExisting: options.loggerMergeWithExisting,
+      }),
+    );
+  }
+
+  if (signals.has("traces")) {
+    layers.push(
+      OtlpTracer.layerFromConfig({
+        resource,
+        headers: options.headers,
+        context: options.tracerContext,
+      }),
+    );
+  }
+
+  if (signals.has("metrics")) {
+    layers.push(
+      OtlpMetrics.layerFromConfig({
+        resource,
+        headers: options.headers,
+      }),
+    );
+  }
+
+  return mergeSignalLayers(layers).pipe(
+    Layer.provide(cloudflareConfigProviderLayer),
+    Layer.provide(serializationLayer(options.serialization)),
+    Layer.provide(FetchHttpClient.layer),
+  );
+};
 
 /**
  * Base OTLP telemetry layer for Cloudflare-compatible runtimes.
  *
- * The layer reads {@link CloudflareOtlpSettings} when provided. Otherwise it
- * reads standard OpenTelemetry config from `WorkerEnvironment` when available,
- * then falls back to the ambient Effect `ConfigProvider`.
- *
- * When only `OTEL_EXPORTER_OTLP_ENDPOINT` is configured, per-signal paths are
- * derived by appending `/v1/logs`, `/v1/traces`, and `/v1/metrics`. Signal
- * specific endpoints are used as-is, matching the OpenTelemetry OTLP exporter
- * convention.
+ * Standard OpenTelemetry environment variables are resolved by Effect's OTLP
+ * layers. In Cloudflare Workers and Durable Objects, the current `env` object is
+ * installed as the primary `ConfigProvider`; outside Cloudflare, the ambient
+ * Effect `ConfigProvider` remains the fallback.
  */
 export const layer = (options: LayerOptions = {}) => makeLayer(options);
 
@@ -491,7 +195,7 @@ export const layerProtobuf = (options: Omit<LayerOptions, "serialization"> = {})
  * Provide this layer at runtime scope for long-lived metrics aggregation, or at
  * handler scope when traces/logs should flush as the Cloudflare event finishes.
  */
-export const workerLayer = (options: LayerOptions & WorkerResourceOptions = {}) =>
+export const workerLayer = (options: WorkerLayerOptions = {}) =>
   makeLayer(options, {
     "cloudflare.resource_type": "worker",
     "cloudflare.worker.name": options.workerName,
@@ -504,7 +208,7 @@ export const workerLayer = (options: LayerOptions & WorkerResourceOptions = {}) 
  * Durable Object id. Prefer leaving `includeObjectId` disabled unless the
  * backend can tolerate high-cardinality resource attributes.
  */
-export const durableObjectLayer = (options: LayerOptions & DurableObjectResourceOptions = {}) =>
+export const durableObjectLayer = (options: DurableObjectLayerOptions = {}) =>
   Layer.unwrap(
     Effect.map(DurableObjectState, (state) =>
       makeLayer(options, {

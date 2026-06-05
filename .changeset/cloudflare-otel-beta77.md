@@ -1,5 +1,5 @@
 ---
-"effect-cf": major
+"effect-cf": minor
 ---
 
 Simplify `CloudflareOtlp` around Effect's standard OTEL configuration layers from `effect@4.0.0-beta.77`.

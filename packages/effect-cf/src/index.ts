@@ -1,4 +1,6 @@
+export * as AiGateway from "./AiGateway";
 export * as Binding from "./Binding";
+export * as BrowserRendering from "./BrowserRendering";
 export * as D1 from "./D1";
 export * as DurableObject from "./DurableObject";
 export * as DurableObjectAlarm from "./DurableObjectAlarm";
@@ -23,4 +25,6 @@ export * as WorkerDefinition from "./WorkerDefinition";
 export * as Workflow from "./Workflow";
 export * as WorkflowBinding from "./WorkflowBinding";
 export * as WorkflowDefinition from "./WorkflowDefinition";
+export * as Vectorize from "./Vectorize";
+export * as WorkersAi from "./WorkersAi";
 export { WorkerConfig, WorkerEnvironment, type WorkerEnv } from "./Environment";

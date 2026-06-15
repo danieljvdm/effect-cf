@@ -11,6 +11,9 @@ declare global {
       TEST_BUCKET?: R2Bucket;
       HYPERDRIVE?: Hyperdrive;
       IMAGES?: ImagesBinding;
+      AI?: Ai;
+      RECIPE_VECTORS?: Vectorize;
+      MYBROWSER?: unknown;
       DATABASE_URL?: string;
       SECRET_VALUE?: string;
       APP_NAME?: string;

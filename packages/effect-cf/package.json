@@ -39,7 +39,7 @@
     "prepublishOnly": "vp run build"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.15.0",
+    "@cloudflare/vitest-pool-workers": "catalog:",
     "@cloudflare/workers-types": "catalog:",
     "@effect/platform-node": "4.0.0-beta.77",
     "@effect/sql-d1": "catalog:",

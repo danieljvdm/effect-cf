@@ -1,3 +1,21 @@
+import type {
+  HostedImagesBinding as CloudflareHostedImagesBinding,
+  ImageDrawOptions as CloudflareImageDrawOptions,
+  ImageHandle as CloudflareImageHandle,
+  ImageInfoResponse as CloudflareImageInfoResponse,
+  ImageInputOptions as CloudflareImageInputOptions,
+  ImageList as CloudflareImageList,
+  ImageListOptions as CloudflareImageListOptions,
+  ImageMetadata as CloudflareImageMetadata,
+  ImageOutputOptions as CloudflareImageOutputOptions,
+  ImageTransform as CloudflareImageTransform,
+  ImageTransformationOutputOptions as CloudflareImageTransformationOutputOptions,
+  ImageTransformationResult as CloudflareImageTransformationResult,
+  ImageTransformer as CloudflareImageTransformer,
+  ImageUpdateOptions as CloudflareImageUpdateOptions,
+  ImageUploadOptions as CloudflareImageUploadOptions,
+  Response as CloudflareResponse,
+} from "@cloudflare/workers-types";
 import { Context, Data, Effect, Option, type Layer } from "effect";
 
 import * as Binding from "./Binding";
@@ -19,23 +37,23 @@ export interface ImagesDefinition {
   readonly binding: string;
 }
 
-export type ImageInfoResponse = globalThis.ImageInfoResponse;
-export type ImageTransform = globalThis.ImageTransform;
-export type ImageDrawOptions = globalThis.ImageDrawOptions;
-export type ImageInputOptions = globalThis.ImageInputOptions;
-export type ImageOutputOptions = globalThis.ImageOutputOptions;
-export type ImageTransformationOutputOptions = globalThis.ImageTransformationOutputOptions;
-export type ImageTransformationResult = globalThis.ImageTransformationResult;
-export type ImageUploadOptions = globalThis.ImageUploadOptions;
-export type ImageUpdateOptions = globalThis.ImageUpdateOptions;
-export type ImageListOptions = globalThis.ImageListOptions;
-export type ImageList = globalThis.ImageList;
-export type ImageMetadata = globalThis.ImageMetadata;
+export type ImageInfoResponse = CloudflareImageInfoResponse;
+export type ImageTransform = CloudflareImageTransform;
+export type ImageDrawOptions = CloudflareImageDrawOptions;
+export type ImageInputOptions = CloudflareImageInputOptions;
+export type ImageOutputOptions = CloudflareImageOutputOptions;
+export type ImageTransformationOutputOptions = CloudflareImageTransformationOutputOptions;
+export type ImageTransformationResult = CloudflareImageTransformationResult;
+export type ImageUploadOptions = CloudflareImageUploadOptions;
+export type ImageUpdateOptions = CloudflareImageUpdateOptions;
+export type ImageListOptions = CloudflareImageListOptions;
+export type ImageList = CloudflareImageList;
+export type ImageMetadata = CloudflareImageMetadata;
 export type ImageInputValue = ReadableStream<Uint8Array> | ArrayBuffer;
 export type ImageUploadValue = ReadableStream<Uint8Array> | ArrayBuffer;
 
 export interface DrawStepOptions {
-  readonly image: ReadableStream<Uint8Array> | globalThis.ImageTransformer;
+  readonly image: ReadableStream<Uint8Array> | CloudflareImageTransformer;
   readonly options?: ImageDrawOptions;
 }
 
@@ -58,8 +76,8 @@ export interface ProcessOptions {
 }
 
 export interface ImagesTransformationResultClient {
-  readonly raw: globalThis.ImageTransformationResult;
-  readonly response: Effect.Effect<globalThis.Response, ImagesOperationError>;
+  readonly raw: CloudflareImageTransformationResult;
+  readonly response: Effect.Effect<CloudflareResponse, ImagesOperationError>;
   readonly contentType: Effect.Effect<string, ImagesOperationError>;
   readonly image: (
     options?: ImageTransformationOutputOptions,
@@ -67,7 +85,7 @@ export interface ImagesTransformationResultClient {
 }
 
 export interface ImageHandleClient {
-  readonly raw: globalThis.ImageHandle;
+  readonly raw: CloudflareImageHandle;
   readonly details: Effect.Effect<Option.Option<ImageMetadata>, ImagesOperationError>;
   readonly bytes: Effect.Effect<Option.Option<ReadableStream<Uint8Array>>, ImagesOperationError>;
   readonly update: (
@@ -83,7 +101,7 @@ export interface HostedImagesClient {
     options?: ImageUploadOptions,
   ) => Effect.Effect<ImageMetadata, ImagesOperationError>;
   readonly list: (options?: ImageListOptions) => Effect.Effect<ImageList, ImagesOperationError>;
-  readonly unsafeRaw: Effect.Effect<globalThis.HostedImagesBinding>;
+  readonly unsafeRaw: Effect.Effect<CloudflareHostedImagesBinding>;
 }
 
 export interface ImagesRuntimeBinding {
@@ -94,8 +112,8 @@ export interface ImagesRuntimeBinding {
   readonly input: (
     image: ImageInputValue,
     options?: ImageInputOptions,
-  ) => globalThis.ImageTransformer;
-  readonly hosted?: globalThis.HostedImagesBinding;
+  ) => CloudflareImageTransformer;
+  readonly hosted?: CloudflareHostedImagesBinding;
 }
 
 export interface ImagesClient {
@@ -106,7 +124,7 @@ export interface ImagesClient {
   readonly input: (
     image: ImageInputValue,
     options?: ImageInputOptions,
-  ) => Effect.Effect<globalThis.ImageTransformer, ImagesOperationError>;
+  ) => Effect.Effect<CloudflareImageTransformer, ImagesOperationError>;
   readonly process: (
     steps: Steps,
     options: ProcessOptions,
@@ -223,7 +241,7 @@ const maybe = <A>(value: A | null): Option.Option<A> =>
 const hasFunction = (value: object, key: string): boolean =>
   typeof Reflect.get(value, key) === "function";
 
-const isHostedImagesBinding = (value: unknown): value is globalThis.HostedImagesBinding =>
+const isHostedImagesBinding = (value: unknown): value is CloudflareHostedImagesBinding =>
   typeof value === "object" &&
   value !== null &&
   hasFunction(value, "image") &&
@@ -238,7 +256,7 @@ export const isImagesBinding = (value: unknown): value is ImagesRuntimeBinding =
 
 const wrapResult = (
   binding: string,
-  result: globalThis.ImageTransformationResult,
+  result: CloudflareImageTransformationResult,
 ): ImagesTransformationResultClient => ({
   raw: result,
   response: tryImagesSync(binding, "response", () => result.response()),
@@ -246,7 +264,7 @@ const wrapResult = (
   image: (options) => tryImagesSync(binding, "image", () => result.image(options)),
 });
 
-const wrapHandle = (binding: string, handle: globalThis.ImageHandle): ImageHandleClient => ({
+const wrapHandle = (binding: string, handle: CloudflareImageHandle): ImageHandleClient => ({
   raw: handle,
   details: tryImagesPromise(binding, "details", () => handle.details()).pipe(Effect.map(maybe)),
   bytes: tryImagesPromise(binding, "bytes", () => handle.bytes()).pipe(Effect.map(maybe)),
@@ -256,7 +274,7 @@ const wrapHandle = (binding: string, handle: globalThis.ImageHandle): ImageHandl
 
 const wrapHosted = (
   binding: string,
-  hosted: globalThis.HostedImagesBinding,
+  hosted: CloudflareHostedImagesBinding,
 ): HostedImagesClient => ({
   image: (imageId) => wrapHandle(binding, hosted.image(imageId)),
   upload: (image, options) =>

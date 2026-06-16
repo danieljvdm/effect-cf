@@ -1,3 +1,17 @@
+import type {
+  R2Bucket as CloudflareR2Bucket,
+  R2Conditional as CloudflareR2Conditional,
+  R2GetOptions as CloudflareR2GetOptions,
+  R2ListOptions as CloudflareR2ListOptions,
+  R2MultipartOptions as CloudflareR2MultipartOptions,
+  R2MultipartUpload as CloudflareR2MultipartUpload,
+  R2Object as CloudflareR2Object,
+  R2ObjectBody as CloudflareR2ObjectBody,
+  R2Objects as CloudflareR2Objects,
+  R2PutOptions as CloudflareR2PutOptions,
+  R2UploadPartOptions as CloudflareR2UploadPartOptions,
+  R2UploadedPart as CloudflareR2UploadedPart,
+} from "@cloudflare/workers-types";
 import { Context, Data, Effect, Option, type Layer } from "effect";
 
 import * as Binding from "./Binding";
@@ -19,19 +33,19 @@ export interface R2Definition {
   readonly binding: string;
 }
 
-export type R2GetOptions = globalThis.R2GetOptions;
-export type R2PutOptions = globalThis.R2PutOptions;
-export type R2ListOptions = globalThis.R2ListOptions;
-export type R2MultipartOptions = globalThis.R2MultipartOptions;
-export type R2UploadPartOptions = globalThis.R2UploadPartOptions;
+export type R2GetOptions = CloudflareR2GetOptions;
+export type R2PutOptions = CloudflareR2PutOptions;
+export type R2ListOptions = CloudflareR2ListOptions;
+export type R2MultipartOptions = CloudflareR2MultipartOptions;
+export type R2UploadPartOptions = CloudflareR2UploadPartOptions;
 export type R2PutValue = ReadableStream | ArrayBuffer | ArrayBufferView | string | null | Blob;
 export type R2UploadPartValue = ReadableStream | ArrayBuffer | ArrayBufferView | string | Blob;
 
 export interface R2ObjectBodyClient extends Omit<
-  globalThis.R2ObjectBody,
+  CloudflareR2ObjectBody,
   "arrayBuffer" | "blob" | "bytes" | "json" | "text"
 > {
-  readonly raw: globalThis.R2ObjectBody;
+  readonly raw: CloudflareR2ObjectBody;
   readonly arrayBuffer: Effect.Effect<ArrayBuffer, R2OperationError>;
   readonly bytes: Effect.Effect<Uint8Array, R2OperationError>;
   readonly text: Effect.Effect<string, R2OperationError>;
@@ -40,29 +54,29 @@ export interface R2ObjectBodyClient extends Omit<
 }
 
 export interface R2MultipartUploadClient {
-  readonly raw: globalThis.R2MultipartUpload;
+  readonly raw: CloudflareR2MultipartUpload;
   readonly key: string;
   readonly uploadId: string;
   readonly uploadPart: (
     partNumber: number,
     value: R2UploadPartValue,
     options?: R2UploadPartOptions,
-  ) => Effect.Effect<globalThis.R2UploadedPart, R2OperationError>;
+  ) => Effect.Effect<CloudflareR2UploadedPart, R2OperationError>;
   readonly abort: Effect.Effect<void, R2OperationError>;
   readonly complete: (
-    uploadedParts: ReadonlyArray<globalThis.R2UploadedPart>,
-  ) => Effect.Effect<globalThis.R2Object, R2OperationError>;
+    uploadedParts: ReadonlyArray<CloudflareR2UploadedPart>,
+  ) => Effect.Effect<CloudflareR2Object, R2OperationError>;
 }
 
 export interface R2Client {
   readonly head: (
     key: string,
-  ) => Effect.Effect<Option.Option<globalThis.R2Object>, R2OperationError>;
+  ) => Effect.Effect<Option.Option<CloudflareR2Object>, R2OperationError>;
   readonly get: {
     (
       key: string,
-      options: R2GetOptions & { readonly onlyIf: globalThis.R2Conditional | Headers },
-    ): Effect.Effect<Option.Option<R2ObjectBodyClient | globalThis.R2Object>, R2OperationError>;
+      options: R2GetOptions & { readonly onlyIf: CloudflareR2Conditional | Headers },
+    ): Effect.Effect<Option.Option<R2ObjectBodyClient | CloudflareR2Object>, R2OperationError>;
     (
       key: string,
       options?: R2GetOptions,
@@ -72,13 +86,13 @@ export interface R2Client {
     (
       key: string,
       value: R2PutValue,
-      options: R2PutOptions & { readonly onlyIf: globalThis.R2Conditional | Headers },
-    ): Effect.Effect<Option.Option<globalThis.R2Object>, R2OperationError>;
+      options: R2PutOptions & { readonly onlyIf: CloudflareR2Conditional | Headers },
+    ): Effect.Effect<Option.Option<CloudflareR2Object>, R2OperationError>;
     (
       key: string,
       value: R2PutValue,
       options?: R2PutOptions,
-    ): Effect.Effect<globalThis.R2Object, R2OperationError>;
+    ): Effect.Effect<CloudflareR2Object, R2OperationError>;
   };
   readonly createMultipartUpload: (
     key: string,
@@ -89,8 +103,8 @@ export interface R2Client {
     uploadId: string,
   ) => Effect.Effect<R2MultipartUploadClient, R2OperationError>;
   readonly delete: (keys: string | ReadonlyArray<string>) => Effect.Effect<void, R2OperationError>;
-  readonly list: (options?: R2ListOptions) => Effect.Effect<globalThis.R2Objects, R2OperationError>;
-  readonly unsafeRaw: Effect.Effect<globalThis.R2Bucket>;
+  readonly list: (options?: R2ListOptions) => Effect.Effect<CloudflareR2Objects, R2OperationError>;
+  readonly unsafeRaw: Effect.Effect<CloudflareR2Bucket>;
   readonly definition: R2Definition;
 }
 
@@ -149,16 +163,16 @@ const maybe = <A>(value: A | null): Option.Option<A> =>
   value === null ? Option.none() : Option.some(value);
 
 const isR2ObjectBody = (
-  value: globalThis.R2ObjectBody | globalThis.R2Object,
-): value is globalThis.R2ObjectBody =>
+  value: CloudflareR2ObjectBody | CloudflareR2Object,
+): value is CloudflareR2ObjectBody =>
   "body" in value &&
-  typeof (value as globalThis.R2ObjectBody).arrayBuffer === "function" &&
-  typeof (value as globalThis.R2ObjectBody).bytes === "function" &&
-  typeof (value as globalThis.R2ObjectBody).text === "function" &&
-  typeof (value as globalThis.R2ObjectBody).json === "function" &&
-  typeof (value as globalThis.R2ObjectBody).blob === "function";
+  typeof (value as CloudflareR2ObjectBody).arrayBuffer === "function" &&
+  typeof (value as CloudflareR2ObjectBody).bytes === "function" &&
+  typeof (value as CloudflareR2ObjectBody).text === "function" &&
+  typeof (value as CloudflareR2ObjectBody).json === "function" &&
+  typeof (value as CloudflareR2ObjectBody).blob === "function";
 
-const wrapObjectBody = (binding: string, object: globalThis.R2ObjectBody): R2ObjectBodyClient => ({
+const wrapObjectBody = (binding: string, object: CloudflareR2ObjectBody): R2ObjectBodyClient => ({
   key: object.key,
   version: object.version,
   size: object.size,
@@ -186,8 +200,8 @@ const wrapObjectBody = (binding: string, object: globalThis.R2ObjectBody): R2Obj
 
 const wrapGetResult = (
   binding: string,
-  object: globalThis.R2ObjectBody | globalThis.R2Object | null,
-): R2ObjectBodyClient | globalThis.R2Object | null => {
+  object: CloudflareR2ObjectBody | CloudflareR2Object | null,
+): R2ObjectBodyClient | CloudflareR2Object | null => {
   if (object === null || !isR2ObjectBody(object)) {
     return object;
   }
@@ -195,7 +209,7 @@ const wrapGetResult = (
   return wrapObjectBody(binding, object);
 };
 
-export const isR2Bucket = (value: unknown): value is globalThis.R2Bucket => {
+export const isR2Bucket = (value: unknown): value is CloudflareR2Bucket => {
   if (typeof value !== "object" || value === null) {
     return false;
   }
@@ -215,8 +229,8 @@ export const isR2Bucket = (value: unknown): value is globalThis.R2Bucket => {
 
 export const makeClient = (
   definition: R2Definition,
-): ((bucket: globalThis.R2Bucket) => R2Client) => {
-  const wrapUpload = (upload: globalThis.R2MultipartUpload): R2MultipartUploadClient => ({
+): ((bucket: CloudflareR2Bucket) => R2Client) => {
+  const wrapUpload = (upload: CloudflareR2MultipartUpload): R2MultipartUploadClient => ({
     raw: upload,
     key: upload.key,
     uploadId: upload.uploadId,
@@ -246,7 +260,7 @@ export const makeClient = (
         tryR2Promise(definition.binding, "put", () => bucket.put(key, value, options)).pipe(
           Effect.map((object) => {
             if (object === null) {
-              return Option.none<globalThis.R2Object>();
+              return Option.none<CloudflareR2Object>();
             }
 
             if (options !== undefined && "onlyIf" in options) {

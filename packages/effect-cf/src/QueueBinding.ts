@@ -1,17 +1,26 @@
+import type {
+  MessageSendRequest as CloudflareMessageSendRequest,
+  Queue as CloudflareQueue,
+  QueueMetrics as CloudflareQueueMetrics,
+  QueueSendBatchOptions as CloudflareQueueSendBatchOptions,
+  QueueSendBatchResponse as CloudflareQueueSendBatchResponse,
+  QueueSendOptions as CloudflareQueueSendOptions,
+  QueueSendResponse as CloudflareQueueSendResponse,
+} from "@cloudflare/workers-types";
 import { Context, Data, Effect, Schema as S } from "effect";
 
 import * as Binding from "./Binding";
 import type * as RpcDefinition from "./RpcDefinition";
 
-export type QueueSendOptions = globalThis.QueueSendOptions;
-export type QueueSendResponse = globalThis.QueueSendResponse;
-export type QueueSendBatchOptions = globalThis.QueueSendBatchOptions;
-export type QueueSendBatchResponse = globalThis.QueueSendBatchResponse;
-export type QueueMetrics = globalThis.QueueMetrics;
-export type MessageSendRequest<Body> = globalThis.MessageSendRequest<Body>;
+export type QueueSendOptions = CloudflareQueueSendOptions;
+export type QueueSendResponse = CloudflareQueueSendResponse;
+export type QueueSendBatchOptions = CloudflareQueueSendBatchOptions;
+export type QueueSendBatchResponse = CloudflareQueueSendBatchResponse;
+export type QueueMetrics = CloudflareQueueMetrics;
+export type MessageSendRequest<Body> = CloudflareMessageSendRequest<Body>;
 
-export type QueueProducer<Body> = Pick<globalThis.Queue<Body>, "send"> &
-  Partial<Pick<globalThis.Queue<Body>, "sendBatch" | "metrics">>;
+export type QueueProducer<Body> = Pick<CloudflareQueue<Body>, "send"> &
+  Partial<Pick<CloudflareQueue<Body>, "sendBatch" | "metrics">>;
 
 const expectedQueueProducer = "Queue producer binding with send(); optional sendBatch()/metrics()";
 
@@ -32,7 +41,7 @@ export interface QueueBindingClient<Message extends RpcDefinition.ServiceFreeSch
     options?: QueueSendBatchOptions,
   ) => Effect.Effect<void, QueueOperationError | S.SchemaError>;
   readonly metrics: () => Effect.Effect<QueueMetrics, QueueOperationError>;
-  readonly unsafeRaw: Effect.Effect<globalThis.Queue<S.Codec.Encoded<Message>>>;
+  readonly unsafeRaw: Effect.Effect<CloudflareQueue<S.Codec.Encoded<Message>>>;
 }
 
 export class QueueOperationError extends Data.TaggedError("QueueOperationError")<{
@@ -129,7 +138,7 @@ export const makeClient = <Message extends RpcDefinition.ServiceFreeSchema>(
 
       return tryQueuePromise(definition.binding, "metrics", () => metrics.call(queue));
     },
-    unsafeRaw: Effect.succeed(queue as globalThis.Queue<EncodedBody>),
+    unsafeRaw: Effect.succeed(queue as CloudflareQueue<EncodedBody>),
   });
 };
 

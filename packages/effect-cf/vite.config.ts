@@ -3,6 +3,23 @@ import { defineConfig } from "vite-plus";
 
 const testExcludes = ["**/node_modules/**", "**/dist/**", "**/.git/**"];
 
+const cloudflareWorkersTypesDtsPlugin = () => ({
+  name: "effect-cf:cloudflare-workers-types-dts-type-only",
+  transform: {
+    filter: {
+      id: {
+        include: /\.d\.[cm]?ts$/,
+      },
+    },
+    handler(code: string) {
+      return code.replace(
+        /^(import\s+)(?!type\s)(.+from\s+["']@cloudflare\/workers-types["'];?)/gm,
+        "import type $2",
+      );
+    },
+  },
+});
+
 export default defineConfig({
   test: {
     projects: [
@@ -43,6 +60,7 @@ export default defineConfig({
     dts: {
       tsgo: true,
     },
+    plugins: [cloudflareWorkersTypesDtsPlugin()],
   },
   lint: {
     options: {

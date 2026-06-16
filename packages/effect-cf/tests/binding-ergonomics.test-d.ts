@@ -4,7 +4,9 @@ import { PgClient } from "@effect/sql-pg";
 import { SqlClient, SqlError } from "effect/unstable/sql";
 
 import {
+  AiGateway,
   Binding,
+  BrowserRendering,
   DurableObject,
   DurableObjectNamespace,
   Hyperdrive,
@@ -15,8 +17,10 @@ import {
   R2,
   Rpc,
   ServiceBinding,
+  Vectorize,
   Worker,
   WorkerEnvironment,
+  WorkersAi,
   Workflow,
   WorkflowBinding,
 } from "../src/index";
@@ -195,6 +199,105 @@ const imagesProgram = Effect.gen(function* () {
   });
 });
 
+export class Ai extends WorkersAi.Tag<Ai>()("Ai") {}
+
+export const AiLayer = Ai.layer({ binding: "AI" });
+
+const workersAiProgram = Effect.gen(function* () {
+  const ai = yield* Ai;
+
+  expectTypeOf(
+    ai.run("@cf/qwen/qwen3-embedding-0.6b", {
+      text: "tomato soup",
+    }),
+  ).toEqualTypeOf<
+    Effect.Effect<Ai_Cf_Qwen_Qwen3_Embedding_0_6B_Output, WorkersAi.WorkersAiOperationError>
+  >();
+
+  expectTypeOf(
+    ai.runEmbedding("@cf/qwen/qwen3-embedding-0.6b", {
+      text: "tomato soup",
+    }),
+  ).toEqualTypeOf<
+    Effect.Effect<WorkersAi.WorkersAiEmbeddingResponse, WorkersAi.WorkersAiOperationError>
+  >();
+
+  expectTypeOf(ai.unsafeRaw).toEqualTypeOf<Effect.Effect<WorkersAi.WorkersAiBinding<AiModels>>>();
+});
+
+export class RecipeVectors extends Vectorize.Tag<RecipeVectors>()("RecipeVectors") {}
+
+export const RecipeVectorsLayer = RecipeVectors.layer({ binding: "RECIPE_VECTORS" });
+
+const vectorizeProgram = Effect.gen(function* () {
+  const vectors = yield* RecipeVectors;
+
+  expectTypeOf(
+    vectors.upsert([
+      {
+        id: "recipe-1",
+        values: [0.1, 0.2],
+        namespace: "recipes",
+        metadata: { kind: "soup" },
+      },
+    ]),
+  ).toEqualTypeOf<Effect.Effect<Vectorize.VectorizeMutation, Vectorize.VectorizeOperationError>>();
+
+  expectTypeOf(
+    vectors.query([0.1, 0.2], {
+      topK: 5,
+      namespace: "recipes",
+      returnMetadata: "all",
+      returnValues: true,
+      filter: { kind: "soup" },
+    }),
+  ).toEqualTypeOf<Effect.Effect<Vectorize.VectorizeMatches, Vectorize.VectorizeOperationError>>();
+});
+
+export class Gateway extends AiGateway.Tag<Gateway>()("Gateway") {}
+
+export const GatewayLayer = Gateway.layer({ binding: "AI", gatewayId: "default" });
+
+const aiGatewayProgram = Effect.gen(function* () {
+  const gateway = yield* Gateway;
+
+  expectTypeOf(
+    gateway.run({
+      provider: "workers-ai",
+      endpoint: "@cf/meta/llama-3.1-8b-instruct",
+      headers: {},
+      query: { prompt: "hello" },
+    }),
+  ).toEqualTypeOf<Effect.Effect<Response, AiGateway.AiGatewayOperationError>>();
+
+  expectTypeOf(gateway.getUrl("openai")).toEqualTypeOf<
+    Effect.Effect<string, AiGateway.AiGatewayOperationError>
+  >();
+});
+
+export class Browser extends BrowserRendering.Tag<Browser>()("Browser") {}
+
+export const BrowserLayer = Browser.layer({ binding: "MYBROWSER" });
+
+declare const launch: BrowserRendering.BrowserRenderingLaunch<
+  BrowserRendering.BrowserRenderingBinding,
+  BrowserRendering.BrowserRenderingBrowserLike
+>;
+
+const browserRenderingProgram = Effect.gen(function* () {
+  const rendering = yield* Browser;
+
+  expectTypeOf(rendering.launchWith(launch)).toEqualTypeOf<
+    Effect.Effect<
+      BrowserRendering.BrowserRenderingBrowserClient<
+        BrowserRendering.BrowserRenderingBrowserLike<BrowserRendering.BrowserRenderingPageLike>,
+        BrowserRendering.BrowserRenderingPageLike
+      >,
+      BrowserRendering.BrowserRenderingOperationError
+    >
+  >();
+});
+
 // @ts-expect-error optional driver integrations stay behind subpath exports.
 expectTypeOf(EffectCf.HyperdrivePg).toBeNever();
 
@@ -311,6 +414,10 @@ void kvProgram;
 void r2Program;
 void hyperdriveProgram;
 void imagesProgram;
+void workersAiProgram;
+void vectorizeProgram;
+void aiGatewayProgram;
+void browserRenderingProgram;
 void workerProgram;
 void durableObjectProgram;
 void missingDurableObjectLayer;

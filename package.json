@@ -21,27 +21,23 @@
     "changeset:publish": "vp exec changeset publish",
     "dev": "vp run chat-api-worker#dev",
     "dev:web": "vp run chat-web#dev",
-    "cf-typegen": "vp run chat-room-do#cf-typegen && vp run chat-analytics-worker#cf-typegen && vp run chat-api-worker#cf-typegen",
     "dev:todo-http-api": "vp run todo-http-api-worker#dev",
     "dev:todo-http-web": "vp run todo-http-web#dev",
     "dev:todo-http": "vp run todo-http-web#dev",
     "build:todo-http": "vp run todo-http-domain#build && vp run todo-http-api-worker#build && vp run todo-http-web#build",
-    "cf-typegen:todo-http": "vp run todo-http-api-worker#cf-typegen",
     "dev:todo-rpc-http-api": "vp run todo-rpc-http-api-worker#dev",
     "dev:todo-rpc-http-web": "vp run todo-rpc-http-web#dev",
     "dev:todo-rpc-http": "vp run todo-rpc-http-web#dev",
     "build:todo-rpc-http": "vp run todo-rpc-http-domain#build && vp run todo-rpc-http-api-worker#build && vp run todo-rpc-http-web#build",
-    "cf-typegen:todo-rpc-http": "vp run todo-rpc-http-api-worker#cf-typegen",
     "dev:todo-rpc-ws-api": "vp run todo-rpc-ws-api-worker#dev",
     "dev:todo-rpc-ws-web": "vp run todo-rpc-ws-web#dev",
     "dev:todo-rpc-ws": "vp run todo-rpc-ws-web#dev",
-    "build:todo-rpc-ws": "vp run todo-rpc-ws-domain#build && vp run todo-rpc-ws-store-do#build && vp run todo-rpc-ws-api-worker#build && vp run todo-rpc-ws-web#build",
-    "cf-typegen:todo-rpc-ws": "vp run todo-rpc-ws-store-do#cf-typegen && vp run todo-rpc-ws-api-worker#cf-typegen"
+    "build:todo-rpc-ws": "vp run todo-rpc-ws-domain#build && vp run todo-rpc-ws-store-do#build && vp run todo-rpc-ws-api-worker#build && vp run todo-rpc-ws-web#build"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.7.0",
     "@changesets/cli": "^2.31.0",
-    "@cloudflare/vitest-pool-workers": "^0.16.3",
+    "@cloudflare/vitest-pool-workers": "catalog:",
     "@effect/platform-bun": "catalog:",
     "@effect/tsgo": "0.5.1",
     "@types/bun": "^1.3.14",
@@ -50,9 +46,10 @@
     "effect": "catalog:",
     "vite-plus": "catalog:",
     "vitest": "npm:@voidzero-dev/vite-plus-test@0.1.20",
-    "wrangler": "^4.93.1"
+    "wrangler": "catalog:"
   },
   "overrides": {
+    "@cloudflare/workers-types": "catalog:",
     "@effect/platform-node-shared": "4.0.0-beta.77",
     "vite": "catalog:",
     "vitest": "catalog:"
@@ -62,6 +59,8 @@
   },
   "packageManager": "bun@1.3.13",
   "catalog": {
+    "@cloudflare/workers-types": "4.20260611.1",
+    "@cloudflare/vitest-pool-workers": "0.16.15",
     "@effect/platform-bun": "4.0.0-beta.77",
     "@effect/sql-d1": "4.0.0-beta.77",
     "@effect/sql-pg": "4.0.0-beta.77",
@@ -70,6 +69,7 @@
     "effect": "4.0.0-beta.77",
     "vite": "npm:@voidzero-dev/vite-plus-core@0.1.20",
     "vitest": "npm:@voidzero-dev/vite-plus-test@0.1.20",
-    "vite-plus": "0.1.20"
+    "vite-plus": "0.1.20",
+    "wrangler": "4.100.0"
   }
 }

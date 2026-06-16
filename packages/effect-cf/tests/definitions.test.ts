@@ -386,6 +386,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
         payload: { segmentId: "s_1", attempt: "5" },
         timestamp: new Date(),
         instanceId: "wf_1",
+        workflowName: "SegmentWorkflow",
       },
       step,
     );

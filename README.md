@@ -79,6 +79,99 @@ export default Worker.make(Layer.mergeAll(HttpRouter.layer, CounterLayer), app);
 
 The `examples/` directory demonstrates package usage across Workers, Durable Objects, service bindings, and frontend consumers.
 
+### Cloudflare AI and Browser Bindings
+
+Workers AI embeddings:
+
+```ts
+import { Effect } from "effect";
+import { WorkersAi } from "effect-cf";
+
+class Ai extends WorkersAi.Tag<Ai>()("Ai") {}
+
+const program = Effect.gen(function* () {
+  const ai = yield* Ai;
+  const embedding = yield* ai.runEmbedding("@cf/qwen/qwen3-embedding-0.6b", {
+    text: "tomato soup with basil",
+  });
+
+  return { data: embedding.data, shape: embedding.shape };
+});
+```
+
+Vectorize upsert/query:
+
+```ts
+import { Effect } from "effect";
+import { Vectorize } from "effect-cf";
+
+class RecipeVectors extends Vectorize.Tag<RecipeVectors>()("RecipeVectors") {}
+
+const program = Effect.gen(function* () {
+  const vectors = yield* RecipeVectors;
+
+  yield* vectors.upsert([
+    {
+      id: "recipe:tomato-soup",
+      values: [0.12, 0.34, 0.56],
+      namespace: "recipes",
+      metadata: { kind: "soup" },
+    },
+  ]);
+
+  return yield* vectors.query([0.12, 0.34, 0.56], {
+    topK: 5,
+    namespace: "recipes",
+    returnMetadata: "all",
+    returnValues: true,
+    filter: { kind: "soup" },
+  });
+});
+```
+
+AI Gateway request:
+
+```ts
+import { Effect } from "effect";
+import { AiGateway } from "effect-cf";
+
+class Gateway extends AiGateway.Tag<Gateway>()("Gateway") {}
+
+const program = Effect.gen(function* () {
+  const gateway = yield* Gateway;
+
+  return yield* gateway.run({
+    provider: "workers-ai",
+    endpoint: "@cf/meta/llama-3.1-8b-instruct",
+    headers: {},
+    query: { prompt: "Write one sentence about soup." },
+  });
+});
+```
+
+Browser Rendering screenshot/content extraction:
+
+```ts
+import puppeteer from "@cloudflare/puppeteer";
+import { Effect } from "effect";
+import { BrowserRendering } from "effect-cf";
+
+class Browser extends BrowserRendering.Tag<Browser>()("Browser") {}
+
+const program = Effect.gen(function* () {
+  const rendering = yield* Browser;
+  const browser = yield* rendering.launchWith(puppeteer.launch);
+  const page = yield* browser.newPage;
+
+  yield* page.goto("https://example.com");
+  const content = yield* page.content;
+  const screenshot = yield* page.screenshot<Uint8Array>({ type: "png" });
+
+  yield* browser.close;
+  return { content, screenshot };
+});
+```
+
 ## Changelog
 
 See [packages/effect-cf/CHANGELOG.md](./packages/effect-cf/CHANGELOG.md).

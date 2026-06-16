@@ -120,6 +120,7 @@ test("Workflow example runs durable steps and returns typed output", async () =>
       payload: { reportId: "report-2", requestedBy: "dan" },
       timestamp: new Date(),
       instanceId: "instance-2",
+      workflowName: "ReportWorkflow",
     },
     makeWorkflowStep(stepCalls),
   );

@@ -26,7 +26,7 @@
     "effect-cf": "workspace:*"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260421.1",
+    "@cloudflare/workers-types": "catalog:",
     "typescript": "~6.0.2",
     "vite-plus": "catalog:"
   }

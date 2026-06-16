@@ -59,6 +59,6 @@ The current branch already has related edits in several of these files. New work
 
 ## Notes
 
-- Generated `worker-configuration.d.ts` files remain an auxiliary Wrangler check, not the source of RPC API truth.
+- Worker projects use `@cloudflare/workers-types` directly instead of generated Wrangler type files.
 - No schema validation is added at RPC call boundaries in this refactor.
 - If stronger Durable Object namespace validation conflicts with test doubles, update the doubles to match the public wrapper surface instead of weakening type inference.

@@ -22,7 +22,6 @@ Useful local commands:
 ```bash
 vp run ready
 vp run -r build
-vp run cf-typegen
 vp run chat-api-worker#dev --port 8799
 ```
 

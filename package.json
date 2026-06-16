@@ -21,22 +21,18 @@
     "changeset:publish": "vp exec changeset publish",
     "dev": "vp run chat-api-worker#dev",
     "dev:web": "vp run chat-web#dev",
-    "cf-typegen": "vp run chat-room-do#cf-typegen && vp run chat-analytics-worker#cf-typegen && vp run chat-api-worker#cf-typegen",
     "dev:todo-http-api": "vp run todo-http-api-worker#dev",
     "dev:todo-http-web": "vp run todo-http-web#dev",
     "dev:todo-http": "vp run todo-http-web#dev",
     "build:todo-http": "vp run todo-http-domain#build && vp run todo-http-api-worker#build && vp run todo-http-web#build",
-    "cf-typegen:todo-http": "vp run todo-http-api-worker#cf-typegen",
     "dev:todo-rpc-http-api": "vp run todo-rpc-http-api-worker#dev",
     "dev:todo-rpc-http-web": "vp run todo-rpc-http-web#dev",
     "dev:todo-rpc-http": "vp run todo-rpc-http-web#dev",
     "build:todo-rpc-http": "vp run todo-rpc-http-domain#build && vp run todo-rpc-http-api-worker#build && vp run todo-rpc-http-web#build",
-    "cf-typegen:todo-rpc-http": "vp run todo-rpc-http-api-worker#cf-typegen",
     "dev:todo-rpc-ws-api": "vp run todo-rpc-ws-api-worker#dev",
     "dev:todo-rpc-ws-web": "vp run todo-rpc-ws-web#dev",
     "dev:todo-rpc-ws": "vp run todo-rpc-ws-web#dev",
-    "build:todo-rpc-ws": "vp run todo-rpc-ws-domain#build && vp run todo-rpc-ws-store-do#build && vp run todo-rpc-ws-api-worker#build && vp run todo-rpc-ws-web#build",
-    "cf-typegen:todo-rpc-ws": "vp run todo-rpc-ws-store-do#cf-typegen && vp run todo-rpc-ws-api-worker#cf-typegen"
+    "build:todo-rpc-ws": "vp run todo-rpc-ws-domain#build && vp run todo-rpc-ws-store-do#build && vp run todo-rpc-ws-api-worker#build && vp run todo-rpc-ws-web#build"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.7.0",

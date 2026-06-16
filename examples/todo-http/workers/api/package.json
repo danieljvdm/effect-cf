@@ -6,8 +6,7 @@
   "scripts": {
     "dev": "wrangler dev -c wrangler.jsonc --port 8787",
     "build": "tsc --noEmit && wrangler deploy --dry-run --outdir dist",
-    "deploy": "wrangler deploy",
-    "cf-typegen": "wrangler types"
+    "deploy": "wrangler deploy"
   },
   "dependencies": {
     "@effect-cf/todo-http-domain": "workspace:*",

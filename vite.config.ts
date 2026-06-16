@@ -40,10 +40,10 @@ export default defineConfig({
     ],
   },
   fmt: {
-    ignorePatterns: ["apps/example/worker-configuration.d.ts", "repos/**"],
+    ignorePatterns: ["repos/**"],
   },
   lint: {
-    ignorePatterns: ["apps/example/worker-configuration.d.ts", "repos/**"],
+    ignorePatterns: ["repos/**"],
     options: { typeAware: true, typeCheck: true },
   },
   run: {

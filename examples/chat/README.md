@@ -57,6 +57,6 @@ const ApiConfig = Config.all({
 });
 ```
 
-Those keys come from the generated `worker-configuration.d.ts` / `Cloudflare.Env` shape, while
+Those keys come from the configured Cloudflare bindings and `@cloudflare/workers-types`, while
 the app still decides how each value is parsed or redacted. Binding objects such as KV namespaces,
 Durable Object namespaces, and service bindings continue to use the package binding helpers.

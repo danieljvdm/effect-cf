@@ -28,6 +28,7 @@
         "effect-cf": "workspace:*",
       },
       "devDependencies": {
+        "@cloudflare/workers-types": "^4.20260421.1",
         "typescript": "~6.0.2",
         "vite-plus": "catalog:",
       },
@@ -70,6 +71,7 @@
         "effect-cf": "workspace:*",
       },
       "devDependencies": {
+        "@cloudflare/workers-types": "^4.20260421.1",
         "typescript": "~6.0.2",
         "vite-plus": "catalog:",
       },
@@ -83,6 +85,7 @@
         "effect-cf": "workspace:*",
       },
       "devDependencies": {
+        "@cloudflare/workers-types": "^4.20260421.1",
         "typescript": "~6.0.2",
         "vite-plus": "catalog:",
       },
@@ -305,7 +308,7 @@
     },
     "packages/effect-cf": {
       "name": "effect-cf",
-      "version": "0.9.2",
+      "version": "0.10.0",
       "devDependencies": {
         "@cloudflare/vitest-pool-workers": "^0.15.0",
         "@cloudflare/workers-types": "^4.20260421.1",

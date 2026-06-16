@@ -6,8 +6,7 @@
   "scripts": {
     "dev": "wrangler dev -c wrangler.jsonc -c ../../workers/analytics/wrangler.jsonc -c ../../durable-objects/chat-room/wrangler.jsonc",
     "build": "tsc --noEmit && wrangler deploy --dry-run --outdir dist",
-    "deploy": "wrangler deploy",
-    "cf-typegen": "wrangler types"
+    "deploy": "wrangler deploy"
   },
   "dependencies": {
     "@effect-cf/example-contracts": "workspace:*",
@@ -15,6 +14,7 @@
     "effect-cf": "workspace:*"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260421.1",
     "typescript": "~6.0.2",
     "vite-plus": "catalog:"
   }

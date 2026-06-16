@@ -1,11 +1,5 @@
 import { Context, Data, Effect, type Layer } from "effect";
-import type {
-  AIGatewayHeaders as CloudflareAiGatewayHeaders,
-  AIGatewayUniversalRequest as CloudflareAiGatewayUniversalRequest,
-  AiGateway as CloudflareAiGateway,
-  AiGatewayLog as CloudflareAiGatewayLog,
-  AiGatewayPatchLog as CloudflareAiGatewayPatchLog,
-} from "@cloudflare/workers-types";
+import type { AiGateway as CloudflareAiGateway } from "@cloudflare/workers-types";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
@@ -31,11 +25,12 @@ export interface AiGatewayDefinition {
 }
 
 export type AiGatewayBinding = CloudflareAiGateway;
-export type AiGatewayPatchLog = CloudflareAiGatewayPatchLog;
-export type AiGatewayLog = CloudflareAiGatewayLog;
-export type AiGatewayProvider = string;
-export type AiGatewayHeaders = CloudflareAiGatewayHeaders;
-export type AiGatewayUniversalRequest = CloudflareAiGatewayUniversalRequest;
+type AiGatewayRunData = Parameters<AiGatewayBinding["run"]>[0];
+export type AiGatewayPatchLog = Parameters<AiGatewayBinding["patchLog"]>[1];
+export type AiGatewayLog = Awaited<ReturnType<AiGatewayBinding["getLog"]>>;
+export type AiGatewayProvider = NonNullable<Parameters<AiGatewayBinding["getUrl"]>[0]>;
+export type AiGatewayUniversalRequest = Exclude<AiGatewayRunData, ReadonlyArray<unknown>>;
+export type AiGatewayHeaders = NonNullable<AiGatewayUniversalRequest["headers"]>;
 export type AiGatewayRunOptions = Parameters<CloudflareAiGateway["run"]>[1];
 
 export interface AiGatewayFetchOptions {

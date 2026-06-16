@@ -1,11 +1,15 @@
-import { Config, ConfigProvider, Context, Effect, Layer, Stream } from "effect";
+import { Clock, Config, ConfigProvider, Context, Effect, Layer, Stream } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
 import { expect, test } from "vite-plus/test";
 
-import { Worker, WorkerConfig } from "../src/index";
+import { DurableObject, Worker, WorkerConfig } from "../src/index";
 
 class RenderValue extends Context.Service<RenderValue, string>()(
   "effect-cf/test/WorkerBoundary/RenderValue",
+) {}
+
+class EventValue extends Context.Service<EventValue, string>()(
+  "effect-cf/test/WorkerBoundary/EventValue",
 ) {}
 
 const makeExecutionContext = () =>
@@ -14,6 +18,14 @@ const makeExecutionContext = () =>
     waitUntil: () => undefined,
     passThroughOnException: () => undefined,
   }) as unknown as globalThis.ExecutionContext;
+
+const makeDurableObjectState = () =>
+  ({
+    id: { toString: () => "durable-object:test" },
+    storage: {},
+    waitUntil: () => undefined,
+    blockConcurrencyWhile: async <T>(callback: () => Promise<T>) => callback(),
+  }) as unknown as globalThis.DurableObjectState;
 
 test("Worker.makeFetchHandler returns an ExportedHandler-compatible fetch object", async () => {
   const handler = Worker.makeFetchHandler(Layer.empty, {
@@ -143,6 +155,23 @@ test("Worker fetch handlers read Effect config from env by default", async () =>
   await expect(response.text()).resolves.toBe("effect-cf");
 });
 
+test("Durable Object fetch handlers read Effect config from env by default", async () => {
+  const Live = DurableObject.make(Layer.empty, {
+    fetch: Effect.gen(function* () {
+      const value = yield* Config.string("APP_NAME");
+
+      return new Response(value);
+    }),
+  });
+  const durableObject = new Live(makeDurableObjectState(), {
+    APP_NAME: "effect-cf",
+  } as Cloudflare.Env);
+
+  const response = await durableObject.fetch!(new Request("https://worker.test/"));
+
+  await expect(response.text()).resolves.toBe("effect-cf");
+});
+
 test("WorkerConfig.layerWith derives Effect config from non-scalar env bindings", async () => {
   const Live = Worker.make(
     WorkerConfig.layerWith((env) =>
@@ -167,3 +196,84 @@ test("WorkerConfig.layerWith derives Effect config from non-scalar env bindings"
 
   await expect(response.text()).resolves.toBe("postgres://hyperdrive.test/app");
 });
+
+test("Worker handlers use an epoch nanosecond clock derived from wall time", async () => {
+  const originalDateNow = Date.now;
+  const fixedMillis = Date.UTC(2030, 0, 2, 3, 4, 5);
+  Date.now = () => fixedMillis;
+
+  try {
+    const WorkerClass = Worker.make(Layer.empty, {
+      fetch: Effect.gen(function* () {
+        const nanos = yield* Clock.currentTimeNanos;
+        return Response.json({ nanos: nanos.toString() });
+      }),
+    });
+    const worker = new WorkerClass(makeExecutionContext(), {} as Cloudflare.Env);
+
+    const response = await worker.fetch(new Request("https://worker.test/clock"));
+    const body = (await response.json()) as { readonly nanos: string };
+
+    expect(BigInt(body.nanos)).toBe(BigInt(fixedMillis) * BigInt(1_000_000));
+  } finally {
+    Date.now = originalDateNow;
+  }
+});
+
+test("Worker eventLayer applies to fetch, queue, and RPC events", async () => {
+  const events: Array<string> = [];
+  let nextEventId = 0;
+
+  const eventLayer = Layer.effect(
+    EventValue,
+    Effect.acquireRelease(
+      Effect.sync(() => {
+        nextEventId++;
+        events.push(`acquire:${nextEventId}`);
+        return `event:${nextEventId}`;
+      }),
+      (value) => Effect.sync(() => events.push(`release:${value}`)),
+    ),
+  );
+
+  const WorkerClass = Worker.make(Layer.empty, {
+    eventLayer,
+    fetch: Effect.gen(function* () {
+      const value = yield* EventValue;
+      return new Response(value);
+    }),
+    queue: () =>
+      Effect.gen(function* () {
+        const value = yield* EventValue;
+        events.push(`queue:${value}`);
+      }),
+    rpc: {
+      read: () => EventValue,
+    },
+  });
+  const worker = new WorkerClass(makeExecutionContext(), {} as Cloudflare.Env);
+
+  const response = await worker.fetch(new Request("https://worker.test/"));
+  await expect(response.text()).resolves.toBe("event:1");
+  await worker.queue(makeMessageBatch("events"));
+  await expect(worker.read()).resolves.toBe("event:3");
+
+  expect(events).toEqual([
+    "acquire:1",
+    "release:event:1",
+    "acquire:2",
+    "queue:event:2",
+    "release:event:2",
+    "acquire:3",
+    "release:event:3",
+  ]);
+});
+
+const makeMessageBatch = (queue: string): globalThis.MessageBatch<unknown> =>
+  ({
+    queue,
+    messages: [],
+    metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
+    ackAll: () => undefined,
+    retryAll: () => undefined,
+  }) as globalThis.MessageBatch<unknown>;

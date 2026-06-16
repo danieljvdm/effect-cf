@@ -1,5 +1,32 @@
 # effect-cf
 
+## 0.13.1
+
+### Patch Changes
+
+- [#41](https://github.com/danieljvdm/effect-cf/pull/41) [`6e1ddc9`](https://github.com/danieljvdm/effect-cf/commit/6e1ddc9e246ee966dee7a66eae38739241d23816) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Provide an epoch-based Effect clock in Worker and Durable Object runtimes so OTLP
+  span and log timestamps are valid under Cloudflare workerd.
+
+## 0.13.0
+
+### Minor Changes
+
+- [#39](https://github.com/danieljvdm/effect-cf/pull/39) [`ac22ae2`](https://github.com/danieljvdm/effect-cf/commit/ac22ae2d84fbed6ac23a6a77c841a8305003aa6e) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add `eventLayer` options to Worker and Durable Object entrypoints for per-event
+  Effect layer provisioning, and remove the Cloudflare OTLP handler instrumentation
+  helper APIs.
+
+## 0.12.0
+
+### Minor Changes
+
+- [#37](https://github.com/danieljvdm/effect-cf/pull/37) [`4936579`](https://github.com/danieljvdm/effect-cf/commit/4936579eed9b2ad690f3fece468cc435e5bbf8e8) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add Cloudflare OTLP layers for Effect logs, traces, and metrics in Workers and Durable Objects.
+
+## 0.11.0
+
+### Minor Changes
+
+- [#35](https://github.com/danieljvdm/effect-cf/pull/35) [`fc02f42`](https://github.com/danieljvdm/effect-cf/commit/fc02f421565451c9925f45841f45012473057966) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add a Durable Object SQLite layer for providing `effect/unstable/sql` through `@effect/sql-sqlite-do`.
+
 ## 0.10.0
 
 ### Minor Changes

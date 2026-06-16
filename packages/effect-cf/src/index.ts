@@ -1,12 +1,14 @@
 export * as AiGateway from "./AiGateway";
 export * as Binding from "./Binding";
 export * as BrowserRendering from "./BrowserRendering";
+export * as CloudflareOtlp from "./CloudflareOtlp";
 export * as D1 from "./D1";
 export * as DurableObject from "./DurableObject";
 export * as DurableObjectAlarm from "./DurableObjectAlarm";
 export * as DurableObjectDefinition from "./DurableObjectDefinition";
 export * as DurableObjectNamespace from "./DurableObjectNamespace";
 export * as DurableObjectRpcWebSocket from "./DurableObjectRpcWebSocket";
+export * as DurableObjectSqlite from "./DurableObjectSqlite";
 export * as DurableObjectState from "./DurableObjectState";
 export * as DurableObjectWebSocket from "./DurableObjectWebSocket";
 export * as DurableObjectStorage from "./DurableObjectStorage";

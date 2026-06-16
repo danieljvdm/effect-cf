@@ -115,11 +115,21 @@ type BoundaryHandlers<ROut, Self extends Definition.Any> = {
 /**
  * Durable Object constructor options for a specific RPC definition.
  */
-export interface Options<ROut, Self extends Definition.Any> extends Omit<
-  DurableObjectEntrypoint.DurableObjectOptions<ROut, Handlers<ROut, Self>>,
+export interface Options<
+  ROut,
+  Self extends Definition.Any,
+  REvent = never,
+  EventLayerError = never,
+> extends Omit<
+  DurableObjectEntrypoint.DurableObjectOptions<
+    ROut,
+    REvent,
+    EventLayerError,
+    Handlers<ROut | REvent, Self>
+  >,
   "rpc"
 > {
-  readonly rpc: Handlers<ROut, Self>;
+  readonly rpc: Handlers<ROut | REvent, Self>;
 }
 
 export type LayerOptions = {
@@ -141,12 +151,12 @@ export type TagClass<Self, Id extends string, MethodsShape extends Methods> = Co
   > & {
     readonly id: Id;
     readonly methods: MethodsShape;
-    readonly make: <ROut, LayerError>(
+    readonly make: <ROut, LayerError, REvent = never, EventLayerError = never>(
       layer: Layer.Layer<ROut, LayerError, DurableObjectState | WorkerEnvironment>,
-      options: Options<ROut, Definition<Id, MethodsShape>>,
+      options: Options<ROut, Definition<Id, MethodsShape>, REvent, EventLayerError>,
     ) => DurableObjectEntrypoint.DurableObjectClass<
-      Handlers<ROut, Definition<Id, MethodsShape>>,
-      ROut
+      Handlers<ROut | REvent, Definition<Id, MethodsShape>>,
+      ROut | REvent
     >;
     readonly layer: (
       options: LayerOptions,
@@ -195,9 +205,9 @@ const makeDefinition = <Id extends string, const MethodsShape extends Methods>(
   const definition: SelfDefinition = RpcDefinition.make(id, methods);
 
   return Object.assign(definition, {
-    make: <ROut, LayerError>(
+    make: <ROut, LayerError, REvent = never, EventLayerError = never>(
       layer: Layer.Layer<ROut, LayerError, DurableObjectState | WorkerEnvironment>,
-      options: Options<ROut, SelfDefinition>,
+      options: Options<ROut, SelfDefinition, REvent, EventLayerError>,
     ) =>
       DurableObjectEntrypoint.make(layer, {
         ...options,

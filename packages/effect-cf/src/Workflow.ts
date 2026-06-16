@@ -21,6 +21,7 @@ export interface WorkflowEventService<Payload = unknown> {
   readonly payload: Payload;
   readonly timestamp: Date;
   readonly instanceId: string;
+  readonly workflowName: string;
 }
 
 export class WorkflowEvent extends Context.Service<WorkflowEvent, WorkflowEventService>()(
@@ -63,6 +64,7 @@ const fromWorkflowEvent = <Payload>(
   payload: event.payload,
   timestamp: event.timestamp,
   instanceId: event.instanceId,
+  workflowName: event.workflowName,
 });
 
 const fromWorkflowStep = (

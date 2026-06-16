@@ -1,15 +1,16 @@
 import { DurableObject as CloudflareDurableObject } from "cloudflare:workers";
-import { Effect, Layer, ManagedRuntime, type Context, type Scope } from "effect";
+import { ConfigProvider, Effect, Layer, ManagedRuntime, type Context, type Scope } from "effect";
 import type { Schema as S } from "effect";
 
 import { NativeRequest } from "./Worker";
-import { WorkerEnvironment, type WorkerEnv } from "./Environment";
+import { WorkerConfig, WorkerEnvironment, type WorkerEnv } from "./Environment";
 import { DurableObjectState, fromDurableObjectState } from "./DurableObjectState";
 import { fromWebSocket, type DurableWebSocket } from "./DurableObjectWebSocket";
 import type * as Binding from "./Binding";
 import * as DurableObjectDefinition from "./DurableObjectDefinition";
 import type * as DurableObjectNamespace from "./DurableObjectNamespace";
 import type * as Rpc from "./Rpc";
+import * as CloudflareClock from "./internal/Clock";
 import * as Entrypoint from "./internal/Entrypoint";
 
 const reservedMethodNames = new Set<string>([
@@ -27,6 +28,9 @@ type RuntimeContext<ROut> = DurableObjectState | WorkerEnvironment | ROut;
 type HandlerContext<ROut> = RuntimeContext<ROut> | Scope.Scope;
 
 type FetchContext<ROut> = HandlerContext<ROut> | NativeRequest;
+type RunOptions = {
+  readonly eventLayer?: boolean;
+};
 
 const RunSymbol = Symbol.for("effect-cf/DurableObject/run");
 
@@ -72,7 +76,24 @@ export type RpcHandlers<ROut, Api> = {
 /**
  * Options for creating a Durable Object class backed by Effect handlers.
  */
-export interface DurableObjectOptions<ROut, Rpc extends DurableObjectRpc<ROut>> {
+export interface DurableObjectOptions<
+  RRuntime,
+  REvent = never,
+  EventLayerError = never,
+  Rpc extends DurableObjectRpc<RRuntime | REvent> = Record<never, never>,
+> {
+  /**
+   * Layer provided around each Cloudflare event handled by this Durable Object.
+   *
+   * The layer is built inside the event's Effect scope and finalized when the
+   * event effect completes. It is not applied to `initialize`, which is an
+   * instance-load lifecycle hook rather than a platform event.
+   */
+  readonly eventLayer?: Layer.Layer<
+    REvent,
+    EventLayerError,
+    DurableObjectState | WorkerEnvironment | RRuntime
+  >;
   /**
    * Effect run when Cloudflare loads this Durable Object instance into memory.
    *
@@ -81,11 +102,11 @@ export interface DurableObjectOptions<ROut, Rpc extends DurableObjectRpc<ROut>> 
    * the same Durable Object id again after eviction or restart; use Durable
    * Object storage if work must happen only once per id.
    */
-  readonly initialize?: Effect.Effect<void, unknown, HandlerContext<ROut>>;
+  readonly initialize?: Effect.Effect<void, unknown, HandlerContext<RRuntime>>;
   /** Optional RPC methods exposed as Durable Object instance methods. */
   readonly rpc?: Rpc;
   /** Optional fetch handler for HTTP/WebSocket requests. */
-  readonly fetch?: Effect.Effect<Response, unknown, FetchContext<ROut>>;
+  readonly fetch?: Effect.Effect<Response, unknown, FetchContext<RRuntime | REvent>>;
   /**
    * Optional logical alarm processing effect.
    *
@@ -93,24 +114,24 @@ export interface DurableObjectOptions<ROut, Rpc extends DurableObjectRpc<ROut>> 
    * `DurableObjectAlarm.processDue(...)` so the reusable scheduler stays inside
    * the Durable Object's single managed runtime boundary.
    */
-  readonly alarms?: Effect.Effect<unknown, unknown, HandlerContext<ROut>>;
+  readonly alarms?: Effect.Effect<unknown, unknown, HandlerContext<RRuntime | REvent>>;
   readonly alarm?: (
     alarmInfo?: globalThis.AlarmInvocationInfo,
-  ) => Effect.Effect<void, unknown, HandlerContext<ROut>>;
+  ) => Effect.Effect<void, unknown, HandlerContext<RRuntime | REvent>>;
   readonly webSocketMessage?: (
     socket: DurableWebSocket,
     message: string | ArrayBuffer,
-  ) => Effect.Effect<void, unknown, HandlerContext<ROut>>;
+  ) => Effect.Effect<void, unknown, HandlerContext<RRuntime | REvent>>;
   readonly webSocketClose?: (
     socket: DurableWebSocket,
     code: number,
     reason: string,
     wasClean: boolean,
-  ) => Effect.Effect<void, unknown, HandlerContext<ROut>>;
+  ) => Effect.Effect<void, unknown, HandlerContext<RRuntime | REvent>>;
   readonly webSocketError?: (
     socket: DurableWebSocket,
     error: unknown,
-  ) => Effect.Effect<void, unknown, HandlerContext<ROut>>;
+  ) => Effect.Effect<void, unknown, HandlerContext<RRuntime | REvent>>;
 }
 
 /**
@@ -127,11 +148,13 @@ export type DurableObjectClass<Rpc extends DurableObjectRpc<ROut>, ROut> = new (
 export const make = <
   ROut,
   LayerError,
-  const Rpc extends DurableObjectRpc<ROut> = Record<never, never>,
+  REvent = never,
+  EventLayerError = never,
+  const Rpc extends DurableObjectRpc<ROut | REvent> = Record<never, never>,
 >(
   layer: Layer.Layer<ROut, LayerError, DurableObjectState | WorkerEnvironment>,
-  options: DurableObjectOptions<ROut, Rpc> = {},
-): DurableObjectClass<Rpc, ROut> => {
+  options: DurableObjectOptions<ROut, REvent, EventLayerError, Rpc> = {},
+): DurableObjectClass<Rpc, ROut | REvent> => {
   class EffectDurableObject extends CloudflareDurableObject<WorkerEnv> {
     readonly runtime: ManagedRuntime.ManagedRuntime<RuntimeContext<ROut>, LayerError>;
 
@@ -139,6 +162,8 @@ export const make = <
       super(state, env);
 
       const services = Layer.mergeAll(
+        CloudflareClock.layer,
+        ConfigProvider.layer(Effect.succeed(WorkerConfig.providerFromEnv(env))),
         Layer.succeed(DurableObjectState, fromDurableObjectState(state)),
         Layer.succeed(WorkerEnvironment, env),
       );
@@ -149,12 +174,24 @@ export const make = <
 
       const initialize = options.initialize;
       if (initialize !== undefined) {
-        state.waitUntil(this[RunSymbol](initialize));
+        state.waitUntil(this[RunSymbol](initialize, { eventLayer: false }));
       }
     }
 
-    [RunSymbol]<A, E>(effect: Effect.Effect<A, E, HandlerContext<ROut>>): Promise<A> {
-      return this.runtime.runPromise(Effect.scoped(effect));
+    [RunSymbol]<A, E>(
+      effect: Effect.Effect<A, E, HandlerContext<ROut | REvent>>,
+      runOptions: RunOptions = {},
+    ): Promise<A> {
+      const effectWithEventLayer =
+        runOptions.eventLayer === false || options.eventLayer === undefined
+          ? effect
+          : effect.pipe(Effect.provide(options.eventLayer, { local: true }));
+
+      return this.runtime.runPromise(
+        Effect.scoped(
+          effectWithEventLayer as Effect.Effect<A, E | EventLayerError, HandlerContext<ROut>>,
+        ),
+      );
     }
 
     fetch(request: Request): Promise<Response> {
@@ -223,7 +260,9 @@ export const make = <
     (self, effect) => self[RunSymbol](effect),
   );
 
-  return Entrypoint.assumeEntrypointClass<DurableObjectClass<Rpc, ROut>>(EffectDurableObject);
+  return Entrypoint.assumeEntrypointClass<DurableObjectClass<Rpc, ROut | REvent>>(
+    EffectDurableObject,
+  );
 };
 
 export type ServiceFreeSchema = S.Codec<any, any, never, never>;
@@ -285,11 +324,16 @@ export type Handlers<ROut, Self extends Definition.Any> = {
   ) => DurableObjectHandler<ROut, Method.Success<Self["methods"][Key]>>;
 };
 
-export interface Options<ROut, Self extends Definition.Any> extends Omit<
-  DurableObjectOptions<ROut, Handlers<ROut, Self>>,
+export interface Options<
+  ROut,
+  Self extends Definition.Any,
+  REvent = never,
+  EventLayerError = never,
+> extends Omit<
+  DurableObjectOptions<ROut, REvent, EventLayerError, Handlers<ROut | REvent, Self>>,
   "rpc"
 > {
-  readonly rpc: Handlers<ROut, Self>;
+  readonly rpc: Handlers<ROut | REvent, Self>;
 }
 
 export type TagClass<Self, Id extends string, MethodsShape extends Methods> = Context.ServiceClass<
@@ -307,10 +351,10 @@ export type TagClass<Self, Id extends string, MethodsShape extends Methods> = Co
   > & {
     readonly id: Id;
     readonly methods: MethodsShape;
-    readonly make: <ROut, LayerError>(
+    readonly make: <ROut, LayerError, REvent = never, EventLayerError = never>(
       layer: Layer.Layer<ROut, LayerError, DurableObjectState | WorkerEnvironment>,
-      options: Options<ROut, Definition<Id, MethodsShape>>,
-    ) => DurableObjectClass<Handlers<ROut, Definition<Id, MethodsShape>>, ROut>;
+      options: Options<ROut, Definition<Id, MethodsShape>, REvent, EventLayerError>,
+    ) => DurableObjectClass<Handlers<ROut | REvent, Definition<Id, MethodsShape>>, ROut | REvent>;
     readonly layer: (
       options: LayerOptions,
     ) => Layer.Layer<

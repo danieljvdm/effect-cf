@@ -1,6 +1,6 @@
 {
   "name": "effect-cf",
-  "version": "0.10.0",
+  "version": "0.13.1",
   "description": "Effect-native primitives for Cloudflare Workers and bindings.",
   "license": "MIT",
   "repository": {
@@ -41,8 +41,10 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.15.0",
     "@cloudflare/workers-types": "catalog:",
+    "@effect/platform-node": "4.0.0-beta.77",
     "@effect/sql-d1": "catalog:",
     "@effect/sql-pg": "catalog:",
+    "@effect/sql-sqlite-do": "catalog:",
     "@effect/vitest": "catalog:",
     "effect": "catalog:",
     "typescript": "^6.0.2",
@@ -50,9 +52,10 @@
     "vitest": "catalog:"
   },
   "peerDependencies": {
-    "@effect/sql-d1": "^4.0.0-beta.70",
-    "@effect/sql-pg": "^4.0.0-beta.70",
-    "effect": "^4.0.0-beta.70"
+    "@effect/sql-d1": "^4.0.0-beta.77",
+    "@effect/sql-pg": "^4.0.0-beta.77",
+    "@effect/sql-sqlite-do": "^4.0.0-beta.77",
+    "effect": "^4.0.0-beta.77"
   },
   "peerDependenciesMeta": {
     "@effect/sql-pg": {

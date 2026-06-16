@@ -25,7 +25,7 @@ type ScalarConfigKey = Extract<
 
 /**
  * Effect `Config` helpers for scalar Cloudflare vars and secrets declared on
- * `Cloudflare.Env` / generated `worker-configuration.d.ts`.
+ * `Cloudflare.Env`.
  *
  * Users still author their app config explicitly with Effect `Config`:
  *

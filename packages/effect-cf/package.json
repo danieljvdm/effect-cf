@@ -40,7 +40,7 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.15.0",
-    "@cloudflare/workers-types": "^4.20260421.1",
+    "@cloudflare/workers-types": "catalog:",
     "@effect/sql-d1": "catalog:",
     "@effect/sql-pg": "catalog:",
     "@effect/vitest": "catalog:",

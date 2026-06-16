@@ -58,6 +58,7 @@
   },
   "packageManager": "bun@1.3.13",
   "catalog": {
+    "@cloudflare/workers-types": "^4.20260421.1",
     "@effect/platform-bun": "4.0.0-beta.70",
     "@effect/sql-d1": "4.0.0-beta.70",
     "@effect/sql-pg": "4.0.0-beta.70",

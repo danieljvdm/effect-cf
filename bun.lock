@@ -28,7 +28,7 @@
         "effect-cf": "workspace:*",
       },
       "devDependencies": {
-        "@cloudflare/workers-types": "^4.20260421.1",
+        "@cloudflare/workers-types": "catalog:",
         "typescript": "~6.0.2",
         "vite-plus": "catalog:",
       },
@@ -41,7 +41,7 @@
         "effect-cf": "workspace:*",
       },
       "devDependencies": {
-        "@cloudflare/workers-types": "^4.20260421.1",
+        "@cloudflare/workers-types": "catalog:",
         "typescript": "~6.0.2",
         "vite-plus": "catalog:",
       },
@@ -71,7 +71,7 @@
         "effect-cf": "workspace:*",
       },
       "devDependencies": {
-        "@cloudflare/workers-types": "^4.20260421.1",
+        "@cloudflare/workers-types": "catalog:",
         "typescript": "~6.0.2",
         "vite-plus": "catalog:",
       },
@@ -85,7 +85,7 @@
         "effect-cf": "workspace:*",
       },
       "devDependencies": {
-        "@cloudflare/workers-types": "^4.20260421.1",
+        "@cloudflare/workers-types": "catalog:",
         "typescript": "~6.0.2",
         "vite-plus": "catalog:",
       },
@@ -98,7 +98,7 @@
         "effect-cf": "workspace:*",
       },
       "devDependencies": {
-        "@cloudflare/workers-types": "^4.20260421.1",
+        "@cloudflare/workers-types": "catalog:",
         "@effect/vitest": "catalog:",
         "typescript": "~6.0.2",
         "vite-plus": "catalog:",
@@ -112,7 +112,7 @@
         "effect": "catalog:",
       },
       "devDependencies": {
-        "@cloudflare/workers-types": "^4.20260421.1",
+        "@cloudflare/workers-types": "catalog:",
         "typescript": "~6.0.2",
         "vite-plus": "catalog:",
       },
@@ -143,7 +143,7 @@
         "effect-cf": "workspace:*",
       },
       "devDependencies": {
-        "@cloudflare/workers-types": "^4.20260421.1",
+        "@cloudflare/workers-types": "catalog:",
         "typescript": "~6.0.2",
         "vite-plus": "catalog:",
       },
@@ -155,7 +155,7 @@
         "effect": "catalog:",
       },
       "devDependencies": {
-        "@cloudflare/workers-types": "^4.20260421.1",
+        "@cloudflare/workers-types": "catalog:",
         "typescript": "~6.0.2",
         "vite-plus": "catalog:",
       },
@@ -186,7 +186,7 @@
         "effect-cf": "workspace:*",
       },
       "devDependencies": {
-        "@cloudflare/workers-types": "^4.20260421.1",
+        "@cloudflare/workers-types": "catalog:",
         "typescript": "~6.0.2",
         "vite-plus": "catalog:",
       },
@@ -200,7 +200,7 @@
         "effect-cf": "workspace:*",
       },
       "devDependencies": {
-        "@cloudflare/workers-types": "^4.20260421.1",
+        "@cloudflare/workers-types": "catalog:",
         "typescript": "~6.0.2",
         "vite-plus": "catalog:",
       },
@@ -213,7 +213,7 @@
         "effect-cf": "workspace:*",
       },
       "devDependencies": {
-        "@cloudflare/workers-types": "^4.20260421.1",
+        "@cloudflare/workers-types": "catalog:",
         "typescript": "~6.0.2",
         "vite-plus": "catalog:",
       },
@@ -244,7 +244,7 @@
         "effect-cf": "workspace:*",
       },
       "devDependencies": {
-        "@cloudflare/workers-types": "^4.20260421.1",
+        "@cloudflare/workers-types": "catalog:",
         "typescript": "~6.0.2",
         "vite-plus": "catalog:",
       },
@@ -256,7 +256,7 @@
         "effect": "catalog:",
       },
       "devDependencies": {
-        "@cloudflare/workers-types": "^4.20260421.1",
+        "@cloudflare/workers-types": "catalog:",
         "typescript": "~6.0.2",
         "vite-plus": "catalog:",
       },
@@ -287,7 +287,7 @@
         "effect-cf": "workspace:*",
       },
       "devDependencies": {
-        "@cloudflare/workers-types": "^4.20260421.1",
+        "@cloudflare/workers-types": "catalog:",
         "typescript": "~6.0.2",
         "vite-plus": "catalog:",
       },
@@ -301,7 +301,7 @@
         "effect-cf": "workspace:*",
       },
       "devDependencies": {
-        "@cloudflare/workers-types": "^4.20260421.1",
+        "@cloudflare/workers-types": "catalog:",
         "typescript": "~6.0.2",
         "vite-plus": "catalog:",
       },
@@ -311,7 +311,7 @@
       "version": "0.10.0",
       "devDependencies": {
         "@cloudflare/vitest-pool-workers": "^0.15.0",
-        "@cloudflare/workers-types": "^4.20260421.1",
+        "@cloudflare/workers-types": "catalog:",
         "@effect/sql-d1": "catalog:",
         "@effect/sql-pg": "catalog:",
         "@effect/vitest": "catalog:",
@@ -336,6 +336,7 @@
     "vitest": "catalog:",
   },
   "catalog": {
+    "@cloudflare/workers-types": "^4.20260421.1",
     "@effect/platform-bun": "4.0.0-beta.70",
     "@effect/sql-d1": "4.0.0-beta.70",
     "@effect/sql-pg": "4.0.0-beta.70",

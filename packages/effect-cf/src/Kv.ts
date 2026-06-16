@@ -1,3 +1,7 @@
+import type {
+  KVNamespaceListOptions as CloudflareKVNamespaceListOptions,
+  KVNamespacePutOptions as CloudflareKVNamespacePutOptions,
+} from "@cloudflare/workers-types";
 import { Context, Data, Effect, Option, Schema as S, type Layer } from "effect";
 
 import * as Binding from "./Binding";
@@ -14,9 +18,9 @@ export class KvOperationError extends Data.TaggedError("KvOperationError")<{
 }> {}
 
 /** `KVNamespace.put` options. */
-export type KvPutOptions = globalThis.KVNamespacePutOptions;
+export type KvPutOptions = CloudflareKVNamespacePutOptions;
 /** `KVNamespace.list` options with optional metadata decoding schema. */
-export type KvListOptions<Metadata = unknown> = globalThis.KVNamespaceListOptions & {
+export type KvListOptions<Metadata = unknown> = CloudflareKVNamespaceListOptions & {
   readonly metadataSchema?: S.Codec<Metadata, unknown>;
 };
 

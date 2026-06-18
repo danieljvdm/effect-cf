@@ -9,6 +9,7 @@ import {
   BrowserRendering,
   DurableObject,
   DurableObjectNamespace,
+  Email,
   Hyperdrive,
   Images,
   Kv,
@@ -196,6 +197,50 @@ const imagesProgram = Effect.gen(function* () {
     expectTypeOf(hosted.upload(new ArrayBuffer(0), { id: "avatar-1" })).toEqualTypeOf<
       Effect.Effect<Images.ImageMetadata, Images.ImagesOperationError>
     >();
+  });
+});
+
+export class TransactionalEmail extends Email.Tag<TransactionalEmail>()("TransactionalEmail") {}
+
+export const TransactionalEmailLayer = TransactionalEmail.layer({ binding: "EMAIL" });
+
+const emailProgram = Effect.gen(function* () {
+  const email = yield* TransactionalEmail;
+
+  expectTypeOf(
+    email.send({
+      from: { name: "Example", email: "team@example.com" },
+      to: "user@example.com",
+      subject: "Welcome",
+      text: "Welcome to Example",
+    }),
+  ).toEqualTypeOf<Effect.Effect<Email.EmailSendResult, Email.EmailOperationError>>();
+
+  yield* email.send({
+    from: "team@example.com",
+    to: "user@example.com",
+    subject: "Welcome",
+    html: "<p>Welcome to Example</p>",
+    attachments: [
+      {
+        disposition: "attachment",
+        filename: "welcome.txt",
+        type: "text/plain",
+        content: "Welcome",
+      },
+    ],
+  });
+
+  yield* email.send({
+    from: "team@example.com",
+    to: "user@example.com",
+  } satisfies Email.EmailMessage);
+
+  // @ts-expect-error builder messages require a subject.
+  yield* email.send({
+    from: "team@example.com",
+    to: "user@example.com",
+    text: "Welcome to Example",
   });
 });
 
@@ -414,6 +459,7 @@ void kvProgram;
 void r2Program;
 void hyperdriveProgram;
 void imagesProgram;
+void emailProgram;
 void workersAiProgram;
 void vectorizeProgram;
 void aiGatewayProgram;

@@ -23,7 +23,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          # Let changesets/action configure git credentials with github.token.
+          # Use the release token when changesets/action pushes updates to the
+          # release branch, so CI runs on the generated release PR.
           persist-credentials: false
       - uses: voidzero-dev/setup-vp@v1
         with:
@@ -37,6 +38,7 @@ jobs:
         with:
           version: vp run changeset:version
           publish: vp run changeset:publish
-          token: ${{ github.token }}
+          github-token: ${{ secrets.CHANGESET_GITHUB_TOKEN }}
         env:
+          GITHUB_TOKEN: ${{ secrets.CHANGESET_GITHUB_TOKEN }}
           NPM_CONFIG_PROVENANCE: true

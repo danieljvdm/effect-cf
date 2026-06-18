@@ -12,6 +12,7 @@ export * as DurableObjectSqlite from "./DurableObjectSqlite";
 export * as DurableObjectState from "./DurableObjectState";
 export * as DurableObjectWebSocket from "./DurableObjectWebSocket";
 export * as DurableObjectStorage from "./DurableObjectStorage";
+export * as Email from "./Email";
 export * as Hyperdrive from "./Hyperdrive";
 export * as Images from "./Images";
 export * as Kv from "./Kv";

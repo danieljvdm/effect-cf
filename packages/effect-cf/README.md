@@ -1,6 +1,6 @@
 # effect-cf
 
-Effect-native Cloudflare primitives for Workers, Durable Objects, bindings, KV, D1, Queues, Workflows, and Durable Object storage.
+Effect-native Cloudflare primitives for Workers, Durable Objects, bindings, KV, D1, Queues, Email, Workflows, and Durable Object storage.
 
 ## Install
 
@@ -35,6 +35,7 @@ Runtime creation belongs at Cloudflare entrypoints, not inside binding helpers.
 - `R2` - typed R2 bucket binding helper with Effect-wrapped object and multipart operations
 - `Hyperdrive` - typed Hyperdrive binding helper for connection strings and optional Postgres SQL integration
 - `Images` - typed Cloudflare Images binding helper with transformation APIs and optional hosted image operations
+- `Email` - typed Cloudflare Send Email binding helper for `send_email` bindings
 - `Queue` - typed Queue producer/consumer tags plus client and error types
 - `Workflow` - typed Workflow entrypoints, steps, starter clients, and instance types
 - `Rpc` - Cloudflare RPC type helpers and scoped disposal utilities
@@ -203,6 +204,32 @@ export const resizeAvatar = (image: Images.ImageInputValue) =>
     );
 
     return yield* result.response;
+  });
+```
+
+## Email Example
+
+Email tags expose Cloudflare Send Email bindings as Effect-wrapped `send(...)` operations.
+
+```ts
+import { Effect } from "effect";
+import { Email } from "effect-cf";
+
+class TransactionalEmail extends Email.Tag<TransactionalEmail>()("TransactionalEmail") {}
+
+export const TransactionalEmailLayer = TransactionalEmail.layer({ binding: "EMAIL" });
+
+export const sendWelcomeEmail = (to: string) =>
+  Effect.gen(function* () {
+    const email = yield* TransactionalEmail;
+
+    return yield* email.send({
+      from: { name: "Example", email: "team@example.com" },
+      to,
+      subject: "Welcome to Example",
+      text: "Welcome to Example",
+      html: "<p>Welcome to Example</p>",
+    });
   });
 ```
 

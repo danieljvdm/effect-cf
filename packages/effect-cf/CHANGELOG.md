@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.15.0
+
+### Minor Changes
+
+- [#47](https://github.com/danieljvdm/effect-cf/pull/47) [`debc5e1`](https://github.com/danieljvdm/effect-cf/commit/debc5e12cee68c85c5ea99096e2660aa0ec90b6f) Thanks [@owensbla](https://github.com/owensbla)! - Add an Effect-native Cloudflare Send Email binding wrapper. `Email.Tag(...)` now provides a typed client for `send_email` bindings with `send(...)`, `unsafeRaw`, binding validation, and `EmailOperationError` failure mapping.
+
 ## 0.14.0
 
 ### Minor Changes

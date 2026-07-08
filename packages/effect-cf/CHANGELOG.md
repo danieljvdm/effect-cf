@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.16.0
+
+### Minor Changes
+
+- [#51](https://github.com/danieljvdm/effect-cf/pull/51) [`9a6abd2`](https://github.com/danieljvdm/effect-cf/commit/9a6abd27366c71867a420f872459b3d5fc1b2143) Thanks [@owensbla](https://github.com/owensbla)! - Add Effect-native Cloudflare Analytics Engine helpers. `AnalyticsEngine.Tag(...)` now provides validated dataset writes, configurable invalid-write policy, and batch write helpers. `AnalyticsEngine.QueryTag(...)` / `makeQueryClient(...)` provide SQL API querying backed by Effect `HttpClient`, config and redacted API token support, typed result envelopes, and row decoding through Effect schemas.
+
 ## 0.15.0
 
 ### Minor Changes

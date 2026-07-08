@@ -1,4 +1,5 @@
 export * as AiGateway from "./AiGateway";
+export * as AnalyticsEngine from "./AnalyticsEngine";
 export * as Binding from "./Binding";
 export * as BrowserRendering from "./BrowserRendering";
 export * as CloudflareOtlp from "./CloudflareOtlp";

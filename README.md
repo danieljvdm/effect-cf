@@ -1,6 +1,6 @@
 # effect-cf
 
-Effect-native primitives for Cloudflare Workers, Durable Objects, bindings, KV, Email, and Durable Object storage.
+Effect-native primitives for Cloudflare Workers, Durable Objects, bindings, KV, Email, Analytics Engine, and Durable Object storage.
 
 ## Install
 
@@ -170,6 +170,63 @@ const program = Effect.gen(function* () {
   yield* browser.close;
   return { content, screenshot };
 });
+```
+
+Analytics Engine event writes:
+
+```ts
+import { Effect } from "effect";
+import { AnalyticsEngine } from "effect-cf";
+
+class RequestAnalytics extends AnalyticsEngine.Tag<RequestAnalytics>()("RequestAnalytics") {}
+
+const program = Effect.gen(function* () {
+  const analytics = yield* RequestAnalytics;
+
+  yield* analytics.writeDataPoint({
+    indexes: ["example.com"],
+    blobs: ["/home", "US"],
+    doubles: [1],
+  });
+
+  yield* analytics.writeBatch(
+    [
+      { indexes: ["example.com"], blobs: ["/pricing", "US"], doubles: [1] },
+      { indexes: ["example.com"], blobs: ["/docs", "CA"], doubles: [1] },
+    ],
+    { onInvalid: "drop", batchSize: 100 },
+  );
+});
+```
+
+Writes validate the Cloudflare Analytics Engine field, byte, and per-invocation limits before calling the native binding. Invalid writes fail with `AnalyticsEngineWriteValidationError` by default, or can be dropped with `onInvalid: "drop"` on the layer or per call.
+
+Analytics Engine SQL queries with schema-decoded rows:
+
+```ts
+import { Effect, Layer, Schema as S } from "effect";
+import { FetchHttpClient } from "effect/unstable/http";
+import { AnalyticsEngine, WorkerConfig } from "effect-cf";
+
+class AnalyticsQuery extends AnalyticsEngine.QueryTag<AnalyticsQuery>()("AnalyticsQuery") {}
+
+const PageView = S.Struct({ path: S.String, views: S.Number });
+
+const program = Effect.gen(function* () {
+  const analytics = yield* AnalyticsQuery;
+
+  return yield* analytics.queryRows(
+    PageView,
+    "SELECT blob1 AS path, SUM(_sample_interval) AS views FROM request_metrics GROUP BY path",
+  );
+});
+
+const layer = AnalyticsQuery.layerConfig(
+  AnalyticsEngine.queryConfig({
+    accountId: WorkerConfig.string("CLOUDFLARE_ACCOUNT_ID"),
+    apiToken: WorkerConfig.redacted("CLOUDFLARE_API_TOKEN"),
+  }),
+).pipe(Layer.provide(FetchHttpClient.layer));
 ```
 
 ## Changelog

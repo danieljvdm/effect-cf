@@ -13,9 +13,14 @@ declare global {
       HYPERDRIVE?: Hyperdrive;
       IMAGES?: ImagesBinding;
       AI?: Ai;
+      REQUEST_ANALYTICS?: AnalyticsEngineDataset;
       RECIPE_VECTORS?: Vectorize;
       MYBROWSER?: unknown;
       DATABASE_URL?: string;
+      CLOUDFLARE_ACCOUNT_ID?: string;
+      CLOUDFLARE_API_TOKEN?: string;
+      ACCOUNT_ID?: string;
+      API_TOKEN?: string;
       SECRET_VALUE?: string;
       APP_NAME?: string;
       APP_PORT?: string;

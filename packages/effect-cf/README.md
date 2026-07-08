@@ -1,6 +1,6 @@
 # effect-cf
 
-Effect-native Cloudflare primitives for Workers, Durable Objects, bindings, KV, D1, Queues, Email, Workflows, and Durable Object storage.
+Effect-native Cloudflare primitives for Workers, Durable Objects, bindings, KV, D1, Queues, Email, Analytics Engine, Workflows, and Durable Object storage.
 
 ## Install
 
@@ -36,6 +36,7 @@ Runtime creation belongs at Cloudflare entrypoints, not inside binding helpers.
 - `Hyperdrive` - typed Hyperdrive binding helper for connection strings and optional Postgres SQL integration
 - `Images` - typed Cloudflare Images binding helper with transformation APIs and optional hosted image operations
 - `Email` - typed Cloudflare Send Email binding helper for `send_email` bindings
+- `AnalyticsEngine` - typed Cloudflare Analytics Engine write bindings and SQL API query helpers
 - `Queue` - typed Queue producer/consumer tags plus client and error types
 - `Workflow` - typed Workflow entrypoints, steps, starter clients, and instance types
 - `Rpc` - Cloudflare RPC type helpers and scoped disposal utilities
@@ -231,6 +232,87 @@ export const sendWelcomeEmail = (to: string) =>
       html: "<p>Welcome to Example</p>",
     });
   });
+```
+
+## Analytics Engine Example
+
+Analytics Engine tags expose Cloudflare dataset bindings as Effect-wrapped `writeDataPoint(...)` operations. Writes use Cloudflare's native non-blocking runtime API and are validated against Workers Analytics Engine limits before reaching the binding.
+
+```ts
+import { Effect } from "effect";
+import { AnalyticsEngine } from "effect-cf";
+
+class RequestAnalytics extends AnalyticsEngine.Tag<RequestAnalytics>()("RequestAnalytics") {}
+
+export const RequestAnalyticsLayer = RequestAnalytics.layer({
+  binding: "REQUEST_ANALYTICS",
+  write: {
+    onInvalid: "error",
+    batchSize: 100,
+  },
+});
+
+export const recordPageView = (request: Request) =>
+  Effect.gen(function* () {
+    const analytics = yield* RequestAnalytics;
+    const url = new URL(request.url);
+
+    yield* analytics.writeDataPoint({
+      indexes: [url.hostname],
+      blobs: [url.pathname, request.headers.get("cf-connecting-country") ?? "unknown"],
+      doubles: [1],
+    });
+
+    yield* analytics.writeBatch(
+      [
+        {
+          indexes: [url.hostname],
+          blobs: [url.pathname, "page-view"],
+          doubles: [1],
+        },
+      ],
+      { onInvalid: "drop" },
+    );
+  });
+```
+
+Define the dataset binding in the consuming Worker's `wrangler.jsonc` with `analytics_engine_datasets`, then provide `RequestAnalytics.layer({ binding: "REQUEST_ANALYTICS" })` from the Worker layer. Invalid writes fail with `AnalyticsEngineWriteValidationError` by default. Use `write: { onInvalid: "drop" }` on the layer or `{ onInvalid: "drop" }` per call when dropping invalid points is preferable.
+
+Analytics Engine query tags wrap Cloudflare's HTTP SQL API. Configuration can stay in Effect `Config`, including a redacted API token, the outbound transport is an Effect `HttpClient` dependency, and rows can be decoded with Effect schemas at the query boundary. Use `fetchLayerConfig(...)` as shorthand when the platform fetch-backed client is enough.
+
+```ts
+import { Effect, Layer, Schema as S } from "effect";
+import { FetchHttpClient } from "effect/unstable/http";
+import { AnalyticsEngine, WorkerConfig } from "effect-cf";
+
+class AnalyticsQuery extends AnalyticsEngine.QueryTag<AnalyticsQuery>()("AnalyticsQuery") {}
+
+export const AnalyticsQueryLayer = AnalyticsQuery.layerConfig(
+  AnalyticsEngine.queryConfig({
+    accountId: WorkerConfig.string("CLOUDFLARE_ACCOUNT_ID"),
+    apiToken: WorkerConfig.redacted("CLOUDFLARE_API_TOKEN"),
+  }),
+).pipe(Layer.provide(FetchHttpClient.layer));
+
+const PageView = S.Struct({
+  path: S.String,
+  views: S.Number,
+});
+
+export const topPages = Effect.gen(function* () {
+  const analytics = yield* AnalyticsQuery;
+
+  return yield* analytics.queryRows(
+    PageView,
+    `
+      SELECT blob1 AS path, SUM(_sample_interval) AS views
+      FROM request_metrics
+      GROUP BY path
+      ORDER BY views DESC
+      LIMIT 10
+    `,
+  );
+});
 ```
 
 ## Workflow Example

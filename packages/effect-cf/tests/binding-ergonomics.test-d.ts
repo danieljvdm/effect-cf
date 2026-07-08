@@ -303,7 +303,10 @@ const vectorizeProgram = Effect.gen(function* () {
 
 export class RequestAnalytics extends AnalyticsEngine.Tag<RequestAnalytics>()("RequestAnalytics") {}
 
-export const RequestAnalyticsLayer = RequestAnalytics.layer({ binding: "REQUEST_ANALYTICS" });
+export const RequestAnalyticsLayer = RequestAnalytics.layer({
+  binding: "REQUEST_ANALYTICS",
+  write: { onInvalid: "drop", batchSize: 100 },
+});
 
 export class RequestAnalyticsQuery extends AnalyticsEngine.QueryTag<RequestAnalyticsQuery>()(
   "RequestAnalyticsQuery",
@@ -342,11 +345,25 @@ const analyticsEngineProgram = Effect.gen(function* () {
       blobs: ["/home", "US", null],
       doubles: [1, 42],
     }),
-  ).toEqualTypeOf<Effect.Effect<void, AnalyticsEngine.AnalyticsEngineOperationError>>();
+  ).toEqualTypeOf<Effect.Effect<void, AnalyticsEngine.AnalyticsEngineWriteError>>();
 
   expectTypeOf(
     analytics.write({ indexes: ["example.com"], blobs: ["/pricing"], doubles: [1] }),
-  ).toEqualTypeOf<Effect.Effect<void, AnalyticsEngine.AnalyticsEngineOperationError>>();
+  ).toEqualTypeOf<Effect.Effect<void, AnalyticsEngine.AnalyticsEngineWriteError>>();
+
+  expectTypeOf(
+    analytics.writeDataPoints(
+      [
+        { indexes: ["example.com"], blobs: ["/pricing"], doubles: [1] },
+        { indexes: ["example.com"], blobs: ["/home"], doubles: [1] },
+      ],
+      { onInvalid: "error", batchSize: 2 },
+    ),
+  ).toEqualTypeOf<Effect.Effect<void, AnalyticsEngine.AnalyticsEngineWriteError>>();
+
+  expectTypeOf(
+    analytics.writeBatch([{ indexes: ["example.com"], blobs: ["/pricing"], doubles: [1] }]),
+  ).toEqualTypeOf<Effect.Effect<void, AnalyticsEngine.AnalyticsEngineWriteError>>();
 
   expectTypeOf(analytics.unsafeRaw).toEqualTypeOf<
     Effect.Effect<AnalyticsEngine.AnalyticsEngineBinding>
@@ -354,6 +371,9 @@ const analyticsEngineProgram = Effect.gen(function* () {
 
   // @ts-expect-error doubles only accept numbers.
   yield* analytics.writeDataPoint({ doubles: ["1"] });
+
+  // @ts-expect-error only known invalid-write policies are accepted.
+  yield* analytics.writeDataPoint({ doubles: [1] }, { onInvalid: "ignore" });
 });
 
 const analyticsEngineQueryProgram = Effect.gen(function* () {

@@ -12,25 +12,46 @@ class RequestAnalyticsQuery extends AnalyticsEngine.QueryTag<RequestAnalyticsQue
 
 interface FakeAnalyticsEngineDataset extends AnalyticsEngine.AnalyticsEngineBinding {
   readonly points: Array<AnalyticsEngine.AnalyticsEngineDataPoint | undefined>;
+  readonly batches: Array<Array<AnalyticsEngine.AnalyticsEngineDataPoint>>;
+  readonly writeDataPoints?: (
+    dataPoints: ReadonlyArray<AnalyticsEngine.AnalyticsEngineDataPoint>,
+  ) => void;
 }
 
 const makeFakeAnalyticsEngineDataset = (
   writeDataPoint?: (dataPoint?: AnalyticsEngine.AnalyticsEngineDataPoint) => void,
+  options?: {
+    readonly nativeWriteDataPoints?: boolean;
+  },
 ): FakeAnalyticsEngineDataset => {
   const points: Array<AnalyticsEngine.AnalyticsEngineDataPoint | undefined> = [];
+  const batches: Array<Array<AnalyticsEngine.AnalyticsEngineDataPoint>> = [];
 
   return {
     points,
+    batches,
     writeDataPoint:
       writeDataPoint ??
       ((dataPoint) => {
         points.push(dataPoint);
       }),
-  };
+    ...(options?.nativeWriteDataPoints === true
+      ? {
+          writeDataPoints: (
+            dataPoints: ReadonlyArray<AnalyticsEngine.AnalyticsEngineDataPoint>,
+          ) => {
+            batches.push([...dataPoints]);
+          },
+        }
+      : {}),
+  } as FakeAnalyticsEngineDataset;
 };
 
-const analyticsLayer = (dataset: AnalyticsEngine.AnalyticsEngineBinding) =>
-  RequestAnalytics.layer({ binding: "REQUEST_ANALYTICS" }).pipe(
+const analyticsLayer = (
+  dataset: AnalyticsEngine.AnalyticsEngineBinding,
+  options?: Omit<AnalyticsEngine.LayerOptions, "binding">,
+) =>
+  RequestAnalytics.layer({ binding: "REQUEST_ANALYTICS", ...options }).pipe(
     Layer.provide(Layer.succeed(WorkerEnvironment, { REQUEST_ANALYTICS: dataset })),
   );
 
@@ -69,6 +90,222 @@ layer(analyticsLayer(makeFakeAnalyticsEngineDataset()))("AnalyticsEngine", (it) 
       ]);
     }),
   );
+});
+
+test("AnalyticsEngine validates write limits before calling the native binding", async () => {
+  const dataset = makeFakeAnalyticsEngineDataset();
+
+  await expect(
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const analytics = yield* RequestAnalytics;
+        yield* analytics.writeDataPoint({
+          blobs: Array.from({ length: AnalyticsEngine.writeLimits.maxBlobs + 1 }, (_, index) =>
+            String(index),
+          ),
+        });
+      }).pipe(Effect.provide(analyticsLayer(dataset))),
+    ),
+  ).rejects.toMatchObject({
+    _tag: "AnalyticsEngineWriteValidationError",
+    binding: "REQUEST_ANALYTICS",
+    operation: "writeDataPoint",
+    violations: [
+      {
+        path: "blobs",
+        actual: AnalyticsEngine.writeLimits.maxBlobs + 1,
+        limit: AnalyticsEngine.writeLimits.maxBlobs,
+      },
+    ],
+  });
+
+  assert.deepStrictEqual(dataset.points, []);
+});
+
+test("AnalyticsEngine validates blob and index byte limits", async () => {
+  const dataset = makeFakeAnalyticsEngineDataset();
+
+  await expect(
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const analytics = yield* RequestAnalytics;
+        yield* analytics.writeDataPoint({
+          indexes: ["x".repeat(AnalyticsEngine.writeLimits.maxIndexBytes + 1)],
+          blobs: ["x".repeat(AnalyticsEngine.writeLimits.maxBlobBytes + 1)],
+        });
+      }).pipe(Effect.provide(analyticsLayer(dataset))),
+    ),
+  ).rejects.toMatchObject({
+    _tag: "AnalyticsEngineWriteValidationError",
+    violations: [
+      {
+        path: "blobs",
+        actual: AnalyticsEngine.writeLimits.maxBlobBytes + 1,
+        limit: AnalyticsEngine.writeLimits.maxBlobBytes,
+      },
+      {
+        path: "indexes[0]",
+        actual: AnalyticsEngine.writeLimits.maxIndexBytes + 1,
+        limit: AnalyticsEngine.writeLimits.maxIndexBytes,
+      },
+    ],
+  });
+
+  assert.deepStrictEqual(dataset.points, []);
+});
+
+test("AnalyticsEngine surfaces schema validation errors for writes", async () => {
+  const dataset = makeFakeAnalyticsEngineDataset();
+
+  await expect(
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const analytics = yield* RequestAnalytics;
+        yield* analytics.writeDataPoint({
+          doubles: [Number.NaN],
+        });
+      }).pipe(Effect.provide(analyticsLayer(dataset))),
+    ),
+  ).rejects.toMatchObject({
+    _tag: "AnalyticsEngineWriteValidationError",
+    binding: "REQUEST_ANALYTICS",
+    operation: "writeDataPoint",
+    violations: [
+      {
+        path: "$",
+      },
+    ],
+  });
+
+  assert.deepStrictEqual(dataset.points, []);
+});
+
+test("AnalyticsEngine can drop invalid writes by layer policy", async () => {
+  const dataset = makeFakeAnalyticsEngineDataset();
+
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const analytics = yield* RequestAnalytics;
+
+      yield* analytics.writeDataPoint({
+        indexes: ["example.com", "overflow"],
+      });
+      yield* analytics.writeDataPoint({
+        indexes: ["example.com"],
+        blobs: ["/home"],
+      });
+    }).pipe(Effect.provide(analyticsLayer(dataset, { write: { onInvalid: "drop" } }))),
+  );
+
+  assert.deepStrictEqual(dataset.points, [
+    {
+      indexes: ["example.com"],
+      blobs: ["/home"],
+    },
+  ]);
+});
+
+test("AnalyticsEngine hard-error policy can override a drop layer policy", async () => {
+  const dataset = makeFakeAnalyticsEngineDataset();
+
+  await expect(
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const analytics = yield* RequestAnalytics;
+        yield* analytics.writeDataPoint(
+          {
+            indexes: ["example.com", "overflow"],
+          },
+          { onInvalid: "error" },
+        );
+      }).pipe(Effect.provide(analyticsLayer(dataset, { write: { onInvalid: "drop" } }))),
+    ),
+  ).rejects.toMatchObject({
+    _tag: "AnalyticsEngineWriteValidationError",
+    violations: [
+      {
+        path: "indexes",
+        actual: 2,
+        limit: AnalyticsEngine.writeLimits.maxIndexes,
+      },
+    ],
+  });
+
+  assert.deepStrictEqual(dataset.points, []);
+});
+
+test("AnalyticsEngine batches writeDataPoints through the native batch API when available", async () => {
+  const dataset = makeFakeAnalyticsEngineDataset(undefined, { nativeWriteDataPoints: true });
+
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const analytics = yield* RequestAnalytics;
+
+      yield* analytics.writeDataPoints(
+        [{ indexes: ["one"] }, { indexes: ["two"] }, { indexes: ["three"] }],
+        { batchSize: 2 },
+      );
+    }).pipe(Effect.provide(analyticsLayer(dataset))),
+  );
+
+  assert.deepStrictEqual(dataset.points, []);
+  assert.deepStrictEqual(dataset.batches, [
+    [{ indexes: ["one"] }, { indexes: ["two"] }],
+    [{ indexes: ["three"] }],
+  ]);
+});
+
+test("AnalyticsEngine enforces the per-invocation data point limit", async () => {
+  const dataset = makeFakeAnalyticsEngineDataset();
+  const dataPoints = Array.from(
+    { length: AnalyticsEngine.writeLimits.maxDataPointsPerInvocation + 1 },
+    (_, index) => ({ indexes: [String(index)] }),
+  );
+
+  await expect(
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const analytics = yield* RequestAnalytics;
+        yield* analytics.writeBatch(dataPoints);
+      }).pipe(Effect.provide(analyticsLayer(dataset))),
+    ),
+  ).rejects.toMatchObject({
+    _tag: "AnalyticsEngineWriteValidationError",
+    operation: "writeDataPoints",
+    violations: [
+      {
+        path: "dataPoints",
+        actual: AnalyticsEngine.writeLimits.maxDataPointsPerInvocation + 1,
+        limit: AnalyticsEngine.writeLimits.maxDataPointsPerInvocation,
+      },
+    ],
+  });
+
+  assert.deepStrictEqual(dataset.points, []);
+});
+
+test("AnalyticsEngine drops over-limit and invalid batch points when configured", async () => {
+  const dataset = makeFakeAnalyticsEngineDataset();
+  const dataPoints = Array.from(
+    { length: AnalyticsEngine.writeLimits.maxDataPointsPerInvocation + 1 },
+    (_, index) => ({
+      indexes: index === 1 ? ["example.com", "overflow"] : [String(index)],
+    }),
+  );
+
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const analytics = yield* RequestAnalytics;
+      yield* analytics.writeBatch(dataPoints, { onInvalid: "drop" });
+    }).pipe(Effect.provide(analyticsLayer(dataset))),
+  );
+
+  assert.strictEqual(
+    dataset.points.length,
+    AnalyticsEngine.writeLimits.maxDataPointsPerInvocation - 1,
+  );
+  assert.deepStrictEqual(dataset.points[0], { indexes: ["0"] });
+  assert.deepStrictEqual(dataset.points[1], { indexes: ["2"] });
 });
 
 test("AnalyticsEngine layer validates the binding shape", async () => {

@@ -2,7 +2,17 @@ import type {
   AnalyticsEngineDataPoint as CloudflareAnalyticsEngineDataPoint,
   AnalyticsEngineDataset as CloudflareAnalyticsEngineDataset,
 } from "@cloudflare/workers-types";
-import { Config, Context, Data, Effect, Layer, Option, Redacted, Schema as S } from "effect";
+import {
+  Config,
+  Context,
+  Data,
+  Effect,
+  Layer,
+  Option,
+  Redacted,
+  Result,
+  Schema as S,
+} from "effect";
 import {
   FetchHttpClient,
   type Headers,
@@ -16,6 +26,16 @@ import type { WorkerEnvironment } from "./Environment";
 
 const expectedAnalyticsEngineDataset = "Analytics Engine dataset binding with writeDataPoint()";
 const defaultQueryApiBaseUrl = "https://api.cloudflare.com/client/v4";
+const textEncoder = new TextEncoder();
+
+export const writeLimits = {
+  maxBlobs: 20,
+  maxDoubles: 20,
+  maxIndexes: 1,
+  maxBlobBytes: 16 * 1024,
+  maxIndexBytes: 96,
+  maxDataPointsPerInvocation: 250,
+} as const;
 
 const queryColumnSchema = S.Struct({
   name: S.String,
@@ -30,7 +50,18 @@ const queryResponseSchema = S.Struct({
   rows: S.Number,
 });
 
+export const AnalyticsEngineFieldValueSchema = S.NullOr(
+  S.Union([S.String, S.instanceOf(ArrayBuffer)]),
+);
+
+export const AnalyticsEngineDataPointSchema = S.Struct({
+  indexes: S.optionalKey(S.Array(AnalyticsEngineFieldValueSchema)),
+  doubles: S.optionalKey(S.Array(S.Finite)),
+  blobs: S.optionalKey(S.Array(AnalyticsEngineFieldValueSchema)),
+});
+
 const decodeQueryResponse = S.decodeUnknownEffect(queryResponseSchema);
+const decodeDataPoint = S.decodeUnknownEffect(AnalyticsEngineDataPointSchema);
 
 /** Error raised when an Analytics Engine operation fails. */
 export class AnalyticsEngineOperationError extends Data.TaggedError(
@@ -39,6 +70,23 @@ export class AnalyticsEngineOperationError extends Data.TaggedError(
   readonly binding: string;
   readonly operation: string;
   readonly cause: unknown;
+}> {}
+
+export interface AnalyticsEngineWriteViolation {
+  readonly path: string;
+  readonly message: string;
+  readonly limit?: number;
+  readonly actual?: number;
+}
+
+/** Error raised when an Analytics Engine write input violates Cloudflare limits. */
+export class AnalyticsEngineWriteValidationError extends Data.TaggedError(
+  "AnalyticsEngineWriteValidationError",
+)<{
+  readonly binding: string;
+  readonly operation: string;
+  readonly violations: ReadonlyArray<AnalyticsEngineWriteViolation>;
+  readonly cause?: unknown;
 }> {}
 
 /** Error raised when an Analytics Engine SQL API query fails. */
@@ -60,8 +108,30 @@ export interface AnalyticsEngineDefinition {
 export type AnalyticsEngineBinding = CloudflareAnalyticsEngineDataset;
 export type AnalyticsEngineDataPoint = CloudflareAnalyticsEngineDataPoint;
 export type AnalyticsEngineFieldValue = ArrayBuffer | string | null;
+export type AnalyticsEngineWriteError =
+  | AnalyticsEngineOperationError
+  | AnalyticsEngineWriteValidationError;
+export type AnalyticsEngineInvalidWritePolicy = "error" | "drop";
 export type AnalyticsEngineQueryColumn = S.Schema.Type<typeof queryColumnSchema>;
 export type AnalyticsEngineQueryRow = S.Schema.Type<typeof queryRowSchema>;
+
+export interface AnalyticsEngineWriteOptions {
+  /**
+   * Controls invalid write behavior. The default is `"error"`, which fails with
+   * `AnalyticsEngineWriteValidationError`. `"drop"` skips invalid points.
+   */
+  readonly onInvalid?: AnalyticsEngineInvalidWritePolicy;
+}
+
+export interface AnalyticsEngineWriteBatchOptions extends AnalyticsEngineWriteOptions {
+  /**
+   * Maximum points per native batch call. Values are clamped to Cloudflare's
+   * per-invocation limit.
+   */
+  readonly batchSize?: number;
+}
+
+export type AnalyticsEngineWritePolicy = AnalyticsEngineWriteBatchOptions;
 
 export interface AnalyticsEngineQueryResult<Row = AnalyticsEngineQueryRow> {
   readonly meta: ReadonlyArray<AnalyticsEngineQueryColumn>;
@@ -86,10 +156,20 @@ export interface AnalyticsEngineQueryOptions {
 export interface AnalyticsEngineClient {
   readonly writeDataPoint: (
     dataPoint?: AnalyticsEngineDataPoint,
-  ) => Effect.Effect<void, AnalyticsEngineOperationError>;
+    options?: AnalyticsEngineWriteOptions,
+  ) => Effect.Effect<void, AnalyticsEngineWriteError>;
   readonly write: (
     dataPoint?: AnalyticsEngineDataPoint,
-  ) => Effect.Effect<void, AnalyticsEngineOperationError>;
+    options?: AnalyticsEngineWriteOptions,
+  ) => Effect.Effect<void, AnalyticsEngineWriteError>;
+  readonly writeDataPoints: (
+    dataPoints: ReadonlyArray<AnalyticsEngineDataPoint>,
+    options?: AnalyticsEngineWriteBatchOptions,
+  ) => Effect.Effect<void, AnalyticsEngineWriteError>;
+  readonly writeBatch: (
+    dataPoints: ReadonlyArray<AnalyticsEngineDataPoint>,
+    options?: AnalyticsEngineWriteBatchOptions,
+  ) => Effect.Effect<void, AnalyticsEngineWriteError>;
   readonly unsafeRaw: Effect.Effect<AnalyticsEngineBinding>;
   readonly definition: AnalyticsEngineDefinition;
 }
@@ -144,6 +224,7 @@ export interface AnalyticsEngineQueryService<Id extends string> {
 
 export type LayerOptions = {
   readonly binding: string;
+  readonly write?: AnalyticsEngineWritePolicy;
 };
 
 export type QueryConfigOptions = {
@@ -188,6 +269,19 @@ export interface QueryTagClass<Self, Id extends string> extends Context.ServiceC
 const analyticsEngineError = (binding: string, operation: string, cause: unknown) =>
   new AnalyticsEngineOperationError({ binding, operation, cause });
 
+const analyticsEngineWriteValidationError = (
+  binding: string,
+  operation: string,
+  violations: ReadonlyArray<AnalyticsEngineWriteViolation>,
+  cause?: unknown,
+) =>
+  new AnalyticsEngineWriteValidationError({
+    binding,
+    operation,
+    violations,
+    cause,
+  });
+
 const analyticsEngineQueryError = (
   definition: AnalyticsEngineQueryDefinition,
   operation: string,
@@ -215,6 +309,250 @@ const tryAnalyticsEngineSync = <A>(
   Effect.try({
     try: evaluate,
     catch: (cause) => analyticsEngineError(binding, operation, cause),
+  });
+
+const normalizeBatchSize = (batchSize: number | undefined) => {
+  if (batchSize === undefined || !Number.isFinite(batchSize) || batchSize <= 0) {
+    return writeLimits.maxDataPointsPerInvocation;
+  }
+
+  return Math.min(Math.floor(batchSize), writeLimits.maxDataPointsPerInvocation);
+};
+
+const resolveWritePolicy = (
+  defaults: AnalyticsEngineWritePolicy | undefined,
+  options: AnalyticsEngineWriteBatchOptions | undefined,
+) => ({
+  onInvalid: options?.onInvalid ?? defaults?.onInvalid ?? "error",
+  batchSize: normalizeBatchSize(options?.batchSize ?? defaults?.batchSize),
+});
+
+const fieldPath = (prefix: string, field: string) => (prefix === "" ? field : `${prefix}.${field}`);
+
+const indexedPath = (prefix: string, field: string, index: number) =>
+  `${fieldPath(prefix, field)}[${index}]`;
+
+const byteLength = (value: AnalyticsEngineFieldValue) => {
+  if (value === null) {
+    return 0;
+  }
+
+  return typeof value === "string" ? textEncoder.encode(value).byteLength : value.byteLength;
+};
+
+const lengthViolation = (
+  path: string,
+  label: string,
+  actual: number,
+  limit: number,
+): AnalyticsEngineWriteViolation => ({
+  path,
+  message: `${label} exceeds Cloudflare Analytics Engine limit`,
+  actual,
+  limit,
+});
+
+const validateDataPointLimits = (
+  dataPoint: AnalyticsEngineDataPoint,
+  pathPrefix = "",
+): ReadonlyArray<AnalyticsEngineWriteViolation> => {
+  const violations: Array<AnalyticsEngineWriteViolation> = [];
+
+  if (dataPoint.blobs !== undefined && dataPoint.blobs.length > writeLimits.maxBlobs) {
+    violations.push(
+      lengthViolation(
+        fieldPath(pathPrefix, "blobs"),
+        "blobs",
+        dataPoint.blobs.length,
+        writeLimits.maxBlobs,
+      ),
+    );
+  }
+
+  if (dataPoint.doubles !== undefined && dataPoint.doubles.length > writeLimits.maxDoubles) {
+    violations.push(
+      lengthViolation(
+        fieldPath(pathPrefix, "doubles"),
+        "doubles",
+        dataPoint.doubles.length,
+        writeLimits.maxDoubles,
+      ),
+    );
+  }
+
+  if (dataPoint.indexes !== undefined && dataPoint.indexes.length > writeLimits.maxIndexes) {
+    violations.push(
+      lengthViolation(
+        fieldPath(pathPrefix, "indexes"),
+        "indexes",
+        dataPoint.indexes.length,
+        writeLimits.maxIndexes,
+      ),
+    );
+  }
+
+  if (dataPoint.blobs !== undefined) {
+    const blobBytes = dataPoint.blobs.reduce((total, value) => total + byteLength(value), 0);
+
+    if (blobBytes > writeLimits.maxBlobBytes) {
+      violations.push(
+        lengthViolation(
+          fieldPath(pathPrefix, "blobs"),
+          "blob bytes",
+          blobBytes,
+          writeLimits.maxBlobBytes,
+        ),
+      );
+    }
+  }
+
+  if (dataPoint.indexes !== undefined) {
+    for (let index = 0; index < dataPoint.indexes.length; index++) {
+      const indexBytes = byteLength(dataPoint.indexes[index] ?? null);
+
+      if (indexBytes > writeLimits.maxIndexBytes) {
+        violations.push(
+          lengthViolation(
+            indexedPath(pathPrefix, "indexes", index),
+            "index bytes",
+            indexBytes,
+            writeLimits.maxIndexBytes,
+          ),
+        );
+      }
+    }
+  }
+
+  return violations;
+};
+
+const schemaViolation = (
+  pathPrefix: string,
+  cause: S.SchemaError,
+): AnalyticsEngineWriteViolation => ({
+  path: pathPrefix === "" ? "$" : pathPrefix,
+  message: cause.message,
+});
+
+const toAnalyticsEngineDataPoint = (
+  dataPoint: S.Schema.Type<typeof AnalyticsEngineDataPointSchema>,
+): AnalyticsEngineDataPoint => ({
+  ...(dataPoint.indexes === undefined ? {} : { indexes: [...dataPoint.indexes] }),
+  ...(dataPoint.doubles === undefined ? {} : { doubles: [...dataPoint.doubles] }),
+  ...(dataPoint.blobs === undefined ? {} : { blobs: [...dataPoint.blobs] }),
+});
+
+const validateDataPoint = (
+  binding: string,
+  operation: string,
+  dataPoint: AnalyticsEngineDataPoint,
+  pathPrefix = "",
+): Effect.Effect<AnalyticsEngineDataPoint, AnalyticsEngineWriteValidationError> =>
+  Effect.gen(function* () {
+    const decoded = yield* decodeDataPoint(dataPoint).pipe(
+      Effect.mapError((cause) =>
+        analyticsEngineWriteValidationError(
+          binding,
+          operation,
+          [schemaViolation(pathPrefix, cause)],
+          cause,
+        ),
+      ),
+    );
+    const validated = toAnalyticsEngineDataPoint(decoded);
+    const violations = validateDataPointLimits(validated, pathPrefix);
+
+    if (violations.length > 0) {
+      return yield* Effect.fail(
+        analyticsEngineWriteValidationError(binding, operation, violations),
+      );
+    }
+
+    return validated;
+  });
+
+const validateOptionalDataPoint = (
+  binding: string,
+  operation: string,
+  dataPoint: AnalyticsEngineDataPoint | undefined,
+): Effect.Effect<AnalyticsEngineDataPoint | undefined, AnalyticsEngineWriteValidationError> =>
+  dataPoint === undefined
+    ? Effect.succeed(undefined)
+    : validateDataPoint(binding, operation, dataPoint);
+
+const validateDataPoints = (
+  binding: string,
+  operation: string,
+  dataPoints: ReadonlyArray<AnalyticsEngineDataPoint>,
+  policy: ReturnType<typeof resolveWritePolicy>,
+): Effect.Effect<ReadonlyArray<AnalyticsEngineDataPoint>, AnalyticsEngineWriteValidationError> =>
+  Effect.gen(function* () {
+    const points =
+      dataPoints.length > writeLimits.maxDataPointsPerInvocation && policy.onInvalid === "drop"
+        ? dataPoints.slice(0, writeLimits.maxDataPointsPerInvocation)
+        : dataPoints;
+    const violations: Array<AnalyticsEngineWriteViolation> = [];
+
+    if (
+      dataPoints.length > writeLimits.maxDataPointsPerInvocation &&
+      policy.onInvalid === "error"
+    ) {
+      violations.push(
+        lengthViolation(
+          "dataPoints",
+          "data points per Worker invocation",
+          dataPoints.length,
+          writeLimits.maxDataPointsPerInvocation,
+        ),
+      );
+    }
+
+    const validPoints: Array<AnalyticsEngineDataPoint> = [];
+
+    for (let index = 0; index < points.length; index++) {
+      const result = yield* Effect.result(
+        validateDataPoint(binding, operation, points[index], `dataPoints[${index}]`),
+      );
+
+      if (Result.isSuccess(result)) {
+        validPoints.push(result.success);
+      } else if (policy.onInvalid === "error") {
+        violations.push(...result.failure.violations);
+      }
+    }
+
+    if (violations.length > 0) {
+      return yield* Effect.fail(
+        analyticsEngineWriteValidationError(binding, operation, violations),
+      );
+    }
+
+    return validPoints;
+  });
+
+const writeChunks = (
+  binding: string,
+  operation: string,
+  dataset: AnalyticsEngineBinding,
+  dataPoints: ReadonlyArray<AnalyticsEngineDataPoint>,
+  batchSize: number,
+): Effect.Effect<void, AnalyticsEngineOperationError> =>
+  Effect.gen(function* () {
+    const writeDataPoints = Reflect.get(dataset, "writeDataPoints");
+
+    for (let index = 0; index < dataPoints.length; index += batchSize) {
+      const chunk = dataPoints.slice(index, index + batchSize);
+
+      if (typeof writeDataPoints === "function") {
+        yield* tryAnalyticsEngineSync(binding, operation, () =>
+          writeDataPoints.call(dataset, chunk),
+        );
+      } else {
+        for (const point of chunk) {
+          yield* tryAnalyticsEngineSync(binding, operation, () => dataset.writeDataPoint(point));
+        }
+      }
+    }
   });
 
 const queryApiUrl = (definition: AnalyticsEngineQueryDefinition) => {
@@ -364,17 +702,56 @@ export const isAnalyticsEngineDataset = (value: unknown): value is AnalyticsEngi
 };
 
 export const makeClient =
-  (definition: AnalyticsEngineDefinition) =>
+  (definition: AnalyticsEngineDefinition, defaults?: AnalyticsEngineWritePolicy) =>
   (dataset: AnalyticsEngineBinding): AnalyticsEngineClient => {
-    const writeDataPoint = (dataPoint?: AnalyticsEngineDataPoint) =>
-      tryAnalyticsEngineSync(definition.binding, "writeDataPoint", () =>
-        dataset.writeDataPoint(dataPoint),
+    const writeDataPoint = (
+      dataPoint?: AnalyticsEngineDataPoint,
+      options?: AnalyticsEngineWriteOptions,
+    ) => {
+      const policy = resolveWritePolicy(defaults, options);
+
+      return validateOptionalDataPoint(definition.binding, "writeDataPoint", dataPoint).pipe(
+        Effect.matchEffect({
+          onFailure: (error) =>
+            policy.onInvalid === "drop" ? Effect.succeed(undefined) : Effect.fail(error),
+          onSuccess: (point) =>
+            tryAnalyticsEngineSync(definition.binding, "writeDataPoint", () =>
+              dataset.writeDataPoint(point),
+            ),
+        }),
       );
+    };
+
+    const writeDataPoints = (
+      dataPoints: ReadonlyArray<AnalyticsEngineDataPoint>,
+      options?: AnalyticsEngineWriteBatchOptions,
+    ) => {
+      const policy = resolveWritePolicy(defaults, options);
+
+      return Effect.gen(function* () {
+        const validPoints = yield* validateDataPoints(
+          definition.binding,
+          "writeDataPoints",
+          dataPoints,
+          policy,
+        );
+
+        yield* writeChunks(
+          definition.binding,
+          "writeDataPoints",
+          dataset,
+          validPoints,
+          policy.batchSize,
+        );
+      });
+    };
 
     return {
       definition,
       writeDataPoint,
       write: writeDataPoint,
+      writeDataPoints,
+      writeBatch: writeDataPoints,
       unsafeRaw: Effect.succeed(dataset),
     };
   };
@@ -417,11 +794,17 @@ export const queryFetchLayerConfig = <Self>(
 
 export const layer = <Self>(
   tag: Context.Service<Self, AnalyticsEngineClient>,
-  definition: AnalyticsEngineDefinition,
+  definition: LayerOptions,
 ) =>
-  Binding.layer(tag, definition.binding, isAnalyticsEngineDataset, makeClient(definition), {
-    expected: expectedAnalyticsEngineDataset,
-  });
+  Binding.layer(
+    tag,
+    definition.binding,
+    isAnalyticsEngineDataset,
+    makeClient(definition, definition.write),
+    {
+      expected: expectedAnalyticsEngineDataset,
+    },
+  );
 
 export const make = <Id extends string>(id: Id) => Tag<AnalyticsEngineService<Id>>()<Id>(id);
 

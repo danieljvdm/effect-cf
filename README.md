@@ -188,8 +188,18 @@ const program = Effect.gen(function* () {
     blobs: ["/home", "US"],
     doubles: [1],
   });
+
+  yield* analytics.writeBatch(
+    [
+      { indexes: ["example.com"], blobs: ["/pricing", "US"], doubles: [1] },
+      { indexes: ["example.com"], blobs: ["/docs", "CA"], doubles: [1] },
+    ],
+    { onInvalid: "drop", batchSize: 100 },
+  );
 });
 ```
+
+Writes validate the Cloudflare Analytics Engine field, byte, and per-invocation limits before calling the native binding. Invalid writes fail with `AnalyticsEngineWriteValidationError` by default, or can be dropped with `onInvalid: "drop"` on the layer or per call.
 
 Analytics Engine SQL queries with schema-decoded rows:
 

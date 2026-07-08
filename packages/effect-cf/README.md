@@ -236,7 +236,7 @@ export const sendWelcomeEmail = (to: string) =>
 
 ## Analytics Engine Example
 
-Analytics Engine tags expose Cloudflare dataset bindings as Effect-wrapped `writeDataPoint(...)` operations. Writes use Cloudflare's native non-blocking runtime API.
+Analytics Engine tags expose Cloudflare dataset bindings as Effect-wrapped `writeDataPoint(...)` operations. Writes use Cloudflare's native non-blocking runtime API and are validated against Workers Analytics Engine limits before reaching the binding.
 
 ```ts
 import { Effect } from "effect";
@@ -246,6 +246,10 @@ class RequestAnalytics extends AnalyticsEngine.Tag<RequestAnalytics>()("RequestA
 
 export const RequestAnalyticsLayer = RequestAnalytics.layer({
   binding: "REQUEST_ANALYTICS",
+  write: {
+    onInvalid: "error",
+    batchSize: 100,
+  },
 });
 
 export const recordPageView = (request: Request) =>
@@ -258,10 +262,21 @@ export const recordPageView = (request: Request) =>
       blobs: [url.pathname, request.headers.get("cf-connecting-country") ?? "unknown"],
       doubles: [1],
     });
+
+    yield* analytics.writeBatch(
+      [
+        {
+          indexes: [url.hostname],
+          blobs: [url.pathname, "page-view"],
+          doubles: [1],
+        },
+      ],
+      { onInvalid: "drop" },
+    );
   });
 ```
 
-Define the dataset binding in the consuming Worker's `wrangler.jsonc` with `analytics_engine_datasets`, then provide `RequestAnalytics.layer({ binding: "REQUEST_ANALYTICS" })` from the Worker layer.
+Define the dataset binding in the consuming Worker's `wrangler.jsonc` with `analytics_engine_datasets`, then provide `RequestAnalytics.layer({ binding: "REQUEST_ANALYTICS" })` from the Worker layer. Invalid writes fail with `AnalyticsEngineWriteValidationError` by default. Use `write: { onInvalid: "drop" }` on the layer or `{ onInvalid: "drop" }` per call when dropping invalid points is preferable.
 
 Analytics Engine query tags wrap Cloudflare's HTTP SQL API. Configuration can stay in Effect `Config`, including a redacted API token, the outbound transport is an Effect `HttpClient` dependency, and rows can be decoded with Effect schemas at the query boundary. Use `fetchLayerConfig(...)` as shorthand when the platform fetch-backed client is enough.
 

@@ -1,10 +1,12 @@
 import { expectTypeOf } from "vitest";
-import { Effect, Layer, Option, Schema } from "effect";
+import { Config, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { PgClient } from "@effect/sql-pg";
+import { HttpClient } from "effect/unstable/http";
 import { SqlClient, SqlError } from "effect/unstable/sql";
 
 import {
   AiGateway,
+  AnalyticsEngine,
   Binding,
   BrowserRendering,
   DurableObject,
@@ -299,6 +301,121 @@ const vectorizeProgram = Effect.gen(function* () {
   ).toEqualTypeOf<Effect.Effect<Vectorize.VectorizeMatches, Vectorize.VectorizeOperationError>>();
 });
 
+export class RequestAnalytics extends AnalyticsEngine.Tag<RequestAnalytics>()("RequestAnalytics") {}
+
+export const RequestAnalyticsLayer = RequestAnalytics.layer({ binding: "REQUEST_ANALYTICS" });
+
+export class RequestAnalyticsQuery extends AnalyticsEngine.QueryTag<RequestAnalyticsQuery>()(
+  "RequestAnalyticsQuery",
+) {}
+
+export const RequestAnalyticsQueryLayer = RequestAnalyticsQuery.layer({
+  accountId: "account-1",
+  apiToken: Redacted.make("secret-token"),
+});
+
+export const RequestAnalyticsQueryFetchLayer = RequestAnalyticsQuery.fetchLayer({
+  accountId: "account-1",
+  apiToken: Redacted.make("secret-token"),
+});
+
+export const RequestAnalyticsQueryConfigLayer = RequestAnalyticsQuery.layerConfig(
+  AnalyticsEngine.queryConfig({
+    accountId: Config.string("ACCOUNT_ID"),
+    apiToken: Config.redacted("API_TOKEN"),
+  }),
+);
+
+export const RequestAnalyticsQueryFetchConfigLayer = RequestAnalyticsQuery.fetchLayerConfig(
+  AnalyticsEngine.queryConfig({
+    accountId: Config.string("ACCOUNT_ID"),
+    apiToken: Config.redacted("API_TOKEN"),
+  }),
+);
+
+const analyticsEngineProgram = Effect.gen(function* () {
+  const analytics = yield* RequestAnalytics;
+
+  expectTypeOf(
+    analytics.writeDataPoint({
+      indexes: ["example.com"],
+      blobs: ["/home", "US", null],
+      doubles: [1, 42],
+    }),
+  ).toEqualTypeOf<Effect.Effect<void, AnalyticsEngine.AnalyticsEngineOperationError>>();
+
+  expectTypeOf(
+    analytics.write({ indexes: ["example.com"], blobs: ["/pricing"], doubles: [1] }),
+  ).toEqualTypeOf<Effect.Effect<void, AnalyticsEngine.AnalyticsEngineOperationError>>();
+
+  expectTypeOf(analytics.unsafeRaw).toEqualTypeOf<
+    Effect.Effect<AnalyticsEngine.AnalyticsEngineBinding>
+  >();
+
+  // @ts-expect-error doubles only accept numbers.
+  yield* analytics.writeDataPoint({ doubles: ["1"] });
+});
+
+const analyticsEngineQueryProgram = Effect.gen(function* () {
+  const query = yield* RequestAnalyticsQuery;
+  const row = Schema.Struct({
+    path: Schema.String,
+    views: Schema.Number,
+  });
+
+  expectTypeOf(query.query("SHOW TABLES")).toEqualTypeOf<
+    Effect.Effect<
+      AnalyticsEngine.AnalyticsEngineQueryResult,
+      AnalyticsEngine.AnalyticsEngineQueryError | Schema.SchemaError
+    >
+  >();
+
+  expectTypeOf(
+    query.queryRows(row, "SELECT blob1 AS path, double1 AS views FROM requests"),
+  ).toEqualTypeOf<
+    Effect.Effect<
+      ReadonlyArray<{ readonly path: string; readonly views: number }>,
+      AnalyticsEngine.AnalyticsEngineQueryError | Schema.SchemaError
+    >
+  >();
+
+  expectTypeOf(
+    query.queryOne(row, "SELECT blob1 AS path, double1 AS views FROM requests LIMIT 1"),
+  ).toEqualTypeOf<
+    Effect.Effect<
+      Option.Option<{ readonly path: string; readonly views: number }>,
+      AnalyticsEngine.AnalyticsEngineQueryError | Schema.SchemaError
+    >
+  >();
+
+  expectTypeOf(query.queryText("SHOW TABLES FORMAT TabSeparated")).toEqualTypeOf<
+    Effect.Effect<string, AnalyticsEngine.AnalyticsEngineQueryError>
+  >();
+});
+
+expectTypeOf(
+  AnalyticsEngine.makeQueryClient({
+    accountId: "account-1",
+    apiToken: Redacted.make("secret-token"),
+  }),
+).toEqualTypeOf<
+  Effect.Effect<AnalyticsEngine.AnalyticsEngineQueryClient, never, HttpClient.HttpClient>
+>();
+
+expectTypeOf(RequestAnalyticsQueryLayer).toEqualTypeOf<
+  Layer.Layer<RequestAnalyticsQuery, never, HttpClient.HttpClient>
+>();
+
+expectTypeOf(RequestAnalyticsQueryFetchLayer).toEqualTypeOf<Layer.Layer<RequestAnalyticsQuery>>();
+
+expectTypeOf(RequestAnalyticsQueryConfigLayer).toEqualTypeOf<
+  Layer.Layer<RequestAnalyticsQuery, Config.ConfigError, HttpClient.HttpClient>
+>();
+
+expectTypeOf(RequestAnalyticsQueryFetchConfigLayer).toEqualTypeOf<
+  Layer.Layer<RequestAnalyticsQuery, Config.ConfigError>
+>();
+
 export class Gateway extends AiGateway.Tag<Gateway>()("Gateway") {}
 
 export const GatewayLayer = Gateway.layer({ binding: "AI", gatewayId: "default" });
@@ -462,6 +579,8 @@ void imagesProgram;
 void emailProgram;
 void workersAiProgram;
 void vectorizeProgram;
+void analyticsEngineProgram;
+void analyticsEngineQueryProgram;
 void aiGatewayProgram;
 void browserRenderingProgram;
 void workerProgram;

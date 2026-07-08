@@ -55,9 +55,9 @@ export const AnalyticsEngineFieldValueSchema = S.NullOr(
 );
 
 export const AnalyticsEngineDataPointSchema = S.Struct({
-  indexes: S.optionalKey(S.Array(AnalyticsEngineFieldValueSchema)),
-  doubles: S.optionalKey(S.Array(S.Finite)),
-  blobs: S.optionalKey(S.Array(AnalyticsEngineFieldValueSchema)),
+  indexes: S.optional(S.Array(AnalyticsEngineFieldValueSchema)),
+  doubles: S.optional(S.Array(S.Finite)),
+  blobs: S.optional(S.Array(AnalyticsEngineFieldValueSchema)),
 });
 
 const decodeQueryResponse = S.decodeUnknownEffect(queryResponseSchema);

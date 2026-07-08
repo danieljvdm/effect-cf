@@ -122,6 +122,25 @@ test("AnalyticsEngine validates write limits before calling the native binding",
   assert.deepStrictEqual(dataset.points, []);
 });
 
+test("AnalyticsEngine accepts omitted, undefined, and null write inputs", async () => {
+  const dataset = makeFakeAnalyticsEngineDataset();
+
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const analytics = yield* RequestAnalytics;
+
+      yield* analytics.writeDataPoint();
+      yield* analytics.writeDataPoint({
+        indexes: undefined,
+        doubles: undefined,
+        blobs: [null],
+      });
+    }).pipe(Effect.provide(analyticsLayer(dataset))),
+  );
+
+  assert.deepStrictEqual(dataset.points, [undefined, { blobs: [null] }]);
+});
+
 test("AnalyticsEngine validates blob and index byte limits", async () => {
   const dataset = makeFakeAnalyticsEngineDataset();
 

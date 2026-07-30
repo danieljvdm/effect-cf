@@ -308,8 +308,9 @@
     },
     "packages/effect-cf": {
       "name": "effect-cf",
-      "version": "0.13.1",
+      "version": "0.16.0",
       "devDependencies": {
+        "@cloudflare/containers": "catalog:",
         "@cloudflare/vitest-pool-workers": "catalog:",
         "@cloudflare/workers-types": "catalog:",
         "@effect/platform-node": "4.0.0-beta.77",
@@ -340,6 +341,7 @@
     "vitest": "catalog:",
   },
   "catalog": {
+    "@cloudflare/containers": "0.3.7",
     "@cloudflare/vitest-pool-workers": "0.16.15",
     "@cloudflare/workers-types": "4.20260611.1",
     "@effect/platform-bun": "4.0.0-beta.77",
@@ -393,6 +395,8 @@
     "@changesets/types": ["@changesets/types@6.1.0", "", {}, "sha512-rKQcJ+o1nKNgeoYRHKOS07tAMNd3YSN0uHaJOZYjBAgxfV7TUE7JE+z4BzZdQwb5hKaYbayKN5KrYV7ODb2rAA=="],
 
     "@changesets/write": ["@changesets/write@0.4.0", "", { "dependencies": { "@changesets/types": "^6.1.0", "fs-extra": "^7.0.1", "human-id": "^4.1.1", "prettier": "^2.7.1" } }, "sha512-CdTLvIOPiCNuH71pyDu3rA+Q0n65cmAbXnwWH84rKGiFumFzkmHNT8KHTMEchcxN+Kl8I54xGUhJ7l3E7X396Q=="],
+
+    "@cloudflare/containers": ["@cloudflare/containers@0.3.7", "", {}, "sha512-DM9dm3FnIBSyiSJ1FLavKwl/lk3oAmTaynCzZQ9pZR0ncRPquSxkxd8Nu2MFILxmDDsPkxKsSNEh9mHHMty4Fw=="],
 
     "@cloudflare/kv-asset-handler": ["@cloudflare/kv-asset-handler@0.5.0", "", {}, "sha512-jxQYkj8dSIzc0cD6cMMNdOc1UVjqSqu8BZdor5s8cGjW2I8BjODt/kWPVdY+u9zj3ms75Q5qaZgnxUad83+eAg=="],
 

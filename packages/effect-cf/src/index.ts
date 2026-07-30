@@ -3,6 +3,7 @@ export * as AnalyticsEngine from "./AnalyticsEngine";
 export * as Binding from "./Binding";
 export * as BrowserRendering from "./BrowserRendering";
 export * as CloudflareOtlp from "./CloudflareOtlp";
+export * as ContainerNamespace from "./ContainerNamespace";
 export * as D1 from "./D1";
 export * as DurableObject from "./DurableObject";
 export * as DurableObjectAlarm from "./DurableObjectAlarm";

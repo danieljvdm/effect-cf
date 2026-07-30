@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.17.0
+
+### Minor Changes
+
+- [#53](https://github.com/danieljvdm/effect-cf/pull/53) [`b36fc21`](https://github.com/danieljvdm/effect-cf/commit/b36fc2111670c6404a80d51a3c12b10080260256) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add `ContainerNamespace` services for named Cloudflare Container request forwarding and lifecycle operations.
+
 ## 0.16.0
 
 ### Minor Changes

@@ -59,6 +59,7 @@
   },
   "packageManager": "bun@1.3.13",
   "catalog": {
+    "@cloudflare/containers": "0.3.7",
     "@cloudflare/workers-types": "4.20260611.1",
     "@cloudflare/vitest-pool-workers": "0.16.15",
     "@effect/platform-bun": "4.0.0-beta.77",

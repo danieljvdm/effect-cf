@@ -1,6 +1,6 @@
 # effect-cf
 
-Effect-native Cloudflare primitives for Workers, Durable Objects, bindings, KV, D1, Queues, Email, Analytics Engine, Workflows, and Durable Object storage.
+Effect-native Cloudflare primitives for Workers, Durable Objects, Containers, bindings, KV, D1, Queues, Email, Analytics Engine, Workflows, and Durable Object storage.
 
 ## Install
 
@@ -30,6 +30,7 @@ Runtime creation belongs at Cloudflare entrypoints, not inside binding helpers.
 - `DurableObject` - Durable Object entrypoint factory and typed namespace helpers
 - `DurableObjectState` / `DurableObjectStorage` - Effect wrappers for state, alarms, SQL, and embedded KV
 - `DurableObjectWebSocket` - WebSocket upgrade helpers for Durable Objects
+- `ContainerNamespace` - named Cloudflare Container instances with Effect-wrapped request and lifecycle operations
 - `Kv` - typed KV namespace helper
 - `D1` - typed D1 database binding helper with an `@effect/sql-d1` backed SQL layer
 - `R2` - typed R2 bucket binding helper with Effect-wrapped object and multipart operations
@@ -84,6 +85,46 @@ export const readCounter = Effect.gen(function* () {
 ```
 
 Define Wrangler bindings and migrations in the consuming application. Durable Object namespace bindings are provided with `YourObject.layer({ binding })`, and consumers use `const namespace = yield* YourObject`.
+
+## Container Example
+
+Container entrypoints remain owned by `@cloudflare/containers`; `effect-cf`
+wraps the Container namespace used by a calling Worker.
+
+```ts
+import { Container, switchPort } from "@cloudflare/containers";
+import { Effect, Layer } from "effect";
+import { ContainerNamespace, Worker } from "effect-cf";
+
+export class RendererContainer extends Container {
+  defaultPort = 8080;
+  sleepAfter = "10m";
+}
+
+class Renderers extends ContainerNamespace.Tag<Renderers>()("Renderers") {}
+
+const RenderersLive = Renderers.layer({ binding: "RENDERERS" });
+
+export default Worker.make(RenderersLive, {
+  fetch: Effect.gen(function* () {
+    const request = yield* Worker.NativeRequest;
+    const renderer = Renderers.byName(new URL(request.url).pathname);
+
+    yield* renderer.startAndWaitForPorts({ ports: 8080 });
+    return yield* renderer.fetch(switchPort(request, 8080));
+  }),
+});
+```
+
+The instance client exposes `state`, `fetch`, `start`,
+`startAndWaitForPorts`, `stop`, `destroy`, and the Effect-valued native
+`unsafeRaw` stub.
+Responses are returned unchanged, including non-2xx and WebSocket upgrade
+responses. If the Container uses outbound interception, also export
+`ContainerProxy` from `@cloudflare/containers`.
+
+See [`examples/containers/README.md`](../../examples/containers/README.md) for
+the corresponding Wrangler configuration and entrypoint responsibilities.
 
 ## Queue Example
 

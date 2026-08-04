@@ -7,15 +7,15 @@ Effect-native Cloudflare primitives for Workers, Durable Objects, Containers, bi
 `effect-cf` currently targets Effect 4 beta.
 
 ```bash
-bun add effect-cf "effect@^4.0.0-beta.65"
+bun add effect-cf "effect@^4.0.0-beta.103"
 ```
 
 ```bash
-pnpm add effect-cf "effect@^4.0.0-beta.65"
+pnpm add effect-cf "effect@^4.0.0-beta.103"
 ```
 
 ```bash
-npm install effect-cf "effect@^4.0.0-beta.65"
+npm install effect-cf "effect@^4.0.0-beta.103"
 ```
 
 ## Goal
@@ -26,10 +26,13 @@ Runtime creation belongs at Cloudflare entrypoints, not inside binding helpers.
 
 ## Exports
 
-- `Worker` - Worker entrypoint factory, request services, and typed Worker bindings
-- `DurableObject` - Durable Object entrypoint factory and typed namespace helpers
+- `Worker` - Worker entrypoint factory, request services, and typed Worker bindings, including inbound `connect` handlers
+- `DurableObject` - Durable Object entrypoint factory and typed namespace helpers, including socket forwarding
 - `DurableObjectState` / `DurableObjectStorage` - Effect wrappers for state, alarms, SQL, and embedded KV
+- `DurableObjectContainer` - low-level `DurableObjectState.container` lifecycle, process, interception, snapshot, HTTP, and TCP APIs
 - `DurableObjectWebSocket` - WebSocket upgrade helpers for Durable Objects
+- `Socket` - Effect-friendly Cloudflare TCP sockets with open, close, STARTTLS, and scoped lifetime helpers
+- `ServiceBinding` - typed Worker service bindings with HTTP, TCP socket, and RPC clients
 - `ContainerNamespace` - named Cloudflare Container instances with Effect-wrapped request and lifecycle operations
 - `Kv` - typed KV namespace helper
 - `D1` - typed D1 database binding helper with an `@effect/sql-d1` backed SQL layer
@@ -52,6 +55,75 @@ import { Worker } from "effect-cf";
 
 export default Worker.make(Layer.empty, Effect.succeed(HttpServerResponse.text("ok")));
 ```
+
+## Socket Workers and gRPC
+
+Cloudflare's [Socket Workers release](https://blog.cloudflare.com/grpc-workers/) adds an inbound `connect(socket)` event and
+`Fetcher.connect(...)` on Worker service bindings, Durable Object stubs, and
+Container TCP ports. `effect-cf` exposes those boundaries as Effect handlers and
+typed socket clients:
+
+```ts
+import { Effect, Layer } from "effect";
+import { DurableObject, DurableObjectState, Worker } from "effect-cf";
+
+const bridge = (left: ReadableStream, right: WritableStream) =>
+  Effect.tryPromise(() => left.pipeTo(right));
+
+export class GrpcBackends extends DurableObject.Tag<GrpcBackends>()("GrpcBackends", {}) {}
+
+export const GrpcBackendObject = GrpcBackends.make(Layer.empty, {
+  rpc: {},
+  connect: (incoming) =>
+    Effect.gen(function* () {
+      const state = yield* DurableObjectState.DurableObjectState;
+      const container = yield* state.container;
+
+      if (!(yield* container.running)) {
+        yield* container.start({ enableInternet: false });
+      }
+
+      const port = yield* container.getTcpPort(50051);
+      const backend = yield* port.connect("10.0.0.1:50051", {
+        allowHalfOpen: true,
+      });
+      yield* backend.opened;
+
+      yield* Effect.all(
+        [bridge(incoming.readable, backend.writable), bridge(backend.readable, incoming.writable)],
+        { concurrency: "unbounded" },
+      );
+    }),
+});
+
+export default Worker.make(GrpcBackends.layer({ binding: "GRPC_BACKENDS" }), {
+  connect: (incoming) =>
+    Effect.gen(function* () {
+      const backends = yield* GrpcBackends;
+      const backend = yield* backends.byName("primary").connect("backend:50051", {
+        allowHalfOpen: true,
+      });
+
+      yield* Effect.all(
+        [bridge(incoming.readable, backend.writable), bridge(backend.readable, incoming.writable)],
+        { concurrency: "unbounded" },
+      );
+    }),
+});
+```
+
+The wrapper deliberately leaves `readable` and `writable` as native Web Streams
+so protocol libraries and `pipeTo(...)` retain direct control. `opened`, `closed`,
+`close`, and `startTls(...)` are Effects; use `Socket.connectScoped(...)` when
+opening through a raw Fetcher-like connector and the socket should close with an
+Effect scope.
+
+This covers the transport path for full-duplex gRPC servers running in
+Containers. It does not implement HTTP/2 or gRPC framing in JavaScript. For
+unary and server-streaming gRPC directly in a Worker, use a gRPC-web library such
+as ConnectRPC through the existing `fetch` handler; Cloudflare performs the
+gRPC/gRPC-web translation. The Socket Workers and gRPC capabilities announced
+in August 2026 are private beta and require Cloudflare account enablement.
 
 ## Durable Object Example
 
@@ -125,6 +197,13 @@ responses. If the Container uses outbound interception, also export
 
 See [`examples/containers/README.md`](../../examples/containers/README.md) for
 the corresponding Wrangler configuration and entrypoint responsibilities.
+
+`ContainerNamespace` above is the high-level `@cloudflare/containers` binding
+used by a calling Worker. Inside a Durable Object with a container binding,
+`yield* DurableObjectState.DurableObjectState` and then `yield* state.container`
+to access the distinct low-level `DurableObjectContainer` API, including
+`running`, `start`, `monitor`, `destroy`, `signal`, `exec`, snapshots, outbound
+interception, and [`getTcpPort(...).fetch/connect`](https://developers.cloudflare.com/durable-objects/api/container/#gettcpport).
 
 ## Queue Example
 

@@ -1,7 +1,12 @@
 import { assert, expect, it, test } from "@effect/vitest";
 import { Effect, Option, Schema as S } from "effect";
 
-import { DurableObjectState, DurableObjectWebSocket, Worker } from "../src/index";
+import {
+  DurableObjectContainer,
+  DurableObjectState,
+  DurableObjectWebSocket,
+  Worker,
+} from "../src/index";
 
 test("detects websocket upgrade requests", () => {
   expect(
@@ -145,6 +150,7 @@ function makeFakeDurableObjectState(options?: {
     raw: {} as globalThis.DurableObjectState,
     id: {} as globalThis.DurableObjectId,
     storage: {} as never,
+    container: Effect.fail(new DurableObjectContainer.ContainerNotConfiguredError()),
     waitUntil: () => Effect.void,
     blockConcurrencyWhile: (effect) => effect,
     blockConcurrencyWhileOrReset: (effect) => effect,

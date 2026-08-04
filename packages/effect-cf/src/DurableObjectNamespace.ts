@@ -4,6 +4,7 @@ import * as Binding from "./Binding";
 import * as CloudflareRpc from "./Rpc";
 import type * as DurableObjectDefinition from "./DurableObjectDefinition";
 import * as RpcDefinition from "./RpcDefinition";
+import * as CloudflareSocket from "./Socket";
 import * as RpcInvocation from "./internal/RpcInvocation";
 
 const expectedDurableObjectNamespace =
@@ -11,6 +12,10 @@ const expectedDurableObjectNamespace =
 
 interface DurableObjectFetcher {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
+  connect(
+    address: CloudflareSocket.SocketAddress,
+    options?: CloudflareSocket.SocketOptions,
+  ): globalThis.Socket;
 }
 
 type RpcClient<Api> = {
@@ -21,7 +26,7 @@ type RpcClient<Api> = {
     : never]: Api[Key];
 };
 
-type ReservedMethodName = DurableObjectDefinition.ReservedMethodName | "fetch";
+type ReservedMethodName = DurableObjectDefinition.ReservedMethodName | "fetch" | "connect";
 
 /**
  * Cloudflare Durable Object stub, optionally enriched with RPC methods.
@@ -96,6 +101,14 @@ export class DurableObjectFetchError extends Data.TaggedError("DurableObjectFetc
   readonly cause: unknown;
 }> {}
 
+/** Failure raised when opening a TCP socket through a Durable Object stub. */
+export class DurableObjectConnectError extends Data.TaggedError("DurableObjectConnectError")<{
+  readonly binding: string;
+  readonly id: string;
+  readonly name?: string;
+  readonly cause: unknown;
+}> {}
+
 type StubMethodKey<Api> = RpcInvocation.AsyncMethodKey<Api>;
 type StubMethodArgs<Api, Method extends keyof Api> = RpcInvocation.AsyncMethodArgs<Api, Method>;
 type StubMethodSuccess<Api, Method extends keyof Api> = RpcInvocation.AsyncMethodSuccess<
@@ -118,6 +131,10 @@ type DurableObjectDirectClient<R, Api extends object> = {
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => Effect.Effect<globalThis.Response, DurableObjectFetchError, R>;
+  readonly connect: (
+    address: CloudflareSocket.SocketAddress,
+    options?: CloudflareSocket.SocketOptions,
+  ) => Effect.Effect<CloudflareSocket.Socket, DurableObjectConnectError, R>;
 } & {
   readonly [Method in StubMethodKey<Api>]: (
     ...args: StubMethodArgs<Api, Method>
@@ -147,6 +164,10 @@ type DefinitionDurableObjectDirectClient<
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => Effect.Effect<globalThis.Response, DurableObjectFetchError, R>;
+  readonly connect: (
+    address: CloudflareSocket.SocketAddress,
+    options?: CloudflareSocket.SocketOptions,
+  ) => Effect.Effect<CloudflareSocket.Socket, DurableObjectConnectError, R>;
 } & {
   readonly [Method in RpcDefinition.Definition.MethodNames<Definition>]: (
     ...args: RpcDefinition.Method.Args<Definition["methods"][Method]>
@@ -229,6 +250,12 @@ export type DurableObjectNamespaceEffectClient<
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => Effect.Effect<globalThis.Response, DurableObjectFetchError>;
+  /** Opens a TCP socket through a Durable Object's `connect` handler. */
+  readonly connect: (
+    stub: DurableObjectStubClient<Api>,
+    address: CloudflareSocket.SocketAddress,
+    options?: CloudflareSocket.SocketOptions,
+  ) => Effect.Effect<CloudflareSocket.Socket, DurableObjectConnectError>;
   /**
    * Invokes a Durable Object RPC method and returns Cloudflare's raw RPC result.
    *
@@ -345,6 +372,11 @@ export type DurableObjectNamespaceStaticClient<
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => Effect.Effect<globalThis.Response, DurableObjectFetchError, R>;
+  readonly connect: (
+    stub: DurableObjectStubClient<Api>,
+    address: CloudflareSocket.SocketAddress,
+    options?: CloudflareSocket.SocketOptions,
+  ) => Effect.Effect<CloudflareSocket.Socket, DurableObjectConnectError, R>;
   readonly rpc: <Method extends StubMethodKey<Api>>(
     stub: DurableObjectStubClient<Api>,
     method: Method,
@@ -415,6 +447,23 @@ export const makeClient = <
         try: () => stub.fetch(input, init),
         catch: (cause) => new DurableObjectFetchError({ binding: definition.binding, cause }),
       });
+
+    const connect = (
+      stub: StubClient,
+      address: CloudflareSocket.SocketAddress,
+      options?: CloudflareSocket.SocketOptions,
+    ) =>
+      CloudflareSocket.connect(stub, address, options).pipe(
+        Effect.mapError(
+          (cause) =>
+            new DurableObjectConnectError({
+              binding: definition.binding,
+              id: stub.id.toString(),
+              name: stub.name,
+              cause,
+            }),
+        ),
+      );
 
     const rpc = <Method extends StubMethodKey<Api>>(
       stub: StubClient,
@@ -517,6 +566,7 @@ export const makeClient = <
     const directMethods = makeDirectMethods<never, Api, Definition>(definition.definition, {
       call,
       fetch,
+      connect,
       get,
       getByName,
     });
@@ -529,6 +579,7 @@ export const makeClient = <
       getByName,
       jurisdiction,
       fetch,
+      connect,
       rpc,
       call,
       scopedCall,
@@ -567,6 +618,11 @@ export const makeDirectMethods = <
       input: RequestInfo | URL,
       init?: RequestInit,
     ) => Effect.Effect<globalThis.Response, DurableObjectFetchError, R>;
+    readonly connect: (
+      stub: DurableObjectStubClient<Api>,
+      address: CloudflareSocket.SocketAddress,
+      options?: CloudflareSocket.SocketOptions,
+    ) => Effect.Effect<CloudflareSocket.Socket, DurableObjectConnectError, R>;
     readonly get: (
       id: globalThis.DurableObjectId,
       options?: globalThis.DurableObjectNamespaceGetDurableObjectOptions,
@@ -599,6 +655,14 @@ export const makeDirectMethods = <
           Effect.gen(function* () {
             const stub = yield* getStub();
             return yield* helpers.fetch(stub, input, init);
+          }),
+        connect: (
+          address: CloudflareSocket.SocketAddress,
+          options?: CloudflareSocket.SocketOptions,
+        ) =>
+          Effect.gen(function* () {
+            const stub = yield* getStub();
+            return yield* helpers.connect(stub, address, options);
           }),
       } as Record<string, unknown>;
 

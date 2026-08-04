@@ -10,6 +10,7 @@ import type * as Binding from "./Binding";
 import * as DurableObjectDefinition from "./DurableObjectDefinition";
 import type * as DurableObjectNamespace from "./DurableObjectNamespace";
 import type * as Rpc from "./Rpc";
+import * as CloudflareSocket from "./Socket";
 import * as CloudflareClock from "./internal/Clock";
 import * as Entrypoint from "./internal/Entrypoint";
 
@@ -17,6 +18,7 @@ const reservedMethodNames = new Set<string>([
   "constructor",
   "dup",
   "fetch",
+  "connect",
   "alarm",
   "webSocketMessage",
   "webSocketClose",
@@ -107,6 +109,10 @@ export interface DurableObjectOptions<
   readonly rpc?: Rpc;
   /** Optional fetch handler for HTTP/WebSocket requests. */
   readonly fetch?: Effect.Effect<Response, unknown, FetchContext<RRuntime | REvent>>;
+  /** Handles an inbound TCP socket from a Worker or service binding. */
+  readonly connect?: (
+    socket: CloudflareSocket.Socket,
+  ) => Effect.Effect<void, unknown, HandlerContext<RRuntime | REvent>>;
   /**
    * Optional logical alarm processing effect.
    *
@@ -202,6 +208,16 @@ export const make = <
       }
 
       return this[RunSymbol](Effect.provideService(fetchHandler, NativeRequest, request));
+    }
+
+    connect(socket: globalThis.Socket): Promise<void> {
+      const connectHandler = options.connect;
+
+      if (connectHandler === undefined) {
+        return Promise.resolve();
+      }
+
+      return this[RunSymbol](connectHandler(CloudflareSocket.fromSocket(socket)));
     }
 
     alarm(alarmInfo?: globalThis.AlarmInvocationInfo): Promise<void> | void {

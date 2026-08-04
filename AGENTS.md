@@ -18,7 +18,7 @@ Docs are local at `node_modules/vite-plus/docs` or online at https://viteplus.de
 - `examples/` contains consumer/example apps.
 - Reusable package code belongs under `packages/effect-cf/src` and should be exported from `packages/effect-cf/src/index.ts`.
 - Worker projects use `@cloudflare/workers-types` directly for Cloudflare runtime types.
-- Effect source code can be referenced at `repos/effect-smol` for patterns and API style when changing Effect-heavy code. Do not edit files under `repos/effect-smol`; it is a reference checkout, not package source.
+- Effect source code can be referenced at `repos/effect` for patterns and API style when changing Effect-heavy code. Do not edit files under `repos/effect`; it is a reference checkout, not package source.
 
 # Repo-Local Skills
 

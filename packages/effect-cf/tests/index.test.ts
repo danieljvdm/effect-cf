@@ -116,6 +116,12 @@ test("rejects Worker lifecycle RPC method names reserved by Cloudflare", () => {
       alarm: Worker.method({ success: S.Void }),
     }),
   ).toThrow(/reserved by Cloudflare Workers RPC/);
+
+  expect(() =>
+    (Worker.Tag as any)()("ReservedConnectWorker", {
+      connect: Worker.method({ success: S.Void }),
+    }),
+  ).toThrow(/reserved by Cloudflare Workers RPC/);
 });
 
 test("rejects direct Worker RPC method names reserved by Cloudflare", () => {
@@ -123,6 +129,14 @@ test("rejects direct Worker RPC method names reserved by Cloudflare", () => {
     (Worker.make as any)(Layer.empty, {
       rpc: {
         fetch: () => Effect.succeed("invalid"),
+      },
+    }),
+  ).toThrow(/reserved by Cloudflare Workers RPC/);
+
+  expect(() =>
+    (Worker.make as any)(Layer.empty, {
+      rpc: {
+        connect: () => Effect.succeed("invalid"),
       },
     }),
   ).toThrow(/reserved by Cloudflare Workers RPC/);
@@ -141,6 +155,14 @@ test("rejects direct Durable Object RPC method names reserved by Cloudflare", ()
     (DurableObject.make as any)(Layer.empty, {
       rpc: {
         fetch: () => Effect.succeed("invalid"),
+      },
+    }),
+  ).toThrow(/reserved by Cloudflare Workers RPC/);
+
+  expect(() =>
+    (DurableObject.make as any)(Layer.empty, {
+      rpc: {
+        connect: () => Effect.succeed("invalid"),
       },
     }),
   ).toThrow(/reserved by Cloudflare Workers RPC/);

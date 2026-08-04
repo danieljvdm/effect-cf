@@ -116,7 +116,7 @@ type SignalLayer = ReturnType<typeof OtlpLogger.layerFromConfig>;
 
 const mergeSignalLayers = (layers: ReadonlyArray<SignalLayer>): SignalLayer => {
   if (layers.length === 0) {
-    return Layer.empty;
+    return Layer.empty as unknown as SignalLayer;
   }
 
   let merged = layers[0]!;

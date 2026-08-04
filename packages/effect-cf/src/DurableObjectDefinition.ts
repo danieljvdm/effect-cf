@@ -8,6 +8,7 @@ import * as DurableObjectNamespace from "./DurableObjectNamespace";
 import type { DurableObjectState } from "./DurableObjectState";
 import type * as Rpc from "./Rpc";
 import * as RpcDefinition from "./RpcDefinition";
+import * as CloudflareSocket from "./Socket";
 import type { WorkerEnvironment } from "./Environment";
 
 export type ServiceFreeSchema = S.Codec<any, any, never, never>;
@@ -68,6 +69,7 @@ export namespace Definition {
 export type ReservedMethodName =
   | RpcDefinition.ReservedMethodName
   | "fetch"
+  | "connect"
   | "alarm"
   | "webSocketMessage"
   | "webSocketClose"
@@ -80,6 +82,7 @@ const reservedMethodNames = new Set<string>([
   "constructor",
   "dup",
   "fetch",
+  "connect",
   "alarm",
   "webSocketMessage",
   "webSocketClose",
@@ -298,6 +301,16 @@ export const Tag =
         return yield* namespace.fetch(stub, input, init);
       });
 
+    const connect = (
+      stub: DurableObjectNamespace.DurableObjectStubClient<ClientApi>,
+      address: CloudflareSocket.SocketAddress,
+      options?: CloudflareSocket.SocketOptions,
+    ) =>
+      Effect.gen(function* () {
+        const namespace = yield* tag;
+        return yield* namespace.connect(stub, address, options);
+      });
+
     const rpc = <Method extends keyof ClientApi>(
       stub: DurableObjectNamespace.DurableObjectStubClient<ClientApi>,
       method: Method,
@@ -338,6 +351,7 @@ export const Tag =
       {
         call: call as never,
         fetch,
+        connect,
         get,
         getByName,
       },
@@ -355,6 +369,7 @@ export const Tag =
       getByName,
       jurisdiction,
       fetch,
+      connect,
       rpc,
       call,
       scopedCall,

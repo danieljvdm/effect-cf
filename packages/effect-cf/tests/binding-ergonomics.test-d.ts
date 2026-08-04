@@ -20,6 +20,7 @@ import {
   R2,
   Rpc,
   ServiceBinding,
+  Socket,
   Vectorize,
   Worker,
   WorkerEnvironment,
@@ -532,6 +533,12 @@ expectTypeOf(FetchOnlyWorker.fetch(new Request("https://example.com"))).toEqualT
   Effect.Effect<Response, ServiceBinding.ServiceBindingFetchError, FetchOnlyWorker>
 >();
 
+expectTypeOf(
+  FetchOnlyWorker.connect("database.internal:5432", { allowHalfOpen: false }),
+).toEqualTypeOf<
+  Effect.Effect<Socket.Socket, ServiceBinding.ServiceBindingConnectError, FetchOnlyWorker>
+>();
+
 const workerProgram = Effect.gen(function* () {
   const worker = yield* ApiWorker;
 
@@ -569,6 +576,10 @@ const durableObjectProgram = Effect.gen(function* () {
     Effect.Effect<number, DurableObjectNamespace.DurableObjectRpcError>
   >();
 
+  expectTypeOf(
+    counter.connect({ hostname: "object.internal", port: 50051 }, { allowHalfOpen: true }),
+  ).toEqualTypeOf<Effect.Effect<Socket.Socket, DurableObjectNamespace.DurableObjectConnectError>>();
+
   const counterRpcResult: Effect.Effect<
     Rpc.Result<number>,
     DurableObjectNamespace.DurableObjectRpcError,
@@ -591,6 +602,18 @@ declare const counterStub: Effect.Success<ReturnType<typeof CounterDurableObject
 // @ts-expect-error Static direct methods require the namespace layer.
 const staticDirectMethodWithoutLayer: Effect.Effect<number, unknown, never> =
   CounterDurableObject.increment(counterStub, 1);
+
+expectTypeOf(
+  CounterDurableObject.byName("counter-1").connect("object.internal:50051", {
+    allowHalfOpen: false,
+  }),
+).toEqualTypeOf<
+  Effect.Effect<
+    Socket.Socket,
+    DurableObjectNamespace.DurableObjectConnectError,
+    CounterDurableObject
+  >
+>();
 
 void kvProgram;
 void r2Program;

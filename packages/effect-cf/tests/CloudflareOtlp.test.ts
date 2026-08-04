@@ -6,11 +6,12 @@ import process from "node:process";
 
 import { CloudflareOtlp, Worker } from "../src/index";
 
-const makeExecutionContext = (): globalThis.ExecutionContext => ({
-  props: undefined,
-  waitUntil: () => undefined,
-  passThroughOnException: () => undefined,
-});
+const makeExecutionContext = (): globalThis.ExecutionContext =>
+  ({
+    props: undefined,
+    waitUntil: () => undefined,
+    passThroughOnException: () => undefined,
+  }) as unknown as globalThis.ExecutionContext;
 
 const processEnv = process.env;
 
@@ -215,7 +216,7 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
     }),
   );
 
-  it.effect("uses OTEL resource variables before explicit resource options", () =>
+  it.effect("uses explicit resource options before OTEL resource variables", () =>
     Effect.gen(function* () {
       const collector = yield* OtlpCollector;
       const handler = Worker.makeFetchHandler(Layer.empty, {
@@ -255,9 +256,9 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
       const resource = getRecord(resourceSpans[0], "resource");
       const resourceAttributes = getArray(resource, "attributes");
 
-      expect(getStringAttribute(resourceAttributes, "service.name")).toBe("env-service");
-      expect(getStringAttribute(resourceAttributes, "service.version")).toBe("1.2.3");
-      expect(getStringAttribute(resourceAttributes, "deployment.environment")).toBe("dev");
+      expect(getStringAttribute(resourceAttributes, "service.name")).toBe("explicit-service");
+      expect(getStringAttribute(resourceAttributes, "service.version")).toBe("explicit-version");
+      expect(getStringAttribute(resourceAttributes, "deployment.environment")).toBe("explicit");
     }),
   );
 

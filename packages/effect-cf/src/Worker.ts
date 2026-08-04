@@ -9,6 +9,7 @@ import { fromMessage, fromMessageBatch, type QueueHandler } from "./Queue";
 import type * as Rpc from "./Rpc";
 import type * as RpcDefinition from "./RpcDefinition";
 import type * as ServiceBinding from "./ServiceBinding";
+import * as CloudflareSocket from "./Socket";
 import * as WorkerDefinition from "./WorkerDefinition";
 import * as CloudflareClock from "./internal/Clock";
 import * as Entrypoint from "./internal/Entrypoint";
@@ -87,6 +88,7 @@ type WorkerFetchContext<ROut> =
   | HttpServerRequest.HttpServerRequest
   | Scope.Scope;
 type WorkerRpcContext<ROut> = WorkerBaseContext<ROut> | Scope.Scope;
+type WorkerConnectContext<ROut> = WorkerBaseContext<ROut> | Scope.Scope;
 
 type RuntimeContext<ROut> = WorkerBaseContext<ROut>;
 type RunOptions = {
@@ -104,6 +106,10 @@ export type WorkerHandler<ROut, A = WorkerFetchSuccess> = Effect.Effect<
 >;
 
 export type WorkerRpcHandler<ROut, A = unknown> = Effect.Effect<A, unknown, WorkerRpcContext<ROut>>;
+
+export type WorkerConnectHandler<ROut> = (
+  socket: CloudflareSocket.Socket,
+) => Effect.Effect<void, unknown, WorkerConnectContext<ROut>>;
 
 export type WorkerRpc<ROut> = Record<string, (...args: Array<any>) => WorkerRpcHandler<ROut>>;
 
@@ -150,6 +156,8 @@ export interface WorkerOptions<
     unknown,
     WorkerFetchContext<RRuntime | REvent>
   >;
+  /** Handles an inbound TCP socket delivered by Spectrum or another Fetcher. */
+  readonly connect?: WorkerConnectHandler<RRuntime | REvent>;
   readonly queue?: QueueHandler<RRuntime | REvent>;
   readonly rpc?: Rpc;
 }
@@ -166,6 +174,7 @@ export type WorkerClass<Rpc extends WorkerRpc<ROut>, ROut> = new (
   env: WorkerEnv,
 ) => CloudflareWorkerEntrypoint<WorkerEnv> & {
   fetch(request: Request): Promise<Response>;
+  connect(socket: globalThis.Socket): Promise<void>;
   queue(batch: globalThis.MessageBatch): Promise<void>;
 } & WorkerRpcShape<Rpc, ROut>;
 
@@ -175,6 +184,19 @@ export interface FetchHandler<Env extends WorkerEnv = WorkerEnv> {
     env: Env,
     ctx: globalThis.ExecutionContext,
   ) => Promise<Response>;
+}
+
+export interface Handler<Env extends WorkerEnv = WorkerEnv> extends FetchHandler<Env> {
+  readonly connect: (
+    socket: globalThis.Socket,
+    env: Env,
+    ctx: globalThis.ExecutionContext,
+  ) => Promise<void>;
+  readonly queue: (
+    batch: globalThis.MessageBatch,
+    env: Env,
+    ctx: globalThis.ExecutionContext,
+  ) => Promise<void>;
 }
 
 export const renderHttpResponse = <A extends HttpServerResponse.HttpServerResponse, E, R>(
@@ -202,7 +224,11 @@ const isWorkerOptions = <ROut, REvent, EventLayerError, Rpc extends WorkerRpc<RO
 ): options is WorkerOptions<ROut, REvent, EventLayerError, Rpc> =>
   typeof options === "object" &&
   options !== null &&
-  ("eventLayer" in options || "fetch" in options || "queue" in options || "rpc" in options);
+  ("eventLayer" in options ||
+    "fetch" in options ||
+    "connect" in options ||
+    "queue" in options ||
+    "rpc" in options);
 
 export function make<ROut, LayerError>(
   layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
@@ -304,6 +330,16 @@ export function make<
       );
     }
 
+    connect(socket: globalThis.Socket): Promise<void> {
+      const connectHandler = options.connect;
+
+      if (connectHandler === undefined) {
+        return Promise.resolve();
+      }
+
+      return this[RunSymbol](connectHandler(CloudflareSocket.fromSocket(socket)));
+    }
+
     queue(batch: globalThis.MessageBatch): Promise<void> {
       const queueHandler = options.queue;
 
@@ -342,6 +378,26 @@ export const makeFetchHandler = <
 
   return {
     fetch: (request, env, ctx) => Promise.resolve(new WorkerClass(ctx, env).fetch(request)),
+  };
+};
+
+/** Creates an object-syntax Worker handler backed by the same managed entrypoint implementation. */
+export const makeHandler = <
+  ROut,
+  LayerError,
+  REvent = never,
+  EventLayerError = never,
+  Env extends WorkerEnv = WorkerEnv,
+>(
+  layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+  options: FetchWorkerOptions<ROut, REvent, EventLayerError>,
+): Handler<Env> => {
+  const WorkerClass = make(layer, options);
+
+  return {
+    fetch: (request, env, ctx) => Promise.resolve(new WorkerClass(ctx, env).fetch(request)),
+    connect: (socket, env, ctx) => Promise.resolve(new WorkerClass(ctx, env).connect(socket)),
+    queue: (batch, env, ctx) => Promise.resolve(new WorkerClass(ctx, env).queue(batch)),
   };
 };
 

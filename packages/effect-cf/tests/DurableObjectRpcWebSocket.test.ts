@@ -6,6 +6,7 @@ import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
 import * as RpcServer from "effect/unstable/rpc/RpcServer";
 
 import {
+  DurableObjectContainer,
   DurableObjectRpcWebSocket,
   DurableObjectState,
   DurableObjectWebSocket,
@@ -176,6 +177,7 @@ function makeFakeDurableObjectState(options?: {
     raw: {} as globalThis.DurableObjectState,
     id: {} as globalThis.DurableObjectId,
     storage: {} as never,
+    container: Effect.fail(new DurableObjectContainer.ContainerNotConfiguredError()),
     waitUntil: () => Effect.void,
     blockConcurrencyWhile: (effect) => effect,
     blockConcurrencyWhileOrReset: (effect) => effect,

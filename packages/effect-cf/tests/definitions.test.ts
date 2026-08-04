@@ -692,6 +692,18 @@ test("reserved RPC method names are rejected", () => {
       fetch: WorkerDefinition.method({ success: S.String }),
     } as never),
   ).toThrow();
+
+  expect(() =>
+    WorkerDefinition.make("BadConnectWorker", {
+      connect: WorkerDefinition.method({ success: S.Void }),
+    } as never),
+  ).toThrow();
+
+  expect(() =>
+    DurableObjectDefinition.make("BadConnectObject", {
+      connect: DurableObjectDefinition.method({ success: S.Void }),
+    } as never),
+  ).toThrow();
 });
 
 test("Worker-only lifecycle names are not globally reserved", () => {

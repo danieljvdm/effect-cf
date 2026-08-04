@@ -1,5 +1,5 @@
 import { expectTypeOf } from "vitest";
-import { Config, Effect, Layer, Option, Redacted, Schema } from "effect";
+import { Config, Effect, Layer, Option, Redacted, Schema, Sink, Stream } from "effect";
 import { PgClient } from "@effect/sql-pg";
 import { HttpClient } from "effect/unstable/http";
 import { SqlClient, SqlError } from "effect/unstable/sql";
@@ -528,6 +528,16 @@ export class FetchOnlyWorker extends ServiceBinding.Service<FetchOnlyWorker, {}>
 ) {}
 
 export const FetchOnlyWorkerLayer = FetchOnlyWorker.layer;
+
+declare const cloudflareSocket: Socket.Socket;
+
+expectTypeOf(cloudflareSocket.unsafeRaw).toEqualTypeOf<Effect.Effect<globalThis.Socket>>();
+expectTypeOf(cloudflareSocket.readable).toEqualTypeOf<
+  Stream.Stream<Uint8Array, Socket.SocketOperationError>
+>();
+expectTypeOf(cloudflareSocket.writable).toEqualTypeOf<
+  Sink.Sink<void, Uint8Array, never, Socket.SocketOperationError>
+>();
 
 expectTypeOf(FetchOnlyWorker.fetch(new Request("https://example.com"))).toEqualTypeOf<
   Effect.Effect<Response, ServiceBinding.ServiceBindingFetchError, FetchOnlyWorker>

@@ -19,7 +19,7 @@ test("service binding connect forwards the address and options", async () => {
 
   const socket = await Effect.runPromise(client.connect("database:5432", options));
 
-  expect(socket.unsafeRaw).toBe(fixture.raw);
+  expect(await Effect.runPromise(socket.unsafeRaw)).toBe(fixture.raw);
   expect(calls).toEqual([["database:5432", options]]);
 });
 
@@ -83,8 +83,8 @@ test("Durable Object namespace and by-name clients forward connect", async () =>
     client.byName("primary").connect({ hostname: "origin.internal", port: 443 }, options),
   );
 
-  expect(directSocket.unsafeRaw).toBe(fixture.raw);
-  expect(namedSocket.unsafeRaw).toBe(fixture.raw);
+  expect(await Effect.runPromise(directSocket.unsafeRaw)).toBe(fixture.raw);
+  expect(await Effect.runPromise(namedSocket.unsafeRaw)).toBe(fixture.raw);
   expect(calls).toEqual([
     ["origin.internal:443", options],
     [{ hostname: "origin.internal", port: 443 }, options],

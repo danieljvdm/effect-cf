@@ -7,6 +7,8 @@ export interface NativeSocketFixture {
 }
 
 export const makeNativeSocket = (options?: {
+  readonly readable?: ReadableStream<Uint8Array>;
+  readonly writable?: WritableStream<Uint8Array>;
   readonly opened?: Promise<globalThis.SocketInfo>;
   readonly closed?: Promise<void>;
   readonly close?: () => Promise<void>;
@@ -20,8 +22,8 @@ export const makeNativeSocket = (options?: {
   };
 
   const raw = {
-    readable: new ReadableStream(),
-    writable: new WritableStream(),
+    readable: options?.readable ?? new ReadableStream<Uint8Array>(),
+    writable: options?.writable ?? new WritableStream<Uint8Array>(),
     opened: options?.opened ?? Promise.resolve({ remoteAddress: "127.0.0.1:443" }),
     closed: options?.closed ?? new Promise<void>(() => undefined),
     upgraded: options?.upgraded ?? false,

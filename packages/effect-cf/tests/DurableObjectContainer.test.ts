@@ -68,10 +68,10 @@ test("wraps the stable Durable Object Container lifecycle and process APIs", asy
   const output = await Effect.runPromise(child.output);
   await Effect.runPromise(child.kill(9));
 
-  expect(service.unsafeRaw).toBe(container);
-  expect(tcpPort.unsafeRaw).toBe(port);
+  expect(await Effect.runPromise(service.unsafeRaw)).toBe(container);
+  expect(await Effect.runPromise(tcpPort.unsafeRaw)).toBe(port);
   expect(await response.text()).toBe("container");
-  expect(child.unsafeRaw).toBe(process);
+  expect(await Effect.runPromise(child.unsafeRaw)).toBe(process);
   expect(child.pid).toBe(42);
   expect(await Effect.runPromise(child.exitCode)).toBe(0);
   expect(new TextDecoder().decode(output.stdout)).toBe("ok");
@@ -105,7 +105,7 @@ test("Container TCP ports expose Effect sockets", async () => {
 
   const socket = await Effect.runPromise(tcpPort.connect("grpc.internal:50051", options));
 
-  expect(socket.unsafeRaw).toBe(fixture.raw);
+  expect(await Effect.runPromise(socket.unsafeRaw)).toBe(fixture.raw);
   expect(calls).toEqual([["grpc.internal:50051", options]]);
 });
 
@@ -135,7 +135,11 @@ test("DurableObjectState exposes configured containers and a typed missing error
   const configured = DurableObjectState.fromDurableObjectState(makeState(true));
   const missing = DurableObjectState.fromDurableObjectState(makeState(false));
 
-  expect((await Effect.runPromise(configured.container)).unsafeRaw).toBe(container);
+  expect(
+    await Effect.runPromise(
+      Effect.flatMap(configured.container, (configuredContainer) => configuredContainer.unsafeRaw),
+    ),
+  ).toBe(container);
   await expect(Effect.runPromise(missing.container)).rejects.toMatchObject({
     _tag: "ContainerNotConfiguredError",
   });

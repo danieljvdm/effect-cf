@@ -81,7 +81,7 @@ The library supports Cloudflare's new Socket Workers transport surface:
 
 - `Worker.make(...)`, `Worker.makeHandler(...)`, and `DurableObject.make(...)` accept Effect-native inbound `connect(socket)` handlers.
 - Worker service bindings and Durable Object namespaces expose typed `connect(...)` clients.
-- `Socket` wraps native streams, open/close state, STARTTLS, and scoped lifetime management.
+- `Socket` exposes native byte streams as Effect `Stream` and `Sink` values, plus open/close state, STARTTLS, and scoped lifetime management.
 - `DurableObjectState.container` exposes the low-level Container lifecycle and `getTcpPort(...).fetch/connect` APIs through `DurableObjectContainer`.
 
 These APIs let an inbound Spectrum TCP connection be routed Worker → Durable Object → Container, which is the transport Cloudflare documents in its [Socket Workers and gRPC release](https://blog.cloudflare.com/grpc-workers/) for full-duplex gRPC. Unary and server-streaming gRPC implemented directly in a Worker continues to use gRPC-web libraries through the existing `fetch` handler, with Cloudflare translating gRPC at the edge. The August 2026 release is private beta and requires account enablement.

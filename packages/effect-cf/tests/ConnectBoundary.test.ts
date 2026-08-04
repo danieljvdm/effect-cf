@@ -40,7 +40,8 @@ test("Worker connect handlers receive wrapped sockets and event-scoped services"
     connect: (socket) =>
       Effect.gen(function* () {
         const value = yield* EventValue;
-        calls.push(`${value}:${socket.unsafeRaw === fixture.raw}`);
+        const raw = yield* socket.unsafeRaw;
+        calls.push(`${value}:${raw === fixture.raw}`);
       }),
   });
   const fixture = makeNativeSocket();
@@ -56,8 +57,8 @@ test("Worker connect-only options are recognized and object syntax forwards conn
   const fixture = makeNativeSocket();
   const handler = Worker.makeHandler(Layer.empty, {
     connect: (socket) =>
-      Effect.sync(() => {
-        seen = socket.unsafeRaw;
+      Effect.gen(function* () {
+        seen = yield* socket.unsafeRaw;
       }),
   });
 
@@ -97,7 +98,8 @@ test("Durable Object connect handlers receive wrapped sockets and event-scoped s
     connect: (socket) =>
       Effect.gen(function* () {
         const value = yield* EventValue;
-        calls.push(`${value}:${socket.unsafeRaw === fixture.raw}`);
+        const raw = yield* socket.unsafeRaw;
+        calls.push(`${value}:${raw === fixture.raw}`);
       }),
   });
   const durableObject = new DurableObjectClass(makeDurableObjectState(), {} as Cloudflare.Env);

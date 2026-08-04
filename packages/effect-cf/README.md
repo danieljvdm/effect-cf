@@ -64,20 +64,11 @@ Container TCP ports. `effect-cf` exposes those boundaries as Effect handlers and
 typed socket clients:
 
 ```ts
-import { Effect, Layer, Sink, Stream } from "effect";
-import { DurableObject, DurableObjectState, Worker } from "effect-cf";
+import { Effect, Layer, Stream } from "effect";
+import { DurableObject, DurableObjectState, Socket, Worker } from "effect-cf";
 
-const bridge = (readable: ReadableStream<Uint8Array>, writable: WritableStream<Uint8Array>) =>
-  Stream.run(
-    Stream.fromReadableStream({
-      evaluate: () => readable,
-      onError: (cause) => cause,
-    }),
-    Sink.fromWritableStream({
-      evaluate: () => writable,
-      onError: (cause) => cause,
-    }),
-  );
+const bridge = (source: Socket.Socket, destination: Socket.Socket) =>
+  Stream.run(source.readable, destination.writable);
 
 export class GrpcBackends extends DurableObject.Tag<GrpcBackends>()("GrpcBackends", {}) {}
 
@@ -98,10 +89,9 @@ export const GrpcBackendObject = GrpcBackends.make(Layer.empty, {
       });
       yield* backend.opened;
 
-      yield* Effect.all(
-        [bridge(incoming.readable, backend.writable), bridge(backend.readable, incoming.writable)],
-        { concurrency: "unbounded" },
-      );
+      yield* Effect.all([bridge(incoming, backend), bridge(backend, incoming)], {
+        concurrency: "unbounded",
+      });
     }),
 });
 
@@ -113,18 +103,15 @@ export default Worker.make(GrpcBackends.layer({ binding: "GRPC_BACKENDS" }), {
         allowHalfOpen: true,
       });
 
-      yield* Effect.all(
-        [bridge(incoming.readable, backend.writable), bridge(backend.readable, incoming.writable)],
-        { concurrency: "unbounded" },
-      );
+      yield* Effect.all([bridge(incoming, backend), bridge(backend, incoming)], {
+        concurrency: "unbounded",
+      });
     }),
 });
 ```
 
-The wrapper deliberately leaves `readable` and `writable` as native Web Streams
-so protocol libraries retain direct control. For Effect-managed piping, adapt
-them with `Stream.fromReadableStream(...)` and `Sink.fromWritableStream(...)` as
-shown above; their scopes manage reader/writer locks and interruption cleanup.
+The wrapper exposes the native byte streams as an Effect `Stream` and `Sink`, so
+their scopes manage reader/writer locks and interruption cleanup. `unsafeRaw`,
 `opened`, `closed`, `close`, and `startTls(...)` are Effects; use
 `Socket.connectScoped(...)` when opening through a raw Fetcher-like connector and
 the socket should close with an Effect scope.

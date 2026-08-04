@@ -14,7 +14,7 @@ export class ContainerNotConfiguredError extends Data.TaggedError(
 )<{}> {}
 
 export interface ContainerProcess {
-  readonly unsafeRaw: globalThis.ExecProcess;
+  readonly unsafeRaw: Effect.Effect<globalThis.ExecProcess>;
   readonly stdin: globalThis.WritableStream | null;
   readonly stdout: globalThis.ReadableStream | null;
   readonly stderr: globalThis.ReadableStream | null;
@@ -26,7 +26,7 @@ export interface ContainerProcess {
 
 /** Fetch and TCP access to one port exposed by a Durable Object Container. */
 export interface ContainerTcpPort {
-  readonly unsafeRaw: globalThis.Fetcher;
+  readonly unsafeRaw: Effect.Effect<globalThis.Fetcher>;
   readonly fetch: (
     input: RequestInfo | URL,
     init?: RequestInit,
@@ -39,7 +39,7 @@ export interface ContainerTcpPort {
 
 /** Effect-friendly stable API exposed by `DurableObjectState.container`. */
 export interface DurableObjectContainer {
-  readonly unsafeRaw: globalThis.Container;
+  readonly unsafeRaw: Effect.Effect<globalThis.Container>;
   readonly running: Effect.Effect<boolean, ContainerOperationError>;
   readonly start: (
     options?: globalThis.ContainerStartupOptions,
@@ -88,12 +88,12 @@ const tryOperationPromise = <A>(
   evaluate: () => Promise<A>,
 ): Effect.Effect<A, ContainerOperationError> =>
   Effect.tryPromise({
-    try: evaluate,
+    try: (_signal) => evaluate(),
     catch: (cause) => new ContainerOperationError({ operation, cause }),
   });
 
 const fromProcess = (process: globalThis.ExecProcess): ContainerProcess => ({
-  unsafeRaw: process,
+  unsafeRaw: Effect.succeed(process),
   stdin: process.stdin,
   stdout: process.stdout,
   stderr: process.stderr,
@@ -104,7 +104,7 @@ const fromProcess = (process: globalThis.ExecProcess): ContainerProcess => ({
 });
 
 const fromTcpPort = (port: globalThis.Fetcher): ContainerTcpPort => ({
-  unsafeRaw: port,
+  unsafeRaw: Effect.succeed(port),
   fetch: (input, init) => tryOperationPromise("getTcpPort.fetch", () => port.fetch(input, init)),
   connect: (address, options) =>
     CloudflareSocket.connect(port, address, options).pipe(
@@ -116,7 +116,7 @@ const fromTcpPort = (port: globalThis.Fetcher): ContainerTcpPort => ({
 
 /** Wraps the stable low-level Container attached to a Durable Object state. */
 export const fromContainer = (container: globalThis.Container): DurableObjectContainer => ({
-  unsafeRaw: container,
+  unsafeRaw: Effect.succeed(container),
   running: tryOperation("running", () => container.running),
   start: (options) => tryOperation("start", () => container.start(options)),
   monitor: tryOperationPromise("monitor", () => container.monitor()),

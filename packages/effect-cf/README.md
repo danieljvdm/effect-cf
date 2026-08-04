@@ -45,6 +45,7 @@ Runtime creation belongs at Cloudflare entrypoints, not inside binding helpers.
 - `Workflow` - typed Workflow entrypoints, steps, starter clients, and instance types
 - `Rpc` - Cloudflare RPC type helpers and scoped disposal utilities
 - `WorkerConfig` - Effect `Config` helpers backed by Cloudflare `env`
+- `CloudflareOtlp` - OTLP logs, traces, and metrics layers with manual flush support
 
 ## Worker Example
 
@@ -55,6 +56,26 @@ import { Worker } from "effect-cf";
 
 export default Worker.make(Layer.empty, Effect.succeed(HttpServerResponse.text("ok")));
 ```
+
+## OTLP Telemetry
+
+`CloudflareOtlp.layer`, `workerLayer`, and `durableObjectLayer` configure logs,
+traces, and metrics through the standard OpenTelemetry environment variables.
+They also provide Effect's shared `OtlpExporter.Flusher`, so an event can drain
+all enabled exporters before returning when explicit delivery timing matters:
+
+```ts
+import { Effect } from "effect";
+import { OtlpExporter } from "effect/unstable/observability";
+
+const flushTelemetry = Effect.gen(function* () {
+  const flusher = yield* OtlpExporter.Flusher;
+  yield* flusher.flush;
+});
+```
+
+The flusher is a no-op when no OTLP signal is enabled. It has no built-in
+timeout; apply `Effect.timeoutOption` when the request path needs a strict bound.
 
 ## Socket Workers and gRPC
 

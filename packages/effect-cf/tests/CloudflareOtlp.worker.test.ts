@@ -44,3 +44,26 @@ it.effect("Worker handlers use epoch nanosecond timestamps in the Workers runtim
     expect(BigInt(body.nanos)).toBeGreaterThan(minimumEpochNanos);
   }),
 );
+
+it.effect("Worker handlers provide monotonic nanosecond timing in the Workers runtime", () =>
+  Effect.gen(function* () {
+    const WorkerClass = Worker.make(Layer.empty, {
+      fetch: Effect.gen(function* () {
+        const start = yield* Clock.monotonicTimeNanos;
+        yield* Effect.yieldNow;
+        const end = yield* Clock.monotonicTimeNanos;
+        return Response.json({ start: start.toString(), end: end.toString() });
+      }),
+    });
+
+    const worker = new WorkerClass(createExecutionContext(), env);
+    const response = yield* Effect.promise(() =>
+      Promise.resolve(worker.fetch(new Request("https://worker.test/monotonic-clock"))),
+    );
+    const body = yield* Effect.promise(() =>
+      response.json<{ readonly start: string; readonly end: string }>(),
+    );
+
+    expect(BigInt(body.end)).toBeGreaterThanOrEqual(BigInt(body.start));
+  }),
+);

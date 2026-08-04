@@ -115,11 +115,45 @@ const TestRpcHandlers = TestRpcs.toLayer(
   });
 }
 
-function makeAppLayer(state: FakeDurableObjectState) {
+{
+  const socket = makeFakeWebSocket();
+  const durableSocket = DurableObjectWebSocket.fromWebSocket(socket);
+  const state = makeFakeDurableObjectState();
+
+  layer(makeAppLayer(state, RpcSerialization.layerNdjsonWith({ maxBufferSize: 8 })))(
+    "DurableObjectRpcWebSocket framing limits",
+    (it) => {
+      it.effect("closes and unregisters sockets that exceed the parser buffer limit", () =>
+        Effect.gen(function* () {
+          const protocol = yield* RpcServer.Protocol;
+          const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
+
+          yield* transport.accept(durableSocket);
+          yield* transport.message(durableSocket, "123456789");
+
+          assert.deepStrictEqual(socket.closed, [
+            {
+              code: 1009,
+              reason:
+                "MaxBufferSizeExceeded: RPC serialization buffer exceeded the maximum size of 8",
+            },
+          ]);
+          assert.deepStrictEqual(socket.sent, []);
+          assert.deepStrictEqual(Array.from(yield* protocol.clientIds), []);
+        }),
+      );
+    },
+  );
+}
+
+function makeAppLayer(
+  state: FakeDurableObjectState,
+  serializationLayer = RpcSerialization.layerJson,
+) {
   return RpcServer.layer(TestRpcs, { disableFatalDefects: true }).pipe(
     Layer.provideMerge(DurableObjectRpcWebSocket.layer({ tag: "test-rpc" })),
     Layer.provide(TestRpcHandlers),
-    Layer.provide(RpcSerialization.layerJson),
+    Layer.provide(serializationLayer),
     Layer.provide(
       Layer.succeed(
         DurableObjectState.DurableObjectState,
@@ -131,6 +165,10 @@ function makeAppLayer(state: FakeDurableObjectState) {
 
 interface FakeWebSocket extends WebSocket {
   readonly sent: Array<string | ArrayBuffer | ArrayBufferView>;
+  readonly closed: Array<{
+    readonly code: number | undefined;
+    readonly reason: string | undefined;
+  }>;
   readonly nextSend: Promise<void>;
 }
 
@@ -138,18 +176,23 @@ function makeFakeWebSocket(initialAttachment: unknown = null): FakeWebSocket {
   let attachment = initialAttachment;
   let resolveSend: () => void = () => {};
   const sent: Array<string | ArrayBuffer | ArrayBufferView> = [];
+  const closed: Array<{ readonly code: number | undefined; readonly reason: string | undefined }> =
+    [];
   const nextSend = new Promise<void>((resolve) => {
     resolveSend = resolve;
   });
 
   return {
     sent,
+    closed,
     nextSend,
     send(message: string | ArrayBuffer | ArrayBufferView) {
       sent.push(message);
       resolveSend();
     },
-    close() {},
+    close(code?: number, reason?: string) {
+      closed.push({ code, reason });
+    },
     serializeAttachment(value: unknown) {
       attachment = value;
     },

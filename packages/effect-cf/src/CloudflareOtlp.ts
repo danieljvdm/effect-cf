@@ -2,6 +2,7 @@ import { ConfigProvider, Effect, Layer, Option } from "effect";
 import type * as Tracer from "effect/Tracer";
 import { FetchHttpClient, type Headers } from "effect/unstable/http";
 import {
+  OtlpExporter,
   OtlpLogger,
   OtlpMetrics,
   OtlpSerialization,
@@ -116,7 +117,7 @@ type SignalLayer = ReturnType<typeof OtlpLogger.layerFromConfig>;
 
 const mergeSignalLayers = (layers: ReadonlyArray<SignalLayer>): SignalLayer => {
   if (layers.length === 0) {
-    return Layer.empty as unknown as SignalLayer;
+    return OtlpExporter.layerFlusher;
   }
 
   let merged = layers[0]!;
@@ -129,7 +130,7 @@ const mergeSignalLayers = (layers: ReadonlyArray<SignalLayer>): SignalLayer => {
 const makeLayer = (
   options: LayerOptions = {},
   runtimeAttributes: Record<string, unknown> = {},
-): Layer.Layer<never, never, never> => {
+): Layer.Layer<OtlpExporter.Flusher, never, never> => {
   const signals = selectedSignals(options.signals);
   const resource = makeResource(options, runtimeAttributes);
   const layers: Array<SignalLayer> = [];

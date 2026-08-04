@@ -2,6 +2,7 @@ import { NodeHttpServer } from "@effect/platform-node";
 import { expect, it, layer } from "@effect/vitest";
 import { ConfigProvider, Context, Effect, Layer, Queue } from "effect";
 import { HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { OtlpExporter } from "effect/unstable/observability";
 import process from "node:process";
 
 import { CloudflareOtlp, Worker } from "../src/index";
@@ -133,6 +134,45 @@ class OtlpCollector extends Context.Service<
 }
 
 layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
+  it.effect("exposes a shared manual telemetry flusher", () =>
+    Effect.gen(function* () {
+      const collector = yield* OtlpCollector;
+
+      const request = yield* Effect.gen(function* () {
+        yield* Effect.succeed("ok").pipe(Effect.withSpan("manual.flush"));
+        const flusher = yield* OtlpExporter.Flusher;
+        yield* flusher.flush;
+        return yield* collector.nextRequest;
+      }).pipe(
+        Effect.provide(
+          CloudflareOtlp.layerJson({
+            signals: ["traces"],
+            resource: { serviceName: "manual-flush-test" },
+          }),
+        ),
+        Effect.provide(
+          ConfigProvider.layer(
+            ConfigProvider.fromUnknown({
+              OTEL_TRACES_EXPORTER: "otlp",
+              OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.endpoint}/v1/traces`,
+            }),
+          ),
+        ),
+      );
+
+      expect(request.path).toBe("/v1/traces");
+      expect(request.body).toContain("manual-flush-test");
+      expect(request.body).toContain("manual.flush");
+    }),
+  );
+
+  it.effect("provides a no-op flusher when no signals are selected", () =>
+    Effect.gen(function* () {
+      const flusher = yield* OtlpExporter.Flusher;
+      yield* flusher.flush;
+    }).pipe(Effect.provide(CloudflareOtlp.layer({ signals: [] }))),
+  );
+
   it.effect("reads standard OTEL config from the ambient ConfigProvider", () =>
     Effect.gen(function* () {
       const collector = yield* OtlpCollector;

@@ -163,7 +163,7 @@ export const layer = (options: LayerOptions = {}) =>
             const connection = register(socket);
             const decoded = yield* Effect.try({
               try: () => connection.parser.decode(normalizeMessage(message)),
-              catch: RpcMessage.ResponseDefectEncoded,
+              catch: (cause) => cause,
             });
 
             const run = writeRequest;
@@ -178,7 +178,12 @@ export const layer = (options: LayerOptions = {}) =>
           }).pipe(
             Effect.catch((error) => {
               const connection = register(socket);
-              return send(connection, error);
+              if (error instanceof RpcSerialization.MaxBufferSizeExceeded) {
+                return Effect.sync(() =>
+                  socket.raw.close(1009, `${error._tag}: ${error.message}`),
+                ).pipe(Effect.andThen(unregister(socket)));
+              }
+              return send(connection, RpcMessage.ResponseDefectEncoded(error));
             }),
           ),
         close: unregister,

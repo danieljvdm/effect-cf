@@ -64,11 +64,20 @@ Container TCP ports. `effect-cf` exposes those boundaries as Effect handlers and
 typed socket clients:
 
 ```ts
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Sink, Stream } from "effect";
 import { DurableObject, DurableObjectState, Worker } from "effect-cf";
 
-const bridge = (left: ReadableStream, right: WritableStream) =>
-  Effect.tryPromise(() => left.pipeTo(right));
+const bridge = (readable: ReadableStream<Uint8Array>, writable: WritableStream<Uint8Array>) =>
+  Stream.run(
+    Stream.fromReadableStream({
+      evaluate: () => readable,
+      onError: (cause) => cause,
+    }),
+    Sink.fromWritableStream({
+      evaluate: () => writable,
+      onError: (cause) => cause,
+    }),
+  );
 
 export class GrpcBackends extends DurableObject.Tag<GrpcBackends>()("GrpcBackends", {}) {}
 
@@ -113,10 +122,12 @@ export default Worker.make(GrpcBackends.layer({ binding: "GRPC_BACKENDS" }), {
 ```
 
 The wrapper deliberately leaves `readable` and `writable` as native Web Streams
-so protocol libraries and `pipeTo(...)` retain direct control. `opened`, `closed`,
-`close`, and `startTls(...)` are Effects; use `Socket.connectScoped(...)` when
-opening through a raw Fetcher-like connector and the socket should close with an
-Effect scope.
+so protocol libraries retain direct control. For Effect-managed piping, adapt
+them with `Stream.fromReadableStream(...)` and `Sink.fromWritableStream(...)` as
+shown above; their scopes manage reader/writer locks and interruption cleanup.
+`opened`, `closed`, `close`, and `startTls(...)` are Effects; use
+`Socket.connectScoped(...)` when opening through a raw Fetcher-like connector and
+the socket should close with an Effect scope.
 
 This covers the transport path for full-duplex gRPC servers running in
 Containers. It does not implement HTTP/2 or gRPC framing in JavaScript. For

@@ -77,7 +77,9 @@ const socketUrl = (roomId: string, userId: string) => {
   }
 
   const base = new URL(path, window.location.href);
+
   base.protocol = base.protocol === "https:" ? "wss:" : "ws:";
+
   return base.toString();
 };
 
@@ -135,6 +137,7 @@ export default function App() {
   const disconnect = useCallback(
     (clientId: string) => {
       const socket = sockets.current.get(clientId);
+
       if (socket !== undefined) {
         socket.close(1000, "client requested disconnect");
         sockets.current.delete(clientId);
@@ -197,6 +200,7 @@ export default function App() {
   const connect = useCallback(
     (clientId: string) => {
       const client = clients.find((candidate) => candidate.id === clientId);
+
       if (client === undefined) {
         return;
       }
@@ -209,6 +213,7 @@ export default function App() {
       }));
 
       const socket = new WebSocket(socketUrl(roomId, client.userId));
+
       sockets.current.set(clientId, socket);
 
       socket.addEventListener("open", () => {
@@ -234,6 +239,7 @@ export default function App() {
             lastPong: new Date().toISOString(),
             log: appendLog(current.log, "auto-response pong"),
           }));
+
           return;
         }
 
@@ -276,6 +282,7 @@ export default function App() {
     (clientId: string) => {
       const client = clients.find((candidate) => candidate.id === clientId);
       const socket = sockets.current.get(clientId);
+
       if (client === undefined || socket?.readyState !== WebSocket.OPEN) {
         return;
       }
@@ -299,6 +306,7 @@ export default function App() {
 
   const sendPing = (clientId: string) => {
     const socket = sockets.current.get(clientId);
+
     if (socket?.readyState === WebSocket.OPEN) {
       socket.send("ping");
     }
@@ -306,6 +314,7 @@ export default function App() {
 
   const sendHeartbeat = (clientId: string) => {
     const socket = sockets.current.get(clientId);
+
     if (socket?.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: "heartbeat" }));
     }
@@ -316,6 +325,7 @@ export default function App() {
       fetch(apiUrl(`/rooms/${encodeURIComponent(roomId)}`)),
       fetch(apiUrl(`/rooms/${encodeURIComponent(roomId)}/analysis`)),
     ]);
+
     setSnapshot((await snapshotResponse.json()) as ChatSnapshot);
     setAnalysis((await analysisResponse.json()) as ChatArtifact);
   }, [roomId]);

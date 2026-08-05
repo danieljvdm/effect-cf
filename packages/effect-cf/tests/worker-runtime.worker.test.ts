@@ -10,6 +10,7 @@ test("Worker.make fetch runs in the Workers runtime", async () => {
   const WorkerClass = Worker.make(Layer.empty, {
     fetch: Effect.gen(function* () {
       const request = yield* Worker.NativeRequest;
+
       return new Response(request.url, { status: 201 });
     }),
   });

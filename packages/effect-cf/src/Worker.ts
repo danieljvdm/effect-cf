@@ -1,6 +1,14 @@
 import { WorkerEntrypoint as CloudflareWorkerEntrypoint } from "cloudflare:workers";
-import { Cause, ConfigProvider, Context, Effect, Layer, ManagedRuntime, type Scope } from "effect";
-import type { Schema as S } from "effect";
+import {
+  type Cause,
+  ConfigProvider,
+  Context,
+  Effect,
+  Layer,
+  ManagedRuntime,
+  type Schema as S,
+  type Scope,
+} from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import type * as Binding from "./Binding";

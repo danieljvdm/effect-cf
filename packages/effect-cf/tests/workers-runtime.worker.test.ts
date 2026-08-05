@@ -35,18 +35,22 @@ layer(testLayer)("Workers runtime Durable Object namespace", (it) => {
       const stub = yield* TestCounters.getByName(name);
 
       const incremented = yield* counter.increment(5);
+
       assert.strictEqual(incremented, 5);
 
       const rawEncoded = yield* Effect.promise(() =>
         (stub as unknown as { increment(value: string): Promise<string> }).increment("2"),
       );
+
       assert.strictEqual(rawEncoded, "7");
 
       const current = yield* counter.get();
+
       assert.strictEqual(current, 7);
 
       const response = yield* counter.fetch("https://example.com/?amount=3");
       const body = yield* Effect.promise(() => response.json());
+
       assert.deepStrictEqual(body, { count: 10 });
 
       yield* Effect.promise(() =>
@@ -60,6 +64,7 @@ layer(testLayer)("Workers runtime Durable Object namespace", (it) => {
       );
 
       const ids = yield* Effect.promise(() => listDurableObjectIds(env.TEST_COUNTER_DO!));
+
       assert.strictEqual(ids.length > 0, true);
     }),
   );

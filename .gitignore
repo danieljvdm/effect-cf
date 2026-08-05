@@ -44,3 +44,7 @@ Session.vim
 *.njsproj
 *.sln
 *.sw?
+
+# dev-kit managed paths
+.repos/
+.dev-kit/

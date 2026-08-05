@@ -1,31 +1,33 @@
 import { expectTypeOf } from "vitest";
 import { Config, Effect, Layer, Option, Redacted, Schema } from "effect";
-import { PgClient } from "@effect/sql-pg";
-import { HttpClient } from "effect/unstable/http";
-import { SqlClient, SqlError } from "effect/unstable/sql";
+import type { PgClient } from "@effect/sql-pg";
+import type { HttpClient } from "effect/unstable/http";
+import type { SqlClient, SqlError } from "effect/unstable/sql";
 
+import type {
+  Binding,
+  DurableObjectNamespace,
+  QueueBinding,
+  Rpc,
+  WorkflowBinding,
+} from "../src/index";
 import {
   AiGateway,
   AnalyticsEngine,
-  Binding,
   BrowserRendering,
   DurableObject,
-  DurableObjectNamespace,
   Email,
   Hyperdrive,
   Images,
   Kv,
   Queue,
-  QueueBinding,
   R2,
-  Rpc,
   ServiceBinding,
   Vectorize,
   Worker,
   WorkerEnvironment,
   WorkersAi,
   Workflow,
-  WorkflowBinding,
 } from "../src/index";
 import * as EffectCf from "../src/index";
 import * as HyperdrivePg from "../src/HyperdrivePg";
@@ -131,6 +133,7 @@ const r2Program = Effect.gen(function* () {
   >();
 
   const object = yield* bucket.get("avatars/u1.png").pipe(Effect.map(Option.getOrThrow));
+
   expectTypeOf(object.json<{ readonly ok: true }>()).toEqualTypeOf<
     Effect.Effect<{ readonly ok: true }, R2.R2OperationError>
   >();

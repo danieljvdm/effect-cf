@@ -1,9 +1,10 @@
-import { DatabaseError, TodoHttpApi, TodoNotFound, TodoRpcGroup } from "@effect-cf/todos-domain";
+import type { TodoNotFound } from "@effect-cf/todos-domain";
+import { DatabaseError, TodoHttpApi, TodoRpcGroup } from "@effect-cf/todos-domain";
 import { Cause, Effect, Layer } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
-import { SqlError } from "effect/unstable/sql";
+import type { SqlError } from "effect/unstable/sql";
 import { Worker } from "effect-cf";
 
 import { TodoDatabase } from "./bindings";
@@ -26,24 +27,28 @@ const TodosLive = HttpApiBuilder.group(TodoHttpApi, "Todos", (handlers) =>
     .handle("listTodos", () =>
       Effect.gen(function* () {
         const todos = yield* TodoRepository;
+
         return yield* mapDatabaseError(todos.list.pipe(Effect.map((todos) => ({ todos }))));
       }),
     )
     .handle("createTodo", ({ payload }) =>
       Effect.gen(function* () {
         const todos = yield* TodoRepository;
+
         return yield* mapDatabaseError(todos.create(payload));
       }),
     )
     .handle("updateTodo", ({ params, payload }) =>
       Effect.gen(function* () {
         const todos = yield* TodoRepository;
+
         return yield* mapUpdateDatabaseError(todos.update(params.id, payload));
       }),
     )
     .handle("deleteTodo", ({ params }) =>
       Effect.gen(function* () {
         const todos = yield* TodoRepository;
+
         return yield* mapDatabaseError(
           todos.delete(params.id).pipe(Effect.map((deleted) => ({ deleted }))),
         );
@@ -52,6 +57,7 @@ const TodosLive = HttpApiBuilder.group(TodoHttpApi, "Todos", (handlers) =>
     .handle("stats", () =>
       Effect.gen(function* () {
         const todos = yield* TodoRepository;
+
         return yield* mapDatabaseError(todos.stats);
       }),
     ),
@@ -61,11 +67,13 @@ const TodoRpcLive = TodoRpcGroup.toLayer({
   GetStats: () =>
     Effect.gen(function* () {
       const todos = yield* TodoRepository;
+
       return yield* mapDatabaseError(todos.stats);
     }),
   ClearCompleted: () =>
     Effect.gen(function* () {
       const todos = yield* TodoRepository;
+
       return yield* mapDatabaseError(todos.clearCompleted);
     }),
 });
@@ -101,6 +109,7 @@ const renderHttpApi = Effect.gen(function* () {
       ),
     ),
   );
+
   return HttpServerResponse.toWeb(response, { context });
 });
 

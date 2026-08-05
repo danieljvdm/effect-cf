@@ -44,6 +44,7 @@ const makeFakeStorage = (
       calls.push({ request, options });
       const url =
         typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
+
       return url.endsWith("/hit") ? response : undefined;
     },
   });
@@ -83,6 +84,7 @@ const makeFakeStorage = (
     },
     delete: async (request, options) => {
       deleteCalls.push({ request, options });
+
       return true;
     },
   });
@@ -120,6 +122,7 @@ test("CacheStorage opens named caches", async () => {
   const namedCache = makeFakeCache();
   const storage = makeFakeStorage(makeFakeCache(), async (name) => {
     assert.strictEqual(name, "api-cache");
+
     return namedCache;
   });
 
@@ -145,6 +148,7 @@ test("CacheStorage open maps rejected promises", async () => {
     Effect.runPromise(
       Effect.gen(function* () {
         const service = yield* Cache.CacheStorage;
+
         yield* service.open("api-cache");
       }).pipe(Effect.provide(Cache.layerFrom(storage))),
     ),

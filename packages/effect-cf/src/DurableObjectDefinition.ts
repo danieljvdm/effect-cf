@@ -1,7 +1,6 @@
-import { Context, Effect, type Layer } from "effect";
-import type { Schema as S } from "effect";
+import { Context, Effect, type Layer, type Schema as S } from "effect";
 
-import * as Binding from "./Binding";
+import type * as Binding from "./Binding";
 import * as DurableObjectEntrypoint from "./DurableObject";
 import type { DurableObjectHandler } from "./DurableObject";
 import * as DurableObjectNamespace from "./DurableObjectNamespace";
@@ -232,6 +231,7 @@ export const Tag =
     methods: MethodsShape & NoReservedMethods<MethodsShape>,
   ) => {
     const definition = makeDefinition<Id, MethodsShape>(id, methods);
+
     type SelfDefinition = Definition<Id, MethodsShape>;
     type ClientApi = Api<SelfDefinition>;
     const tag = Context.Service<
@@ -254,16 +254,19 @@ export const Tag =
       options?: globalThis.DurableObjectNamespaceNewUniqueIdOptions,
     ) {
       const namespace = yield* tag;
+
       return yield* namespace.newUniqueId(options);
     });
 
     const idFromName = Effect.fnUntraced(function* (name: string) {
       const namespace = yield* tag;
+
       return yield* namespace.idFromName(name);
     });
 
     const idFromString = Effect.fnUntraced(function* (value: string) {
       const namespace = yield* tag;
+
       return yield* namespace.idFromString(value);
     });
 
@@ -272,6 +275,7 @@ export const Tag =
       options?: globalThis.DurableObjectNamespaceGetDurableObjectOptions,
     ) {
       const namespace = yield* tag;
+
       return yield* namespace.get(objectId, options);
     });
 
@@ -280,11 +284,13 @@ export const Tag =
       options?: globalThis.DurableObjectNamespaceGetDurableObjectOptions,
     ) {
       const namespace = yield* tag;
+
       return yield* namespace.getByName(name, options);
     });
 
     const jurisdiction = Effect.fnUntraced(function* (value: globalThis.DurableObjectJurisdiction) {
       const namespace = yield* tag;
+
       return yield* namespace.jurisdiction(value);
     });
 
@@ -295,6 +301,7 @@ export const Tag =
     ) =>
       Effect.gen(function* () {
         const namespace = yield* tag;
+
         return yield* namespace.fetch(stub, input, init);
       });
 
@@ -305,6 +312,7 @@ export const Tag =
     ) =>
       Effect.gen(function* () {
         const namespace = yield* tag;
+
         return yield* namespace.rpc(stub, method as never, ...(args as never));
       });
 
@@ -315,6 +323,7 @@ export const Tag =
     ) =>
       Effect.gen(function* () {
         const namespace = yield* tag;
+
         return yield* namespace.call(stub, method as never, ...(args as never));
       });
 
@@ -325,11 +334,13 @@ export const Tag =
     ) =>
       Effect.gen(function* () {
         const namespace = yield* tag;
+
         return yield* namespace.scopedCall(stub, method as never, ...(args as never));
       });
 
     const unsafeRaw = Effect.fnUntraced(function* () {
       const namespace = yield* tag;
+
       return yield* namespace.unsafeRaw;
     });
 
@@ -374,10 +385,12 @@ const wrapHandlers = <ROut, const Self extends Definition.Any>(
     RpcDefinition.Definition.MethodNames<Self>
   >) {
     const handler = handlers[key];
+
     wrapped[key] = (...args: Array<unknown>) =>
       Effect.gen(function* () {
         const decodedArgs = yield* RpcDefinition.decodeArgs(definition, key, args);
         const value = yield* handler(...decodedArgs);
+
         return yield* RpcDefinition.encodeSuccess(definition, key, value);
       });
   }

@@ -4,7 +4,8 @@ import type {
   WorkflowInstance as CloudflareWorkflowInstance,
   WorkflowInstanceCreateOptions as CloudflareWorkflowInstanceCreateOptions,
 } from "@cloudflare/workers-types";
-import { Context, Data, Effect, Option, Schema as S } from "effect";
+import type { Context } from "effect";
+import { Data, Effect, Option, Schema as S } from "effect";
 
 import * as Binding from "./Binding";
 import type * as RpcDefinition from "./RpcDefinition";
@@ -187,7 +188,10 @@ export const makeClient = <
             return {
               status: status.status,
               output,
-              error: status.error == null ? Option.none() : Option.some(status.error),
+              error:
+                status.error === null || status.error === undefined
+                  ? Option.none()
+                  : Option.some(status.error),
             };
           }),
         ),

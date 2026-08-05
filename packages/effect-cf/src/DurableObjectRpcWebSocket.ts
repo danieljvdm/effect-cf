@@ -70,18 +70,23 @@ export const layer = (options: LayerOptions = {}) =>
 
       const reserveClientId = (socket: DurableWebSocket) => {
         const attachment = readAttachment(socket.raw, attachmentKey);
+
         if (attachment !== undefined) {
           nextClientId = Math.max(nextClientId, attachment + 1);
+
           return attachment;
         }
 
         const id = nextClientId++;
+
         writeAttachment(socket.raw, attachmentKey, id);
+
         return id;
       };
 
       const register = (socket: DurableWebSocket) => {
         const existing = connectionsBySocket.get(socket.raw);
+
         if (existing !== undefined) {
           return existing;
         }
@@ -95,12 +100,14 @@ export const layer = (options: LayerOptions = {}) =>
         connectionsBySocket.set(socket.raw, connection);
         connectionsById.set(connection.id, connection);
         clientIds.add(connection.id);
+
         return connection;
       };
 
       const unregister = (socket: DurableWebSocket) =>
         Effect.sync(() => {
           const connection = connectionsBySocket.get(socket.raw);
+
           if (connection === undefined) {
             return;
           }
@@ -119,11 +126,13 @@ export const layer = (options: LayerOptions = {}) =>
         Effect.sync(() => {
           try {
             const encoded = connection.parser.encode(response);
+
             if (encoded !== undefined) {
               connection.socket.raw.send(encoded);
             }
           } catch (cause) {
             const encoded = connection.parser.encode(RpcMessage.ResponseDefectEncoded(cause));
+
             if (encoded !== undefined) {
               connection.socket.raw.send(encoded);
             }
@@ -137,11 +146,13 @@ export const layer = (options: LayerOptions = {}) =>
           disconnects,
           send: (clientId, response) => {
             const connection = connectionsById.get(clientId);
+
             return connection === undefined ? Effect.void : send(connection, response);
           },
           end: (clientId) =>
             Effect.sync(() => {
               const connection = connectionsById.get(clientId);
+
               connection?.socket.raw.close();
             }),
           clientIds: Effect.sync(() => clientIds),
@@ -167,8 +178,10 @@ export const layer = (options: LayerOptions = {}) =>
             });
 
             const run = writeRequest;
+
             if (run === undefined) {
               yield* send(connection, RpcMessage.ResponseDefectEncoded("RPC server is not ready"));
+
               return;
             }
 
@@ -178,6 +191,7 @@ export const layer = (options: LayerOptions = {}) =>
           }).pipe(
             Effect.catch((error) => {
               const connection = register(socket);
+
               return send(connection, error);
             }),
           ),

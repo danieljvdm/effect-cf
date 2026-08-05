@@ -121,6 +121,7 @@ const getBinding = <Resource>(
   Effect.gen(function* () {
     if (!isPropertyTarget(env)) {
       const actual = describeActual(env);
+
       return yield* Effect.fail(
         new BindingValidationError({
           binding,
@@ -145,6 +146,7 @@ const getBinding = <Resource>(
     if (!isResource(resource)) {
       const expected = options?.expected ?? defaultExpected;
       const actual = describeActual(resource);
+
       return yield* Effect.fail(
         new BindingValidationError({
           binding,
@@ -187,6 +189,7 @@ export const layer = <Self, Resource, Service = Resource>(
     Effect.gen(function* () {
       const env = yield* WorkerEnvironment;
       const resource = yield* getBinding(env, binding, isResource, options);
+
       return wrap === undefined ? (resource as unknown as Service) : wrap(resource);
     }),
   );

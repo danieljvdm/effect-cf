@@ -46,6 +46,7 @@ test("WorkerContext.waitUntil preserves Effect context through the worker runtim
       yield* ctx.waitUntil(
         Effect.gen(function* () {
           const service = yield* TestService;
+
           service.completed.push("done");
         }),
       );
@@ -75,6 +76,7 @@ test("WorkerContext.waitUntil routes failures to onFailure with preserved contex
         onFailure: (cause) =>
           Effect.gen(function* () {
             const service = yield* TestService;
+
             service.failures.push(Cause.pretty(cause));
           }),
       });
@@ -105,6 +107,7 @@ test("WorkerContext.waitUntil can propagate failures to native waitUntil", async
           onFailure: (cause) =>
             Effect.gen(function* () {
               const service = yield* TestService;
+
               service.failures.push(Cause.pretty(cause));
             }),
         });

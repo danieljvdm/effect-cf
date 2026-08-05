@@ -32,6 +32,7 @@ const emailLayer = (email: SendEmail) =>
   const email = makeFakeEmail({
     send: async (message) => {
       calls.push({ message });
+
       return { messageId: "email-builder-1" };
     },
   });
@@ -66,6 +67,7 @@ const emailLayer = (email: SendEmail) =>
   const email = makeFakeEmail({
     send: async (message) => {
       calls.push({ message });
+
       return { messageId: "email-message-1" };
     },
   });
@@ -93,6 +95,7 @@ test("Send Email layer validates the binding shape", async () => {
     Effect.runPromise(
       Effect.gen(function* () {
         const email = yield* TestEmail;
+
         yield* email.send({
           from: "team@example.com",
           to: "user@example.com",
@@ -117,6 +120,7 @@ test("Send Email operations map rejected sends", async () => {
     Effect.runPromise(
       Effect.gen(function* () {
         const email = yield* TestEmail;
+
         yield* email.send({
           from: "team@example.com",
           to: "user@example.com",

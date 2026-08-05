@@ -1,6 +1,7 @@
 import { assert, expect, layer, test } from "@effect/vitest";
 import { Config, ConfigProvider, Effect, Layer, Option, Redacted, Schema as S } from "effect";
-import { FetchHttpClient, HttpClient } from "effect/unstable/http";
+import type { HttpClient } from "effect/unstable/http";
+import { FetchHttpClient } from "effect/unstable/http";
 
 import { AnalyticsEngine, Binding, WorkerEnvironment } from "../src/index";
 
@@ -99,6 +100,7 @@ test("AnalyticsEngine validates write limits before calling the native binding",
     Effect.runPromise(
       Effect.gen(function* () {
         const analytics = yield* RequestAnalytics;
+
         yield* analytics.writeDataPoint({
           blobs: Array.from({ length: AnalyticsEngine.writeLimits.maxBlobs + 1 }, (_, index) =>
             String(index),
@@ -148,6 +150,7 @@ test("AnalyticsEngine validates blob and index byte limits", async () => {
     Effect.runPromise(
       Effect.gen(function* () {
         const analytics = yield* RequestAnalytics;
+
         yield* analytics.writeDataPoint({
           indexes: ["x".repeat(AnalyticsEngine.writeLimits.maxIndexBytes + 1)],
           blobs: ["x".repeat(AnalyticsEngine.writeLimits.maxBlobBytes + 1)],
@@ -180,6 +183,7 @@ test("AnalyticsEngine surfaces schema validation errors for writes", async () =>
     Effect.runPromise(
       Effect.gen(function* () {
         const analytics = yield* RequestAnalytics;
+
         yield* analytics.writeDataPoint({
           doubles: [Number.NaN],
         });
@@ -231,6 +235,7 @@ test("AnalyticsEngine hard-error policy can override a drop layer policy", async
     Effect.runPromise(
       Effect.gen(function* () {
         const analytics = yield* RequestAnalytics;
+
         yield* analytics.writeDataPoint(
           {
             indexes: ["example.com", "overflow"],
@@ -285,6 +290,7 @@ test("AnalyticsEngine enforces the per-invocation data point limit", async () =>
     Effect.runPromise(
       Effect.gen(function* () {
         const analytics = yield* RequestAnalytics;
+
         yield* analytics.writeBatch(dataPoints);
       }).pipe(Effect.provide(analyticsLayer(dataset))),
     ),
@@ -315,6 +321,7 @@ test("AnalyticsEngine drops over-limit and invalid batch points when configured"
   await Effect.runPromise(
     Effect.gen(function* () {
       const analytics = yield* RequestAnalytics;
+
       yield* analytics.writeBatch(dataPoints, { onInvalid: "drop" });
     }).pipe(Effect.provide(analyticsLayer(dataset))),
   );
@@ -332,6 +339,7 @@ test("AnalyticsEngine layer validates the binding shape", async () => {
     Effect.runPromise(
       Effect.gen(function* () {
         const analytics = yield* RequestAnalytics;
+
         yield* analytics.writeDataPoint({ indexes: ["example.com"] });
       }).pipe(
         Effect.provide(
@@ -355,6 +363,7 @@ test("AnalyticsEngine wraps operation failures", async () => {
     Effect.runPromise(
       Effect.gen(function* () {
         const analytics = yield* RequestAnalytics;
+
         yield* analytics.writeDataPoint({ indexes: ["example.com"] });
       }).pipe(
         Effect.provide(
@@ -451,6 +460,7 @@ test("AnalyticsEngine query layer reads config through the active ConfigProvider
     Effect.gen(function* () {
       const query = yield* RequestAnalyticsQuery;
       const row = yield* query.queryOne(S.Struct({ dataset: S.String }), "SHOW TABLES");
+
       return row;
     }).pipe(
       Effect.provide(queryLayerWithFetch(RequestAnalyticsQuery.layerConfig(), request)),
@@ -472,12 +482,14 @@ test("AnalyticsEngine query config accepts custom config keys", async () => {
   const seen: Array<string | undefined> = [];
   const request: typeof fetch = async (_input, init) => {
     seen.push(new Headers(init?.headers).get("authorization") ?? undefined);
+
     return Response.json({ meta: [], data: [], rows: 0 });
   };
 
   await Effect.runPromise(
     Effect.gen(function* () {
       const query = yield* RequestAnalyticsQuery;
+
       yield* query.query("SHOW TABLES");
     }).pipe(
       Effect.provide(

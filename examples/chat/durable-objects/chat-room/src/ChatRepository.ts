@@ -4,7 +4,8 @@ import type {
   ChatSnapshot,
 } from "@effect-cf/example-contracts/Schemas";
 import { Context, Effect, Layer } from "effect";
-import { DurableObjectState, DurableObjectStorage } from "effect-cf";
+import type { DurableObjectStorage } from "effect-cf";
+import { DurableObjectState } from "effect-cf";
 
 interface MessageRow {
   readonly [key: string]: globalThis.SqlStorageValue;
@@ -85,6 +86,7 @@ export class ChatRepository extends Context.Service<ChatRepository, ChatReposito
             Math.max(1, Math.min(limit, 100)),
           );
           const rows = yield* cursor.toArray();
+
           return rows.toReversed().map(fromRow);
         });
 

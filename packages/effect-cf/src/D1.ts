@@ -70,6 +70,7 @@ export const Service =
       Layer.unwrap(
         Effect.gen(function* () {
           const db = yield* tag;
+
           return D1Client.layer({ ...options, db });
         }),
       ).pipe(Layer.provide(tag.layer));

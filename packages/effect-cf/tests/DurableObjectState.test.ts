@@ -14,6 +14,7 @@ it.effect("blockConcurrencyWhile preserves typed failures without rejecting the 
 
     const effect = Effect.gen(function* () {
       const { message } = yield* Effect.service(FailureMessage);
+
       return yield* Effect.fail(message);
     });
 
@@ -137,7 +138,9 @@ function makeRawDurableObjectState(): {
 
       try {
         const value = await callback();
+
         tracker.resolved.push(value as { readonly _tag: string });
+
         return value;
       } catch (error) {
         tracker.rejected.push(error);

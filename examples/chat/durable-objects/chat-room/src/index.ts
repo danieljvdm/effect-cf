@@ -14,6 +14,7 @@ import { ConnectionManager } from "./ConnectionManager";
 const roomFromRequest = (request: Request) => {
   const url = new URL(request.url);
   const match = url.pathname.match(/^\/rooms\/([^/]+)\/socket$/);
+
   return match === null ? "general" : decodeURIComponent(match[1]);
 };
 
@@ -30,6 +31,7 @@ const send = (socket: DurableObjectWebSocket.DurableWebSocket, event: ChatServer
 const parseClientEvent = (message: string): ChatClientEvent | undefined => {
   try {
     const value: unknown = JSON.parse(message);
+
     if (typeof value !== "object" || value === null || !("type" in value)) {
       return undefined;
     }
@@ -52,6 +54,7 @@ const broadcastPresence = (roomId: string) =>
   Effect.gen(function* () {
     const state = yield* DurableObjectState.DurableObjectState;
     const connections = yield* ConnectionManager;
+
     yield* connections.cleanup;
     const peers = yield* connections.list(roomId);
     const payload = encode({
@@ -77,6 +80,7 @@ const appendAndBroadcast = (
       ...input,
       text: input.text.slice(0, 2_000),
     });
+
     yield* connections.cleanup;
     const payload = encode({ type: "message", message });
 
@@ -93,11 +97,13 @@ const ChatRoomLive = ChatRoom.make(layer, {
     getSnapshot: (roomId: string) =>
       Effect.gen(function* () {
         const repository = yield* ChatRepository;
+
         return yield* repository.getSnapshot(roomId);
       }),
     getRecentMessages: (roomId: string, limit: number) =>
       Effect.gen(function* () {
         const repository = yield* ChatRepository;
+
         return yield* repository.getRecentMessages(roomId, limit);
       }),
   },
@@ -109,6 +115,7 @@ const ChatRoomLive = ChatRoom.make(layer, {
     }
 
     const state = yield* DurableObjectState.DurableObjectState;
+
     yield* state.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
 
     const roomId = roomFromRequest(request);
@@ -149,6 +156,7 @@ const ChatRoomLive = ChatRoom.make(layer, {
 
       if (message === "ping") {
         yield* socket.send("pong").pipe(Effect.ignore);
+
         return;
       }
 
@@ -157,8 +165,10 @@ const ChatRoomLive = ChatRoom.make(layer, {
       }
 
       const event = parseClientEvent(message);
+
       if (event === undefined) {
         yield* send(socket, { type: "error", message: "Unsupported chat event" });
+
         return;
       }
 
@@ -166,18 +176,22 @@ const ChatRoomLive = ChatRoom.make(layer, {
 
       if (event.type === "heartbeat") {
         const count = yield* connections.count;
+
         yield* send(socket, {
           type: "heartbeat",
           at: new Date(connection.lastHeartbeat).toISOString(),
           connectionCount: count,
         });
         yield* broadcastPresence(connection.roomId);
+
         return;
       }
 
       const text = event.text.trim();
+
       if (text === "") {
         yield* send(socket, { type: "error", message: "Message text is required" });
+
         return;
       }
 
@@ -192,6 +206,7 @@ const ChatRoomLive = ChatRoom.make(layer, {
     Effect.gen(function* () {
       const connections = yield* ConnectionManager;
       const connection = yield* connections.remove(socket);
+
       if (connection !== undefined) {
         yield* broadcastPresence(connection.roomId);
       }
@@ -200,6 +215,7 @@ const ChatRoomLive = ChatRoom.make(layer, {
     Effect.gen(function* () {
       const connections = yield* ConnectionManager;
       const connection = yield* connections.remove(socket);
+
       if (connection !== undefined) {
         yield* broadcastPresence(connection.roomId);
       }
@@ -207,6 +223,7 @@ const ChatRoomLive = ChatRoom.make(layer, {
   alarm: () =>
     Effect.gen(function* () {
       const connections = yield* ConnectionManager;
+
       yield* connections.cleanup;
     }),
 });

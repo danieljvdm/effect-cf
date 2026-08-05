@@ -219,11 +219,13 @@ const schemaBackedSyncKvStorage = <Key, Value, EncodedValue>(
       Effect.gen(function* () {
         const encodedKey = yield* encodeKey(key);
         const encodedValue = yield* encodeValue(value);
+
         yield* tryStorageSync("kv.put", () => kv.put(encodedKey, encodedValue));
       }),
     delete: (key) =>
       Effect.gen(function* () {
         const encodedKey = yield* encodeKey(key);
+
         return yield* tryStorageSync("kv.delete", () => kv.delete(encodedKey));
       }),
     list: (options) =>

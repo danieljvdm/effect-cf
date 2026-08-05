@@ -7,9 +7,12 @@ import type { Rpcs } from "effect/unstable/rpc/RpcGroup";
 
 const webSocketUrl = Effect.sync(() => {
   const url = new URL("/api/ws", window.location.href);
+
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+
   return url.toString();
 });
+
 export class TodoRpcClient extends Context.Service<
   TodoRpcClient,
   RpcClient.RpcClient<Rpcs<typeof TodoRpcGroup>, RpcClientError>
@@ -22,5 +25,6 @@ export class TodoRpcClient extends Context.Service<
   );
 }
 const clientRuntime = ManagedRuntime.make(TodoRpcClient.layer);
+
 export const runClient = <A, E>(effect: Effect.Effect<A, E, TodoRpcClient>): Promise<A> =>
   clientRuntime.runPromise(effect);

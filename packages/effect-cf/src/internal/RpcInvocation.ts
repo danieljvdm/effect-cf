@@ -66,6 +66,7 @@ export const invokeRpcMethod = <Api, Method extends AsyncMethodKey<Api>, Error>(
 ): Effect.Effect<AsyncMethodCloudflareReturn<Api, Method>, Error> =>
   Effect.gen(function* () {
     const fn = yield* lookupRpcMethod<Api, Method, Error>(target, method, makeError);
+
     return yield* Effect.try({
       try: () => fn(...args),
       catch: makeError,

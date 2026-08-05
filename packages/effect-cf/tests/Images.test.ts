@@ -29,10 +29,12 @@ const makeTransformer = (state: FakeTransformerState): ImageTransformer =>
   ({
     transform: (transform) => {
       state.transforms.push(transform);
+
       return makeTransformer(state);
     },
     draw: (_image, options) => {
       state.draws.push(options);
+
       return makeTransformer(state);
     },
     output: async () => makeResult(),
@@ -69,6 +71,7 @@ const makeFakeImages = (options: FakeImagesOptions = {}) => {
     info: options.info ?? (async () => ({ format: "image/png", fileSize: 4, width: 1, height: 1 })),
     input: (image: Images.ImageInputValue, inputOptions: ImageInputOptions | undefined) => {
       options.input?.(image, inputOptions);
+
       return makeTransformer(state);
     },
     ...(options.includeHosted === false
@@ -101,6 +104,7 @@ const imagesLayer = (images: ImagesBinding) =>
   const images = makeFakeImages({
     info: async (image) => {
       seen.push(image);
+
       return { format: "image/png", fileSize: 4, width: 1, height: 1 };
     },
   });
@@ -212,6 +216,7 @@ test("Images layer validates the binding shape", async () => {
     Effect.runPromise(
       Effect.gen(function* () {
         const images = yield* TestImages;
+
         yield* images.info(stream());
       }).pipe(
         Effect.provide(

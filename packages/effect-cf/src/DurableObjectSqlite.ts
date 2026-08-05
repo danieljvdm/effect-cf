@@ -21,6 +21,7 @@ export const layer = (options?: SqliteLayerOptions) =>
   Layer.unwrap(
     Effect.gen(function* () {
       const state = yield* DurableObjectState;
+
       return SqliteClient.layer({ ...options, db: state.raw.storage.sql });
     }),
   );

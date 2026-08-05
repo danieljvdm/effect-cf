@@ -243,6 +243,7 @@ export const makeClient =
       options?: globalThis.DurableObjectNamespaceGetDurableObjectOptions,
     ): ContainerInstanceClient => {
       const instance = getByName(name, options);
+
       return {
         unsafeRaw: Effect.flatMap(instance, (client) => client.unsafeRaw),
         state: Effect.flatMap(instance, (client) => client.state),
@@ -296,6 +297,7 @@ export const Tag =
     ) =>
       Effect.gen(function* () {
         const namespace = yield* tag;
+
         return yield* namespace.getByName(name, options);
       });
 
@@ -322,6 +324,7 @@ export const Tag =
 
     const unsafeRaw = Effect.fn(function* () {
       const namespace = yield* tag;
+
       return yield* namespace.unsafeRaw;
     });
 

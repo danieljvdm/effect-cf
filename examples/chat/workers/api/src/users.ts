@@ -15,13 +15,16 @@ export const getUser = (userId: string) =>
   Effect.gen(function* () {
     const cache = yield* UserCache;
     const cached = yield* cache.get(userId);
+
     if (Option.isSome(cached)) {
       return cached.value;
     }
 
     const user = users.get(userId);
+
     if (user !== undefined) {
       yield* cache.put(userId, user);
+
       return user;
     }
 

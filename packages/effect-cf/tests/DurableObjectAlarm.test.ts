@@ -52,11 +52,13 @@ it.effect("schedules, replaces, and reconciles to the earliest logical alarm", (
 it.effect("rolls back schedule writes when platform alarm reconciliation fails", () =>
   Effect.gen(function* () {
     const fixture = makeAlarmFixture();
+
     fixture.failNextSetAlarm();
 
     const exit = yield* fixture.run(
       Effect.gen(function* () {
         const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
         yield* alarms.scheduleAlarm({
           tag: "email",
           id: "a",
@@ -80,6 +82,7 @@ it.effect("does not let one-shot acknowledgement delete a replacement schedule",
     yield* fixture.run(
       Effect.gen(function* () {
         const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
         yield* alarms.scheduleAlarm({
           tag: "connection",
           id: "reconnect",
@@ -113,6 +116,7 @@ it.effect("does not let repeating acknowledgement overwrite a replacement schedu
     yield* fixture.run(
       Effect.gen(function* () {
         const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
         yield* alarms.scheduleAlarm({
           tag: "heartbeat",
           id: "room",
@@ -149,6 +153,7 @@ it.effect("limits due processing and immediately reconciles remaining due rows",
     yield* fixture.run(
       Effect.gen(function* () {
         const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
         yield* alarms.scheduleAlarm({ tag: "jobs", id: "b", runAt: atMillis(0), payload: null });
         yield* alarms.scheduleAlarm({ tag: "jobs", id: "a", runAt: atMillis(0), payload: null });
         yield* alarms.scheduleAlarm({ tag: "jobs", id: "c", runAt: atMillis(0), payload: null });
@@ -182,6 +187,7 @@ it.effect("isolates logical failures by default and continues later due rows", (
     const result = yield* fixture.run(
       Effect.gen(function* () {
         const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
         yield* alarms.scheduleAlarm({ tag: "jobs", id: "a", runAt: atMillis(0), payload: null });
         yield* alarms.scheduleAlarm({ tag: "jobs", id: "b", runAt: atMillis(0), payload: null });
         yield* alarms.scheduleAlarm({ tag: "jobs", id: "c", runAt: atMillis(0), payload: null });
@@ -230,6 +236,7 @@ it.effect("ordered mode preserves strict head-of-line failure behavior", () =>
     const exit = yield* fixture.run(
       Effect.gen(function* () {
         const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
         yield* alarms.scheduleAlarm({ tag: "jobs", id: "a", runAt: atMillis(0), payload: null });
         yield* alarms.scheduleAlarm({ tag: "jobs", id: "b", runAt: atMillis(0), payload: null });
         yield* alarms.scheduleAlarm({ tag: "jobs", id: "c", runAt: atMillis(0), payload: null });
@@ -262,6 +269,7 @@ it.effect("surfaces invalid input as typed scheduler errors", () =>
     const invalidRef = yield* fixture.run(
       Effect.gen(function* () {
         const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
         return yield* alarms
           .scheduleAlarm({ tag: "", id: "a", runAt: atMillis(1), payload: null })
           .pipe(Effect.exit);
@@ -270,6 +278,7 @@ it.effect("surfaces invalid input as typed scheduler errors", () =>
     const invalidRepeat = yield* fixture.run(
       Effect.gen(function* () {
         const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
         return yield* alarms
           .scheduleAlarm({
             tag: "jobs",
@@ -313,6 +322,7 @@ it.effect("routes typed logical alarm definitions through decoded payload handle
     yield* fixture.run(
       Effect.gen(function* () {
         const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
         yield* alarms.scheduleAlarm({
           tag: "reconnectGrace",
           id: "connection-1",
@@ -353,6 +363,7 @@ it.effect("applies per-tag failure policies from typed alarm definitions", () =>
     const result = yield* fixture.run(
       Effect.gen(function* () {
         const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
         yield* alarms.scheduleAlarm({
           tag: "heartbeat",
           id: "room",
@@ -407,6 +418,7 @@ it.effect("supports per-tag ordered failure policies", () =>
     const exit = yield* fixture.run(
       Effect.gen(function* () {
         const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
         yield* alarms.scheduleAlarm({
           tag: "billingSync",
           id: "account-1",
@@ -452,11 +464,13 @@ test("DurableObject.make composes logical alarms before raw alarm hook", async (
   await fixture.runPromise(
     Effect.gen(function* () {
       const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
       yield* alarms.scheduleAlarm({ tag: "jobs", id: "a", runAt: atMillis(0), payload: null });
     }),
   );
 
   const instance = new Live(fixture.state, {} as Cloudflare.Env);
+
   await (instance as unknown as { alarm(): Promise<void> | void }).alarm();
 
   expect(calls).toEqual(["logical:a", "raw"]);
@@ -591,6 +605,7 @@ function makeSqlStorage(rows: Map<string, StoredAlarmRow>): globalThis.SqlStorag
 
       if (normalized.startsWith("SELECT run_at FROM")) {
         const next = sortRows(rows)[0];
+
         return cursor<T>(
           next === undefined ? [] : ([{ run_at: next.run_at }] as unknown as Array<T>),
           0,
@@ -616,6 +631,7 @@ function makeSqlStorage(rows: Map<string, StoredAlarmRow>): globalThis.SqlStorag
       if (normalized.startsWith("DELETE FROM")) {
         const [rowId] = bindings as [string];
         const deleted = rows.delete(rowId);
+
         return cursor<T>([], deleted ? 1 : 0);
       }
 
@@ -628,6 +644,7 @@ function makeSqlStorage(rows: Map<string, StoredAlarmRow>): globalThis.SqlStorag
           number | null,
           string,
         ];
+
         rows.set(rowId, {
           storage_id: rowId,
           alarm_id: alarmId,
@@ -636,11 +653,13 @@ function makeSqlStorage(rows: Map<string, StoredAlarmRow>): globalThis.SqlStorag
           repeat_every_ms: repeatEvery,
           payload,
         });
+
         return cursor<T>([], 1);
       }
 
       if (normalized.startsWith("SELECT storage_id")) {
         const [now, limit] = bindings as [number, number];
+
         return cursor<T>(
           sortRows(rows)
             .filter((row) => row.run_at <= now)
@@ -679,18 +698,23 @@ function cursor<T extends Record<string, globalThis.SqlStorageValue>>(
   rowsWritten: number,
 ): globalThis.SqlStorageCursor<T> {
   let index = 0;
+
   return {
     next: () => {
       const value = rows[index];
+
       index += 1;
+
       return value === undefined ? { done: true } : { done: false, value };
     },
     toArray: () => rows,
     one: () => {
       const value = rows[0];
+
       if (value === undefined) {
         throw new Error("No rows");
       }
+
       return value;
     },
     raw: () => [][Symbol.iterator](),

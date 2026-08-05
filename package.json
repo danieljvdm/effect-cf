@@ -12,9 +12,9 @@
   ],
   "type": "module",
   "scripts": {
-    "postinstall": "bun scripts/postinstall.ts",
-    "sync:effect": "bun scripts/sync-effect-submodule.ts",
-    "patch:tsgo": "bun scripts/patch-tsgo.ts",
+    "postinstall": "bun ./node_modules/@danieljvdm/dev-kit/bin/dev-kit.mjs apply",
+    "sync:effect": "bun ./node_modules/@danieljvdm/dev-kit/bin/dev-kit.mjs effect sync",
+    "patch:tsgo": "bun ./node_modules/@danieljvdm/dev-kit/bin/dev-kit.mjs tsgo patch",
     "ready": "vp check && vp run -r test && vp run -r build",
     "changeset": "vp exec changeset",
     "changeset:version": "vp exec changeset version",
@@ -38,14 +38,16 @@
     "@changesets/changelog-github": "^0.7.0",
     "@changesets/cli": "^2.31.0",
     "@cloudflare/vitest-pool-workers": "catalog:",
+    "@danieljvdm/dev-kit": "0.11.0",
+    "@effect-cf/repo": "workspace:*",
     "@effect/platform-bun": "catalog:",
-    "@effect/tsgo": "0.5.1",
+    "@effect/tsgo": "0.24.3",
     "@types/bun": "^1.3.14",
     "@types/node": "^25.6.0",
-    "@typescript/native-preview": "7.0.0-dev.20260423.1",
     "effect": "catalog:",
+    "typescript": "7.0.2",
     "vite-plus": "catalog:",
-    "vitest": "npm:@voidzero-dev/vite-plus-test@0.1.20",
+    "vitest": "catalog:",
     "wrangler": "catalog:"
   },
   "overrides": {
@@ -55,9 +57,10 @@
     "vitest": "catalog:"
   },
   "engines": {
+    "bun": ">=1.3.0",
     "node": ">=22.12.0"
   },
-  "packageManager": "bun@1.3.13",
+  "packageManager": "bun@1.3.14",
   "catalog": {
     "@cloudflare/containers": "0.3.7",
     "@cloudflare/workers-types": "4.20260611.1",
@@ -68,9 +71,9 @@
     "@effect/sql-sqlite-do": "4.0.0-beta.77",
     "@effect/vitest": "4.0.0-beta.77",
     "effect": "4.0.0-beta.77",
-    "vite": "npm:@voidzero-dev/vite-plus-core@0.1.20",
-    "vitest": "npm:@voidzero-dev/vite-plus-test@0.1.20",
-    "vite-plus": "0.1.20",
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.2.6",
+    "vitest": "4.1.10",
+    "vite-plus": "0.2.6",
     "wrangler": "4.100.0"
   }
 }

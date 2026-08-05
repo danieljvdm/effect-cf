@@ -69,6 +69,7 @@ test("Vectorize layer validates the binding shape", async () => {
     Effect.runPromise(
       Effect.gen(function* () {
         const index = yield* RecipeVectors;
+
         yield* index.describe;
       }).pipe(
         Effect.provide(
@@ -90,6 +91,7 @@ test("Vectorize wraps operation failures", async () => {
     Effect.runPromise(
       Effect.gen(function* () {
         const index = yield* RecipeVectors;
+
         yield* index.upsert([{ id: "recipe-1", values: [0.1, 0.2] }]);
       }).pipe(
         Effect.provide(

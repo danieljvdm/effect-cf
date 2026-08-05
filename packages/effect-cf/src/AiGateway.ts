@@ -113,6 +113,7 @@ const tryAiGatewaySync = <A>(
 const providerUrl = (baseUrl: string, path = "") => {
   const url = new URL(baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`);
   const normalizedPath = path.replace(/^\/+/, "");
+
   return normalizedPath === "" ? url : new URL(normalizedPath, url);
 };
 
@@ -141,6 +142,7 @@ export const makeClient = (definition: AiGatewayDefinition, gateway: AiGatewayBi
         const baseUrl = yield* tryAiGatewayPromise(definition.binding, "getUrl", () =>
           gateway.getUrl(options.provider),
         );
+
         return yield* tryAiGatewayPromise(definition.binding, "fetch", () =>
           fetch(providerUrl(baseUrl, options.path).href, options.init),
         );
@@ -244,6 +246,7 @@ export const makeHttpClient = (
     getLog: (logId) =>
       tryAiGatewayPromise(binding, "getLog", async () => {
         const response = await request(providerUrl(gatewayUrl(definition), `logs/${logId}`).href);
+
         return (await response.json()) as AiGatewayLog;
       }),
     unsafeRaw: Effect.fail(

@@ -3,18 +3,23 @@ import { Worker } from "effect-cf";
 import { TodoStore } from "@effect-cf/todo-rpc-ws-domain";
 const json = (value: unknown, init?: ResponseInit) => {
   const headers = new Headers(init?.headers);
+
   headers.set("cache-control", "no-store");
+
   return Response.json(value, { ...init, headers });
 };
+
 export const TodoRpcWsApiWorkerLive = Worker.make(TodoStore.layer({ binding: "TODO_STORE" }), {
   fetch: Effect.gen(function* () {
     const request = yield* Worker.NativeRequest;
     const url = new URL(request.url);
+
     if (url.pathname === "/api/ws") {
       if (!Worker.isWebSocketUpgrade(request))
         return new Response("Expected WebSocket upgrade", { status: 426 });
       const stores = yield* TodoStore;
       const store = stores.byName("default");
+
       return yield* store
         .fetch(request)
         .pipe(
@@ -28,6 +33,7 @@ export const TodoRpcWsApiWorkerLive = Worker.make(TodoStore.layer({ binding: "TO
           ),
         );
     }
+
     return json({ ok: true, websocket: "/api/ws", durableObject: "default" });
   }),
 });

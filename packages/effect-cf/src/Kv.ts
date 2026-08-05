@@ -124,7 +124,7 @@ export interface TagClass<
 }
 
 const maybeString = (value: string | null | undefined): Option.Option<string> =>
-  value == null ? Option.none() : Option.some(value);
+  value === null || value === undefined ? Option.none() : Option.some(value);
 
 const maybeNumber = (value: number | undefined): Option.Option<number> =>
   value === undefined ? Option.none() : Option.some(value);
@@ -171,6 +171,7 @@ export const makeClient = <Key, Value, EncodedValue>(
     put: Effect.fnUntraced(function* (key: Key, value: Value, options?: KvPutOptions) {
       const keyEncoded = yield* encodeKey(key);
       const valueEncoded = yield* encodeValue(value);
+
       yield* tryKvPromise(definition.binding, "put", () =>
         kv.put(keyEncoded, valueEncoded, options),
       );
@@ -242,6 +243,7 @@ export const makeClient = <Key, Value, EncodedValue>(
     }),
     remove: Effect.fnUntraced(function* (key: Key) {
       const keyEncoded = yield* encodeKey(key);
+
       yield* tryKvPromise(definition.binding, "delete", () => kv.delete(keyEncoded));
     }),
     unsafeRaw: Effect.succeed(kv),

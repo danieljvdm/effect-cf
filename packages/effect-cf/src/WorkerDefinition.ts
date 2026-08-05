@@ -1,7 +1,6 @@
-import { Context, Effect, type Layer } from "effect";
-import type { Schema as S } from "effect";
+import { Context, Effect, type Layer, type Schema as S } from "effect";
 
-import * as Binding from "./Binding";
+import type * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
 import * as WorkerEntrypoint from "./Worker";
 import type { WorkerRpcHandler } from "./Worker";
@@ -238,6 +237,7 @@ export const Tag =
     methods: MethodsShape & NoReservedMethods<MethodsShape>,
   ) => {
     const definition = makeDefinition<Id, MethodsShape>(id, methods);
+
     type SelfDefinition = Definition<Id, MethodsShape>;
     type ClientApi = Api<SelfDefinition>;
     const tag = Context.Service<
@@ -256,6 +256,7 @@ export const Tag =
     const fetch = (input: RequestInfo | URL, init?: RequestInit) =>
       Effect.gen(function* () {
         const service = yield* tag;
+
         return yield* service.fetch(input, init);
       });
 
@@ -265,6 +266,7 @@ export const Tag =
     ) =>
       Effect.gen(function* () {
         const service = yield* tag;
+
         return yield* service.rpc(method as never, ...(args as never));
       });
 
@@ -274,6 +276,7 @@ export const Tag =
     ) =>
       Effect.gen(function* () {
         const service = yield* tag;
+
         return yield* service.call(method as never, ...(args as never));
       });
 
@@ -283,6 +286,7 @@ export const Tag =
     ) =>
       Effect.gen(function* () {
         const service = yield* tag;
+
         return yield* service.scopedCall(method as never, ...(args as never));
       });
 
@@ -315,10 +319,12 @@ const wrapHandlers = <ROut, const Self extends Definition.Any>(
     RpcDefinition.Definition.MethodNames<Self>
   >) {
     const handler = handlers[key];
+
     wrapped[key] = (...args: Array<unknown>) =>
       Effect.gen(function* () {
         const decodedArgs = yield* RpcDefinition.decodeArgs(definition, key, args);
         const value = yield* handler(...decodedArgs);
+
         return yield* RpcDefinition.encodeSuccess(definition, key, value);
       });
   }

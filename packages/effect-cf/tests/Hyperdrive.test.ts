@@ -48,6 +48,7 @@ test("Hyperdrive layer validates the binding shape", async () => {
     Effect.runPromise(
       Effect.gen(function* () {
         const binding = yield* TestHyperdrive;
+
         return binding.connectionString;
       }).pipe(
         Effect.provide(

@@ -85,6 +85,7 @@ const bucketLayer = (bucket: R2Bucket) =>
   const bucket = makeFakeR2({
     put: async (key, value) => {
       seen.push({ key, value });
+
       return makeR2Object(key, 4);
     },
     get: async (key) => makeR2ObjectBody(key, `{"value":"data"}`),
@@ -192,6 +193,7 @@ test("R2 layer validates the binding shape", async () => {
     Effect.runPromise(
       Effect.gen(function* () {
         const bucket = yield* TestBucket;
+
         yield* bucket.head("key");
       }).pipe(
         Effect.provide(

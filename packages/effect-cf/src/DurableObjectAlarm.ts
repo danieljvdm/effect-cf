@@ -356,6 +356,7 @@ const toRepeatEveryMillis = (input: Duration.Input | undefined) => {
   return Effect.try({
     try: () => {
       const millis = Duration.toMillis(Duration.fromInputUnsafe(input));
+
       if (!Number.isFinite(millis) || millis <= 0) {
         throw new Error("Alarm repeatEvery must be a positive finite duration");
       }
@@ -404,6 +405,7 @@ const toFailureRescheduleMillis = (input: Duration.Input) =>
   Effect.try({
     try: () => {
       const millis = Duration.toMillis(Duration.fromInputUnsafe(input));
+
       if (!Number.isFinite(millis) || millis <= 0) {
         throw new Error("Alarm failure rescheduleAfter must be a positive finite duration");
       }
@@ -430,6 +432,7 @@ export const processDue = <R = never, E = never, OnFailureR = never, OnFailureE 
 ) =>
   Effect.gen(function* () {
     const durableObjectAlarm = yield* DurableObjectAlarm;
+
     return yield* durableObjectAlarm.processDueAlarms(handle, options);
   });
 
@@ -506,6 +509,7 @@ export const define = <const Definitions extends AlarmDefinitions>(definitions: 
       (event) =>
         Effect.gen(function* () {
           const definition = definitions[event.tag];
+
           if (definition === undefined) {
             return;
           }
@@ -536,6 +540,7 @@ export const define = <const Definitions extends AlarmDefinitions>(definitions: 
             const action = getAlarmDefinitionFailureAction(definitions[failure.tag]);
             const optionAction =
               options?.onFailure === undefined ? undefined : yield* options.onFailure(failure);
+
             return action ?? optionAction;
           }),
       },
@@ -602,6 +607,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
 
         if (next === undefined) {
           yield* state.storage.deleteAlarm();
+
           return;
         }
 
@@ -625,7 +631,9 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
               row.run_at,
               row.payload,
             );
+
             yield* cursor.rowsWritten;
+
             return;
           }
 
@@ -642,6 +650,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
             row.repeat_every_ms,
             row.payload,
           );
+
           yield* cursor.rowsWritten;
         },
       );
@@ -660,7 +669,9 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
             row.run_at,
             row.payload,
           );
+
           yield* cursor.rowsWritten;
+
           return;
         }
 
@@ -678,11 +689,13 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           row.repeat_every_ms,
           row.payload,
         );
+
         yield* cursor.rowsWritten;
       });
 
       const cancelAlarm = Effect.fn("DurableObjectAlarm.cancelAlarm")(function* (input: AlarmRef) {
         const ref = yield* decodeAlarmRef(input);
+
         yield* state.storage.transaction(() =>
           Effect.gen(function* () {
             yield* ensureTable(state);
@@ -780,15 +793,18 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                 : yield* toFailureRescheduleMillis(actionRetryDelay);
 
             yield* rescheduleFailedAlarm(row, retryDelay);
+
             return "continue" as const;
           }
 
           if (actionMode === "skip-and-advance-repeat") {
             yield* acknowledgeAlarm(row);
+
             return "continue" as const;
           }
 
           yield* reconcileAlarm();
+
           return "stop" as const;
         };
 
@@ -797,6 +813,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
 
           if (Exit.isFailure(eventExit)) {
             const action = yield* handleFailure(row, undefined, eventExit.cause);
+
             if (action === "stop") {
               return yield* Effect.failCause(eventExit.cause);
             }
@@ -808,6 +825,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
 
           if (Exit.isFailure(handleExit)) {
             const action = yield* handleFailure(row, event, handleExit.cause);
+
             if (action === "stop") {
               return yield* Effect.failCause(handleExit.cause);
             }
@@ -819,6 +837,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         }
 
         yield* reconcileAlarm();
+
         return { failed, handled };
       });
 

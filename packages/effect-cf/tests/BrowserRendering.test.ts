@@ -43,6 +43,7 @@ layer(browserLayer({}))("Browser Rendering", (it) => {
       const screenshot = yield* page.screenshot<Uint8Array>();
       const pdf = yield* page.pdf<Uint8Array>();
       const version = yield* browser.version;
+
       yield* page.close();
       yield* browser.close;
 
@@ -59,6 +60,7 @@ test("Browser Rendering layer validates the binding shape", async () => {
     Effect.runPromise(
       Effect.gen(function* () {
         const rendering = yield* TestBrowser;
+
         yield* rendering.unsafeRaw;
       }).pipe(
         Effect.provide(
@@ -88,6 +90,7 @@ test("Browser Rendering wraps operation failures", async () => {
           ),
         );
         const page = yield* browser.newPage;
+
         yield* page.screenshot();
       }).pipe(Effect.provide(browserLayer({}))),
     ),

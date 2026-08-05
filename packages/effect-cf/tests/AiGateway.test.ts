@@ -73,6 +73,7 @@ test("AI Gateway layer validates the AI binding shape", async () => {
     Effect.runPromise(
       Effect.gen(function* () {
         const gateway = yield* DefaultGateway;
+
         yield* gateway.getUrl();
       }).pipe(
         Effect.provide(
@@ -92,6 +93,7 @@ test("AI Gateway wraps operation failures", async () => {
     Effect.runPromise(
       Effect.gen(function* () {
         const gateway = yield* DefaultGateway;
+
         yield* gateway.run({
           provider: "workers-ai",
           endpoint: "@cf/test/model",

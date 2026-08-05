@@ -1,5 +1,6 @@
 import { TodoHttpApi } from "@effect-cf/todo-http-domain";
-import { Context, Effect, flow, Layer, ManagedRuntime } from "effect";
+import type { Effect } from "effect";
+import { Context, flow, Layer, ManagedRuntime } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { HttpApiClient } from "effect/unstable/httpapi";
 
@@ -20,5 +21,6 @@ export class TodoApiClient extends Context.Service<
   ).pipe(Layer.provide(FetchHttpClient.layer));
 }
 const clientRuntime = ManagedRuntime.make(TodoApiClient.layer);
+
 export const runClient = <A, E>(effect: Effect.Effect<A, E, TodoApiClient>): Promise<A> =>
   clientRuntime.runPromise(effect);

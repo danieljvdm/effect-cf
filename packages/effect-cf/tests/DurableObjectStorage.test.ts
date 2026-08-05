@@ -35,6 +35,7 @@ it.effect("wraps transaction with Effect-native callbacks", () =>
     const result = yield* storage.transaction((txn) =>
       Effect.gen(function* () {
         yield* txn.put("count", 42);
+
         return yield* txn.get<number>("count");
       }),
     );
@@ -67,6 +68,7 @@ it.effect("rolls back transaction on typed Effect failure", () =>
       storage.transaction((txn) =>
         Effect.gen(function* () {
           yield* txn.put("count", 42);
+
           return yield* Effect.fail("rollback requested");
         }),
       ),
@@ -118,6 +120,7 @@ it.effect("maps rejected platform operations to StorageOperationError", () =>
     assert.strictEqual(exit._tag, "Failure");
     if (exit._tag === "Failure") {
       const error = Cause.squash(exit.cause) as DurableObjectStorage.StorageOperationError;
+
       assert.strictEqual(error._tag, "StorageOperationError");
       assert.strictEqual(error.operation, "sync");
       assert.strictEqual(error.cause, platformError);

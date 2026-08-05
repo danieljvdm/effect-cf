@@ -90,6 +90,7 @@ function makeCursor(
   return {
     next: () => {
       const row = rows.shift();
+
       if (row === undefined) {
         return { done: true };
       }
@@ -105,6 +106,7 @@ function makeCursor(
       ),
     one: () => {
       const row = rows[0];
+
       if (row === undefined) {
         throw new Error("No rows");
       }

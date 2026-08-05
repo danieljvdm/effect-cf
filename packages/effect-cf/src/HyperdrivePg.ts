@@ -1,7 +1,7 @@
 import { PgClient } from "@effect/sql-pg";
 import { Effect, Layer, Redacted } from "effect";
 
-import * as Hyperdrive from "./Hyperdrive";
+import type * as Hyperdrive from "./Hyperdrive";
 
 export type PgLayerOptions = Omit<
   PgClient.PgClientConfig & { readonly acquireForStream?: boolean },

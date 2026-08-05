@@ -218,6 +218,7 @@ export const decodeArgs = <
 
     for (let index = 0; index < methodDefinition.args.length; index++) {
       const schema = methodDefinition.args[index];
+
       decoded.push(
         yield* (S.decodeUnknownEffect(schema)(args[index]) as Effect.Effect<unknown, unknown>).pipe(
           Effect.mapError(
@@ -265,6 +266,7 @@ export const encodeArgs = <
 
     for (let index = 0; index < methodDefinition.args.length; index++) {
       const schema = methodDefinition.args[index];
+
       encoded.push(
         yield* (S.encodeEffect(schema)(args[index]) as Effect.Effect<unknown, unknown>).pipe(
           Effect.mapError(

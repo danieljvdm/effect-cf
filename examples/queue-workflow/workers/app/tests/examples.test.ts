@@ -20,6 +20,7 @@ test("Queue example sends typed jobs through a producer binding", async () => {
           metrics: async () => ({ backlogCount: 0, backlogBytes: 0 }),
           send: async (message: unknown) => {
             sent.push(message);
+
             return { metadata: { metrics: { backlogCount: 1, backlogBytes: 10 } } };
           },
           sendBatch: async () => ({ metadata: { metrics: { backlogCount: 1, backlogBytes: 10 } } }),
@@ -83,6 +84,7 @@ test("Workflow example starts an instance through a binding", async () => {
         REPORT_WORKFLOW: {
           create: async (options: unknown) => {
             createOptions = options;
+
             return instance;
           },
           createBatch: async () => [instance],
@@ -178,6 +180,7 @@ const makeWorkflowStep = (calls: Array<string>): WorkflowStep =>
       const callback = (maybeCallback ?? configOrCallback) as (
         context: unknown,
       ) => Promise<unknown>;
+
       return callback({ step: { name, count: 1 }, attempt: 2, config: {} });
     },
     sleep: async () => undefined,

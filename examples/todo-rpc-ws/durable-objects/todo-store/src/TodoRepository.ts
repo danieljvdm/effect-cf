@@ -1,7 +1,8 @@
 import type { CreateTodo, Todo, TodoStats, UpdateTodo } from "@effect-cf/todo-rpc-ws-domain";
 import { TodoNotFound } from "@effect-cf/todo-rpc-ws-domain";
 import { Context, Effect, Layer } from "effect";
-import { DurableObjectState, DurableObjectStorage } from "effect-cf";
+import type { DurableObjectStorage } from "effect-cf";
+import { DurableObjectState } from "effect-cf";
 
 type SqlValue = DurableObjectStorage.SqlStorageValue;
 interface TodoRow {
@@ -40,6 +41,7 @@ const fromRow = (row: TodoRow): Todo => ({
   updatedAt: row.updated_at,
 });
 const trimTitle = (title: string) => title.trim().slice(0, 180);
+
 export class TodoRepository extends Context.Service<TodoRepository, TodoRepositoryService>()(
   "todo-rpc-ws-store/TodoRepository",
 ) {
@@ -57,6 +59,7 @@ export class TodoRepository extends Context.Service<TodoRepository, TodoReposito
           const cursor = yield* sql.exec<TodoRow>(
             `SELECT id, title, completed, created_at, updated_at FROM todos ORDER BY completed ASC, created_at DESC`,
           );
+
           return (yield* cursor.toArray()).map(fromRow);
         });
       const getStats = Effect.gen(function* () {
@@ -66,6 +69,7 @@ export class TodoRepository extends Context.Service<TodoRepository, TodoReposito
         );
         const rows = yield* cursor.toArray();
         const row = rows[0] ?? { total: 0, completed: 0 };
+
         return {
           total: row.total,
           open: row.total - row.completed,
@@ -73,6 +77,7 @@ export class TodoRepository extends Context.Service<TodoRepository, TodoReposito
           generatedAt: new Date().toISOString(),
         } satisfies TodoStats;
       });
+
       return {
         list: selectTodos(),
         create: (input) =>
@@ -87,6 +92,7 @@ export class TodoRepository extends Context.Service<TodoRepository, TodoReposito
               now,
               now,
             );
+
             return fromRow(yield* cursor.one());
           }),
         update: (id, input) =>
@@ -97,6 +103,7 @@ export class TodoRepository extends Context.Service<TodoRepository, TodoReposito
               id,
             );
             const current = (yield* currentCursor.toArray())[0];
+
             if (current === undefined) return yield* Effect.fail(new TodoNotFound({ id }));
             const now = new Date().toISOString();
             const title = input.title === undefined ? current.title : trimTitle(input.title);
@@ -109,6 +116,7 @@ export class TodoRepository extends Context.Service<TodoRepository, TodoReposito
               now,
               id,
             );
+
             return fromRow(yield* cursor.one());
           }),
         delete: (id) =>
@@ -118,12 +126,14 @@ export class TodoRepository extends Context.Service<TodoRepository, TodoReposito
               `DELETE FROM todos WHERE id = ? RETURNING id, title, completed, created_at, updated_at`,
               id,
             );
+
             return (yield* cursor.toArray()).length > 0;
           }),
         stats: getStats,
         clearCompleted: Effect.gen(function* () {
           yield* ensureSchema;
           yield* sql.exec(`DELETE FROM todos WHERE completed = 1`);
+
           return yield* getStats;
         }),
       } satisfies TodoRepositoryService;

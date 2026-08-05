@@ -46,7 +46,9 @@ const TestCounterLive = TestCounterDefinition.make(Layer.empty, {
         });
         const current = yield* counters.get("counter");
         const next = (Option.isSome(current) ? current.value.count : 0) + amount;
+
         yield* counters.put("counter", { count: next });
+
         return next;
       }),
     get: () =>
@@ -57,6 +59,7 @@ const TestCounterLive = TestCounterDefinition.make(Layer.empty, {
           value: CounterValue,
         });
         const current = yield* counters.get("counter");
+
         return Option.isSome(current) ? current.value.count : 0;
       }),
   },
@@ -71,7 +74,9 @@ const TestCounterLive = TestCounterDefinition.make(Layer.empty, {
     });
     const current = yield* counters.get("counter");
     const next = (Option.isSome(current) ? current.value.count : 0) + Number(amount);
+
     yield* counters.put("counter", { count: next });
+
     return Response.json({ count: next });
   }),
 });

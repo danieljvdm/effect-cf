@@ -8,13 +8,17 @@ import { ApiWorker, Assets, TodoRpcClient } from "./bindings";
 
 const json = (value: unknown, init?: ResponseInit) => {
   const headers = new Headers(init?.headers);
+
   headers.set("cache-control", "no-store");
+
   return Response.json(value, { ...init, headers });
 };
 
 const rewriteApiRequest = (request: Request, url: URL) => {
   const forwardedUrl = new URL(url.toString());
+
   forwardedUrl.pathname = url.pathname.replace(/^\/api/, "") || "/";
+
   return new Request(forwardedUrl, request);
 };
 
@@ -29,11 +33,13 @@ const TodoRpcBridgeLive = TodoRpcGroup.toLayer({
   GetStats: () =>
     Effect.gen(function* () {
       const rpc = yield* TodoRpcClient;
+
       return yield* rpc.GetStats().pipe(Effect.mapError(mapRpcBridgeError));
     }),
   ClearCompleted: () =>
     Effect.gen(function* () {
       const rpc = yield* TodoRpcClient;
+
       return yield* rpc.ClearCompleted().pipe(Effect.mapError(mapRpcBridgeError));
     }),
 });
@@ -71,6 +77,7 @@ const renderRpc = Effect.gen(function* () {
       ),
     ),
   );
+
   return HttpServerResponse.toWeb(response, { context });
 });
 
@@ -85,6 +92,7 @@ export const TodoWebWorkerLive = Worker.make(layer, {
 
     if (request.method === "GET" && url.pathname === "/api/rpc/stats") {
       const rpc = yield* TodoRpcClient;
+
       return yield* rpc.GetStats().pipe(
         Effect.map((stats) => json(stats)),
         Effect.catchCause((cause) =>
@@ -100,6 +108,7 @@ export const TodoWebWorkerLive = Worker.make(layer, {
 
     if (request.method === "POST" && url.pathname === "/api/rpc/clear-completed") {
       const rpc = yield* TodoRpcClient;
+
       return yield* rpc.ClearCompleted().pipe(
         Effect.map((stats) => json(stats)),
         Effect.catchCause((cause) =>
@@ -118,6 +127,7 @@ export const TodoWebWorkerLive = Worker.make(layer, {
     }
 
     const assets = yield* Assets;
+
     return yield* Effect.tryPromise(() => assets.fetch(request));
   }),
 });

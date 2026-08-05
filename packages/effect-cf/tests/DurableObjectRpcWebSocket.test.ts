@@ -184,6 +184,7 @@ function makeFakeDurableObjectState(options?: {
         accepted.push({ socket: socket.raw, tags });
         for (const tag of tags ?? []) {
           const current = socketsByTag.get(tag) ?? [];
+
           current.push(socket.raw);
           socketsByTag.set(tag, current);
         }
@@ -194,6 +195,7 @@ function makeFakeDurableObjectState(options?: {
           tag !== undefined
             ? (socketsByTag.get(tag) ?? [])
             : Array.from(socketsByTag.values()).flat();
+
         return sockets.map((socket) => DurableObjectWebSocket.fromWebSocket(socket));
       }),
     setWebSocketAutoResponse: () => Effect.void,
@@ -210,6 +212,7 @@ function makeFakeDurableObjectState(options?: {
 function decodeSent(socket: FakeWebSocket) {
   return socket.sent.map((message) => {
     assert.strictEqual(typeof message, "string");
+
     return JSON.parse(message as string);
   });
 }

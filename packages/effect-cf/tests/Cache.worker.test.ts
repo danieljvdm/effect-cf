@@ -9,6 +9,7 @@ test("Cache.layer reads the Workers runtime CacheStorage global", async () => {
   const [storage, defaultCache] = await Effect.runPromise(
     Effect.gen(function* () {
       const service = yield* Cache.CacheStorage;
+
       return yield* Effect.all([service.unsafeRaw, service.default.unsafeRaw]);
     }).pipe(Effect.provide(Cache.layer)),
   );

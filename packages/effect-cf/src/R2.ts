@@ -280,6 +280,7 @@ export const makeClient = (
         ),
       delete: (keys) => {
         const nativeKeys = typeof keys === "string" ? keys : [...keys];
+
         return tryR2Promise(definition.binding, "delete", () => bucket.delete(nativeKeys));
       },
       list: (options) => tryR2Promise(definition.binding, "list", () => bucket.list(options)),

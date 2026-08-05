@@ -1,0 +1,149 @@
+{
+  "version": 1,
+  "toolVersion": "0.11.3",
+  "manifestDigest": "sha256:696576ce60d4680c2bb55028d6e02ae4936546a71bad4dc70eab0a89e4677f91",
+  "setup": {
+    "effectSource": {
+      "packageName": "effect",
+      "packageVersion": "4.0.0-beta.77",
+      "path": ".repos/effect",
+      "repository": "https://github.com/Effect-TS/effect.git",
+      "tag": "effect@4.0.0-beta.77"
+    },
+    "effectTsgo": {
+      "effectTsgoVersion": "0.24.3",
+      "typescriptPackage": "typescript",
+      "typescriptVersion": "7.0.2"
+    }
+  },
+  "outputs": [
+    {
+      "resourceId": "skill:cloudflare@agents",
+      "path": ".agents/skills/cloudflare",
+      "skill": "cloudflare",
+      "target": "agents",
+      "mode": "copy",
+      "kind": "directory",
+      "digest": "sha256:dfc92bac99350aa358617e0b8edd61fd7115cbf1a873ba01d32f93d967b9822e",
+      "catalog": {
+        "source": "cloudflare-skills",
+        "repository": "https://github.com/cloudflare/skills.git",
+        "resolved": "30553f89ae1ef1e3c2917cd09d72dac992bb4e9a"
+      }
+    },
+    {
+      "resourceId": "skill:dev-kit@agents",
+      "path": ".agents/skills/dev-kit",
+      "skill": "dev-kit",
+      "target": "agents",
+      "mode": "copy",
+      "kind": "directory",
+      "digest": "sha256:934e6a086784b8cc9cc19c85587ba60481f57613fb8b85e4aea6b5556da72e0f"
+    },
+    {
+      "resourceId": "skill:effect-ts@agents",
+      "path": ".agents/skills/effect-ts",
+      "skill": "effect-ts",
+      "target": "agents",
+      "mode": "copy",
+      "kind": "directory",
+      "digest": "sha256:50786d8d351fa32953de526bc12ac67fee34fecfebff5dccde4f9fe0c3354ba3"
+    },
+    {
+      "resourceId": "skill:@effect-cf/repo#pr-hygiene@agents",
+      "path": ".agents/skills/pr-hygiene",
+      "skill": "pr-hygiene",
+      "target": "agents",
+      "mode": "copy",
+      "kind": "directory",
+      "digest": "sha256:9b80526abdf0d3dbd96044578872c6b07cc1b9b9c70727c75eb8220886865166",
+      "catalog": {
+        "package": "@effect-cf/repo",
+        "version": "0.0.0",
+        "skill": "pr-hygiene",
+        "digest": "sha256:9b80526abdf0d3dbd96044578872c6b07cc1b9b9c70727c75eb8220886865166"
+      }
+    },
+    {
+      "resourceId": "skill:testing@agents",
+      "path": ".agents/skills/testing",
+      "skill": "testing",
+      "target": "agents",
+      "mode": "copy",
+      "kind": "directory",
+      "digest": "sha256:e239ef710f905b77ae1f98b2b86d3d0911c9e5f9381a92b268a8ac8c28e9c88f"
+    },
+    {
+      "resourceId": "skill:cloudflare@claude",
+      "path": ".claude/skills/cloudflare",
+      "skill": "cloudflare",
+      "target": "claude",
+      "mode": "symlink",
+      "kind": "symlink",
+      "digest": "sha256:7f52a7fe04df81d3eeafcd92d7e965202d71c0a989082a44838de001aa225f94",
+      "catalog": {
+        "source": "cloudflare-skills",
+        "repository": "https://github.com/cloudflare/skills.git",
+        "resolved": "30553f89ae1ef1e3c2917cd09d72dac992bb4e9a"
+      }
+    },
+    {
+      "resourceId": "skill:dev-kit@claude",
+      "path": ".claude/skills/dev-kit",
+      "skill": "dev-kit",
+      "target": "claude",
+      "mode": "symlink",
+      "kind": "symlink",
+      "digest": "sha256:b59ba0874ef06cb4c651bb9b3012b014c9063648577f3f3181894e8ca3086d8f"
+    },
+    {
+      "resourceId": "skill:effect-ts@claude",
+      "path": ".claude/skills/effect-ts",
+      "skill": "effect-ts",
+      "target": "claude",
+      "mode": "symlink",
+      "kind": "symlink",
+      "digest": "sha256:057d09728194631224706ae6afbf877107388501832bf0f3e2c6516c7d55f242"
+    },
+    {
+      "resourceId": "skill:@effect-cf/repo#pr-hygiene@claude",
+      "path": ".claude/skills/pr-hygiene",
+      "skill": "pr-hygiene",
+      "target": "claude",
+      "mode": "symlink",
+      "kind": "symlink",
+      "digest": "sha256:80ed5d18537d77a22cb497637294af99f8c28a78741d8323fb9c96f91d1fa95d",
+      "catalog": {
+        "package": "@effect-cf/repo",
+        "version": "0.0.0",
+        "skill": "pr-hygiene",
+        "digest": "sha256:9b80526abdf0d3dbd96044578872c6b07cc1b9b9c70727c75eb8220886865166"
+      }
+    },
+    {
+      "resourceId": "skill:testing@claude",
+      "path": ".claude/skills/testing",
+      "skill": "testing",
+      "target": "claude",
+      "mode": "symlink",
+      "kind": "symlink",
+      "digest": "sha256:82fb62fd2299e2171e4a204cf80a604732080f812d215b85e667b19d344b0536"
+    },
+    {
+      "resourceId": "setup:agent-instructions",
+      "path": "AGENTS.md",
+      "sourcePath": "templates/AGENTS.md",
+      "mode": "copy",
+      "kind": "file",
+      "digest": "sha256:034c4a68fe39e4e620f21f5ef0f170f99c3874fbac06393492e340afdec950ab"
+    },
+    {
+      "resourceId": "setup:claude-instructions",
+      "path": "CLAUDE.md",
+      "sourcePath": "AGENTS.md",
+      "mode": "symlink",
+      "kind": "symlink",
+      "digest": "sha256:07728883f9dfed017a4810db4ea26e3248d1e603ce8b085ec87953359caae216"
+    }
+  ]
+}

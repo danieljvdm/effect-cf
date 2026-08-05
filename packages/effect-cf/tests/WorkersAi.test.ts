@@ -50,6 +50,7 @@ test("Workers AI layer validates the binding shape", async () => {
     Effect.runPromise(
       Effect.gen(function* () {
         const ai = yield* TestAi;
+
         yield* ai.models();
       }).pipe(
         Effect.provide(
@@ -69,6 +70,7 @@ test("Workers AI wraps operation failures", async () => {
     Effect.runPromise(
       Effect.gen(function* () {
         const ai = yield* TestAi;
+
         yield* ai.run("@cf/test/model", {});
       }).pipe(
         Effect.provide(

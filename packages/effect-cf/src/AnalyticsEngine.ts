@@ -3,13 +3,13 @@ import type {
   AnalyticsEngineDataset as CloudflareAnalyticsEngineDataset,
 } from "@cloudflare/workers-types";
 import {
+  type Redacted,
   Config,
   Context,
   Data,
   Effect,
   Layer,
   Option,
-  Redacted,
   Result,
   Schema as S,
 } from "effect";
@@ -558,7 +558,9 @@ const writeChunks = (
 const queryApiUrl = (definition: AnalyticsEngineQueryDefinition) => {
   const baseUrl = new URL(definition.apiBaseUrl ?? defaultQueryApiBaseUrl);
   const pathname = baseUrl.pathname.replace(/\/+$/, "");
+
   baseUrl.pathname = `${pathname}/accounts/${definition.accountId}/analytics_engine/sql`;
+
   return baseUrl.href;
 };
 
@@ -613,6 +615,7 @@ const executeQueryRequest = (
 
     if (response.status < 200 || response.status >= 300) {
       const body = yield* responseText(definition, response, "queryErrorBody");
+
       return yield* Effect.fail(
         analyticsEngineQueryError(
           definition,
@@ -647,6 +650,7 @@ const makeQueryClientWith = (
           ),
         ),
       );
+
       return yield* decodeQueryResponse(json);
     });
   const queryResult = <Row>(
@@ -783,6 +787,7 @@ export const queryLayerConfig = <Self>(
     tag,
     Effect.gen(function* () {
       const definition = yield* config;
+
       return yield* makeQueryClient(definition);
     }),
   );

@@ -1,7 +1,12 @@
-import type { CreateTodo, Todo, TodoStats, UpdateTodo } from "@effect-cf/todo-http-domain";
-import { TodoNotFound } from "@effect-cf/todo-http-domain";
+import {
+  type CreateTodo,
+  type Todo,
+  type TodoStats,
+  type UpdateTodo,
+  TodoNotFound,
+} from "@effect-cf/todo-http-domain";
 import { Context, Effect, Layer } from "effect";
-import { SqlClient, SqlError } from "effect/unstable/sql";
+import { type SqlError, SqlClient } from "effect/unstable/sql";
 
 interface TodoRow {
   readonly [key: string]: unknown;
@@ -66,6 +71,7 @@ export class TodoRepository extends Context.Service<TodoRepository, TodoReposito
             FROM todos
             ORDER BY completed ASC, created_at DESC
           `;
+
           return rows.map(fromRow);
         });
 
@@ -76,6 +82,7 @@ export class TodoRepository extends Context.Service<TodoRepository, TodoReposito
           FROM todos
         `;
         const row = rows[0] ?? { total: 0, completed: 0 };
+
         return {
           total: row.total,
           open: row.total - row.completed,
@@ -96,6 +103,7 @@ export class TodoRepository extends Context.Service<TodoRepository, TodoReposito
               VALUES (${crypto.randomUUID()}, ${title === "" ? "Untitled todo" : title}, 0, ${now}, ${now})
               RETURNING id, title, completed, created_at, updated_at
             `;
+
             return fromRow(rows[0]);
           }),
         update: (id, input) =>
@@ -107,6 +115,7 @@ export class TodoRepository extends Context.Service<TodoRepository, TodoReposito
               WHERE id = ${id}
             `;
             const current = currentRows[0];
+
             if (current === undefined) {
               return yield* Effect.fail(new TodoNotFound({ id }));
             }
@@ -121,6 +130,7 @@ export class TodoRepository extends Context.Service<TodoRepository, TodoReposito
               WHERE id = ${id}
               RETURNING id, title, completed, created_at, updated_at
             `;
+
             return fromRow(rows[0]);
           }),
         delete: (id) =>
@@ -131,12 +141,14 @@ export class TodoRepository extends Context.Service<TodoRepository, TodoReposito
               WHERE id = ${id}
               RETURNING id, title, completed, created_at, updated_at
             `;
+
             return rows.length > 0;
           }),
         stats: getStats,
         clearCompleted: Effect.gen(function* () {
           yield* ensureSchema;
           yield* sql`DELETE FROM todos WHERE completed = 1`;
+
           return yield* getStats;
         }),
       } satisfies TodoRepositoryService;

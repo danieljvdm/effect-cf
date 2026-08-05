@@ -1,6 +1,6 @@
 import { Context, Effect, Schema as S, type Layer, type Scope } from "effect";
 
-import * as Binding from "./Binding";
+import type * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
 import * as QueueEntrypoint from "./Queue";
 import * as QueueBinding from "./QueueBinding";
@@ -121,6 +121,7 @@ export const Tag =
       options?: QueueBinding.QueueSendOptions,
     ) {
       const queue = yield* tag;
+
       yield* queue.send(message, options);
     });
 
@@ -129,16 +130,19 @@ export const Tag =
       options?: QueueBinding.QueueSendBatchOptions,
     ) {
       const queue = yield* tag;
+
       yield* queue.sendBatch(messages, options);
     });
 
     const metrics = Effect.fnUntraced(function* () {
       const queue = yield* tag;
+
       return yield* queue.metrics();
     });
 
     const unsafeRaw = Effect.fnUntraced(function* () {
       const queue = yield* tag;
+
       return yield* queue.unsafeRaw;
     });
 
@@ -165,6 +169,7 @@ const wrapHandler = <ROut, const Self extends Definition.Any>(
   return (batch) =>
     Effect.gen(function* () {
       const decoded = yield* QueueEntrypoint.decodeBatch(batch.raw, decodeBody);
+
       yield* handler(decoded);
     });
 };

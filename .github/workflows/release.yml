@@ -25,11 +25,14 @@ jobs:
         with:
           # Let changesets/action configure git credentials with github.token.
           persist-credentials: false
-      - uses: voidzero-dev/setup-vp@v1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # setup-bun action v2.2.0
+      - uses: voidzero-dev/setup-vp@143f5f385f39b1b753ffed1a01ad443811855c8b # v1.16.1
         with:
           node-version: "24"
           cache: true
-      - run: vp install
+          run-install: |
+            args: ["--frozen-lockfile", "--ignore-scripts"]
+      - run: bun ./node_modules/@danieljvdm/dev-kit/bin/dev-kit.mjs apply --locked
       - name: Upgrade npm for trusted publishing
         run: npm install -g npm@latest
       - name: Create Release Pull Request or Publish

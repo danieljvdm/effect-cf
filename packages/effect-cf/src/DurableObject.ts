@@ -1,6 +1,13 @@
 import { DurableObject as CloudflareDurableObject } from "cloudflare:workers";
-import { ConfigProvider, Effect, Layer, ManagedRuntime, type Context, type Scope } from "effect";
-import type { Schema as S } from "effect";
+import {
+  ConfigProvider,
+  Effect,
+  Layer,
+  ManagedRuntime,
+  type Context,
+  type Scope,
+  type Schema as S,
+} from "effect";
 
 import { NativeRequest } from "./Worker";
 import { WorkerConfig, WorkerEnvironment, type WorkerEnv } from "./Environment";
@@ -173,6 +180,7 @@ export const make = <
       this.runtime = ManagedRuntime.make(runtimeLayer);
 
       const initialize = options.initialize;
+
       if (initialize !== undefined) {
         state.waitUntil(this[RunSymbol](initialize, { eventLayer: false }));
       }

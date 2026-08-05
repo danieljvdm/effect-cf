@@ -1,4 +1,4 @@
-import { Context, Data, Effect, type Scope } from "effect";
+import { Data, Effect, type Context, type Scope } from "effect";
 
 import * as Binding from "./Binding";
 import * as CloudflareRpc from "./Rpc";
@@ -511,6 +511,7 @@ export const makeClient = <
         const methodName = String(method);
         const result = yield* rpc(stub, method, ...args);
         const value = yield* CloudflareRpc.scoped(result);
+
         return yield* decodeSuccess<Method>(methodName, value);
       });
 
@@ -598,6 +599,7 @@ export const makeDirectMethods = <
         fetch: (input: RequestInfo | URL, init?: RequestInit) =>
           Effect.gen(function* () {
             const stub = yield* getStub();
+
             return yield* helpers.fetch(stub, input, init);
           }),
       } as Record<string, unknown>;
@@ -606,6 +608,7 @@ export const makeDirectMethods = <
         client[methodName] = (...args: Array<unknown>) =>
           Effect.gen(function* () {
             const stub = yield* getStub();
+
             return yield* (
               helpers.call as (
                 stub: DurableObjectStubClient<Api>,

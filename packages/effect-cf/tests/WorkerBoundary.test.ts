@@ -87,6 +87,7 @@ test("Worker.fetch renders Effect HttpServerResponse values", async () => {
 
       if (path === "/context-stream") {
         const stream = RenderValue.pipe(Stream.fromEffect, Stream.encodeText);
+
         return HttpServerResponse.stream(stream as Stream.Stream<Uint8Array, never, never>);
       }
 
@@ -99,11 +100,13 @@ test("Worker.fetch renders Effect HttpServerResponse values", async () => {
   const worker = new Live(makeExecutionContext(), {} as Cloudflare.Env);
 
   const textResponse = await worker.fetch(new Request("https://worker.test/text"));
+
   expect(textResponse.status).toBe(202);
   expect(textResponse.headers.get("x-text")).toBe("yes");
   await expect(textResponse.text()).resolves.toBe("from-http-server-response");
 
   const jsonResponse = await worker.fetch(new Request("https://worker.test/json"));
+
   expect(jsonResponse.status).toBe(201);
   expect(jsonResponse.headers.get("x-test")).toBe("ok");
   expect(
@@ -112,15 +115,18 @@ test("Worker.fetch renders Effect HttpServerResponse values", async () => {
   await expect(jsonResponse.json()).resolves.toEqual({ ok: true });
 
   const emptyResponse = await worker.fetch(new Request("https://worker.test/empty"));
+
   expect(emptyResponse.status).toBe(204);
   await expect(emptyResponse.text()).resolves.toBe("");
 
   const streamResponse = await worker.fetch(new Request("https://worker.test/stream"));
+
   await expect(streamResponse.text()).resolves.toBe("foobar");
 
   const contextStreamResponse = await worker.fetch(
     new Request("https://worker.test/context-stream"),
   );
+
   await expect(contextStreamResponse.text()).resolves.toBe("from-context");
 });
 
@@ -200,12 +206,14 @@ test("WorkerConfig.layerWith derives Effect config from non-scalar env bindings"
 test("Worker handlers use an epoch nanosecond clock derived from wall time", async () => {
   const originalDateNow = Date.now;
   const fixedMillis = Date.UTC(2030, 0, 2, 3, 4, 5);
+
   Date.now = () => fixedMillis;
 
   try {
     const WorkerClass = Worker.make(Layer.empty, {
       fetch: Effect.gen(function* () {
         const nanos = yield* Clock.currentTimeNanos;
+
         return Response.json({ nanos: nanos.toString() });
       }),
     });
@@ -230,6 +238,7 @@ test("Worker eventLayer applies to fetch, queue, and RPC events", async () => {
       Effect.sync(() => {
         nextEventId++;
         events.push(`acquire:${nextEventId}`);
+
         return `event:${nextEventId}`;
       }),
       (value) => Effect.sync(() => events.push(`release:${value}`)),
@@ -240,11 +249,13 @@ test("Worker eventLayer applies to fetch, queue, and RPC events", async () => {
     eventLayer,
     fetch: Effect.gen(function* () {
       const value = yield* EventValue;
+
       return new Response(value);
     }),
     queue: () =>
       Effect.gen(function* () {
         const value = yield* EventValue;
+
         events.push(`queue:${value}`);
       }),
     rpc: {
@@ -254,6 +265,7 @@ test("Worker eventLayer applies to fetch, queue, and RPC events", async () => {
   const worker = new WorkerClass(makeExecutionContext(), {} as Cloudflare.Env);
 
   const response = await worker.fetch(new Request("https://worker.test/"));
+
   await expect(response.text()).resolves.toBe("event:1");
   await worker.queue(makeMessageBatch("events"));
   await expect(worker.read()).resolves.toBe("event:3");

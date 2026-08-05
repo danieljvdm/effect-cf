@@ -1,8 +1,8 @@
-import { DatabaseError, TodoHttpApi, TodoNotFound } from "@effect-cf/todo-http-domain";
+import { type TodoNotFound, DatabaseError, TodoHttpApi } from "@effect-cf/todo-http-domain";
 import { Cause, Effect, Layer } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
-import { SqlError } from "effect/unstable/sql";
+import type { SqlError } from "effect/unstable/sql";
 import { Worker } from "effect-cf";
 import { TodoDatabase } from "./bindings";
 import { D1SqlClient } from "./D1SqlClient";
@@ -22,30 +22,35 @@ const TodosLive = HttpApiBuilder.group(TodoHttpApi, "Todos", (handlers) =>
     .handle("listTodos", () =>
       Effect.gen(function* () {
         const todos = yield* TodoRepository;
+
         return yield* mapDatabaseError(todos.list.pipe(Effect.map((todos) => ({ todos }))));
       }),
     )
     .handle("createTodo", ({ payload }) =>
       Effect.gen(function* () {
         const todos = yield* TodoRepository;
+
         return yield* mapDatabaseError(todos.create(payload));
       }),
     )
     .handle("clearCompleted", () =>
       Effect.gen(function* () {
         const todos = yield* TodoRepository;
+
         return yield* mapDatabaseError(todos.clearCompleted);
       }),
     )
     .handle("updateTodo", ({ params, payload }) =>
       Effect.gen(function* () {
         const todos = yield* TodoRepository;
+
         return yield* mapUpdateDatabaseError(todos.update(params.id, payload));
       }),
     )
     .handle("deleteTodo", ({ params }) =>
       Effect.gen(function* () {
         const todos = yield* TodoRepository;
+
         return yield* mapDatabaseError(
           todos.delete(params.id).pipe(Effect.map((deleted) => ({ deleted }))),
         );
@@ -54,6 +59,7 @@ const TodosLive = HttpApiBuilder.group(TodoHttpApi, "Todos", (handlers) =>
     .handle("stats", () =>
       Effect.gen(function* () {
         const todos = yield* TodoRepository;
+
         return yield* mapDatabaseError(todos.stats);
       }),
     ),
@@ -83,6 +89,7 @@ const render = Effect.gen(function* () {
       ),
     ),
   );
+
   return HttpServerResponse.toWeb(response, { context });
 });
 

@@ -1,8 +1,8 @@
-import { DatabaseError, TodoNotFound, TodoRpcGroup } from "@effect-cf/todo-rpc-http-domain";
+import { type TodoNotFound, DatabaseError, TodoRpcGroup } from "@effect-cf/todo-rpc-http-domain";
 import { Cause, Effect, Layer } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
-import { SqlError } from "effect/unstable/sql";
+import type { SqlError } from "effect/unstable/sql";
 import { Worker } from "effect-cf";
 import { TodoDatabase } from "./bindings";
 import { D1SqlClient } from "./D1SqlClient";
@@ -21,21 +21,25 @@ const TodoRpcLive = TodoRpcGroup.toLayer({
   ListTodos: () =>
     Effect.gen(function* () {
       const todos = yield* TodoRepository;
+
       return yield* mapDatabaseError(todos.list.pipe(Effect.map((todos) => ({ todos }))));
     }),
   CreateTodo: (payload) =>
     Effect.gen(function* () {
       const todos = yield* TodoRepository;
+
       return yield* mapDatabaseError(todos.create(payload));
     }),
   UpdateTodo: (payload) =>
     Effect.gen(function* () {
       const todos = yield* TodoRepository;
+
       return yield* mapUpdateDatabaseError(todos.update(payload.id, payload));
     }),
   DeleteTodo: (payload) =>
     Effect.gen(function* () {
       const todos = yield* TodoRepository;
+
       return yield* mapDatabaseError(
         todos.delete(payload.id).pipe(Effect.map((deleted) => ({ deleted }))),
       );
@@ -43,11 +47,13 @@ const TodoRpcLive = TodoRpcGroup.toLayer({
   GetStats: () =>
     Effect.gen(function* () {
       const todos = yield* TodoRepository;
+
       return yield* mapDatabaseError(todos.stats);
     }),
   ClearCompleted: () =>
     Effect.gen(function* () {
       const todos = yield* TodoRepository;
+
       return yield* mapDatabaseError(todos.clearCompleted);
     }),
 });
@@ -77,6 +83,7 @@ const render = Effect.gen(function* () {
       ),
     ),
   );
+
   return HttpServerResponse.toWeb(response, { context });
 });
 

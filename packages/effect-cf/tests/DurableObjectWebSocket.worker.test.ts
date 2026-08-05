@@ -100,12 +100,14 @@ it.effect("serializes, deserializes, and rehydrates typed attachments", () =>
     assert.deepStrictEqual(valid.deserializeAttachment(), { id: "abc" });
 
     const decoded = yield* Attachment.deserialize(validSocket);
+
     assert.strictEqual(Option.isSome(decoded), true);
     if (Option.isSome(decoded)) {
       assert.deepStrictEqual(decoded.value, { id: "abc" });
     }
 
     const decodeFailure = yield* Attachment.deserialize(invalidSocket).pipe(Effect.flip);
+
     assert.strictEqual(decodeFailure._tag, "DurableWebSocketAttachmentError");
     assert.strictEqual(decodeFailure.operation, "deserialize");
 

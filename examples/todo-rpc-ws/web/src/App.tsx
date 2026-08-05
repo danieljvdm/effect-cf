@@ -5,29 +5,35 @@ import { runClient, TodoRpcClient } from "./clients";
 
 const listTodos = Effect.gen(function* () {
   const client = yield* TodoRpcClient;
+
   return yield* client.ListTodos();
 });
 const getStats = Effect.gen(function* () {
   const client = yield* TodoRpcClient;
+
   return yield* client.GetStats();
 });
 const createTodo = (title: string) =>
   Effect.gen(function* () {
     const client = yield* TodoRpcClient;
+
     return yield* client.CreateTodo({ title });
   });
 const updateTodo = (todo: Todo) =>
   Effect.gen(function* () {
     const client = yield* TodoRpcClient;
+
     return yield* client.UpdateTodo({ id: todo.id, title: undefined, completed: !todo.completed });
   });
 const removeTodo = (todo: Todo) =>
   Effect.gen(function* () {
     const client = yield* TodoRpcClient;
+
     return yield* client.DeleteTodo({ id: todo.id });
   });
 const clearCompletedTodos = Effect.gen(function* () {
   const client = yield* TodoRpcClient;
+
   return yield* client.ClearCompleted();
 });
 
@@ -49,10 +55,12 @@ export default function App() {
   );
   const load = useCallback(async () => {
     const [list, nextStats] = await runClient(Effect.all([listTodos, getStats]));
+
     setTodos(list.todos);
     setStats(nextStats);
     setStatus(`Synced ${list.todos.length} todo(s) via Effect RPC over WebSocket`);
   }, []);
+
   useEffect(() => {
     load().catch((error: unknown) =>
       setStatus(error instanceof Error ? error.message : String(error)),
@@ -95,6 +103,7 @@ export default function App() {
         Effect.asVoid,
       ),
     );
+
   return (
     <main className="shell">
       <section className="hero">

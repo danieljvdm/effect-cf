@@ -23,6 +23,7 @@ const makeFakeD1 = (options: FakeD1Options = {}) =>
       const statement = {
         bind: (...values: Array<unknown>) => {
           params = values;
+
           return statement;
         },
         all: async () => ({
@@ -34,6 +35,7 @@ const makeFakeD1 = (options: FakeD1Options = {}) =>
         run: async () => ({ success: true, meta: {}, results: [] }),
         first: async () => null,
       };
+
       return statement;
     },
     batch: async () => [],
@@ -54,6 +56,7 @@ const sqlLayer = (db: D1Database) =>
   const db = makeFakeD1({
     all: (query, params) => {
       seen.push({ query, params });
+
       return [{ id: 1, title: "ship D1" }];
     },
   });

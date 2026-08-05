@@ -10,6 +10,7 @@ export const clock: Clock.Clock = {
   currentTimeNanos: Effect.sync(() => clock.currentTimeNanosUnsafe()),
   sleep: (duration) => {
     const millis = Duration.toMillis(duration);
+
     if (millis <= 0) {
       return Effect.yieldNow;
     }
@@ -20,6 +21,7 @@ export const clock: Clock.Clock = {
       }
 
       const handle = setTimeout(() => resume(Effect.void), millis);
+
       return Effect.sync(() => clearTimeout(handle));
     });
   },

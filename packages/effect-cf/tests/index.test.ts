@@ -2,11 +2,11 @@ import { Clock, Context, Effect, Layer, Option, Schema as S, type Scope } from "
 import { expect, test } from "vite-plus/test";
 
 import {
+  type DurableObjectWebSocket,
   Binding,
   DurableObject,
   DurableObjectNamespace,
   DurableObjectState,
-  DurableObjectWebSocket,
   ServiceBinding,
   Worker,
   WorkerEnvironment,
@@ -165,6 +165,7 @@ test("Durable Object initialize runs when the instance is constructed", async ()
     },
     blockConcurrencyWhile: (callback: () => Promise<unknown>) => {
       calls.push("block");
+
       return callback();
     },
     acceptWebSocket() {},
@@ -181,6 +182,7 @@ test("Durable Object initialize runs when the instance is constructed", async ()
   const Live = DurableObject.make(Layer.empty, {
     initialize: Effect.gen(function* () {
       const state = yield* DurableObjectState.DurableObjectState;
+
       yield* state.blockConcurrencyWhile(
         Effect.sync(() => {
           calls.push(`initialize:${state.id.toString()}`);
@@ -206,6 +208,7 @@ test("Durable Object eventLayer applies to events but not initialize", async () 
       Effect.sync(() => {
         nextEventId++;
         events.push(`acquire:${nextEventId}`);
+
         return `event:${nextEventId}`;
       }),
       (value) => Effect.sync(() => events.push(`release:${value}`)),
@@ -216,34 +219,41 @@ test("Durable Object eventLayer applies to events but not initialize", async () 
     eventLayer,
     initialize: Effect.gen(function* () {
       const value = yield* Effect.serviceOption(DurableObjectEventValue);
+
       events.push(Option.isSome(value) ? `initialize:${value.value}` : "initialize:none");
     }),
     fetch: Effect.gen(function* () {
       const value = yield* DurableObjectEventValue;
+
       return new Response(value);
     }),
     alarms: Effect.gen(function* () {
       const value = yield* DurableObjectEventValue;
+
       events.push(`alarms:${value}`);
     }),
     alarm: () =>
       Effect.gen(function* () {
         const value = yield* DurableObjectEventValue;
+
         events.push(`alarm:${value}`);
       }),
     webSocketMessage: () =>
       Effect.gen(function* () {
         const value = yield* DurableObjectEventValue;
+
         events.push(`websocket:${value}`);
       }),
     webSocketClose: () =>
       Effect.gen(function* () {
         const value = yield* DurableObjectEventValue;
+
         events.push(`websocket-close:${value}`);
       }),
     webSocketError: () =>
       Effect.gen(function* () {
         const value = yield* DurableObjectEventValue;
+
         events.push(`websocket-error:${value}`);
       }),
     rpc: {
@@ -252,9 +262,11 @@ test("Durable Object eventLayer applies to events but not initialize", async () 
   });
 
   const object = new Live(state.raw, {} as Cloudflare.Env);
+
   await Promise.all(state.waitUntilPromises);
 
   const response = await object.fetch!(new Request("https://do.test/"));
+
   await expect(response.text()).resolves.toBe("event:1");
   await object.alarm!();
   await object.webSocketMessage!({} as WebSocket, "hello");
@@ -287,12 +299,14 @@ test("Durable Object eventLayer applies to events but not initialize", async () 
 test("Durable Object handlers use an epoch nanosecond clock derived from wall time", async () => {
   const originalDateNow = Date.now;
   const fixedMillis = Date.UTC(2030, 0, 2, 3, 4, 5);
+
   Date.now = () => fixedMillis;
 
   try {
     const Live = DurableObject.make(Layer.empty, {
       fetch: Effect.gen(function* () {
         const nanos = yield* Clock.currentTimeNanos;
+
         return Response.json({ nanos: nanos.toString() });
       }),
     });
@@ -326,6 +340,7 @@ test("fetch provides the exact NativeRequest object", async () => {
   const WorkerClass = Worker.make(Layer.empty, {
     fetch: Effect.gen(function* () {
       capturedRequest = yield* Worker.NativeRequest;
+
       return new Response(null, { status: 204 });
     }),
   });
@@ -356,6 +371,7 @@ test("Worker RPC methods run through the managed runtime", async () => {
       ping: () =>
         Effect.gen(function* () {
           const service = yield* TestService;
+
           return service.value;
         }),
     },
@@ -415,6 +431,7 @@ test("DurableObject preserves server, client, handler, and namespace types", () 
         get: () =>
           Effect.gen(function* () {
             yield* DurableObjectState.DurableObjectState;
+
             return 1;
           }),
         add: (amount, label) => Effect.succeed(amount + label.length),
@@ -447,15 +464,18 @@ test("DurableObject preserves server, client, handler, and namespace types", () 
       webSocketMessage: (socket, message) => {
         expectType<DurableObjectWebSocket.DurableWebSocket>(socket);
         expectType<string | ArrayBuffer>(message);
+
         return Effect.void;
       },
       webSocketClose: (socket) => {
         expectType<DurableObjectWebSocket.DurableWebSocket>(socket);
+
         return Effect.void;
       },
       webSocketError: (socket, error) => {
         expectType<DurableObjectWebSocket.DurableWebSocket>(socket);
         expectType<unknown>(error);
+
         return Effect.void;
       },
     });
@@ -624,6 +644,7 @@ test("Durable Object namespace binding retrieves stubs from the Worker environme
       Effect.gen(function* () {
         const counters = yield* Counter;
         const counter = yield* counters.getByName("counter");
+
         return yield* counters.call(counter, "get");
       }),
       {
@@ -675,6 +696,7 @@ test("Service binding rpc uses the shared dynamic method validation", async () =
       provideEchoService(
         Effect.gen(function* () {
           const service = yield* EchoService;
+
           return yield* service.call("echo", "hello");
         }),
         {

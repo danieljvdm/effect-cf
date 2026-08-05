@@ -30,6 +30,7 @@ it.effect("Worker handlers use epoch nanosecond timestamps in the Workers runtim
     const WorkerClass = Worker.make(Layer.empty, {
       fetch: Effect.gen(function* () {
         const nanos = yield* Clock.currentTimeNanos;
+
         return Response.json({ nanos: nanos.toString() });
       }),
     });

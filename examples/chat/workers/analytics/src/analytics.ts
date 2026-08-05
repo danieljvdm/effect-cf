@@ -14,6 +14,7 @@ const knownUsersFor = (userIds: ReadonlySet<string>) =>
 
     for (const userId of userIds) {
       const user = yield* api.getUser(userId);
+
       if (user !== null) {
         users.push(user);
       }

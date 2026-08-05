@@ -6,23 +6,27 @@ import { runClient, TodoApiClient, TodoRpcClient } from "./clients";
 
 const listTodos = Effect.gen(function* () {
   const client = yield* TodoApiClient;
+
   return yield* client.Todos.listTodos(undefined);
 });
 
 const getStats = Effect.gen(function* () {
   const client = yield* TodoRpcClient;
+
   return yield* client.GetStats();
 });
 
 const createTodo = (title: string) =>
   Effect.gen(function* () {
     const client = yield* TodoApiClient;
+
     return yield* client.Todos.createTodo({ payload: { title } });
   });
 
 const updateTodo = (todo: Todo) =>
   Effect.gen(function* () {
     const client = yield* TodoApiClient;
+
     return yield* client.Todos.updateTodo({
       params: { id: todo.id },
       payload: { title: undefined, completed: !todo.completed },
@@ -32,11 +36,13 @@ const updateTodo = (todo: Todo) =>
 const removeTodo = (todo: Todo) =>
   Effect.gen(function* () {
     const client = yield* TodoApiClient;
+
     return yield* client.Todos.deleteTodo({ params: { id: todo.id } });
   });
 
 const clearCompletedTodos = Effect.gen(function* () {
   const client = yield* TodoRpcClient;
+
   return yield* client.ClearCompleted();
 });
 
@@ -60,6 +66,7 @@ export default function App() {
 
   const load = useCallback(async () => {
     const [list, nextStats] = await runClient(Effect.all([listTodos, getStats]));
+
     setTodos(list.todos);
     setStats(nextStats);
     setStatus(`Synced ${list.todos.length} todo(s) via typed HttpApiClient + RpcClient`);

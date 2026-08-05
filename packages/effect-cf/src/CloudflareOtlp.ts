@@ -89,11 +89,13 @@ const selectedSignals = (signals: ReadonlyArray<Signal> | undefined): ReadonlySe
 
 const withDefinedAttributes = (attributes: Record<string, unknown>): Record<string, unknown> => {
   const out: Record<string, unknown> = {};
+
   for (const [key, value] of Object.entries(attributes)) {
     if (value !== undefined) {
       out[key] = value;
     }
   }
+
   return out;
 };
 
@@ -120,9 +122,11 @@ const mergeSignalLayers = (layers: ReadonlyArray<SignalLayer>): SignalLayer => {
   }
 
   let merged = layers[0]!;
+
   for (let index = 1; index < layers.length; index++) {
     merged = Layer.mergeAll(merged, layers[index]!);
   }
+
   return merged;
 };
 

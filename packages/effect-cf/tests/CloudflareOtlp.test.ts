@@ -35,6 +35,7 @@ const getArray = (value: unknown, key: string): ReadonlyArray<unknown> => {
   }
 
   const child = value[key];
+
   if (!Array.isArray(child)) {
     throw new Error(`Expected ${key} to be an array`);
   }
@@ -48,6 +49,7 @@ const getRecord = (value: unknown, key: string): Record<string, unknown> => {
   }
 
   const child = value[key];
+
   if (!isRecord(child)) {
     throw new Error(`Expected ${key} to be an object`);
   }
@@ -61,6 +63,7 @@ const getString = (value: unknown, key: string): string => {
   }
 
   const child = value[key];
+
   if (typeof child !== "string") {
     throw new Error(`Expected ${key} to be a string`);
   }
@@ -82,11 +85,13 @@ const getStringAttribute = (
   key: string,
 ): string | undefined => {
   const attribute = getAttribute(attributes, key);
+
   if (attribute === undefined) {
     return undefined;
   }
 
   const value = attribute.value;
+
   return isRecord(value) && typeof value.stringValue === "string" ? value.stringValue : undefined;
 };
 
@@ -113,6 +118,7 @@ class OtlpCollector extends Context.Service<
         Effect.gen(function* () {
           const request = yield* HttpServerRequest.HttpServerRequest;
           const body = yield* request.text;
+
           yield* Queue.offer(requests, {
             path: request.url,
             headers: request.headers,
@@ -155,6 +161,7 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
       );
 
       const request = yield* collector.nextRequest;
+
       expect(request.path).toBe("/v1/traces");
       expect(request.body).toContain("ambient-provider-test");
       expect(request.body).toContain("ambient.config");
@@ -192,6 +199,7 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
       expect(response.status).toBe(200);
 
       const request = yield* collector.nextRequest;
+
       expect(request.path).toBe("/v1/traces");
       expect(request.headers["x-api-key"]).toBe("trace-secret");
       expect(request.headers["x-trace-key"]).toBe("trace-only");
@@ -285,6 +293,7 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
       );
 
       const request = yield* collector.nextRequest;
+
       expect(request.path).toBe("/base/v1/traces");
       expect(request.body).toContain("generic.endpoint");
     }),
@@ -295,8 +304,10 @@ it.effect("CloudflareOtlp layer is disabled when the OTEL signal exporter is uns
   Effect.gen(function* () {
     const originalFetch = globalThis.fetch;
     let fetchCalls = 0;
+
     globalThis.fetch = (...args: Parameters<typeof fetch>) => {
       fetchCalls += 1;
+
       return originalFetch(...args);
     };
 
@@ -332,8 +343,10 @@ it.effect("CloudflareOtlp layer is disabled when no endpoint is configured", () 
   Effect.gen(function* () {
     const originalFetch = globalThis.fetch;
     let fetchCalls = 0;
+
     globalThis.fetch = (...args: Parameters<typeof fetch>) => {
       fetchCalls += 1;
+
       return originalFetch(...args);
     };
 
@@ -370,8 +383,10 @@ it.effect("CloudflareOtlp layer honors OTEL_SDK_DISABLED", () =>
   Effect.gen(function* () {
     const originalFetch = globalThis.fetch;
     let fetchCalls = 0;
+
     globalThis.fetch = (...args: Parameters<typeof fetch>) => {
       fetchCalls += 1;
+
       return originalFetch(...args);
     };
 

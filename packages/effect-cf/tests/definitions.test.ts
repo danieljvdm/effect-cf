@@ -1,14 +1,15 @@
 import { assert, expect, it, layer, test } from "@effect/vitest";
+import type { WorkflowStep } from "cloudflare:workers";
 import { Cause, Effect, Exit, Layer, Option, Schema as S, type Scope } from "effect";
 
 import {
+  type DurableObjectNamespace,
+  type QueueBinding,
+  type Rpc,
+  type ServiceBinding,
   DurableObjectDefinition,
-  DurableObjectNamespace,
   DurableObjectStorage,
   Queue,
-  QueueBinding,
-  Rpc,
-  ServiceBinding,
   WorkerDefinition,
   WorkerEnvironment,
   Workflow,
@@ -104,10 +105,12 @@ test("definition-backed Worker RPC validates encoded success values", async () =
       metrics: async () => ({ backlogCount: 0, backlogBytes: 0 }),
       send: async (message: unknown) => {
         sent.push(message);
+
         return { metadata: { metrics: { backlogCount: 1, backlogBytes: 10 } } };
       },
       sendBatch: async (messages: Iterable<MessageSendRequest<unknown>>) => {
         sent.push(...Array.from(messages, (message) => message.body));
+
         return { metadata: { metrics: { backlogCount: 2, backlogBytes: 20 } } };
       },
     },
@@ -124,6 +127,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
 
         yield* AvatarQueue.send({ userId: "u_1", attempts: 2 });
         const queue = yield* AvatarQueue;
+
         yield* queue.sendBatch([{ body: { userId: "u_2", attempts: 3 } }]);
         const metrics = yield* queue.metrics();
 
@@ -142,6 +146,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
       AVATAR_QUEUE: {
         send: async (message: unknown, options?: QueueBinding.QueueSendOptions) => {
           sent.push({ message, options });
+
           return { metadata: { metrics: { backlogCount: sent.length, backlogBytes: 0 } } };
         },
       },
@@ -161,6 +166,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
           yield* AvatarQueue.send({ userId: "u_1", attempts: 2 });
 
           const queue = yield* AvatarQueue;
+
           yield* queue.sendBatch(
             [
               { body: { userId: "u_2", attempts: 3 }, contentType: "json" },
@@ -289,10 +295,12 @@ test("definition-backed Worker RPC validates encoded success values", async () =
     ARTIFACT_WORKFLOW: {
       create: async (options: unknown) => {
         createdOptions = options;
+
         return instance;
       },
       createBatch: async (options: unknown) => {
         createdBatchOptions = options;
+
         return [instance];
       },
       get: async () => instance,
@@ -349,13 +357,16 @@ test("definition-backed Worker RPC validates encoded success values", async () =
       run: (payload) =>
         Effect.gen(function* () {
           const event = yield* Workflow.WorkflowEvent;
+
           eventPayloads.push(event.payload);
           rawEventPayloads.push(event.raw.payload);
           const doubled = yield* Workflow.step(
             `process:${event.instanceId}`,
             Effect.gen(function* () {
               const stepContext = yield* Workflow.WorkflowStepContext;
+
               stepAttempts.push(stepContext.attempt);
+
               return payload.attempt * 2;
             }),
           );
@@ -374,12 +385,13 @@ test("definition-backed Worker RPC validates encoded success values", async () =
         const callback = (maybeCallback ?? callbackOrConfig) as (
           context: unknown,
         ) => Promise<unknown>;
+
         return callback({ step: { name, count: 1 }, attempt: 3, config: {} });
       },
       sleep: async () => undefined,
       sleepUntil: async () => undefined,
       waitForEvent: async () => ({ payload: undefined, timestamp: new Date(), type: "event" }),
-    } as unknown as import("cloudflare:workers").WorkflowStep;
+    } as unknown as WorkflowStep;
 
     const result = await workflow.run(
       {
@@ -456,6 +468,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
       fetch: async () => new Response("ok"),
       increment: async (value: string) => {
         received = value;
+
         return String(Number(value) + 1);
       },
     },
@@ -568,6 +581,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
     fetch: async () => new Response("ok"),
     increment: async (value: string) => {
       received = value;
+
       return String(Number(value) + 1);
     },
   };
@@ -653,6 +667,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
       fetch: async () => new Response("ok"),
       ping: async (value: string) => {
         received = value;
+
         return value.toUpperCase();
       },
     }),
@@ -662,6 +677,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
       fetch: async () => new Response("ok"),
       ping: async (value: string) => {
         received = value;
+
         return value.toUpperCase();
       },
     }),
@@ -736,6 +752,7 @@ it.effect("Durable Object embedded KV exposes schema-backed helpers", () =>
     yield* typedKv.put("counter", { count: 1 });
 
     const value = yield* typedKv.get("counter");
+
     assert.strictEqual(Option.isSome(value) ? value.value.count : undefined, 1);
 
     raw.set("broken", { count: "not a number" });

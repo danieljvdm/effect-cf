@@ -1,6 +1,6 @@
 import { Context, Effect, Schema as S, type Layer } from "effect";
 
-import * as Binding from "./Binding";
+import type * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
 import type { ExecutionContext, WorkerContext } from "./Worker";
 import type * as RpcDefinition from "./RpcDefinition";
@@ -162,6 +162,7 @@ export const Tag =
       options?: WorkflowBinding.WorkflowInstanceCreateOptions<S.Codec.Encoded<Payload>>,
     ) {
       const workflow = yield* tag;
+
       return yield* workflow.create(payload, options);
     });
 
@@ -172,16 +173,19 @@ export const Tag =
       >,
     ) {
       const workflow = yield* tag;
+
       return yield* workflow.createBatch(batch);
     });
 
     const get = Effect.fnUntraced(function* (instanceId: string) {
       const workflow = yield* tag;
+
       return yield* workflow.get(instanceId);
     });
 
     const unsafeRaw = Effect.fnUntraced(function* () {
       const workflow = yield* tag;
+
       return yield* workflow.unsafeRaw;
     });
 
@@ -222,6 +226,7 @@ const wrapHandler = <ROut, const Self extends Definition.Any>(
       const result = yield* handler(decodedPayload as S.Schema.Type<Self["payload"]>).pipe(
         Effect.provideService(WorkflowEntrypoint.WorkflowEvent, decodedEvent),
       );
+
       return yield* encodeResult(result as S.Schema.Type<Self["result"]>);
     });
 };

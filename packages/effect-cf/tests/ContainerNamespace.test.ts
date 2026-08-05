@@ -41,10 +41,12 @@ const makeFake = (options?: {
       if (options?.fetchFailure !== undefined) {
         throw options.fetchFailure;
       }
+
       return response;
     },
     getState: async () => {
       calls.push({ operation: "getState" });
+
       return { lastChange: 42, status: "healthy" };
     },
     start: async (startOptions, waitOptions) => {
@@ -63,6 +65,7 @@ const makeFake = (options?: {
   const namespace: ContainerNamespace.ContainerNamespaceResource = {
     getByName: (name) => {
       calls.push({ operation: "getByName", name });
+
       return stub;
     },
   };
@@ -123,6 +126,7 @@ it.effect("supports static byName helpers", () => {
     assert.strictEqual(yield* instance.unsafeRaw, fake.stub);
 
     const namespace = yield* TestContainers.unsafeRaw();
+
     assert.strictEqual(namespace, fake.namespace);
   }).pipe(Effect.provide(fake.live));
 });
@@ -142,6 +146,7 @@ it.effect("defers lookup and reports synchronous namespace lookup failures", () 
 
   return Effect.gen(function* () {
     const error = yield* Effect.flip(raw);
+
     assert.instanceOf(error, ContainerNamespace.ContainerOperationError);
     assert.strictEqual(error.operation, "getByName");
     assert.strictEqual(error.cause, cause);
@@ -150,11 +155,13 @@ it.effect("defers lookup and reports synchronous namespace lookup failures", () 
 
 it.effect("decodes state and reports malformed native state", () => {
   const fake = makeFake();
+
   fake.stub.getState = async () =>
     ({ lastChange: Number.NaN, status: "unknown" }) as unknown as ContainerNamespace.ContainerState;
 
   return Effect.gen(function* () {
     const error = yield* Effect.flip(TestContainers.byName("render-invalid").state);
+
     assert.instanceOf(error, ContainerNamespace.ContainerOperationError);
     assert.strictEqual(error.operation, "state");
   }).pipe(Effect.provide(fake.live));

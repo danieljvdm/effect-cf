@@ -30,6 +30,7 @@ export const ReportWorkflowEntrypoint = ReportWorkflow.make(Layer.empty, {
         "render-report",
         Effect.gen(function* () {
           const stepContext = yield* Workflow.WorkflowStepContext;
+
           return `reports/${payload.reportId}/${event.instanceId}/${stepContext.attempt}.json`;
         }),
         {

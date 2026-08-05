@@ -46,6 +46,7 @@ export const fromWebSocket = <Attachment = unknown>(
   raw: WebSocket,
 ): DurableWebSocket<Attachment> => {
   const existing = wrappers.get(raw);
+
   if (existing !== undefined) {
     return existing as DurableWebSocket<Attachment>;
   }
@@ -74,6 +75,7 @@ export const fromWebSocket = <Attachment = unknown>(
   };
 
   wrappers.set(raw, socket);
+
   return socket as DurableWebSocket<Attachment>;
 };
 
@@ -189,7 +191,8 @@ export const attachment = <const AttachmentSchema extends S.Codec<any, any, neve
   const deserialize = (socket: DurableWebSocket<unknown>) =>
     Effect.gen(function* () {
       const value = yield* socket.deserializeAttachment;
-      if (value == null) {
+
+      if (value === null || value === undefined) {
         return Option.none<Attachment>();
       }
 

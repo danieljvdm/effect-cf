@@ -9,7 +9,9 @@ import * as Users from "./users";
 
 const json = (value: unknown, init?: ResponseInit) => {
   const headers = new Headers(init?.headers);
+
   headers.set("cache-control", "no-store");
+
   return Response.json(value, { ...init, headers });
 };
 
@@ -29,6 +31,7 @@ const layer = Layer.mergeAll(
 
 const roomRoute = (pathname: string, suffix: string) => {
   const match = pathname.match(new RegExp(`^/rooms/([^/]+)${suffix}$`));
+
   return match === null ? undefined : decodeURIComponent(match[1]);
 };
 
@@ -49,12 +52,15 @@ export const ApiWorkerLive = ApiWorker.make(layer, {
     }
 
     const userMatch = url.pathname.match(/^\/users\/([^/]+)$/);
+
     if (request.method === "GET" && userMatch !== null) {
       const user = yield* Users.getUser(decodeURIComponent(userMatch[1]));
+
       return user === null ? json({ error: "user not found" }, { status: 404 }) : json(user);
     }
 
     const socketRoomId = roomRoute(url.pathname, "/socket");
+
     if (
       request.method === "GET" &&
       socketRoomId !== undefined &&
@@ -64,8 +70,10 @@ export const ApiWorkerLive = ApiWorker.make(layer, {
     }
 
     const messagesRoomId = roomRoute(url.pathname, "/messages");
+
     if (request.method === "POST" && messagesRoomId !== undefined) {
       const text = yield* Effect.tryPromise(() => request.text());
+
       if (text.trim() === "") {
         return json({ error: "message text is required" }, { status: 400 });
       }
@@ -85,14 +93,18 @@ export const ApiWorkerLive = ApiWorker.make(layer, {
     }
 
     const roomId = roomRoute(url.pathname, "");
+
     if (request.method === "GET" && roomId !== undefined) {
       const snapshot = yield* rooms.byName(roomId).getSnapshot(roomId);
+
       return json(snapshot);
     }
 
     const analysisRoomId = roomRoute(url.pathname, "/analysis");
+
     if (request.method === "GET" && analysisRoomId !== undefined) {
       const artifact = yield* analytics.analyzeRoom(analysisRoomId);
+
       return json(artifact);
     }
 

@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Stream } from "effect";
 import { Reactivity } from "effect/unstable/reactivity";
-import { SqlClient, SqlConnection, SqlError, Statement } from "effect/unstable/sql";
+import { type SqlConnection, SqlClient, SqlError, Statement } from "effect/unstable/sql";
 
 import { TodoDatabase } from "./bindings";
 
@@ -30,6 +30,7 @@ const makeConnection = (db: D1Database): SqlConnection.Connection => {
           .prepare(sql)
           .bind(...params)
           .run();
+
         return [];
       }
 
@@ -38,6 +39,7 @@ const makeConnection = (db: D1Database): SqlConnection.Connection => {
         .bind(...params)
         .all<Record<string, unknown>>();
       const rows = result.results;
+
       return transformRows === undefined ? rows : transformRows(rows);
     });
 
@@ -74,6 +76,7 @@ export class D1SqlClient extends Context.Service<D1SqlClient, SqlClient.SqlClien
     SqlClient.SqlClient,
     Effect.gen(function* () {
       const db = yield* TodoDatabase;
+
       return yield* SqlClient.make({
         acquirer: Effect.succeed(makeConnection(db)),
         compiler: Statement.makeCompilerSqlite(),

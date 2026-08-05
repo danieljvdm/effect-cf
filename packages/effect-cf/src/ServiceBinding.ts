@@ -1,4 +1,4 @@
-import { Context, Data, Effect, type Scope } from "effect";
+import { Data, Effect, type Context, type Scope } from "effect";
 
 import * as Binding from "./Binding";
 import * as CloudflareRpc from "./Rpc";
@@ -333,6 +333,7 @@ export const makeClient = <
         const methodName = String(method);
         const result = yield* rpc(method, ...args);
         const value = yield* CloudflareRpc.scoped(result);
+
         return yield* decodeSuccess<Method>(methodName, value);
       });
 
@@ -413,6 +414,7 @@ export const Service =
     const fetch = (input: RequestInfo | URL, init?: RequestInit) =>
       Effect.gen(function* () {
         const service = yield* tag;
+
         return yield* service.fetch(input, init);
       });
 
@@ -422,6 +424,7 @@ export const Service =
     ) =>
       Effect.gen(function* () {
         const service = yield* tag;
+
         return yield* service.rpc(method, ...args);
       });
 
@@ -431,6 +434,7 @@ export const Service =
     ) =>
       Effect.gen(function* () {
         const service = yield* tag;
+
         return yield* service.call(method, ...args);
       });
 
@@ -440,6 +444,7 @@ export const Service =
     ) =>
       Effect.gen(function* () {
         const service = yield* tag;
+
         return yield* service.scopedCall(method, ...args);
       });
 

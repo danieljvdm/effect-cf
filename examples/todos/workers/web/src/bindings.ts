@@ -43,6 +43,7 @@ const ApiWorkerHttpClient = Layer.effect(
               }),
           ),
         );
+
         return HttpClientResponse.fromWeb(request, response);
       }),
     );

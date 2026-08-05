@@ -171,6 +171,7 @@ const valueStyleKvBindingLayer = (kv: KVNamespace) =>
   const kv = makeFakeKv({
     list: async (options) => {
       seenOptions.push(options);
+
       return {
         keys: [
           {
@@ -344,6 +345,7 @@ test("definition-backed KV bindings report missing and invalid bindings", async 
     Effect.runPromise(
       Effect.gen(function* () {
         const testKvBinding = yield* TestKvBinding;
+
         yield* testKvBinding.get("missing");
       }).pipe(
         Effect.provide(
@@ -359,6 +361,7 @@ test("definition-backed KV bindings report missing and invalid bindings", async 
     Effect.runPromise(
       Effect.gen(function* () {
         const testKvBinding = yield* TestKvBinding;
+
         yield* testKvBinding.get("invalid");
       }).pipe(
         Effect.provide(

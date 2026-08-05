@@ -116,6 +116,7 @@ export class ConnectionManager extends Context.Service<
       ): Effect.Effect<Connection | undefined, unknown> =>
         Effect.gen(function* () {
           const current = connections.get(socket);
+
           if (current !== undefined) {
             return current;
           }
@@ -123,6 +124,7 @@ export class ConnectionManager extends Context.Service<
           const attachment = yield* Attachments.deserialize(socket).pipe(
             Effect.catch(() => Effect.succeed(Option.none())),
           );
+
           if (Option.isNone(attachment)) {
             return undefined;
           }
@@ -136,8 +138,10 @@ export class ConnectionManager extends Context.Service<
 
       const pruneStale = Effect.gen(function* () {
         const now = Date.now();
+
         for (const socket of yield* state.getWebSockets()) {
           const connection = yield* getConnection(socket);
+
           if (connection !== undefined && now - connection.lastHeartbeat > heartbeatTtlMillis) {
             connections.delete(socket);
             yield* socket.close(1000, "heartbeat timeout").pipe(Effect.ignore);
@@ -151,6 +155,7 @@ export class ConnectionManager extends Context.Service<
           Effect.gen(function* () {
             const current = yield* getConnection(socket);
             const metadata = current ?? { roomId: "general", userId: "anonymous" };
+
             return yield* remember(socket, metadata, {
               id: current?.id,
               connectedAt: current?.connectedAt,
@@ -161,12 +166,15 @@ export class ConnectionManager extends Context.Service<
         remove: (socket) =>
           Effect.gen(function* () {
             const connection = yield* getConnection(socket);
+
             connections.delete(socket);
+
             return connection;
           }),
         list: (roomId) =>
           Effect.gen(function* () {
             yield* pruneStale;
+
             return Array.from(connections.values())
               .filter((connection) => connection.roomId === roomId)
               .map(toPeer);

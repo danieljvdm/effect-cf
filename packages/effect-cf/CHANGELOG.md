@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.18.0
+
+### Minor Changes
+
+- [#58](https://github.com/danieljvdm/effect-cf/pull/58) [`c5bac36`](https://github.com/danieljvdm/effect-cf/commit/c5bac367587c314a17b32e984faee546a488f1ff) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add Effect-native support for Cloudflare's default and named Cache API instances, including typed operation errors and `Option`-based cache misses.
+
 ## 0.17.1
 
 ### Patch Changes

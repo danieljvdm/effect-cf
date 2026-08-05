@@ -1,7 +1,6 @@
 import { Context, Effect, Layer, Stream } from "effect";
 import { Reactivity } from "effect/unstable/reactivity";
-import type { SqlConnection } from "effect/unstable/sql";
-import { SqlClient, SqlError, Statement } from "effect/unstable/sql";
+import { type SqlConnection, SqlClient, SqlError, Statement } from "effect/unstable/sql";
 
 import { TodoDatabase } from "./bindings";
 

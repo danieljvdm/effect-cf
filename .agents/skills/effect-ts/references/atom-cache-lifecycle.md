@@ -6,6 +6,12 @@
 
 Place one provider around the client application subtree that should share data. Nested or route-local providers create separate caches.
 
+### React mounts and registry disposal
+
+`useAtomValue` keeps an atom active through its value subscription. `useAtomSet` and `useAtomRefresh` mount an atom through a React effect, while `useAtom` combines one value subscription with a setter. Use the combined hook when one component reads and writes the same atom; composing `useAtomValue` and `useAtomSet` adds a second mount and obscures which lifetime owns the work.
+
+Unmount releases only that hook's subscription or mount. The registry removes a node only after it has no remaining consumers and its idle TTL permits removal. Node disposal runs registered finalizers, including cancellation of interruptible Effect work. Therefore component unmount, registry eviction, and `Atom.Interrupt` are distinct events; do not use an unconditional interrupt write as a substitute for releasing a React mount.
+
 An atom runtime and a registry solve different problems:
 
 - the registry stores atom nodes, values, subscriptions, idle timers, and finalizers;

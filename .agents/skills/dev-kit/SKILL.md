@@ -146,9 +146,9 @@ and `workflow.typecheck`; treat these commands as trusted manifest input.
 
 The workflow must use one frozen, script-suppressed install, then locked Dev Kit
 convergence before preparation or checks. Set up Bun from the consumer's
-`packageManager` or `engines.bun` declaration before Vite+ setup. Keep both
-`setup-bun` and `setup-vp` pinned to reviewed release commits—the `setup-vp`
-`v1` tag is frozen—and let Vite+ resolve the consumer's compatible locked
+`packageManager` or `engines.bun` declaration before Vite+ setup. Follow the
+maintained `setup-bun` major tag, name an explicit `setup-vp` release because
+its `v1` tag is frozen, and let Vite+ resolve the consumer's compatible locked
 version.
 
 ## Ownership and conflicts

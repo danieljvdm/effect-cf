@@ -7,8 +7,7 @@ import type {
   QueueSendOptions as CloudflareQueueSendOptions,
   QueueSendResponse as CloudflareQueueSendResponse,
 } from "@cloudflare/workers-types";
-import type { Context } from "effect";
-import { Data, Effect, Schema as S } from "effect";
+import { type Context, Data, Effect, Schema as S } from "effect";
 
 import * as Binding from "./Binding";
 import type * as RpcDefinition from "./RpcDefinition";

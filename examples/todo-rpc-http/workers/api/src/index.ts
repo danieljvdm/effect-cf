@@ -1,5 +1,4 @@
-import type { TodoNotFound } from "@effect-cf/todo-rpc-http-domain";
-import { DatabaseError, TodoRpcGroup } from "@effect-cf/todo-rpc-http-domain";
+import { type TodoNotFound, DatabaseError, TodoRpcGroup } from "@effect-cf/todo-rpc-http-domain";
 import { Cause, Effect, Layer } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";

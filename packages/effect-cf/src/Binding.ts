@@ -1,7 +1,6 @@
 import { Context, Data, Effect, Layer } from "effect";
 
-import { WorkerEnvironment } from "./Environment";
-import type { WorkerEnv } from "./Environment";
+import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 
 /** Internal type id marker used by binding helper services. */
 export const TypeId = "effect-cf/Binding" as const;

@@ -4,8 +4,7 @@ import type {
   ChatSnapshot,
 } from "@effect-cf/example-contracts/Schemas";
 import { Context, Effect, Layer } from "effect";
-import type { DurableObjectStorage } from "effect-cf";
-import { DurableObjectState } from "effect-cf";
+import { type DurableObjectStorage, DurableObjectState } from "effect-cf";
 
 interface MessageRow {
   readonly [key: string]: globalThis.SqlStorageValue;

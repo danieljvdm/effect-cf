@@ -4,14 +4,12 @@ import type { PgClient } from "@effect/sql-pg";
 import type { HttpClient } from "effect/unstable/http";
 import type { SqlClient, SqlError } from "effect/unstable/sql";
 
-import type {
-  Binding,
-  DurableObjectNamespace,
-  QueueBinding,
-  Rpc,
-  WorkflowBinding,
-} from "../src/index";
 import {
+  type Binding,
+  type DurableObjectNamespace,
+  type QueueBinding,
+  type Rpc,
+  type WorkflowBinding,
   AiGateway,
   AnalyticsEngine,
   BrowserRendering,

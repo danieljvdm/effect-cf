@@ -1,6 +1,5 @@
 import { TodoRpcGroup } from "@effect-cf/todo-rpc-http-domain";
-import type { Effect } from "effect";
-import { Context, Layer, ManagedRuntime } from "effect";
+import { type Effect, Context, Layer, ManagedRuntime } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import type { RpcClientError } from "effect/unstable/rpc/RpcClientError";

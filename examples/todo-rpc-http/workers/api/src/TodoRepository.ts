@@ -1,8 +1,12 @@
-import type { CreateTodo, Todo, TodoStats, UpdateTodo } from "@effect-cf/todo-rpc-http-domain";
-import { TodoNotFound } from "@effect-cf/todo-rpc-http-domain";
+import {
+  type CreateTodo,
+  type Todo,
+  type TodoStats,
+  type UpdateTodo,
+  TodoNotFound,
+} from "@effect-cf/todo-rpc-http-domain";
 import { Context, Effect, Layer } from "effect";
-import type { SqlError } from "effect/unstable/sql";
-import { SqlClient } from "effect/unstable/sql";
+import { type SqlError, SqlClient } from "effect/unstable/sql";
 
 interface TodoRow {
   readonly [key: string]: unknown;

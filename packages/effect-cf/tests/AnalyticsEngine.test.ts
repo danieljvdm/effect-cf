@@ -1,7 +1,6 @@
 import { assert, expect, layer, test } from "@effect/vitest";
 import { Config, ConfigProvider, Effect, Layer, Option, Redacted, Schema as S } from "effect";
-import type { HttpClient } from "effect/unstable/http";
-import { FetchHttpClient } from "effect/unstable/http";
+import { type HttpClient, FetchHttpClient } from "effect/unstable/http";
 
 import { AnalyticsEngine, Binding, WorkerEnvironment } from "../src/index";
 

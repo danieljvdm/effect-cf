@@ -110,7 +110,7 @@ When the task touches one of these areas, consult the matching guide before impl
   values, time zones, DST-safe arithmetic, formatting, Date interoperability,
   and deterministic `TestClock` tests
 - `./references/guide-atom-data-fetching.md` for the core Effect Atom HTTP
-  data-fetching workflow and ownership rules
+  data-fetching workflow, React hook choice, and action-lifetime ownership rules
 - `./references/atom-cache-lifecycle.md` for Effect Atom registry scope,
   runtime memoization, families, TTL, SWR, polling, and aggregation resets
 - `./references/atom-http-and-invalidation.md` for `AtomHttpApi.Service`,

@@ -2,8 +2,17 @@ import type {
   AnalyticsEngineDataPoint as CloudflareAnalyticsEngineDataPoint,
   AnalyticsEngineDataset as CloudflareAnalyticsEngineDataset,
 } from "@cloudflare/workers-types";
-import type { Redacted } from "effect";
-import { Config, Context, Data, Effect, Layer, Option, Result, Schema as S } from "effect";
+import {
+  type Redacted,
+  Config,
+  Context,
+  Data,
+  Effect,
+  Layer,
+  Option,
+  Result,
+  Schema as S,
+} from "effect";
 import {
   FetchHttpClient,
   type Headers,

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "toolVersion": "0.11.1",
+  "toolVersion": "0.11.3",
   "manifestDigest": "sha256:6b7c2a581d3d89e5cb2b4c0c52a05ad2bda289a01eae2dfae8c379d851eed222",
   "setup": {
     "effectSource": {
@@ -38,7 +38,7 @@
       "target": "agents",
       "mode": "copy",
       "kind": "directory",
-      "digest": "sha256:588bba0ff4c5a902cd3f44aa92e4638a801e74c80b7d061ee3078b012fd6fe39"
+      "digest": "sha256:934e6a086784b8cc9cc19c85587ba60481f57613fb8b85e4aea6b5556da72e0f"
     },
     {
       "resourceId": "skill:@effect-cf/repo#effect-cf-repository@agents",
@@ -62,7 +62,7 @@
       "target": "agents",
       "mode": "copy",
       "kind": "directory",
-      "digest": "sha256:eea1bda5a72439808dcbe666b8c443d3ad68e9eec9fb9f68f7358ef578f0c2a3"
+      "digest": "sha256:50786d8d351fa32953de526bc12ac67fee34fecfebff5dccde4f9fe0c3354ba3"
     },
     {
       "resourceId": "skill:@effect-cf/repo#pr-hygiene@agents",

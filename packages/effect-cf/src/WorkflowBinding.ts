@@ -4,8 +4,7 @@ import type {
   WorkflowInstance as CloudflareWorkflowInstance,
   WorkflowInstanceCreateOptions as CloudflareWorkflowInstanceCreateOptions,
 } from "@cloudflare/workers-types";
-import type { Context } from "effect";
-import { Data, Effect, Option, Schema as S } from "effect";
+import { type Context, Data, Effect, Option, Schema as S } from "effect";
 
 import * as Binding from "./Binding";
 import type * as RpcDefinition from "./RpcDefinition";

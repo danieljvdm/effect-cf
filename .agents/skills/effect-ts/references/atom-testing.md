@@ -56,6 +56,10 @@ Prefer the installed test APIs over invented helpers or matchers. The upstream E
 3. Run a failed mutation; assert no invalidation.
 4. Assert cleanup removes invalidation handlers after query disposal.
 
+### React Strict Mode and action ownership
+
+Use a React integration test when hook cleanup or action ownership is part of the behavior. Render the owner inside `StrictMode` and assert the development setup-cleanup replay does not write `Atom.Interrupt` or publish an interrupted failure before an explicit cancellation. When an action spans multiple requests, unmount during the sequence and prove the chosen policy: either the stable owner completes every step, or an explicit cancellation interrupts it intentionally. If the atom is shared, also prove unmounting one consumer does not cancel work still owned by another.
+
 ### Aggregate stability
 
 Mount a route atom that uses `AsyncResult.all`, resolve every input, unmount, and remount inside the retention window. Assert the aggregate never returns to `Initial`. Then let one input expire and prove the aggregate reset is caused by that input, not the retained queries.

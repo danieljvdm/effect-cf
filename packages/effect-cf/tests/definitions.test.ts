@@ -2,8 +2,11 @@ import { assert, expect, it, layer, test } from "@effect/vitest";
 import type { WorkflowStep } from "cloudflare:workers";
 import { Cause, Effect, Exit, Layer, Option, Schema as S, type Scope } from "effect";
 
-import type { DurableObjectNamespace, QueueBinding, Rpc, ServiceBinding } from "../src/index";
 import {
+  type DurableObjectNamespace,
+  type QueueBinding,
+  type Rpc,
+  type ServiceBinding,
   DurableObjectDefinition,
   DurableObjectStorage,
   Queue,

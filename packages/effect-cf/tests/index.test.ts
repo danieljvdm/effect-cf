@@ -1,8 +1,8 @@
 import { Clock, Context, Effect, Layer, Option, Schema as S, type Scope } from "effect";
 import { expect, test } from "vite-plus/test";
 
-import type { DurableObjectWebSocket } from "../src/index";
 import {
+  type DurableObjectWebSocket,
   Binding,
   DurableObject,
   DurableObjectNamespace,

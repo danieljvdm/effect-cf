@@ -1,6 +1,5 @@
 import { TodoHttpApi, TodoRpcGroup } from "@effect-cf/todos-domain";
-import type { Effect } from "effect";
-import { Context, flow, Layer, ManagedRuntime } from "effect";
+import { type Effect, Context, flow, Layer, ManagedRuntime } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { HttpApiClient } from "effect/unstable/httpapi";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";

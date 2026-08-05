@@ -51,6 +51,10 @@ await mutate({
 
 The mutation's `reactivityKeys` are invalidated only after the request succeeds. Failed mutations do not invalidate. Keep navigation, toasts, dialog closure, and optimistic UI at the action owner; keep shared server-state refresh in reactivity keys.
 
+If the component also renders the mutation result, use `useAtom(updateProject)` instead of pairing `useAtomValue` with `useAtomSet`. A module-scoped mutation atom is shared registry state, so an unconditional cleanup write of `Atom.Interrupt` can cancel work owned by another consumer and publishes an interrupted failure.
+
+Keep a multi-step mutation sequence in an owner that lives for the whole sequence. When navigation can unmount the initiating route after one request succeeds, a component-owned sequential fan-out can leave a partially completed operation. Use one stable workflow atom or service when client ownership is sufficient; use one server-side command or durable workflow when completion must survive browser navigation or disconnects.
+
 ## Use one key vocabulary
 
 Array keys represent independent keys. Record keys support hierarchical broad-plus-entity invalidation:

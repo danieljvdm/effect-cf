@@ -8,6 +8,7 @@ import type { WorkerRpcHandler } from "./Worker";
 import type * as Rpc from "./Rpc";
 import * as RpcDefinition from "./RpcDefinition";
 import * as ServiceBinding from "./ServiceBinding";
+import * as CloudflareSocket from "./Socket";
 
 export type ServiceFreeSchema = S.Codec<any, any, never, never>;
 
@@ -259,6 +260,15 @@ export const Tag =
         return yield* service.fetch(input, init);
       });
 
+    const connect = (
+      address: CloudflareSocket.SocketAddress,
+      options?: CloudflareSocket.SocketOptions,
+    ) =>
+      Effect.gen(function* () {
+        const service = yield* tag;
+        return yield* service.connect(address, options);
+      });
+
     const rpc = <Method extends keyof ClientApi>(
       method: Method,
       ...args: ClientApi[Method] extends (...args: infer Args) => unknown ? Args : never
@@ -297,6 +307,7 @@ export const Tag =
       make: definition.make,
       layer,
       fetch,
+      connect,
       rpc,
       call,
       scopedCall,

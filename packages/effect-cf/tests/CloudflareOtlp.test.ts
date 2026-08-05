@@ -2,15 +2,17 @@ import { NodeHttpServer } from "@effect/platform-node";
 import { expect, it, layer } from "@effect/vitest";
 import { ConfigProvider, Context, Effect, Layer, Queue } from "effect";
 import { HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { OtlpExporter } from "effect/unstable/observability";
 import process from "node:process";
 
 import { CloudflareOtlp, Worker } from "../src/index";
 
-const makeExecutionContext = (): globalThis.ExecutionContext => ({
-  props: undefined,
-  waitUntil: () => undefined,
-  passThroughOnException: () => undefined,
-});
+const makeExecutionContext = (): globalThis.ExecutionContext =>
+  ({
+    props: undefined,
+    waitUntil: () => undefined,
+    passThroughOnException: () => undefined,
+  }) as unknown as globalThis.ExecutionContext;
 
 const processEnv = process.env;
 
@@ -132,6 +134,45 @@ class OtlpCollector extends Context.Service<
 }
 
 layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
+  it.effect("exposes a shared manual telemetry flusher", () =>
+    Effect.gen(function* () {
+      const collector = yield* OtlpCollector;
+
+      const request = yield* Effect.gen(function* () {
+        yield* Effect.succeed("ok").pipe(Effect.withSpan("manual.flush"));
+        const flusher = yield* OtlpExporter.Flusher;
+        yield* flusher.flush;
+        return yield* collector.nextRequest;
+      }).pipe(
+        Effect.provide(
+          CloudflareOtlp.layerJson({
+            signals: ["traces"],
+            resource: { serviceName: "manual-flush-test" },
+          }),
+        ),
+        Effect.provide(
+          ConfigProvider.layer(
+            ConfigProvider.fromUnknown({
+              OTEL_TRACES_EXPORTER: "otlp",
+              OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.endpoint}/v1/traces`,
+            }),
+          ),
+        ),
+      );
+
+      expect(request.path).toBe("/v1/traces");
+      expect(request.body).toContain("manual-flush-test");
+      expect(request.body).toContain("manual.flush");
+    }),
+  );
+
+  it.effect("provides a no-op flusher when no signals are selected", () =>
+    Effect.gen(function* () {
+      const flusher = yield* OtlpExporter.Flusher;
+      yield* flusher.flush;
+    }).pipe(Effect.provide(CloudflareOtlp.layer({ signals: [] }))),
+  );
+
   it.effect("reads standard OTEL config from the ambient ConfigProvider", () =>
     Effect.gen(function* () {
       const collector = yield* OtlpCollector;
@@ -215,7 +256,7 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
     }),
   );
 
-  it.effect("uses OTEL resource variables before explicit resource options", () =>
+  it.effect("uses explicit resource options before OTEL resource variables", () =>
     Effect.gen(function* () {
       const collector = yield* OtlpCollector;
       const handler = Worker.makeFetchHandler(Layer.empty, {
@@ -255,9 +296,9 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
       const resource = getRecord(resourceSpans[0], "resource");
       const resourceAttributes = getArray(resource, "attributes");
 
-      expect(getStringAttribute(resourceAttributes, "service.name")).toBe("env-service");
-      expect(getStringAttribute(resourceAttributes, "service.version")).toBe("1.2.3");
-      expect(getStringAttribute(resourceAttributes, "deployment.environment")).toBe("dev");
+      expect(getStringAttribute(resourceAttributes, "service.name")).toBe("explicit-service");
+      expect(getStringAttribute(resourceAttributes, "service.version")).toBe("explicit-version");
+      expect(getStringAttribute(resourceAttributes, "deployment.environment")).toBe("explicit");
     }),
   );
 

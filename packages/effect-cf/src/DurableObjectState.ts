@@ -1,6 +1,11 @@
 import { Cause, Context, Effect, Exit } from "effect";
 
 import { fromDurableObjectStorage, type DurableObjectStorage } from "./DurableObjectStorage";
+import {
+  ContainerNotConfiguredError,
+  fromContainer,
+  type DurableObjectContainer,
+} from "./DurableObjectContainer";
 import { fromWebSocket, type DurableWebSocket } from "./DurableObjectWebSocket";
 
 /**
@@ -13,6 +18,8 @@ export interface DurableObjectStateService {
   readonly id: globalThis.DurableObjectId;
   /** Wrapped storage API. */
   readonly storage: DurableObjectStorage;
+  /** Low-level Container attached to this Durable Object, when configured. */
+  readonly container: Effect.Effect<DurableObjectContainer, ContainerNotConfiguredError>;
   /** Registers background work with Cloudflare's lifecycle. */
   waitUntil(promise: Promise<unknown>): Effect.Effect<void>;
   /**
@@ -76,6 +83,10 @@ export const fromDurableObjectState = (
   raw: state,
   id: state.id,
   storage: fromDurableObjectStorage(state.storage),
+  container:
+    state.container === undefined
+      ? Effect.fail(new ContainerNotConfiguredError())
+      : Effect.succeed(fromContainer(state.container)),
   waitUntil: (promise: Promise<unknown>) => Effect.sync(() => state.waitUntil(promise)),
   blockConcurrencyWhile: <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     Effect.context<R>().pipe(

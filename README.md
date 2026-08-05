@@ -1,21 +1,21 @@
 # effect-cf
 
-Effect-native primitives for Cloudflare Workers, Durable Objects, bindings, KV, Email, Analytics Engine, and Durable Object storage.
+Effect-native primitives for Cloudflare Workers, Durable Objects, sockets, Containers, bindings, KV, Email, Analytics Engine, and Durable Object storage.
 
 ## Install
 
 `effect-cf` currently targets Effect 4 beta.
 
 ```bash
-bun add effect-cf "effect@^4.0.0-beta.65"
+bun add effect-cf "effect@^4.0.0-beta.103"
 ```
 
 ```bash
-pnpm add effect-cf "effect@^4.0.0-beta.65"
+pnpm add effect-cf "effect@^4.0.0-beta.103"
 ```
 
 ```bash
-npm install effect-cf "effect@^4.0.0-beta.65"
+npm install effect-cf "effect@^4.0.0-beta.103"
 ```
 
 ## Design
@@ -74,6 +74,19 @@ export default Worker.make(Layer.mergeAll(HttpRouter.layer, CounterLayer), app);
 ```
 
 `COUNTER` is still declared in `wrangler.jsonc`, but the callable API is inferred from the `Counter` class. The Worker and Durable Object both run through `effect-cf` runtime boundaries.
+
+## Socket Workers and gRPC
+
+The library supports Cloudflare's new Socket Workers transport surface:
+
+- `Worker.make(...)`, `Worker.makeHandler(...)`, and `DurableObject.make(...)` accept Effect-native inbound `connect(socket)` handlers.
+- Worker service bindings and Durable Object namespaces expose typed `connect(...)` clients.
+- `Socket` exposes native byte streams as Effect `Stream` and `Sink` values, plus open/close state, STARTTLS, and scoped lifetime management.
+- `DurableObjectState.container` exposes the low-level Container lifecycle and `getTcpPort(...).fetch/connect` APIs through `DurableObjectContainer`.
+
+These APIs let an inbound Spectrum TCP connection be routed Worker → Durable Object → Container, which is the transport Cloudflare documents in its [Socket Workers and gRPC release](https://blog.cloudflare.com/grpc-workers/) for full-duplex gRPC. Unary and server-streaming gRPC implemented directly in a Worker continues to use gRPC-web libraries through the existing `fetch` handler, with Cloudflare translating gRPC at the edge. The August 2026 release is private beta and requires account enablement.
+
+See the package README's [Socket Workers and gRPC](./packages/effect-cf/README.md#socket-workers-and-grpc) section for a complete bridge example.
 
 ## Examples
 

@@ -3,6 +3,7 @@ import { Context, Data, Effect, type Scope } from "effect";
 import * as Binding from "./Binding";
 import * as CloudflareRpc from "./Rpc";
 import * as RpcDefinition from "./RpcDefinition";
+import * as CloudflareSocket from "./Socket";
 import type * as WorkerDefinition from "./WorkerDefinition";
 import * as RpcInvocation from "./internal/RpcInvocation";
 
@@ -14,6 +15,10 @@ const expectedServiceBinding = "Worker service binding with fetch()";
  */
 export interface ServiceFetcher {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
+  connect(
+    address: CloudflareSocket.SocketAddress,
+    options?: CloudflareSocket.SocketOptions,
+  ): globalThis.Socket;
 }
 
 type RpcClient<Api> = {
@@ -56,6 +61,12 @@ export interface ServiceBindingDefinition<
  * Failure raised when calling `fetch` on a service binding.
  */
 export class ServiceBindingFetchError extends Data.TaggedError("ServiceBindingFetchError")<{
+  readonly binding: string;
+  readonly cause: unknown;
+}> {}
+
+/** Failure raised when opening a TCP socket through a service binding. */
+export class ServiceBindingConnectError extends Data.TaggedError("ServiceBindingConnectError")<{
   readonly binding: string;
   readonly cause: unknown;
 }> {}
@@ -123,6 +134,11 @@ export type ServiceBindingEffectClient<
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => Effect.Effect<globalThis.Response, ServiceBindingFetchError>;
+  /** Opens a TCP socket through the bound Worker's `connect` handler. */
+  readonly connect: (
+    address: CloudflareSocket.SocketAddress,
+    options?: CloudflareSocket.SocketOptions,
+  ) => Effect.Effect<CloudflareSocket.Socket, ServiceBindingConnectError>;
   /**
    * Invokes a Worker RPC method and returns Cloudflare's raw RPC result.
    *
@@ -209,6 +225,10 @@ export type ServiceBindingStaticClient<
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => Effect.Effect<globalThis.Response, ServiceBindingFetchError, R>;
+  readonly connect: (
+    address: CloudflareSocket.SocketAddress,
+    options?: CloudflareSocket.SocketOptions,
+  ) => Effect.Effect<CloudflareSocket.Socket, ServiceBindingConnectError, R>;
   readonly rpc: <Method extends ServiceMethodKey<Api>>(
     method: Method,
     ...args: ServiceMethodArgs<Api, Method>
@@ -240,6 +260,16 @@ export const makeClient = <
         try: () => service.fetch(input, init),
         catch: (cause) => new ServiceBindingFetchError({ binding: definition.binding, cause }),
       });
+
+    const connect = (
+      address: CloudflareSocket.SocketAddress,
+      options?: CloudflareSocket.SocketOptions,
+    ) =>
+      CloudflareSocket.connect(service, address, options).pipe(
+        Effect.mapError(
+          (cause) => new ServiceBindingConnectError({ binding: definition.binding, cause }),
+        ),
+      );
 
     const rpc = <Method extends ServiceMethodKey<Api>>(
       method: Method,
@@ -340,6 +370,7 @@ export const makeClient = <
 
     return Object.assign(directMethods, {
       fetch,
+      connect,
       rpc,
       call,
       scopedCall,
@@ -369,6 +400,7 @@ export const layer = <
  * Returned value includes:
  * - a Context tag for dependency injection
  * - `fetch(...)` for raw HTTP forwarding
+ * - `connect(...)` for raw TCP sockets
  * - `rpc(...)` for raw Cloudflare RPC results
  * - `call(...)` for resolved and decoded RPC results
  * - `scopedCall(...)` for scoped and decoded disposable RPC results
@@ -416,6 +448,15 @@ export const Service =
         return yield* service.fetch(input, init);
       });
 
+    const connect = (
+      address: CloudflareSocket.SocketAddress,
+      options?: CloudflareSocket.SocketOptions,
+    ) =>
+      Effect.gen(function* () {
+        const service = yield* tag;
+        return yield* service.connect(address, options);
+      });
+
     const rpc = <Method extends ServiceMethodKey<ServiceApi>>(
       method: Method,
       ...args: ServiceMethodArgs<ServiceApi, Method>
@@ -452,6 +493,7 @@ export const Service =
       [TypeId]: TypeId,
       definition,
       fetch,
+      connect,
       rpc,
       call,
       scopedCall,
@@ -460,6 +502,7 @@ export const Service =
         readonly [TypeId]: typeof TypeId;
         readonly definition: ServiceBindingDefinition<Definition>;
         readonly fetch: typeof fetch;
+        readonly connect: typeof connect;
         readonly rpc: typeof rpc;
         readonly call: typeof call;
         readonly scopedCall: typeof scopedCall;

@@ -1,5 +1,5 @@
 import { expectTypeOf } from "vitest";
-import { Config, Effect, Layer, Option, Redacted, Schema } from "effect";
+import { Config, Effect, Layer, Option, Redacted, Schema, Sink, Stream } from "effect";
 import { PgClient } from "@effect/sql-pg";
 import { HttpClient } from "effect/unstable/http";
 import { SqlClient, SqlError } from "effect/unstable/sql";
@@ -20,6 +20,7 @@ import {
   R2,
   Rpc,
   ServiceBinding,
+  Socket,
   Vectorize,
   Worker,
   WorkerEnvironment,
@@ -528,8 +529,24 @@ export class FetchOnlyWorker extends ServiceBinding.Service<FetchOnlyWorker, {}>
 
 export const FetchOnlyWorkerLayer = FetchOnlyWorker.layer;
 
+declare const cloudflareSocket: Socket.Socket;
+
+expectTypeOf(cloudflareSocket.unsafeRaw).toEqualTypeOf<Effect.Effect<globalThis.Socket>>();
+expectTypeOf(cloudflareSocket.readable).toEqualTypeOf<
+  Stream.Stream<Uint8Array, Socket.SocketOperationError>
+>();
+expectTypeOf(cloudflareSocket.writable).toEqualTypeOf<
+  Sink.Sink<void, Uint8Array, never, Socket.SocketOperationError>
+>();
+
 expectTypeOf(FetchOnlyWorker.fetch(new Request("https://example.com"))).toEqualTypeOf<
   Effect.Effect<Response, ServiceBinding.ServiceBindingFetchError, FetchOnlyWorker>
+>();
+
+expectTypeOf(
+  FetchOnlyWorker.connect("database.internal:5432", { allowHalfOpen: false }),
+).toEqualTypeOf<
+  Effect.Effect<Socket.Socket, ServiceBinding.ServiceBindingConnectError, FetchOnlyWorker>
 >();
 
 const workerProgram = Effect.gen(function* () {
@@ -569,6 +586,10 @@ const durableObjectProgram = Effect.gen(function* () {
     Effect.Effect<number, DurableObjectNamespace.DurableObjectRpcError>
   >();
 
+  expectTypeOf(
+    counter.connect({ hostname: "object.internal", port: 50051 }, { allowHalfOpen: true }),
+  ).toEqualTypeOf<Effect.Effect<Socket.Socket, DurableObjectNamespace.DurableObjectConnectError>>();
+
   const counterRpcResult: Effect.Effect<
     Rpc.Result<number>,
     DurableObjectNamespace.DurableObjectRpcError,
@@ -591,6 +612,18 @@ declare const counterStub: Effect.Success<ReturnType<typeof CounterDurableObject
 // @ts-expect-error Static direct methods require the namespace layer.
 const staticDirectMethodWithoutLayer: Effect.Effect<number, unknown, never> =
   CounterDurableObject.increment(counterStub, 1);
+
+expectTypeOf(
+  CounterDurableObject.byName("counter-1").connect("object.internal:50051", {
+    allowHalfOpen: false,
+  }),
+).toEqualTypeOf<
+  Effect.Effect<
+    Socket.Socket,
+    DurableObjectNamespace.DurableObjectConnectError,
+    CounterDurableObject
+  >
+>();
 
 void kvProgram;
 void r2Program;

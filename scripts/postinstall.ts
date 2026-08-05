@@ -109,7 +109,7 @@ const postinstall = Effect.gen(function* () {
     Effect.succeed(progress),
     (board) =>
       Effect.gen(function* () {
-        board.setRunningNote(0, "syncing effect-smol");
+        board.setRunningNote(0, "syncing effect");
         yield* runStep(board, 0, paths.rootDir, "synced", "bun", [paths.syncEffectScript]);
 
         board.setRunningNote(1, "configuring hooks and agent docs");

@@ -6,7 +6,7 @@ import { Command } from "effect/unstable/cli";
 
 import { formatTiming, startProgressBoard } from "./utils/step-progress.ts";
 
-const SUBMODULE_PATH = "repos/effect-smol";
+const SUBMODULE_PATH = "repos/effect";
 const SENTINEL_PATH = `${SUBMODULE_PATH}/packages/effect/package.json`;
 
 type RootPackageJson = {
@@ -229,7 +229,7 @@ const syncEffectSubmodule = Effect.gen(function* () {
 });
 
 const syncCommand = Command.make("sync-effect-submodule", {}, () => syncEffectSubmodule).pipe(
-  Command.withDescription("Sync repos/effect-smol to the root catalog's effect version."),
+  Command.withDescription("Sync repos/effect to the root catalog's effect version."),
 );
 
 const program = Command.run(syncCommand, { version: "1.0.0" }).pipe(

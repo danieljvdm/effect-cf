@@ -1,7 +1,7 @@
 {
   "version": 1,
   "toolVersion": "0.11.3",
-  "manifestDigest": "sha256:6b7c2a581d3d89e5cb2b4c0c52a05ad2bda289a01eae2dfae8c379d851eed222",
+  "manifestDigest": "sha256:696576ce60d4680c2bb55028d6e02ae4936546a71bad4dc70eab0a89e4677f91",
   "setup": {
     "effectSource": {
       "packageName": "effect",
@@ -39,21 +39,6 @@
       "mode": "copy",
       "kind": "directory",
       "digest": "sha256:934e6a086784b8cc9cc19c85587ba60481f57613fb8b85e4aea6b5556da72e0f"
-    },
-    {
-      "resourceId": "skill:@effect-cf/repo#effect-cf-repository@agents",
-      "path": ".agents/skills/effect-cf-repository",
-      "skill": "effect-cf-repository",
-      "target": "agents",
-      "mode": "copy",
-      "kind": "directory",
-      "digest": "sha256:be45efffada0648c6b5d0e2506c32152bef5a1535c8d5a8ba9cf8a21756dc461",
-      "catalog": {
-        "package": "@effect-cf/repo",
-        "version": "0.0.0",
-        "skill": "effect-cf-repository",
-        "digest": "sha256:be45efffada0648c6b5d0e2506c32152bef5a1535c8d5a8ba9cf8a21756dc461"
-      }
     },
     {
       "resourceId": "skill:effect-ts@agents",
@@ -110,21 +95,6 @@
       "mode": "symlink",
       "kind": "symlink",
       "digest": "sha256:b59ba0874ef06cb4c651bb9b3012b014c9063648577f3f3181894e8ca3086d8f"
-    },
-    {
-      "resourceId": "skill:@effect-cf/repo#effect-cf-repository@claude",
-      "path": ".claude/skills/effect-cf-repository",
-      "skill": "effect-cf-repository",
-      "target": "claude",
-      "mode": "symlink",
-      "kind": "symlink",
-      "digest": "sha256:01ca2691572936817cdf2b07e26fc1d03785cf7009961d6697ceec3ac7caa47f",
-      "catalog": {
-        "package": "@effect-cf/repo",
-        "version": "0.0.0",
-        "skill": "effect-cf-repository",
-        "digest": "sha256:be45efffada0648c6b5d0e2506c32152bef5a1535c8d5a8ba9cf8a21756dc461"
-      }
     },
     {
       "resourceId": "skill:effect-ts@claude",

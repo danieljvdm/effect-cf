@@ -1,13 +1,6 @@
 {
   "$schema": "./node_modules/@danieljvdm/dev-kit/schema/dev-kit.schema.json",
-  "include": [
-    "dev-kit",
-    "effect",
-    "testing",
-    "cloudflare",
-    "@effect-cf/repo#effect-cf-repository",
-    "@effect-cf/repo#pr-hygiene",
-  ],
+  "include": ["dev-kit", "effect", "testing", "cloudflare", "@effect-cf/repo#pr-hygiene"],
   "setup": {
     "agentInstructions": { "enabled": true },
     "claudeInstructions": { "enabled": true },

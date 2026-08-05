@@ -25,3 +25,15 @@ Use these repository commands:
 Do not use `bun run`, `npm run`, `pnpm run`, or `yarn run` in this repository. Do not invoke underlying tools such as `tsc`, `vitest`, `oxlint`, or `oxfmt` directly; use the Vite+ entry points above.
 
 <!-- DEV KIT END -->
+
+# Package Layout
+
+- `packages/effect-cf` is the publishable package.
+- `examples/` contains consumer and example applications.
+- Reusable package code belongs under `packages/effect-cf/src` and must be exported from `packages/effect-cf/src/index.ts`.
+- Worker projects use `@cloudflare/workers-types` directly for Cloudflare runtime types.
+- Effect source code can be referenced at `.repos/effect` for patterns and API style when changing Effect-heavy code. Do not edit it; Dev Kit owns and version-matches that checkout.
+
+# Repo-Local Skills
+
+- Use `.agents/skills/pr-hygiene/SKILL.md` before creating or updating PRs, choosing PR titles, writing PR bodies, or adding changesets.

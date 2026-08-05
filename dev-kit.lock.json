@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "toolVersion": "0.11.0",
+  "toolVersion": "0.11.1",
   "manifestDigest": "sha256:6b7c2a581d3d89e5cb2b4c0c52a05ad2bda289a01eae2dfae8c379d851eed222",
   "setup": {
     "effectSource": {
@@ -165,7 +165,7 @@
       "sourcePath": "templates/AGENTS.md",
       "mode": "copy",
       "kind": "file",
-      "digest": "sha256:5e857dfd69a92acdcce8e031bb09823ef420aca7c70823f7c0a6751c705eb683"
+      "digest": "sha256:034c4a68fe39e4e620f21f5ef0f170f99c3874fbac06393492e340afdec950ab"
     },
     {
       "resourceId": "setup:claude-instructions",

@@ -4,7 +4,7 @@
 
 This project uses `@danieljvdm/dev-kit` to manage portable agent skills and reproducible setup from `dev-kit.jsonc` and `dev-kit.lock.json`.
 
-For dev-kit operations, use the `dev-kit` skill and read `node_modules/.bun/@danieljvdm+dev-kit@0.11.0+6600000bd873e85d/node_modules/@danieljvdm/dev-kit/skills/dev-kit/SKILL.md` before changing managed outputs.
+For dev-kit operations, use the `dev-kit` skill and read `.agents/skills/dev-kit/SKILL.md` before changing managed outputs.
 
 ## Project command policy
 

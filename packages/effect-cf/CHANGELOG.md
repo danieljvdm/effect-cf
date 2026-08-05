@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.17.1
+
+### Patch Changes
+
+- [#56](https://github.com/danieljvdm/effect-cf/pull/56) [`38df8ed`](https://github.com/danieljvdm/effect-cf/commit/38df8ed3153a77df117810e67a34cf039871c08c) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Treat Cloudflare Workflow status responses with a null error as having no error.
+
 ## 0.17.0
 
 ### Minor Changes

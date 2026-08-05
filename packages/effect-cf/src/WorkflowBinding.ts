@@ -187,7 +187,7 @@ export const makeClient = <
             return {
               status: status.status,
               output,
-              error: status.error === undefined ? Option.none() : Option.some(status.error),
+              error: status.error == null ? Option.none() : Option.some(status.error),
             };
           }),
         ),

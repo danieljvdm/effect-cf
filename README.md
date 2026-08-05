@@ -1,6 +1,6 @@
 # effect-cf
 
-Effect-native primitives for Cloudflare Workers, Durable Objects, bindings, KV, Email, Analytics Engine, and Durable Object storage.
+Effect-native primitives for Cloudflare Workers, Durable Objects, bindings, Cache, KV, Email, Analytics Engine, and Durable Object storage.
 
 ## Install
 

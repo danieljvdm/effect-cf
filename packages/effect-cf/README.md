@@ -1,6 +1,6 @@
 # effect-cf
 
-Effect-native Cloudflare primitives for Workers, Durable Objects, Containers, bindings, KV, D1, Queues, Email, Analytics Engine, Workflows, and Durable Object storage.
+Effect-native Cloudflare primitives for Workers, Durable Objects, Containers, bindings, Cache, KV, D1, Queues, Email, Analytics Engine, Workflows, and Durable Object storage.
 
 ## Install
 
@@ -31,6 +31,7 @@ Runtime creation belongs at Cloudflare entrypoints, not inside binding helpers.
 - `DurableObjectState` / `DurableObjectStorage` - Effect wrappers for state, alarms, SQL, and embedded KV
 - `DurableObjectWebSocket` - WebSocket upgrade helpers for Durable Objects
 - `ContainerNamespace` - named Cloudflare Container instances with Effect-wrapped request and lifecycle operations
+- `Cache` - Effect wrapper for Cloudflare's default and named Cache API instances
 - `Kv` - typed KV namespace helper
 - `D1` - typed D1 database binding helper with an `@effect/sql-d1` backed SQL layer
 - `R2` - typed R2 bucket binding helper with Effect-wrapped object and multipart operations
@@ -160,6 +161,38 @@ export const enqueueAvatar = (userId: string, imageKey: string) =>
 Producers should usually use `const queue = yield* AvatarQueue` and then call `queue.send(...)`, `queue.sendBatch(...)`, or `queue.metrics()`. The static `AvatarQueue.send(...)` helpers remain available for concise one-off calls.
 
 Queue handlers run inline failures through Cloudflare's normal retry path. If background work scheduled with `WorkerContext.waitUntil(...)` should also make the batch retry, use `WorkerContext.waitUntilPropagating(...)` or `waitUntil(..., { mode: "propagate" })`; the default `waitUntil` mode observes and logs failures without rejecting the native `waitUntil` promise.
+
+## Cache Example
+
+`Cache.layer` exposes Cloudflare's global Cache API as an Effect service. Cache misses are represented by `Option.none()`, and named caches are available through `open(...)`.
+
+```ts
+import { Effect, Option } from "effect";
+import { Cache, Worker } from "effect-cf";
+
+export default Worker.make(Cache.layer, {
+  fetch: Effect.gen(function* () {
+    const request = yield* Worker.NativeRequest;
+    const storage = yield* Cache.CacheStorage;
+    const cached = yield* storage.default.match(request);
+
+    if (Option.isSome(cached)) {
+      return cached.value;
+    }
+
+    const response = new Response("fresh", {
+      headers: { "Cache-Control": "public, max-age=300" },
+    });
+
+    const context = yield* Worker.WorkerContext;
+    yield* context.waitUntil(storage.default.put(request, response.clone()));
+
+    return response;
+  }),
+});
+```
+
+Use `const cache = yield* storage.open("api-cache")` for a named cache. `match`, `put`, `delete`, and `open` failures are reported as `CacheOperationError` values.
 
 ## R2 Example
 

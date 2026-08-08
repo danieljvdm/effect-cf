@@ -1,5 +1,15 @@
 # effect-cf
 
+## 0.19.0
+
+### Minor Changes
+
+- [#61](https://github.com/danieljvdm/effect-cf/pull/61) [`7aa75de`](https://github.com/danieljvdm/effect-cf/commit/7aa75de93408b1eb345ab530f852db9038923f3d) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add Cloudflare Email Service sending support to `Email`.
+
+  Structured messages sent through a `send_email` binding are now validated against documented Email Sending limits — combined `to`/`cc`/`bcc` recipients, attachment count, custom header sizes, and required fields — and fail with `EmailValidationError` before the binding is called. Opt out with `layer({ binding, send: { validate: false } })`. Raw RFC 5322 `EmailMessage` values are still passed through untouched, so the legacy `cloudflare:email` API keeps working.
+
+  Cloudflare's `E_*` error codes are now reported on `EmailOperationError.code`, with the documented set exported as `Email.emailErrorCodes` and `Email.EmailErrorCode`. Documented limits are exported as `Email.sendLimits`.
+
 ## 0.18.0
 
 ### Minor Changes

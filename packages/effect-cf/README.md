@@ -37,7 +37,7 @@ Runtime creation belongs at Cloudflare entrypoints, not inside binding helpers.
 - `R2` - typed R2 bucket binding helper with Effect-wrapped object and multipart operations
 - `Hyperdrive` - typed Hyperdrive binding helper for connection strings and optional Postgres SQL integration
 - `Images` - typed Cloudflare Images binding helper with transformation APIs and optional hosted image operations
-- `Email` - typed Cloudflare Send Email binding helper for `send_email` bindings
+- `Email` - typed Cloudflare Email Service binding helper for `send_email` bindings, with limit validation and typed error codes
 - `AnalyticsEngine` - typed Cloudflare Analytics Engine write bindings and SQL API query helpers
 - `Queue` - typed Queue producer/consumer tags plus client and error types
 - `Workflow` - typed Workflow entrypoints, steps, starter clients, and instance types
@@ -284,7 +284,7 @@ export const resizeAvatar = (image: Images.ImageInputValue) =>
 
 ## Email Example
 
-Email tags expose Cloudflare Send Email bindings as Effect-wrapped `send(...)` operations.
+Email tags expose Cloudflare Email Service `send_email` bindings as Effect-wrapped `send(...)` operations. Structured messages are validated against documented Email Sending limits before reaching the binding, and Cloudflare's `E_*` error codes are surfaced on `EmailOperationError.code`.
 
 ```ts
 import { Effect } from "effect";
@@ -307,6 +307,20 @@ export const sendWelcomeEmail = (to: string) =>
     });
   });
 ```
+
+Onboard the sending domain under **Compute > Email Service > Email Sending**, then declare the binding in the consuming Worker's `wrangler.jsonc`:
+
+```jsonc
+{
+  "send_email": [{ "name": "EMAIL" }],
+}
+```
+
+Messages that violate a documented limit fail with `EmailValidationError` carrying every violation, without calling the binding. Use `layer({ binding, send: { validate: false } })` to skip validation and let Cloudflare reject the message instead. Raw RFC 5322 `EmailMessage` values are always passed through untouched, so the legacy `cloudflare:email` API keeps working.
+
+Cloudflare's total message size limit is exposed as `Email.sendLimits.maxMessageBytes` but is not enforced, because the encoded MIME size is only known once Cloudflare composes the message. Oversized messages fail at the binding with `E_CONTENT_TOO_LARGE`.
+
+See [`examples/email/README.md`](../../examples/email/README.md) for domain onboarding, binding restrictions, and typed recovery from `EmailValidationError` and `EmailOperationError`.
 
 ## Analytics Engine Example
 

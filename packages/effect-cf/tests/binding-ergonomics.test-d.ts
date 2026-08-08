@@ -207,6 +207,23 @@ export class TransactionalEmail extends Email.Tag<TransactionalEmail>()("Transac
 
 export const TransactionalEmailLayer = TransactionalEmail.layer({ binding: "EMAIL" });
 
+export const UnvalidatedTransactionalEmailLayer = TransactionalEmail.layer({
+  binding: "EMAIL",
+  send: { validate: false },
+});
+
+expectTypeOf(UnvalidatedTransactionalEmailLayer).toEqualTypeOf(TransactionalEmailLayer);
+
+expectTypeOf<Email.EmailSendError>().toEqualTypeOf<
+  Email.EmailOperationError | Email.EmailValidationError
+>();
+
+expectTypeOf<Email.EmailOperationError["code"]>().toEqualTypeOf<
+  Email.EmailErrorCode | (string & {}) | undefined
+>();
+
+expectTypeOf(Email.validateMessage).returns.toEqualTypeOf<ReadonlyArray<Email.EmailViolation>>();
+
 const emailProgram = Effect.gen(function* () {
   const email = yield* TransactionalEmail;
 
@@ -217,7 +234,7 @@ const emailProgram = Effect.gen(function* () {
       subject: "Welcome",
       text: "Welcome to Example",
     }),
-  ).toEqualTypeOf<Effect.Effect<Email.EmailSendResult, Email.EmailOperationError>>();
+  ).toEqualTypeOf<Effect.Effect<Email.EmailSendResult, Email.EmailSendError>>();
 
   yield* email.send({
     from: "team@example.com",

@@ -217,7 +217,7 @@ const emailProgram = Effect.gen(function* () {
       subject: "Welcome",
       text: "Welcome to Example",
     }),
-  ).toEqualTypeOf<Effect.Effect<Email.EmailSendResult, Email.EmailOperationError>>();
+  ).toEqualTypeOf<Effect.Effect<Email.EmailSendResult, Email.EmailSendError>>();
 
   yield* email.send({
     from: "team@example.com",

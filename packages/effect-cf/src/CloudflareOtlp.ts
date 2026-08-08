@@ -1,7 +1,22 @@
+/**
+ * OTLP telemetry layers for Cloudflare Workers and Durable Objects.
+ *
+ * Every layer exposes {@link OtlpExporter.Flusher}, which drains buffered
+ * telemetry on demand. Cloudflare isolates can freeze before the periodic
+ * export interval fires, so flush explicitly before returning a response, or
+ * hand the flush to `ctx.waitUntil`:
+ *
+ * ```ts
+ * const flusher = yield* OtlpExporter.Flusher;
+ *
+ * yield* flusher.flush;
+ * ```
+ */
 import { ConfigProvider, Effect, Layer, Option } from "effect";
 import type * as Tracer from "effect/Tracer";
 import { FetchHttpClient, type Headers } from "effect/unstable/http";
 import {
+  OtlpExporter,
   OtlpLogger,
   OtlpMetrics,
   OtlpSerialization,
@@ -138,7 +153,7 @@ const mergeSignalLayers = (layers: ReadonlyArray<SignalLayer>): SignalLayer => {
 const makeLayer = (
   options: LayerOptions = {},
   runtimeAttributes: Record<string, unknown> = {},
-): Layer.Layer<never, never, never> => {
+): Layer.Layer<OtlpExporter.Flusher> => {
   const signals = selectedSignals(options.signals);
   const resource = makeResource(options, runtimeAttributes);
   const layers: Array<SignalLayer> = [];
@@ -174,7 +189,7 @@ const makeLayer = (
   }
 
   if (layers.length === 0) {
-    return Layer.empty;
+    return OtlpExporter.layerFlusher;
   }
 
   return mergeSignalLayers(layers).pipe(
@@ -191,16 +206,22 @@ const makeLayer = (
  * layers. In Cloudflare Workers and Durable Objects, the current `env` object is
  * installed as the primary `ConfigProvider`; outside Cloudflare, the ambient
  * Effect `ConfigProvider` remains the fallback.
+ *
+ * The layer provides {@link OtlpExporter.Flusher} for draining buffered
+ * telemetry before the isolate freezes.
  */
-export const layer = (options: LayerOptions = {}) => makeLayer(options);
+export const layer = (options: LayerOptions = {}): Layer.Layer<OtlpExporter.Flusher> =>
+  makeLayer(options);
 
 /** Base OTLP telemetry layer forced to JSON serialization. */
-export const layerJson = (options: Omit<LayerOptions, "serialization"> = {}) =>
-  layer({ ...options, serialization: "json" });
+export const layerJson = (
+  options: Omit<LayerOptions, "serialization"> = {},
+): Layer.Layer<OtlpExporter.Flusher> => layer({ ...options, serialization: "json" });
 
 /** Base OTLP telemetry layer forced to protobuf serialization. */
-export const layerProtobuf = (options: Omit<LayerOptions, "serialization"> = {}) =>
-  layer({ ...options, serialization: "protobuf" });
+export const layerProtobuf = (
+  options: Omit<LayerOptions, "serialization"> = {},
+): Layer.Layer<OtlpExporter.Flusher> => layer({ ...options, serialization: "protobuf" });
 
 /**
  * OTLP layer with Cloudflare Worker resource attributes.
@@ -208,7 +229,7 @@ export const layerProtobuf = (options: Omit<LayerOptions, "serialization"> = {})
  * Provide this layer at runtime scope for long-lived metrics aggregation, or at
  * handler scope when traces/logs should flush as the Cloudflare event finishes.
  */
-export const workerLayer = (options: WorkerLayerOptions = {}) =>
+export const layerWorker = (options: WorkerLayerOptions = {}): Layer.Layer<OtlpExporter.Flusher> =>
   makeLayer(options, {
     "cloudflare.resource_type": "worker",
     "cloudflare.worker.name": options.workerName,
@@ -221,7 +242,9 @@ export const workerLayer = (options: WorkerLayerOptions = {}) =>
  * Durable Object id. Prefer leaving `includeObjectId` disabled unless the
  * backend can tolerate high-cardinality resource attributes.
  */
-export const durableObjectLayer = (options: DurableObjectLayerOptions = {}) =>
+export const layerDurableObject = (
+  options: DurableObjectLayerOptions = {},
+): Layer.Layer<OtlpExporter.Flusher, never, DurableObjectState> =>
   Layer.unwrap(
     Effect.map(DurableObjectState, (state) =>
       makeLayer(options, {

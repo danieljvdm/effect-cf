@@ -17,16 +17,31 @@ import type {
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
+import * as ErrorMessage from "./internal/ErrorMessage";
 
 const expectedVectorizeBinding =
   "Vectorize index binding with describe(), query(), insert(), upsert(), deleteByIds(), and getByIds()";
 
+/** Vectorize operation represented by {@link VectorizeOperationError}. */
+export type VectorizeOperation =
+  | "describe"
+  | "query"
+  | "queryById"
+  | "insert"
+  | "upsert"
+  | "deleteByIds"
+  | "getByIds";
+
 /** Error raised when a Vectorize operation fails. */
 export class VectorizeOperationError extends Data.TaggedError("VectorizeOperationError")<{
   readonly binding: string;
-  readonly operation: string;
+  readonly operation: VectorizeOperation;
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Vectorize ${this.operation} failed for binding "${this.binding}": ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 /** Typed Vectorize binding definition. */
 export interface VectorizeDefinition {
@@ -93,7 +108,7 @@ export interface VectorizeClient {
   readonly getByIds: (
     ids: ReadonlyArray<string>,
   ) => Effect.Effect<ReadonlyArray<VectorizeVector>, VectorizeOperationError>;
-  readonly unsafeRaw: Effect.Effect<VectorizeBinding>;
+  readonly rawUnsafe: Effect.Effect<VectorizeBinding>;
   readonly definition: VectorizeDefinition;
 }
 
@@ -125,18 +140,22 @@ export interface TagClass<Self, Id extends string> extends Context.ServiceClass<
   >;
 }
 
-const vectorizeError = (binding: string, operation: string, cause: unknown) =>
+const vectorizeError = (binding: string, operation: VectorizeOperation, cause: unknown) =>
   new VectorizeOperationError({ binding, operation, cause });
 
 const tryVectorizePromise = <A>(
   binding: string,
-  operation: string,
+  operation: VectorizeOperation,
   evaluate: () => Promise<A>,
 ): Effect.Effect<A, VectorizeOperationError> =>
   Effect.tryPromise({
     try: evaluate,
     catch: (cause) => vectorizeError(binding, operation, cause),
   });
+
+const spanOptions = (binding: string, operation: VectorizeOperation) => ({
+  attributes: { binding, operation },
+});
 
 const hasFunction = (value: object, key: string): boolean =>
   typeof Reflect.get(value, key) === "function";
@@ -155,17 +174,30 @@ export const makeClient =
   (definition: VectorizeDefinition) =>
   (index: VectorizeBinding): VectorizeClient => {
     const runtime = index as VectorizeRuntimeBinding;
-    const deleteByIds = (ids: ReadonlyArray<string>) =>
-      tryVectorizePromise(definition.binding, "deleteByIds", () => runtime.deleteByIds([...ids]));
+    const deleteByIds = Effect.fn(
+      "Vectorize.deleteByIds",
+      spanOptions(definition.binding, "deleteByIds"),
+    )((ids: ReadonlyArray<string>) =>
+      tryVectorizePromise(definition.binding, "deleteByIds", () => runtime.deleteByIds([...ids])),
+    );
 
     return {
       definition,
-      describe: tryVectorizePromise(definition.binding, "describe", () => runtime.describe()),
-      query: (vector, options) =>
+      describe: tryVectorizePromise(definition.binding, "describe", () => runtime.describe()).pipe(
+        Effect.withSpan("Vectorize.describe", spanOptions(definition.binding, "describe")),
+      ),
+      query: Effect.fn(
+        "Vectorize.query",
+        spanOptions(definition.binding, "query"),
+      )((vector: VectorizeValues, options?: VectorizeQueryOptions) =>
         tryVectorizePromise(definition.binding, "query", () =>
           runtime.query(vector as Float32Array | Float64Array | number[], options),
         ),
-      queryById: (vectorId, options) =>
+      ),
+      queryById: Effect.fn(
+        "Vectorize.queryById",
+        spanOptions(definition.binding, "queryById"),
+      )((vectorId: string, options?: VectorizeQueryOptions) =>
         runtime.queryById !== undefined
           ? tryVectorizePromise(definition.binding, "queryById", () =>
               runtime.queryById!(vectorId, options),
@@ -177,15 +209,28 @@ export const makeClient =
                 new TypeError("Vectorize binding does not expose queryById()"),
               ),
             ),
-      insert: (vectors) =>
+      ),
+      insert: Effect.fn(
+        "Vectorize.insert",
+        spanOptions(definition.binding, "insert"),
+      )((vectors: ReadonlyArray<VectorizeVector>) =>
         tryVectorizePromise(definition.binding, "insert", () => runtime.insert([...vectors])),
-      upsert: (vectors) =>
+      ),
+      upsert: Effect.fn(
+        "Vectorize.upsert",
+        spanOptions(definition.binding, "upsert"),
+      )((vectors: ReadonlyArray<VectorizeVector>) =>
         tryVectorizePromise(definition.binding, "upsert", () => runtime.upsert([...vectors])),
+      ),
       deleteByIds,
       delete: deleteByIds,
-      getByIds: (ids) =>
+      getByIds: Effect.fn(
+        "Vectorize.getByIds",
+        spanOptions(definition.binding, "getByIds"),
+      )((ids: ReadonlyArray<string>) =>
         tryVectorizePromise(definition.binding, "getByIds", () => runtime.getByIds([...ids])),
-      unsafeRaw: Effect.succeed(index),
+      ),
+      rawUnsafe: Effect.succeed(index),
     };
   };
 

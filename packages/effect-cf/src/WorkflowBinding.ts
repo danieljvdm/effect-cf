@@ -8,6 +8,7 @@ import { type Context, Data, Effect, Option, Schema as S } from "effect";
 
 import * as Binding from "./Binding";
 import type * as RpcDefinition from "./RpcDefinition";
+import * as ErrorMessage from "./internal/ErrorMessage";
 
 const expectedWorkflow = "Workflow binding with create(), createBatch(), and get()";
 
@@ -92,20 +93,28 @@ export interface WorkflowBindingClient<
   readonly get: (
     instanceId: string,
   ) => Effect.Effect<WorkflowInstance<S.Schema.Type<Result>>, WorkflowOperationError>;
-  readonly unsafeRaw: Effect.Effect<CloudflareWorkflow<S.Codec.Encoded<Payload>>>;
+  readonly rawUnsafe: Effect.Effect<CloudflareWorkflow<S.Codec.Encoded<Payload>>>;
 }
 
 export class WorkflowOperationError extends Data.TaggedError("WorkflowOperationError")<{
   readonly binding: string;
   readonly operation: string;
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Workflow ${this.operation} failed for binding "${this.binding}": ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 export class WorkflowResultDecodeError extends Data.TaggedError("WorkflowResultDecodeError")<{
   readonly binding: string;
   readonly instanceId: string;
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Workflow result decode failed for binding "${this.binding}" instance "${this.instanceId}": ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 const workflowError = (binding: string, operation: string, cause: unknown) =>
   new WorkflowOperationError({ binding, operation, cause });
@@ -200,10 +209,9 @@ export const makeClient = <
   };
 
   return (workflow) => ({
-    create: Effect.fnUntraced(function* (
-      payload: PayloadValue,
-      options?: WorkflowInstanceCreateOptions<EncodedPayload>,
-    ) {
+    create: Effect.fn("WorkflowBinding.create", {
+      attributes: { binding: definition.binding, operation: "create" },
+    })(function* (payload: PayloadValue, options?: WorkflowInstanceCreateOptions<EncodedPayload>) {
       const encoded = yield* encodePayload(payload);
       const raw = yield* tryWorkflowPromise(definition.binding, "create", () =>
         workflow.create({ ...options, params: encoded }),
@@ -211,9 +219,9 @@ export const makeClient = <
 
       return wrapInstance(raw);
     }),
-    createBatch: Effect.fnUntraced(function* (
-      batch: WorkflowInstanceCreateBatchOptions<PayloadValue, EncodedPayload>,
-    ) {
+    createBatch: Effect.fn("WorkflowBinding.createBatch", {
+      attributes: { binding: definition.binding, operation: "createBatch" },
+    })(function* (batch: WorkflowInstanceCreateBatchOptions<PayloadValue, EncodedPayload>) {
       const encodedBatch: Array<CloudflareWorkflowInstanceCreateOptions<EncodedPayload>> = [];
 
       for (const item of batch) {
@@ -235,7 +243,7 @@ export const makeClient = <
       tryWorkflowPromise(definition.binding, "get", () => workflow.get(instanceId)).pipe(
         Effect.map(wrapInstance),
       ),
-    unsafeRaw: Effect.succeed(workflow),
+    rawUnsafe: Effect.succeed(workflow),
   });
 };
 

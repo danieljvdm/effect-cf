@@ -1,7 +1,8 @@
-import { Context, Data, Effect, Schema, type Layer } from "effect";
+import { Context, Data, Effect, Schema as S, type Layer } from "effect";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
+import * as ErrorMessage from "./internal/ErrorMessage";
 
 const expectedContainerNamespace = "Container namespace binding with getByName()";
 
@@ -38,15 +39,15 @@ export interface ContainerStartAndWaitForPortsOptions {
 }
 
 /** Serializable state reported by a Cloudflare Container instance. */
-export const ContainerState = Schema.Union([
-  Schema.Struct({
-    lastChange: Schema.Finite,
-    status: Schema.Literals(["running", "stopping", "stopped", "healthy"]),
+export const ContainerState = S.Union([
+  S.Struct({
+    lastChange: S.Finite,
+    status: S.Literals(["running", "stopping", "stopped", "healthy"]),
   }),
-  Schema.Struct({
-    lastChange: Schema.Finite,
-    status: Schema.Literal("stopped_with_code"),
-    exitCode: Schema.optionalKey(Schema.Int),
+  S.Struct({
+    lastChange: S.Finite,
+    status: S.Literal("stopped_with_code"),
+    exitCode: S.optionalKey(S.Int),
   }),
 ]);
 export type ContainerState = typeof ContainerState.Type;
@@ -86,11 +87,15 @@ export class ContainerOperationError extends Data.TaggedError("ContainerOperatio
   readonly instance: string;
   readonly operation: string;
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Container ${this.operation} failed for binding "${this.binding}" instance "${this.instance}": ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 /** Effect-wrapped client for one named Container instance. */
 export interface ContainerInstanceClient {
-  readonly unsafeRaw: Effect.Effect<ContainerStub, ContainerOperationError>;
+  readonly rawUnsafe: Effect.Effect<ContainerStub, ContainerOperationError>;
   readonly state: Effect.Effect<ContainerState, ContainerOperationError>;
   readonly fetch: (
     input: RequestInfo | URL,
@@ -118,7 +123,7 @@ export interface ContainerNamespaceClient {
     name: string,
     options?: globalThis.DurableObjectNamespaceGetDurableObjectOptions,
   ) => ContainerInstanceClient;
-  readonly unsafeRaw: Effect.Effect<ContainerNamespaceResource>;
+  readonly rawUnsafe: Effect.Effect<ContainerNamespaceResource>;
 }
 
 export type ContainerNamespaceStaticClient<R> = {
@@ -144,9 +149,9 @@ export type ContainerNamespaceStaticClient<R> = {
     ) => Effect.Effect<void, ContainerOperationError, R>;
     readonly stop: (signal?: ContainerSignal) => Effect.Effect<void, ContainerOperationError, R>;
     readonly destroy: Effect.Effect<void, ContainerOperationError, R>;
-    readonly unsafeRaw: Effect.Effect<ContainerStub, ContainerOperationError, R>;
+    readonly rawUnsafe: Effect.Effect<ContainerStub, ContainerOperationError, R>;
   };
-  readonly unsafeRaw: () => Effect.Effect<ContainerNamespaceResource, never, R>;
+  readonly rawUnsafe: Effect.Effect<ContainerNamespaceResource, never, R>;
 };
 
 export type LayerOptions = {
@@ -155,7 +160,7 @@ export type LayerOptions = {
 
 export interface TagClass<Self, Id extends string>
   extends
-    Context.ServiceClass<Self, Id, ContainerNamespaceClient>,
+    Context.ServiceClass<Self, `effect-cf/Container/${Id}`, ContainerNamespaceClient>,
     ContainerNamespaceStaticClient<Self> {
   readonly id: Id;
   readonly layer: (
@@ -188,32 +193,62 @@ const makeInstanceClient = (
   definition: ContainerNamespaceDefinition,
   instance: string,
   stub: ContainerStub,
-): ContainerInstanceClient => ({
-  unsafeRaw: Effect.succeed(stub),
-  state: tryContainerPromise(definition, instance, "state", () => stub.getState()).pipe(
-    Effect.flatMap(Schema.decodeUnknownEffect(ContainerState)),
-    Effect.mapError((cause) =>
-      cause instanceof ContainerOperationError
-        ? cause
-        : new ContainerOperationError({
-            binding: definition.binding,
-            instance,
-            operation: "state",
-            cause,
-          }),
+): ContainerInstanceClient => {
+  const spanOptions = (operation: string) => ({
+    attributes: { binding: definition.binding, instance, operation },
+  });
+
+  return {
+    rawUnsafe: Effect.succeed(stub),
+    state: tryContainerPromise(definition, instance, "state", () => stub.getState()).pipe(
+      Effect.flatMap(S.decodeUnknownEffect(ContainerState)),
+      Effect.mapError((cause) =>
+        cause instanceof ContainerOperationError
+          ? cause
+          : new ContainerOperationError({
+              binding: definition.binding,
+              instance,
+              operation: "state",
+              cause,
+            }),
+      ),
+      Effect.withSpan("ContainerNamespace.state", spanOptions("state")),
     ),
-  ),
-  fetch: (input, init) =>
-    tryContainerPromise(definition, instance, "fetch", () => stub.fetch(input, init)),
-  start: (options, waitOptions) =>
-    tryContainerPromise(definition, instance, "start", () => stub.start(options, waitOptions)),
-  startAndWaitForPorts: (options) =>
-    tryContainerPromise(definition, instance, "startAndWaitForPorts", () =>
-      stub.startAndWaitForPorts(options),
+    fetch: Effect.fn(
+      "ContainerNamespace.fetch",
+      spanOptions("fetch"),
+    )(function* (input: RequestInfo | URL, init?: RequestInit) {
+      return yield* tryContainerPromise(definition, instance, "fetch", () =>
+        stub.fetch(input, init),
+      );
+    }),
+    start: Effect.fn(
+      "ContainerNamespace.start",
+      spanOptions("start"),
+    )(function* (options?: ContainerStartOptions, waitOptions?: ContainerWaitOptions) {
+      return yield* tryContainerPromise(definition, instance, "start", () =>
+        stub.start(options, waitOptions),
+      );
+    }),
+    startAndWaitForPorts: Effect.fn(
+      "ContainerNamespace.startAndWaitForPorts",
+      spanOptions("startAndWaitForPorts"),
+    )(function* (options?: ContainerStartAndWaitForPortsOptions) {
+      return yield* tryContainerPromise(definition, instance, "startAndWaitForPorts", () =>
+        stub.startAndWaitForPorts(options),
+      );
+    }),
+    stop: Effect.fn(
+      "ContainerNamespace.stop",
+      spanOptions("stop"),
+    )(function* (signal?: ContainerSignal) {
+      return yield* tryContainerPromise(definition, instance, "stop", () => stub.stop(signal));
+    }),
+    destroy: tryContainerPromise(definition, instance, "destroy", () => stub.destroy()).pipe(
+      Effect.withSpan("ContainerNamespace.destroy", spanOptions("destroy")),
     ),
-  stop: (signal) => tryContainerPromise(definition, instance, "stop", () => stub.stop(signal)),
-  destroy: tryContainerPromise(definition, instance, "destroy", () => stub.destroy()),
-});
+  };
+};
 
 export const isContainerNamespaceResource = (value: unknown): value is ContainerNamespaceResource =>
   typeof value === "object" &&
@@ -245,7 +280,7 @@ export const makeClient =
       const instance = getByName(name, options);
 
       return {
-        unsafeRaw: Effect.flatMap(instance, (client) => client.unsafeRaw),
+        rawUnsafe: Effect.flatMap(instance, (client) => client.rawUnsafe),
         state: Effect.flatMap(instance, (client) => client.state),
         fetch: (input, init) => Effect.flatMap(instance, (client) => client.fetch(input, init)),
         start: (startOptions, waitOptions) =>
@@ -261,7 +296,7 @@ export const makeClient =
       definition,
       getByName,
       byName,
-      unsafeRaw: Effect.succeed(namespace),
+      rawUnsafe: Effect.succeed(namespace),
     };
   };
 
@@ -288,18 +323,19 @@ export interface ContainerNamespaceService<Id extends string> {
 export const Tag =
   <Self>() =>
   <Id extends string>(id: Id) => {
-    const tag = Context.Service<Self, ContainerNamespaceClient>()(id);
+    const tag = Context.Service<Self, ContainerNamespaceClient>()(
+      `effect-cf/Container/${id}` as const,
+    );
     const makeLayer = (definition: LayerOptions) => layer(tag, definition);
 
-    const getByName = (
+    const getByName = Effect.fnUntraced(function* (
       name: string,
       options?: globalThis.DurableObjectNamespaceGetDurableObjectOptions,
-    ) =>
-      Effect.gen(function* () {
-        const namespace = yield* tag;
+    ) {
+      const namespace = yield* tag;
 
-        return yield* namespace.getByName(name, options);
-      });
+      return yield* namespace.getByName(name, options);
+    });
 
     const byName = (
       name: string,
@@ -319,21 +355,17 @@ export const Tag =
       stop: (signal?: ContainerSignal) =>
         Effect.flatMap(getByName(name, options), (instance) => instance.stop(signal)),
       destroy: Effect.flatMap(getByName(name, options), (instance) => instance.destroy),
-      unsafeRaw: Effect.flatMap(getByName(name, options), (instance) => instance.unsafeRaw),
+      rawUnsafe: Effect.flatMap(getByName(name, options), (instance) => instance.rawUnsafe),
     });
 
-    const unsafeRaw = Effect.fn(function* () {
-      const namespace = yield* tag;
-
-      return yield* namespace.unsafeRaw;
-    });
+    const rawUnsafe = Effect.flatMap(tag, (namespace) => namespace.rawUnsafe);
 
     return Object.assign(tag, {
       id,
       layer: makeLayer,
       getByName,
       byName,
-      unsafeRaw,
+      rawUnsafe,
     }) as TagClass<Self, Id>;
   };
 

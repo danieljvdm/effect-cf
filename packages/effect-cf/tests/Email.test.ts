@@ -242,6 +242,28 @@ test("Send Email validation can be disabled per layer", async () => {
   assert.strictEqual(calls.length, 1);
 });
 
+test("EmailOperationError composes binding, operation, code, and cause message", () => {
+  const suppressed = new Email.EmailOperationError({
+    binding: "EMAIL",
+    operation: "send",
+    cause: new Error("Cannot send emails to this recipient because it is on the suppression list"),
+    code: "E_RECIPIENT_SUPPRESSED",
+  });
+
+  assert.strictEqual(
+    suppressed.message,
+    'Email send failed for binding "EMAIL" (E_RECIPIENT_SUPPRESSED): Cannot send emails to this recipient because it is on the suppression list',
+  );
+
+  const codeless = new Email.EmailOperationError({
+    binding: "EMAIL",
+    operation: "send",
+    cause: new Error("smtp rejected"),
+  });
+
+  assert.strictEqual(codeless.message, 'Email send failed for binding "EMAIL": smtp rejected');
+});
+
 test("Send Email surfaces Cloudflare error codes", async () => {
   const cause = Object.assign(new Error("sender domain is not verified"), {
     code: "E_SENDER_NOT_VERIFIED",

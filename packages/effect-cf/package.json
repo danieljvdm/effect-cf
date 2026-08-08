@@ -14,6 +14,7 @@
     "src"
   ],
   "type": "module",
+  "sideEffects": [],
   "types": "./dist/index.d.mts",
   "exports": {
     ".": {
@@ -52,12 +53,16 @@
     "vitest": "catalog:"
   },
   "peerDependencies": {
-    "@effect/sql-d1": "^4.0.0-beta.105",
-    "@effect/sql-pg": "^4.0.0-beta.105",
-    "@effect/sql-sqlite-do": "^4.0.0-beta.105",
-    "effect": "^4.0.0-beta.105"
+    "@cloudflare/workers-types": "^4.20260611.1",
+    "@effect/sql-d1": "4.0.0-beta.105",
+    "@effect/sql-pg": "4.0.0-beta.105",
+    "@effect/sql-sqlite-do": "4.0.0-beta.105",
+    "effect": "4.0.0-beta.105"
   },
   "peerDependenciesMeta": {
+    "@cloudflare/workers-types": {
+      "optional": true
+    },
     "@effect/sql-pg": {
       "optional": true
     }

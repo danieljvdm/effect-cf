@@ -6,7 +6,11 @@ export type RunWaitUntilEffect = <A, E>(
   effect: Effect.Effect<A, E, never>,
 ) => Promise<Exit.Exit<A, unknown>>;
 
-const causeError = <E>(cause: Cause.Cause<E>) => new Error(Cause.pretty(cause));
+const causeError = <E>(cause: Cause.Cause<E>) => {
+  const squashed = Cause.squash(cause);
+
+  return squashed instanceof Error ? squashed : new Error(Cause.pretty(cause), { cause: squashed });
+};
 
 const failureHandler = <E, R>(
   cause: Cause.Cause<E>,
@@ -25,9 +29,17 @@ const failureHandler = <E, R>(
     ),
   );
 
+/**
+ * Builds the `WorkerContext` service from a native `ExecutionContext`.
+ *
+ * Background effects capture the calling fiber's context via `Effect.context`
+ * before being handed to `ctx.waitUntil`, so the default module-level
+ * `Effect.runPromiseExit` runner is sufficient; entrypoints may still pass a
+ * runtime-bound runner.
+ */
 export const fromExecutionContext = (
   ctx: globalThis.ExecutionContext,
-  runPromiseExit: RunWaitUntilEffect,
+  runPromiseExit: RunWaitUntilEffect = (effect) => Effect.runPromiseExit(effect),
 ): WorkerContextService => {
   const schedule = <A, E, R, R2 = never>(
     effect: Effect.Effect<A, E, R>,

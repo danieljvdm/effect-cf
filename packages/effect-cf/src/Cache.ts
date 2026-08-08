@@ -6,6 +6,8 @@ import type {
 } from "@cloudflare/workers-types";
 import { Context, Data, Effect, Layer, Option } from "effect";
 
+import * as ErrorMessage from "./internal/ErrorMessage";
+
 /** Request key accepted by Cloudflare's Cache API. */
 export type CacheRequest = CloudflareRequestInfo | URL;
 
@@ -20,7 +22,11 @@ export class CacheOperationError extends Data.TaggedError("CacheOperationError")
   readonly cache: string;
   readonly operation: CacheOperation;
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Cache ${this.operation} failed for cache "${this.cache}": ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 /** Effect wrapper around one Cloudflare `Cache` instance. */
 export interface CacheClient {
@@ -42,7 +48,7 @@ export interface CacheClient {
     options?: CacheQueryOptions,
   ) => Effect.Effect<boolean, CacheOperationError>;
   /** Access to the native Cloudflare `Cache` instance. */
-  readonly unsafeRaw: Effect.Effect<CloudflareCache>;
+  readonly rawUnsafe: Effect.Effect<CloudflareCache>;
 }
 
 /** Effect wrapper around Cloudflare's global `caches` object. */
@@ -52,7 +58,7 @@ export interface CacheStorageClient {
   /** Opens a named cache. */
   readonly open: (name: string) => Effect.Effect<CacheClient, CacheOperationError>;
   /** Access to the native Cloudflare `CacheStorage` instance. */
-  readonly unsafeRaw: Effect.Effect<CloudflareCacheStorage>;
+  readonly rawUnsafe: Effect.Effect<CloudflareCacheStorage>;
 }
 
 /** Service for Cloudflare's global Cache API. */
@@ -73,17 +79,34 @@ const tryCachePromise = <A>(
     catch: (cause) => cacheError(cache, operation, cause),
   });
 
+const spanOptions = (cache: string, operation: CacheOperation) => ({
+  attributes: { cache, operation },
+});
+
 /** Wraps a native Cloudflare `Cache` instance. */
 export const makeCacheClient = (cache: CloudflareCache, name = "default"): CacheClient => ({
   name,
-  match: (request, options) =>
+  match: Effect.fn(
+    "Cache.match",
+    spanOptions(name, "match"),
+  )((request: CacheRequest, options?: CacheQueryOptions) =>
     tryCachePromise(name, "match", () => cache.match(request, options)).pipe(
       Effect.map(Option.fromUndefinedOr),
     ),
-  put: (request, response) => tryCachePromise(name, "put", () => cache.put(request, response)),
-  delete: (request, options) =>
+  ),
+  put: Effect.fn(
+    "Cache.put",
+    spanOptions(name, "put"),
+  )((request: CacheRequest, response: Response) =>
+    tryCachePromise(name, "put", () => cache.put(request, response)),
+  ),
+  delete: Effect.fn(
+    "Cache.delete",
+    spanOptions(name, "delete"),
+  )((request: CacheRequest, options?: CacheQueryOptions) =>
     tryCachePromise(name, "delete", () => cache.delete(request, options)),
-  unsafeRaw: Effect.succeed(cache),
+  ),
+  rawUnsafe: Effect.succeed(cache),
 });
 
 /** Wraps a native Cloudflare `CacheStorage` instance. */
@@ -92,8 +115,9 @@ export const makeClient = (storage: CloudflareCacheStorage): CacheStorageClient 
   open: (name) =>
     tryCachePromise(name, "open", () => storage.open(name)).pipe(
       Effect.map((cache) => makeCacheClient(cache, name)),
+      Effect.withSpan("Cache.open", spanOptions(name, "open")),
     ),
-  unsafeRaw: Effect.succeed(storage),
+  rawUnsafe: Effect.succeed(storage),
 });
 
 /** Provides Cache API services from an explicit native `CacheStorage` instance. */

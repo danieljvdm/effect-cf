@@ -1,6 +1,8 @@
 import { RpcStub, RpcTarget } from "cloudflare:workers";
 import { Effect, type Scope } from "effect";
 
+import { decodeWireError } from "./RpcDefinition";
+
 export { RpcStub, RpcTarget };
 
 export type Stubable = Rpc.Stubable;
@@ -113,7 +115,7 @@ export const resolve = <A>(value: A): Effect.Effect<Awaited<A>, unknown> =>
   isPromiseLike(value)
     ? Effect.tryPromise({
         try: () => value,
-        catch: (cause) => cause,
+        catch: (cause) => decodeWireError(cause),
       })
     : Effect.sync(() => value as Awaited<A>);
 

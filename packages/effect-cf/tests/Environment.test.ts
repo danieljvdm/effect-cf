@@ -20,6 +20,26 @@ void WorkerConfig.string("TEST_COUNTER_DO");
 // @ts-expect-error Unknown keys must be declared on Cloudflare.Env.
 void WorkerConfig.string("MISSING_CONFIG_KEY");
 
+test("WorkerConfig.providerFromEnv preserves empty strings when requested", async () => {
+  const env = {
+    APP_NAME: "",
+  } as Cloudflare.Env;
+
+  const result = await Effect.runPromise(
+    WorkerConfig.string("APP_NAME").pipe(
+      Effect.provide(
+        WorkerConfig.layerWith((currentEnv) =>
+          WorkerConfig.providerFromEnv(currentEnv, { preserveEmptyStrings: true }),
+        ),
+      ),
+      Effect.provide(Layer.succeed(WorkerEnvironment, env)),
+      Effect.orDie,
+    ),
+  );
+
+  expect(result).toBe("");
+});
+
 test("WorkerConfig.layer reads scalar config from WorkerEnvironment", async () => {
   const env = {
     DATABASE_URL: "postgres://example.test/app",

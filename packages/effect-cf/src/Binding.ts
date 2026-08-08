@@ -3,7 +3,10 @@ import { Context, Data, Effect, Layer } from "effect";
 import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 
 /** Internal type id marker used by binding helper services. */
-export const TypeId = "effect-cf/Binding" as const;
+export const TypeId = "~effect-cf/Binding" as const;
+
+/** Internal type id marker used by binding helper services. */
+export type TypeId = typeof TypeId;
 
 /** Error raised when a configured binding does not exist on `env`. */
 export class BindingNotFoundError extends Data.TaggedError("BindingNotFoundError")<{
@@ -161,13 +164,17 @@ const getBinding = <Resource>(
 
 /**
  * Creates a Context tag + layer for reading and validating a Cloudflare binding.
+ *
+ * The Context key is namespaced as `effect-cf/Binding/<id>`; `id` stays the
+ * bare user-supplied identifier.
  */
 export interface BindingService<Self, Id extends string, Service> extends Context.ServiceClass<
   Self,
-  Id,
+  `effect-cf/Binding/${Id}`,
   Service
 > {
-  readonly [TypeId]: typeof TypeId;
+  readonly [TypeId]: TypeId;
+  readonly id: Id;
   readonly binding: string;
   readonly layer: Layer.Layer<
     Self,
@@ -176,12 +183,17 @@ export interface BindingService<Self, Id extends string, Service> extends Contex
   >;
 }
 
-export const layer = <Self, Resource, Service = Resource>(
+/**
+ * The overloads on {@link layer} and {@link Service} guarantee that
+ * `Service = Resource` whenever `wrap` is absent, making the fallback cast
+ * safe.
+ */
+const makeBindingLayer = <Self, Resource, Service>(
   tag: Context.Service<Self, Service>,
   binding: string,
   isResource: (value: unknown) => value is Resource,
-  wrap?: (resource: Resource) => Service,
-  options?: ValidationOptions,
+  wrap: ((resource: Resource) => Service) | undefined,
+  options: ValidationOptions | undefined,
 ): Layer.Layer<Self, BindingNotFoundError | BindingValidationError, WorkerEnvironment> =>
   Layer.effect(
     tag,
@@ -193,21 +205,62 @@ export const layer = <Self, Resource, Service = Resource>(
     }),
   );
 
-export const Service =
-  <Self>() =>
-  <Id extends string, Resource, Service = Resource>(
+export function layer<Self, Resource>(
+  tag: Context.Service<Self, Resource>,
+  binding: string,
+  isResource: (value: unknown) => value is Resource,
+  wrap?: undefined,
+  options?: ValidationOptions,
+): Layer.Layer<Self, BindingNotFoundError | BindingValidationError, WorkerEnvironment>;
+export function layer<Self, Resource, Service>(
+  tag: Context.Service<Self, Service>,
+  binding: string,
+  isResource: (value: unknown) => value is Resource,
+  wrap: (resource: Resource) => Service,
+  options?: ValidationOptions,
+): Layer.Layer<Self, BindingNotFoundError | BindingValidationError, WorkerEnvironment>;
+export function layer<Self, Resource, Service = Resource>(
+  tag: Context.Service<Self, Service>,
+  binding: string,
+  isResource: (value: unknown) => value is Resource,
+  wrap?: (resource: Resource) => Service,
+  options?: ValidationOptions,
+): Layer.Layer<Self, BindingNotFoundError | BindingValidationError, WorkerEnvironment> {
+  return makeBindingLayer(tag, binding, isResource, wrap, options);
+}
+
+export const Service = <Self>() => {
+  function makeService<Id extends string, Resource>(
+    id: Id,
+    binding: string,
+    isResource: (value: unknown) => value is Resource,
+    wrap?: undefined,
+    options?: ValidationOptions,
+  ): BindingService<Self, Id, Resource>;
+  function makeService<Id extends string, Resource, Service>(
+    id: Id,
+    binding: string,
+    isResource: (value: unknown) => value is Resource,
+    wrap: (resource: Resource) => Service,
+    options?: ValidationOptions,
+  ): BindingService<Self, Id, Service>;
+  function makeService<Id extends string, Resource, Service = Resource>(
     id: Id,
     binding: string,
     isResource: (value: unknown) => value is Resource,
     wrap?: (resource: Resource) => Service,
     options?: ValidationOptions,
-  ): BindingService<Self, Id, Service> => {
-    const tag = Context.Service<Self, Service>()(id);
-    const serviceLayer = layer(tag, binding, isResource, wrap, options);
+  ): BindingService<Self, Id, Service> {
+    const tag = Context.Service<Self, Service>()(`effect-cf/Binding/${id}` as const);
+    const serviceLayer = makeBindingLayer(tag, binding, isResource, wrap, options);
 
     return Object.assign(tag, {
       [TypeId]: TypeId,
+      id,
       binding,
       layer: serviceLayer,
     }) as BindingService<Self, Id, Service>;
-  };
+  }
+
+  return makeService;
+};

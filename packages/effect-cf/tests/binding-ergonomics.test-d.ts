@@ -155,7 +155,7 @@ const hyperdriveProgram = Effect.gen(function* () {
   const hyperdrive = yield* AppHyperdrive;
 
   expectTypeOf(hyperdrive.connectionString).toEqualTypeOf<string>();
-  expectTypeOf(hyperdrive.unsafeRaw).toEqualTypeOf<Effect.Effect<globalThis.Hyperdrive>>();
+  expectTypeOf(hyperdrive.rawUnsafe).toEqualTypeOf<Effect.Effect<globalThis.Hyperdrive>>();
 });
 
 expectTypeOf(HyperdrivePg.layer(AppHyperdrive, { binding: "HYPERDRIVE" })).toEqualTypeOf<
@@ -288,7 +288,7 @@ const workersAiProgram = Effect.gen(function* () {
     Effect.Effect<WorkersAi.WorkersAiEmbeddingResponse, WorkersAi.WorkersAiOperationError>
   >();
 
-  expectTypeOf(ai.unsafeRaw).toEqualTypeOf<Effect.Effect<WorkersAi.WorkersAiBinding<AiModels>>>();
+  expectTypeOf(ai.rawUnsafe).toEqualTypeOf<Effect.Effect<WorkersAi.WorkersAiBinding<AiModels>>>();
 });
 
 export class RecipeVectors extends Vectorize.Tag<RecipeVectors>()("RecipeVectors") {}
@@ -336,7 +336,7 @@ export const RequestAnalyticsQueryLayer = RequestAnalyticsQuery.layer({
   apiToken: Redacted.make("secret-token"),
 });
 
-export const RequestAnalyticsQueryFetchLayer = RequestAnalyticsQuery.fetchLayer({
+export const RequestAnalyticsQueryFetchLayer = RequestAnalyticsQuery.layerFetch({
   accountId: "account-1",
   apiToken: Redacted.make("secret-token"),
 });
@@ -348,7 +348,7 @@ export const RequestAnalyticsQueryConfigLayer = RequestAnalyticsQuery.layerConfi
   }),
 );
 
-export const RequestAnalyticsQueryFetchConfigLayer = RequestAnalyticsQuery.fetchLayerConfig(
+export const RequestAnalyticsQueryFetchConfigLayer = RequestAnalyticsQuery.layerFetchConfig(
   AnalyticsEngine.queryConfig({
     accountId: Config.string("ACCOUNT_ID"),
     apiToken: Config.redacted("API_TOKEN"),
@@ -384,7 +384,7 @@ const analyticsEngineProgram = Effect.gen(function* () {
     analytics.writeBatch([{ indexes: ["example.com"], blobs: ["/pricing"], doubles: [1] }]),
   ).toEqualTypeOf<Effect.Effect<void, AnalyticsEngine.AnalyticsEngineWriteError>>();
 
-  expectTypeOf(analytics.unsafeRaw).toEqualTypeOf<
+  expectTypeOf(analytics.rawUnsafe).toEqualTypeOf<
     Effect.Effect<AnalyticsEngine.AnalyticsEngineBinding>
   >();
 

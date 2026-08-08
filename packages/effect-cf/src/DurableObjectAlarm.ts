@@ -2,6 +2,7 @@ import { Clock, Context, Data, DateTime, Duration, Effect, Exit, Layer, Schema a
 
 import { DurableObjectState } from "./DurableObjectState";
 import type { SqlStorageValue, StorageOperationError } from "./DurableObjectStorage";
+import * as ErrorMessage from "./internal/ErrorMessage";
 
 const INIT_TABLE_SQL = `
 CREATE TABLE IF NOT EXISTS effect_cf_scheduled_alarms (
@@ -46,26 +47,46 @@ interface NextAlarmRow extends Record<string, SqlStorageValue> {
 
 export class InvalidAlarmRefError extends Data.TaggedError("InvalidAlarmRefError")<{
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Invalid Durable Object alarm ref: ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 export class InvalidAlarmPayloadError extends Data.TaggedError("InvalidAlarmPayloadError")<{
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Invalid Durable Object alarm payload: ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 export class InvalidRepeatEveryError extends Data.TaggedError("InvalidRepeatEveryError")<{
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Invalid Durable Object alarm repeatEvery: ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 export class InvalidProcessDueAlarmsOptionsError extends Data.TaggedError(
   "InvalidProcessDueAlarmsOptionsError",
 )<{
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Invalid processDueAlarms options: ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 export class StoredAlarmDecodeError extends Data.TaggedError("StoredAlarmDecodeError")<{
   readonly cause: unknown;
   readonly storageId: string;
-}> {}
+}> {
+  override get message(): string {
+    return `Failed to decode stored alarm "${this.storageId}": ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 export type DurableObjectAlarmError =
   | InvalidAlarmPayloadError
@@ -355,7 +376,7 @@ const toRepeatEveryMillis = (input: Duration.Input | undefined) => {
 
   return Effect.try({
     try: () => {
-      const millis = Duration.toMillis(Duration.fromInputUnsafe(input));
+      const millis = Duration.toMillis(input);
 
       if (!Number.isFinite(millis) || millis <= 0) {
         throw new Error("Alarm repeatEvery must be a positive finite duration");
@@ -382,7 +403,7 @@ const toAlarmDue = (row: AlarmRow) =>
       _tag: "AlarmDue",
       id: row.alarm_id,
       payload: yield* decodeStoredPayload(row),
-      scheduledAt: DateTime.toUtc(DateTime.makeUnsafe(row.run_at)),
+      scheduledAt: DateTime.makeUnsafe(row.run_at),
       tag: row.tag,
     });
   });
@@ -404,7 +425,7 @@ const getProcessLimit = (options: ProcessDueAlarmsOptions<unknown, unknown> | un
 const toFailureRescheduleMillis = (input: Duration.Input) =>
   Effect.try({
     try: () => {
-      const millis = Duration.toMillis(Duration.fromInputUnsafe(input));
+      const millis = Duration.toMillis(input);
 
       if (!Number.isFinite(millis) || millis <= 0) {
         throw new Error("Alarm failure rescheduleAfter must be a positive finite duration");
@@ -594,7 +615,7 @@ export const define = <const Definitions extends AlarmDefinitions>(definitions: 
 export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, AlarmScheduler>()(
   "effect-cf/DurableObjectAlarm",
 ) {
-  static readonly layer = Layer.effect(
+  static readonly layer: Layer.Layer<DurableObjectAlarm, never, DurableObjectState> = Layer.effect(
     DurableObjectAlarm,
     Effect.gen(function* () {
       const state = yield* DurableObjectState;

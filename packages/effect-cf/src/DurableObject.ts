@@ -1,24 +1,12 @@
 import { DurableObject as CloudflareDurableObject } from "cloudflare:workers";
-import {
-  ConfigProvider,
-  Effect,
-  Layer,
-  ManagedRuntime,
-  type Context,
-  type Scope,
-  type Schema as S,
-} from "effect";
+import { Effect, Layer, type ManagedRuntime, type Scope } from "effect";
 
 import { NativeRequest } from "./Worker";
-import { WorkerConfig, WorkerEnvironment, type WorkerEnv } from "./Environment";
+import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 import { DurableObjectState, fromDurableObjectState } from "./DurableObjectState";
 import { fromWebSocket, type DurableWebSocket } from "./DurableObjectWebSocket";
-import type * as Binding from "./Binding";
-import * as DurableObjectDefinition from "./DurableObjectDefinition";
-import type * as DurableObjectNamespace from "./DurableObjectNamespace";
-import type * as Rpc from "./Rpc";
-import * as CloudflareClock from "./internal/Clock";
 import * as Entrypoint from "./internal/Entrypoint";
+import * as Runtime from "./internal/Runtime";
 
 const reservedMethodNames = new Set<string>([
   "constructor",
@@ -168,16 +156,11 @@ export const make = <
     constructor(state: globalThis.DurableObjectState, env: WorkerEnv) {
       super(state, env);
 
-      const services = Layer.mergeAll(
-        CloudflareClock.layer,
-        ConfigProvider.layer(Effect.succeed(WorkerConfig.providerFromEnv(env))),
+      this.runtime = Runtime.makeEntrypointRuntime<ROut, LayerError, DurableObjectState>(
+        layer,
+        env,
         Layer.succeed(DurableObjectState, fromDurableObjectState(state)),
-        Layer.succeed(WorkerEnvironment, env),
       );
-
-      const runtimeLayer = Entrypoint.provideEntrypointServices(layer, services);
-
-      this.runtime = ManagedRuntime.make(runtimeLayer);
 
       const initialize = options.initialize;
 
@@ -190,15 +173,10 @@ export const make = <
       effect: Effect.Effect<A, E, HandlerContext<ROut | REvent>>,
       runOptions: RunOptions = {},
     ): Promise<A> {
-      const effectWithEventLayer =
-        runOptions.eventLayer === false || options.eventLayer === undefined
-          ? effect
-          : effect.pipe(Effect.provide(options.eventLayer, { local: true }));
-
-      return this.runtime.runPromise(
-        Effect.scoped(
-          effectWithEventLayer as Effect.Effect<A, E | EventLayerError, HandlerContext<ROut>>,
-        ),
+      return Runtime.runEventPromise(
+        this.runtime,
+        effect,
+        runOptions.eventLayer === false ? undefined : options.eventLayer,
       );
     }
 
@@ -273,135 +251,20 @@ export const make = <
   );
 };
 
-export type ServiceFreeSchema = S.Codec<any, any, never, never>;
+export type {
+  Api,
+  Definition,
+  HandlerEffect,
+  Handlers,
+  LayerOptions,
+  Method,
+  Methods,
+  NoReservedMethods,
+  Options,
+  ReservedMethodName,
+  ServerApi,
+  ServiceFreeSchema,
+  TagClass,
+} from "./DurableObjectDefinition";
 
-export interface Method<
-  Args extends ReadonlyArray<ServiceFreeSchema> = ReadonlyArray<ServiceFreeSchema>,
-  Success extends ServiceFreeSchema = ServiceFreeSchema,
-> {
-  readonly args: Args;
-  readonly success: Success;
-}
-
-export namespace Method {
-  export type Any = Method<ReadonlyArray<ServiceFreeSchema>, ServiceFreeSchema>;
-
-  type ArgsFromSchemas<Args extends ReadonlyArray<ServiceFreeSchema>> = Args extends readonly []
-    ? []
-    : Args extends readonly [
-          infer Head extends ServiceFreeSchema,
-          ...infer Tail extends ReadonlyArray<ServiceFreeSchema>,
-        ]
-      ? [S.Schema.Type<Head>, ...ArgsFromSchemas<Tail>]
-      : Array<S.Schema.Type<Args[number]>>;
-
-  export type Args<Self extends Any> = ArgsFromSchemas<Self["args"]>;
-
-  export type Success<Self extends Any> = S.Schema.Type<Self["success"]>;
-}
-
-export type Methods = Record<string, Method.Any>;
-
-export type ReservedMethodName = DurableObjectDefinition.ReservedMethodName;
-
-export type NoReservedMethods<MethodsShape extends Methods> =
-  Extract<keyof MethodsShape, ReservedMethodName> extends never ? MethodsShape : never;
-
-export interface Definition<Id extends string = string, MethodsShape extends Methods = Methods> {
-  readonly id: Id;
-  readonly methods: MethodsShape;
-}
-
-export namespace Definition {
-  export type Any = Definition<string, Methods>;
-}
-
-export type LayerOptions = DurableObjectDefinition.LayerOptions;
-
-export type ServerApi<Self extends Definition.Any> = {
-  readonly [Key in keyof Self["methods"]]: (
-    ...args: Method.Args<Self["methods"][Key]>
-  ) => Promise<Method.Success<Self["methods"][Key]>>;
-};
-
-export type Api<Self extends Definition.Any> = Rpc.Provider<ServerApi<Self>, ReservedMethodName>;
-
-export type Handlers<ROut, Self extends Definition.Any> = {
-  readonly [Key in keyof Self["methods"]]: (
-    ...args: Method.Args<Self["methods"][Key]>
-  ) => DurableObjectHandler<ROut, Method.Success<Self["methods"][Key]>>;
-};
-
-export interface Options<
-  ROut,
-  Self extends Definition.Any,
-  REvent = never,
-  EventLayerError = never,
-> extends Omit<
-  DurableObjectOptions<ROut, REvent, EventLayerError, Handlers<ROut | REvent, Self>>,
-  "rpc"
-> {
-  readonly rpc: Handlers<ROut | REvent, Self>;
-}
-
-export type TagClass<Self, Id extends string, MethodsShape extends Methods> = Context.ServiceClass<
-  Self,
-  Id,
-  DurableObjectNamespace.DurableObjectNamespaceEffectClient<
-    Api<Definition<Id, MethodsShape>>,
-    Definition<Id, MethodsShape>
-  >
-> &
-  DurableObjectNamespace.DurableObjectNamespaceStaticClient<
-    Self,
-    Api<Definition<Id, MethodsShape>>,
-    Definition<Id, MethodsShape>
-  > & {
-    readonly id: Id;
-    readonly methods: MethodsShape;
-    readonly make: <ROut, LayerError, REvent = never, EventLayerError = never>(
-      layer: Layer.Layer<ROut, LayerError, DurableObjectState | WorkerEnvironment>,
-      options: Options<ROut, Definition<Id, MethodsShape>, REvent, EventLayerError>,
-    ) => DurableObjectClass<Handlers<ROut | REvent, Definition<Id, MethodsShape>>, ROut | REvent>;
-    readonly layer: (
-      options: LayerOptions,
-    ) => Layer.Layer<
-      Self,
-      Binding.BindingNotFoundError | Binding.BindingValidationError,
-      WorkerEnvironment
-    >;
-  };
-
-export type TagFactory = <Self>() => <Id extends string, const MethodsShape extends Methods>(
-  id: Id,
-  methods: MethodsShape & NoReservedMethods<MethodsShape>,
-) => TagClass<Self, Id, MethodsShape>;
-
-export const Tag = DurableObjectDefinition.Tag as unknown as TagFactory;
-
-export const method = DurableObjectDefinition.method as {
-  <Success extends ServiceFreeSchema>(definition: {
-    readonly success: Success;
-  }): Method<readonly [], Success>;
-  <
-    const Args extends ReadonlyArray<ServiceFreeSchema>,
-    Success extends ServiceFreeSchema,
-  >(definition: {
-    readonly args: Args;
-    readonly success: Success;
-  }): Method<Args, Success>;
-};
-
-export const implement = DurableObjectDefinition.implement as unknown as <
-  ROut,
-  const Self extends Definition.Any,
->(
-  _definition: Self,
-  handlers: Handlers<ROut, Self>,
-) => Handlers<ROut, Self>;
-
-export type HandlerEffect<
-  ROut,
-  Self extends Definition.Any,
-  Key extends keyof Self["methods"],
-> = DurableObjectHandler<ROut, Method.Success<Self["methods"][Key]>>;
+export { implement, method, Tag } from "./DurableObjectDefinition";

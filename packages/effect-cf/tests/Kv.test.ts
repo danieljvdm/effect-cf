@@ -1,5 +1,5 @@
 import { assert, expect, layer, test } from "@effect/vitest";
-import { Effect, Layer, Option, Schema as S } from "effect";
+import { Effect, Layer, Option, Schema as S, Tracer } from "effect";
 
 import { Binding, Kv, WorkerEnvironment } from "../src/index";
 
@@ -375,16 +375,56 @@ test("definition-backed KV bindings report missing and invalid bindings", async 
 });
 
 {
+  const spans: Array<Tracer.NativeSpan> = [];
+  const tracer = Tracer.make({
+    span(options) {
+      const span = new Tracer.NativeSpan(options);
+
+      spans.push(span);
+
+      return span;
+    },
+  });
   const kv = makeFakeKv();
 
-  layer(testKvLayer(kv))("KV unsafeRaw", (it) => {
+  layer(testKvLayer(kv))("KV tracing", (it) => {
+    it.effect("emits a named span for put", () =>
+      Effect.gen(function* () {
+        const testKv = yield* TestKv;
+
+        yield* testKv.put("user:1", { count: 1 });
+
+        const span = spans.find((candidate) => candidate.name === "Kv.put");
+
+        assert.isDefined(span);
+        assert.strictEqual(span?.attributes.get("binding"), "TEST_KV");
+        assert.strictEqual(span?.attributes.get("operation"), "put");
+      }).pipe(Effect.provideService(Tracer.Tracer, tracer)),
+    );
+  });
+}
+
+{
+  const kv = makeFakeKv();
+
+  layer(testKvLayer(kv))("KV rawUnsafe", (it) => {
     it.effect("exposes an explicit raw namespace escape hatch", () =>
       Effect.gen(function* () {
         const testKv = yield* TestKv;
-        const raw = yield* testKv.unsafeRaw;
+        const raw = yield* testKv.rawUnsafe;
 
         assert.strictEqual(raw, kv);
       }),
     );
   });
 }
+
+test("KvOperationError composes binding, operation, and cause message", () => {
+  const error = new Kv.KvOperationError({
+    binding: "MY_KV",
+    operation: "get",
+    cause: new Error("network unavailable"),
+  });
+
+  assert.strictEqual(error.message, 'Kv get failed for binding "MY_KV": network unavailable');
+});

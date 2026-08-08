@@ -70,7 +70,7 @@ Durable Object namespace:
 }
 ```
 
-Use the namespace or named instance `unsafeRaw` Effect only for a native SDK
+Use the namespace or named instance `rawUnsafe` Effect only for a native SDK
 operation that effect-cf does not expose. Container responses are not
 status-checked or transformed, so HTTP errors and WebSocket upgrade responses
 retain native Cloudflare behavior.

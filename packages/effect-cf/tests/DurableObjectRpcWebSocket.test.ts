@@ -114,11 +114,40 @@ const TestRpcHandlers = TestRpcs.toLayer(
   });
 }
 
-function makeAppLayer(state: FakeDurableObjectState) {
+{
+  const socket = makeFakeWebSocket();
+  const durableSocket = DurableObjectWebSocket.fromWebSocket(socket);
+  const state = makeFakeDurableObjectState();
+
+  layer(makeAppLayer(state, RpcSerialization.layerNdjsonWith({ maxBufferSize: 16 })))(
+    "DurableObjectRpcWebSocket buffer limits",
+    (it) => {
+      it.effect("closes the socket with 1009 when a frame exceeds the max buffer size", () =>
+        Effect.gen(function* () {
+          const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
+
+          yield* transport.accept(durableSocket);
+          yield* transport.message(durableSocket, `${"x".repeat(64)}\n`);
+
+          assert.deepStrictEqual(
+            socket.closed.map((event) => event.code),
+            [1009],
+          );
+          assert.deepStrictEqual(socket.sent, []);
+        }),
+      );
+    },
+  );
+}
+
+function makeAppLayer(
+  state: FakeDurableObjectState,
+  serialization: Layer.Layer<RpcSerialization.RpcSerialization> = RpcSerialization.layerJson,
+) {
   return RpcServer.layer(TestRpcs, { disableFatalDefects: true }).pipe(
     Layer.provideMerge(DurableObjectRpcWebSocket.layer({ tag: "test-rpc" })),
     Layer.provide(TestRpcHandlers),
-    Layer.provide(RpcSerialization.layerJson),
+    Layer.provide(serialization),
     Layer.provide(
       Layer.succeed(
         DurableObjectState.DurableObjectState,
@@ -130,6 +159,10 @@ function makeAppLayer(state: FakeDurableObjectState) {
 
 interface FakeWebSocket extends WebSocket {
   readonly sent: Array<string | ArrayBuffer | ArrayBufferView>;
+  readonly closed: Array<{
+    readonly code: number | undefined;
+    readonly reason: string | undefined;
+  }>;
   readonly nextSend: Promise<void>;
 }
 
@@ -137,18 +170,23 @@ function makeFakeWebSocket(initialAttachment: unknown = null): FakeWebSocket {
   let attachment = initialAttachment;
   let resolveSend: () => void = () => {};
   const sent: Array<string | ArrayBuffer | ArrayBufferView> = [];
+  const closed: Array<{ readonly code: number | undefined; readonly reason: string | undefined }> =
+    [];
   const nextSend = new Promise<void>((resolve) => {
     resolveSend = resolve;
   });
 
   return {
     sent,
+    closed,
     nextSend,
     send(message: string | ArrayBuffer | ArrayBufferView) {
       sent.push(message);
       resolveSend();
     },
-    close() {},
+    close(code?: number, reason?: string) {
+      closed.push({ code, reason });
+    },
     serializeAttachment(value: unknown) {
       attachment = value;
     },

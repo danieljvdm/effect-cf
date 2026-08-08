@@ -119,7 +119,7 @@ export default Worker.make(RenderersLive, {
 
 The instance client exposes `state`, `fetch`, `start`,
 `startAndWaitForPorts`, `stop`, `destroy`, and the Effect-valued native
-`unsafeRaw` stub.
+`rawUnsafe` stub.
 Responses are returned unchanged, including non-2xx and WebSocket upgrade
 responses. If the Container uses outbound interception, also export
 `ContainerProxy` from `@cloudflare/containers`.
@@ -366,7 +366,7 @@ export const recordPageView = (request: Request) =>
 
 Define the dataset binding in the consuming Worker's `wrangler.jsonc` with `analytics_engine_datasets`, then provide `RequestAnalytics.layer({ binding: "REQUEST_ANALYTICS" })` from the Worker layer. Invalid writes fail with `AnalyticsEngineWriteValidationError` by default. Use `write: { onInvalid: "drop" }` on the layer or `{ onInvalid: "drop" }` per call when dropping invalid points is preferable.
 
-Analytics Engine query tags wrap Cloudflare's HTTP SQL API. Configuration can stay in Effect `Config`, including a redacted API token, the outbound transport is an Effect `HttpClient` dependency, and rows can be decoded with Effect schemas at the query boundary. Use `fetchLayerConfig(...)` as shorthand when the platform fetch-backed client is enough.
+Analytics Engine query tags wrap Cloudflare's HTTP SQL API. Configuration can stay in Effect `Config`, including a redacted API token, the outbound transport is an Effect `HttpClient` dependency, and rows can be decoded with Effect schemas at the query boundary. Use `layerFetchConfig(...)` as shorthand when the platform fetch-backed client is enough.
 
 ```ts
 import { Effect, Layer, Schema as S } from "effect";

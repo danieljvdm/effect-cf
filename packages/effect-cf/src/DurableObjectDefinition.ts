@@ -144,7 +144,7 @@ export type LayerOptions = {
 
 export type TagClass<Self, Id extends string, MethodsShape extends Methods> = Context.ServiceClass<
   Self,
-  Id,
+  `effect-cf/DurableObject/${Id}`,
   DurableObjectNamespace.DurableObjectNamespaceEffectClient<
     Api<Definition<Id, MethodsShape>>,
     Definition<Id, MethodsShape>
@@ -241,23 +241,30 @@ export const Tag =
 
     type SelfDefinition = Definition<Id, MethodsShape>;
     type ClientApi = Api<SelfDefinition>;
+    const serviceKey: `effect-cf/DurableObject/${Id}` = `effect-cf/DurableObject/${id}`;
     const tag = Context.Service<
       Self,
       DurableObjectNamespace.DurableObjectNamespaceEffectClient<ClientApi, SelfDefinition>
-    >()(id);
+    >()(serviceKey);
 
     const bindingDefinition = (binding: LayerOptions) => ({
       ...binding,
       definition,
     });
 
-    const layer = (binding: LayerOptions) =>
+    const layer = (
+      binding: LayerOptions,
+    ): Layer.Layer<
+      Self,
+      Binding.BindingNotFoundError | Binding.BindingValidationError,
+      WorkerEnvironment
+    > =>
       DurableObjectNamespace.layer<Self, ClientApi, SelfDefinition>(
         tag,
         bindingDefinition(binding),
       );
 
-    const newUniqueId = Effect.fnUntraced(function* (
+    const newUniqueId = Effect.fn("DurableObject.newUniqueId")(function* (
       options?: globalThis.DurableObjectNamespaceNewUniqueIdOptions,
     ) {
       const namespace = yield* tag;
@@ -265,19 +272,19 @@ export const Tag =
       return yield* namespace.newUniqueId(options);
     });
 
-    const idFromName = Effect.fnUntraced(function* (name: string) {
+    const idFromName = Effect.fn("DurableObject.idFromName")(function* (name: string) {
       const namespace = yield* tag;
 
       return yield* namespace.idFromName(name);
     });
 
-    const idFromString = Effect.fnUntraced(function* (value: string) {
+    const idFromString = Effect.fn("DurableObject.idFromString")(function* (value: string) {
       const namespace = yield* tag;
 
       return yield* namespace.idFromString(value);
     });
 
-    const get = Effect.fnUntraced(function* (
+    const get = Effect.fn("DurableObject.get")(function* (
       objectId: globalThis.DurableObjectId,
       options?: globalThis.DurableObjectNamespaceGetDurableObjectOptions,
     ) {
@@ -286,7 +293,7 @@ export const Tag =
       return yield* namespace.get(objectId, options);
     });
 
-    const getByName = Effect.fnUntraced(function* (
+    const getByName = Effect.fn("DurableObject.getByName")(function* (
       name: string,
       options?: globalThis.DurableObjectNamespaceGetDurableObjectOptions,
     ) {
@@ -295,68 +302,70 @@ export const Tag =
       return yield* namespace.getByName(name, options);
     });
 
-    const jurisdiction = Effect.fnUntraced(function* (value: globalThis.DurableObjectJurisdiction) {
+    const jurisdiction = Effect.fn("DurableObject.jurisdiction")(function* (
+      value: globalThis.DurableObjectJurisdiction,
+    ) {
       const namespace = yield* tag;
 
       return yield* namespace.jurisdiction(value);
     });
 
-    const fetch = (
+    const fetch = Effect.fn("DurableObject.fetch")(function* (
       stub: DurableObjectNamespace.DurableObjectStubClient<ClientApi>,
       input: RequestInfo | URL,
       init?: RequestInit,
-    ) =>
-      Effect.gen(function* () {
-        const namespace = yield* tag;
-
-        return yield* namespace.fetch(stub, input, init);
-      });
-
-    const rpc = <Method extends keyof ClientApi>(
-      stub: DurableObjectNamespace.DurableObjectStubClient<ClientApi>,
-      method: Method,
-      ...args: ClientApi[Method] extends (...args: infer Args) => unknown ? Args : never
-    ) =>
-      Effect.gen(function* () {
-        const namespace = yield* tag;
-
-        return yield* (namespace.rpc as UnsafeInvoke<DurableObjectNamespace.DurableObjectRpcError>)(
-          stub,
-          method,
-          ...args,
-        );
-      });
-
-    const call = <Method extends keyof ClientApi>(
-      stub: DurableObjectNamespace.DurableObjectStubClient<ClientApi>,
-      method: Method,
-      ...args: ClientApi[Method] extends (...args: infer Args) => unknown ? Args : never
-    ) =>
-      Effect.gen(function* () {
-        const namespace = yield* tag;
-
-        return yield* (
-          namespace.call as UnsafeInvoke<DurableObjectNamespace.DurableObjectRpcError>
-        )(stub, method, ...args);
-      });
-
-    const scopedCall = <Method extends keyof ClientApi>(
-      stub: DurableObjectNamespace.DurableObjectStubClient<ClientApi>,
-      method: Method,
-      ...args: ClientApi[Method] extends (...args: infer Args) => unknown ? Args : never
-    ) =>
-      Effect.gen(function* () {
-        const namespace = yield* tag;
-
-        return yield* (
-          namespace.scopedCall as UnsafeInvoke<DurableObjectNamespace.DurableObjectRpcError>
-        )(stub, method, ...args);
-      });
-
-    const unsafeRaw = Effect.fnUntraced(function* () {
+    ) {
       const namespace = yield* tag;
 
-      return yield* namespace.unsafeRaw;
+      return yield* namespace.fetch(stub, input, init);
+    });
+
+    const rpc = Effect.fn("DurableObject.rpc")(function* <Method extends keyof ClientApi>(
+      stub: DurableObjectNamespace.DurableObjectStubClient<ClientApi>,
+      method: Method,
+      ...args: ClientApi[Method] extends (...args: infer Args) => unknown ? Args : never
+    ) {
+      const namespace = yield* tag;
+
+      return yield* (namespace.rpc as UnsafeInvoke<DurableObjectNamespace.DurableObjectRpcError>)(
+        stub,
+        method,
+        ...args,
+      );
+    });
+
+    const call = Effect.fn("DurableObject.call")(function* <Method extends keyof ClientApi>(
+      stub: DurableObjectNamespace.DurableObjectStubClient<ClientApi>,
+      method: Method,
+      ...args: ClientApi[Method] extends (...args: infer Args) => unknown ? Args : never
+    ) {
+      const namespace = yield* tag;
+
+      return yield* (namespace.call as UnsafeInvoke<DurableObjectNamespace.DurableObjectRpcError>)(
+        stub,
+        method,
+        ...args,
+      );
+    });
+
+    const scopedCall = Effect.fn("DurableObject.scopedCall")(function* <
+      Method extends keyof ClientApi,
+    >(
+      stub: DurableObjectNamespace.DurableObjectStubClient<ClientApi>,
+      method: Method,
+      ...args: ClientApi[Method] extends (...args: infer Args) => unknown ? Args : never
+    ) {
+      const namespace = yield* tag;
+
+      return yield* (
+        namespace.scopedCall as UnsafeInvoke<DurableObjectNamespace.DurableObjectRpcError>
+      )(stub, method, ...args);
+    });
+
+    const rawUnsafe = Effect.fnUntraced(function* () {
+      const namespace = yield* tag;
+
+      return yield* namespace.rawUnsafe;
     });
 
     const directMethods = DurableObjectNamespace.makeDirectMethods<Self, ClientApi, SelfDefinition>(
@@ -384,7 +393,7 @@ export const Tag =
       rpc,
       call,
       scopedCall,
-      unsafeRaw,
+      rawUnsafe,
     }) as unknown as TagClass<Self, Id, MethodsShape>;
   };
 

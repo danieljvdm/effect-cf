@@ -16,12 +16,16 @@ import type {
   ImageUploadOptions as CloudflareImageUploadOptions,
   Response as CloudflareResponse,
 } from "@cloudflare/workers-types";
-import { Context, Data, Effect, Option, type Layer } from "effect";
+import { Context, Data, Effect, Function, Option, type Layer } from "effect";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
+import * as ErrorMessage from "./internal/ErrorMessage";
 
-const TypeId = "effect-cf/Images/Steps" as const;
+const TypeId = "~effect-cf/Images/Steps" as const;
+
+export type TypeId = typeof TypeId;
+
 const expectedImagesBinding = "Images binding with info() and input()";
 
 /** Error raised when a Cloudflare Images operation fails. */
@@ -29,7 +33,11 @@ export class ImagesOperationError extends Data.TaggedError("ImagesOperationError
   readonly binding: string;
   readonly operation: string;
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Images ${this.operation} failed for binding "${this.binding}": ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 /** Typed Cloudflare Images binding definition. */
 export interface ImagesDefinition {
@@ -63,6 +71,8 @@ export type Step = Data.TaggedEnum<{
   };
   readonly Draw: DrawStepOptions;
 }>;
+
+export const Step = Data.taggedEnum<Step>();
 
 export interface Steps {
   readonly [TypeId]: typeof TypeId;
@@ -101,7 +111,7 @@ export interface HostedImagesClient {
     options?: ImageUploadOptions,
   ) => Effect.Effect<ImageMetadata, ImagesOperationError>;
   readonly list: (options?: ImageListOptions) => Effect.Effect<ImageList, ImagesOperationError>;
-  readonly unsafeRaw: Effect.Effect<CloudflareHostedImagesBinding>;
+  readonly rawUnsafe: Effect.Effect<CloudflareHostedImagesBinding>;
 }
 
 export interface ImagesRuntimeBinding {
@@ -130,7 +140,7 @@ export interface ImagesClient {
     options: ProcessOptions,
   ) => Effect.Effect<ImagesTransformationResultClient, ImagesOperationError>;
   readonly hosted: Option.Option<HostedImagesClient>;
-  readonly unsafeRaw: Effect.Effect<ImagesRuntimeBinding>;
+  readonly rawUnsafe: Effect.Effect<ImagesRuntimeBinding>;
   readonly definition: ImagesDefinition;
 }
 
@@ -170,47 +180,23 @@ const makeSteps = (steps: ReadonlyArray<Step>): Steps => ({
 /** Empty Images transformation pipeline. */
 export const empty: Steps = makeSteps([]);
 
-export function transform(transform: ImageTransform): (steps: Steps) => Steps;
-export function transform(steps: Steps, transform: ImageTransform): Steps;
-export function transform(
-  stepsOrTransform: Steps | ImageTransform,
-  transformValue?: ImageTransform,
-): Steps | ((steps: Steps) => Steps) {
-  if (transformValue === undefined) {
-    return (steps) => transform(steps, stepsOrTransform as ImageTransform);
-  }
+export const transform: {
+  (transform: ImageTransform): (steps: Steps) => Steps;
+  (steps: Steps, transform: ImageTransform): Steps;
+} = Function.dual(
+  2,
+  (steps: Steps, transformValue: ImageTransform): Steps =>
+    makeSteps([...steps.steps, Step.Transform({ transform: transformValue })]),
+);
 
-  const steps = stepsOrTransform as Steps;
-
-  return makeSteps([
-    ...steps.steps,
-    {
-      _tag: "Transform",
-      transform: transformValue,
-    },
-  ]);
-}
-
-export function draw(draw: DrawStepOptions): (steps: Steps) => Steps;
-export function draw(steps: Steps, draw: DrawStepOptions): Steps;
-export function draw(
-  stepsOrDraw: Steps | DrawStepOptions,
-  drawValue?: DrawStepOptions,
-): Steps | ((steps: Steps) => Steps) {
-  if (drawValue === undefined) {
-    return (steps) => draw(steps, stepsOrDraw as DrawStepOptions);
-  }
-
-  const steps = stepsOrDraw as Steps;
-
-  return makeSteps([
-    ...steps.steps,
-    {
-      _tag: "Draw",
-      ...drawValue,
-    },
-  ]);
-}
+export const draw: {
+  (draw: DrawStepOptions): (steps: Steps) => Steps;
+  (steps: Steps, draw: DrawStepOptions): Steps;
+} = Function.dual(
+  2,
+  (steps: Steps, drawValue: DrawStepOptions): Steps =>
+    makeSteps([...steps.steps, Step.Draw(drawValue)]),
+);
 
 const imagesError = (binding: string, operation: string, cause: unknown) =>
   new ImagesOperationError({ binding, operation, cause });
@@ -266,10 +252,20 @@ const wrapResult = (
 
 const wrapHandle = (binding: string, handle: CloudflareImageHandle): ImageHandleClient => ({
   raw: handle,
-  details: tryImagesPromise(binding, "details", () => handle.details()).pipe(Effect.map(maybe)),
-  bytes: tryImagesPromise(binding, "bytes", () => handle.bytes()).pipe(Effect.map(maybe)),
-  update: (options) => tryImagesPromise(binding, "update", () => handle.update(options)),
-  delete: tryImagesPromise(binding, "delete", () => handle.delete()),
+  details: tryImagesPromise(binding, "details", () => handle.details()).pipe(
+    Effect.map(maybe),
+    Effect.withSpan("Images.details"),
+  ),
+  bytes: tryImagesPromise(binding, "bytes", () => handle.bytes()).pipe(
+    Effect.map(maybe),
+    Effect.withSpan("Images.bytes"),
+  ),
+  update: Effect.fn("Images.update")((options: ImageUpdateOptions) =>
+    tryImagesPromise(binding, "update", () => handle.update(options)),
+  ),
+  delete: tryImagesPromise(binding, "delete", () => handle.delete()).pipe(
+    Effect.withSpan("Images.delete"),
+  ),
 });
 
 const wrapHosted = (
@@ -277,10 +273,13 @@ const wrapHosted = (
   hosted: CloudflareHostedImagesBinding,
 ): HostedImagesClient => ({
   image: (imageId) => wrapHandle(binding, hosted.image(imageId)),
-  upload: (image, options) =>
+  upload: Effect.fn("Images.upload")((image: ImageUploadValue, options?: ImageUploadOptions) =>
     tryImagesPromise(binding, "upload", () => hosted.upload(image, options)),
-  list: (options) => tryImagesPromise(binding, "list", () => hosted.list(options)),
-  unsafeRaw: Effect.succeed(hosted),
+  ),
+  list: Effect.fn("Images.list")((options?: ImageListOptions) =>
+    tryImagesPromise(binding, "list", () => hosted.list(options)),
+  ),
+  rawUnsafe: Effect.succeed(hosted),
 });
 
 export const makeClient =
@@ -289,44 +288,40 @@ export const makeClient =
     const input = (image: ImageInputValue, options?: ImageInputOptions) =>
       tryImagesSync(definition.binding, "input", () => images.input(image, options));
 
-    const process = (steps: Steps, options: ProcessOptions) =>
-      Effect.gen(function* () {
-        let transformer = yield* input(options.stream, options.inputOptions);
+    const process = Effect.fn("Images.process")(function* (steps: Steps, options: ProcessOptions) {
+      let transformer = yield* input(options.stream, options.inputOptions);
 
-        for (const step of steps.steps) {
-          switch (step._tag) {
-            case "Draw": {
-              transformer = yield* tryImagesSync(definition.binding, "draw", () =>
-                transformer.draw(step.image, step.options),
-              );
-              break;
-            }
-            case "Transform": {
-              transformer = yield* tryImagesSync(definition.binding, "transform", () =>
-                transformer.transform(step.transform),
-              );
-              break;
-            }
-          }
-        }
+      for (const step of steps.steps) {
+        transformer = yield* Step.$match(step, {
+          Draw: (drawStep) =>
+            tryImagesSync(definition.binding, "draw", () =>
+              transformer.draw(drawStep.image, drawStep.options),
+            ),
+          Transform: (transformStep) =>
+            tryImagesSync(definition.binding, "transform", () =>
+              transformer.transform(transformStep.transform),
+            ),
+        });
+      }
 
-        const result = yield* tryImagesPromise(definition.binding, "output", () =>
-          transformer.output(options.outputOptions),
-        );
+      const result = yield* tryImagesPromise(definition.binding, "output", () =>
+        transformer.output(options.outputOptions),
+      );
 
-        return wrapResult(definition.binding, result);
-      });
+      return wrapResult(definition.binding, result);
+    });
 
     return {
       definition,
-      info: (image, options) =>
+      info: Effect.fn("Images.info")((image: ImageInputValue, options?: ImageInputOptions) =>
         tryImagesPromise(definition.binding, "info", () => images.info(image, options)),
+      ),
       input,
       process,
       hosted: isHostedImagesBinding(images.hosted)
         ? Option.some(wrapHosted(definition.binding, images.hosted))
         : Option.none(),
-      unsafeRaw: Effect.succeed(images),
+      rawUnsafe: Effect.succeed(images),
     };
   };
 

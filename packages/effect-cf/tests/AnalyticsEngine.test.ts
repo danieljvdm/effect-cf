@@ -67,7 +67,7 @@ layer(analyticsLayer(makeFakeAnalyticsEngineDataset()))("AnalyticsEngine", (it) 
   it.effect("writes data points to the native binding", () =>
     Effect.gen(function* () {
       const analytics = yield* RequestAnalytics;
-      const raw = yield* analytics.unsafeRaw;
+      const raw = yield* analytics.rawUnsafe;
 
       yield* analytics.writeDataPoint({
         indexes: ["example.com"],

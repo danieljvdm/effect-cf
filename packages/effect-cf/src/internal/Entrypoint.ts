@@ -30,7 +30,9 @@ export const defineEntrypointRpcMethods = <Self>(
       value(this: Self, ...args: AnyArgs) {
         return run(
           this,
-          Effect.suspend(() => method(...args)),
+          Effect.suspend(() => method(...args)).pipe(
+            Effect.mapError(RpcDefinition.encodeWireError),
+          ),
         );
       },
     });

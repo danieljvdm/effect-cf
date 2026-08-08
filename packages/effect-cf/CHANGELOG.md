@@ -1,5 +1,13 @@
 # effect-cf
 
+## 0.20.0
+
+### Minor Changes
+
+- [#64](https://github.com/danieljvdm/effect-cf/pull/64) [`d333039`](https://github.com/danieljvdm/effect-cf/commit/d33303949ac38d2a2e942954d0edbfeeebc16b81) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Upgrade Effect to `4.0.0-beta.105`. The `effect`, `@effect/sql-d1`, `@effect/sql-pg`, and `@effect/sql-sqlite-do` peer ranges now require `^4.0.0-beta.105`, so upgrade Effect alongside this release.
+
+  `CloudflareOtlp` resource precedence has flipped to match Effect's `OtlpResource.fromConfig`. Explicit `resource.serviceName` and `resource.serviceVersion` now take precedence over `OTEL_SERVICE_NAME`, `OTEL_SERVICE_VERSION`, and `OTEL_RESOURCE_ATTRIBUTES`; previously the environment won. Omit an option to keep letting operators set it from the environment.
+
 ## 0.19.0
 
 ### Minor Changes

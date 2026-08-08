@@ -197,6 +197,9 @@ export const make = <
 
       return this.runtime.runPromise(
         Effect.scoped(
+          // Opting out of the event layer is the caller's assertion that the
+          // effect does not require `REvent`; the ternary above cannot express it.
+          // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off
           effectWithEventLayer as Effect.Effect<A, E | EventLayerError, HandlerContext<ROut>>,
         ),
       );

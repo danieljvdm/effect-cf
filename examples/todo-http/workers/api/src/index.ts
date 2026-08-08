@@ -65,6 +65,10 @@ const TodosLive = HttpApiBuilder.group(TodoHttpApi, "Todos", (handlers) =>
     ),
 );
 
+// `HttpApiBuilder.layer` also requires `FileSystem`, `Path`, `HttpPlatform`, and
+// `Generator`, which back file responses and OpenAPI generation that this Worker
+// never invokes and that Workers cannot provide.
+// @effect-diagnostics-next-line unsafeEffectTypeAssertion:off
 const HttpApiLive = HttpApiBuilder.layer(TodoHttpApi).pipe(
   Layer.provide(TodosLive),
   Layer.provide(HttpRouter.cors()),

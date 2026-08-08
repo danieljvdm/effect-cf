@@ -233,6 +233,24 @@ test("Worker.fetch renders handler failures as HTTP error responses", async () =
   expect(response.status).toBe(500);
 });
 
+test("Worker.fetch applies pre-response handlers to rendered error responses", async () => {
+  const Live = Worker.make(Layer.empty, {
+    fetch: Effect.gen(function* () {
+      yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+        Effect.succeed(HttpServerResponse.setHeader(response, "cache-control", "no-store")),
+      );
+
+      return yield* Effect.fail(new Error("boom"));
+    }),
+  });
+  const worker = new Live(makeExecutionContext(), {} as Cloudflare.Env);
+
+  const response = await worker.fetch(new Request("https://worker.test/auth"));
+
+  expect(response.status).toBe(500);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+});
+
 test("Worker.renderHttpResponse converts HttpServerResponse values explicitly", async () => {
   const Live = Worker.make(Layer.empty, {
     fetch: Worker.renderHttpResponse(

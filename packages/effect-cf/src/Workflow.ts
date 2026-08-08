@@ -82,6 +82,9 @@ const fromWorkflowStep = (
                 Effect.scoped(
                   Effect.provideService(
                     Effect.provideContext(
+                      // `WorkflowStepContext` is provided immediately below, so it
+                      // is excluded from the context supplied here.
+                      // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off
                       effect as Effect.Effect<A, E, Exclude<R, WorkflowStepContext>>,
                       context,
                     ),

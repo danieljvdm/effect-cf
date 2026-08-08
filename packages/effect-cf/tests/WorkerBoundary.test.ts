@@ -88,6 +88,8 @@ test("Worker.fetch renders Effect HttpServerResponse values", async () => {
       if (path === "/context-stream") {
         const stream = RenderValue.pipe(Stream.fromEffect, Stream.encodeText);
 
+        // The handler runs with `RenderValue` already in context.
+        // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off
         return HttpServerResponse.stream(stream as Stream.Stream<Uint8Array, never, never>);
       }
 

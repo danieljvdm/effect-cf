@@ -39,8 +39,7 @@ test("WorkerConfig.layer reads scalar config from WorkerEnvironment", async () =
         databaseUrl: Redacted.value(config.databaseUrl),
       };
     }).pipe(
-      Effect.provide(WorkerConfig.layer),
-      Effect.provide(Layer.succeed(WorkerEnvironment, env)),
+      Effect.provide(WorkerConfig.layer.pipe(Layer.provide(Layer.succeed(WorkerEnvironment, env)))),
       Effect.orDie,
     ),
   );

@@ -128,6 +128,44 @@ it.effect("maps rejected platform operations to StorageOperationError", () =>
   }),
 );
 
+it.effect("maps platform transaction failures to StorageOperationError", () =>
+  Effect.gen(function* () {
+    const platformError = new Error("transaction storage unavailable");
+    const { raw } = makeRawDurableObjectStorage({ transactionError: platformError });
+    const storage = DurableObjectStorage.fromDurableObjectStorage(raw);
+
+    const exit = yield* Effect.exit(storage.transaction(() => Effect.succeed("unreachable")));
+
+    assert.strictEqual(exit._tag, "Failure");
+    if (exit._tag === "Failure") {
+      const error = Cause.squash(exit.cause) as DurableObjectStorage.StorageOperationError;
+
+      assert.strictEqual(error._tag, "StorageOperationError");
+      assert.strictEqual(error.operation, "transaction");
+      assert.strictEqual(error.cause, platformError);
+    }
+  }),
+);
+
+it.effect("maps platform transactionSync failures to StorageOperationError", () =>
+  Effect.gen(function* () {
+    const platformError = new Error("sync transaction storage unavailable");
+    const { raw } = makeRawDurableObjectStorage({ transactionError: platformError });
+    const storage = DurableObjectStorage.fromDurableObjectStorage(raw);
+
+    const exit = yield* Effect.exit(storage.transactionSync(() => Effect.succeed("unreachable")));
+
+    assert.strictEqual(exit._tag, "Failure");
+    if (exit._tag === "Failure") {
+      const error = Cause.squash(exit.cause) as DurableObjectStorage.StorageOperationError;
+
+      assert.strictEqual(error._tag, "StorageOperationError");
+      assert.strictEqual(error.operation, "transactionSync");
+      assert.strictEqual(error.cause, platformError);
+    }
+  }),
+);
+
 interface StorageTracker {
   readonly deleteAllOptions: Array<globalThis.DurableObjectPutOptions | undefined>;
   syncCalls: number;
@@ -139,6 +177,7 @@ interface StorageTracker {
 
 interface StorageOptions {
   readonly syncError?: unknown;
+  readonly transactionError?: unknown;
 }
 
 function makeRawDurableObjectStorage(options: StorageOptions = {}): {
@@ -169,6 +208,10 @@ function makeRawDurableObjectStorage(options: StorageOptions = {}): {
       tracker.transactionCalls += 1;
       const snapshot = new Map(values);
 
+      if (options.transactionError !== undefined) {
+        throw options.transactionError;
+      }
+
       try {
         return await closure(makeRawDurableObjectTransaction(values));
       } catch (error) {
@@ -189,6 +232,10 @@ function makeRawDurableObjectStorage(options: StorageOptions = {}): {
     transactionSync: <T>(closure: () => T) => {
       tracker.transactionSyncCalls += 1;
       const snapshot = new Map(values);
+
+      if (options.transactionError !== undefined) {
+        throw options.transactionError;
+      }
 
       try {
         return closure();

@@ -498,13 +498,13 @@ test("DurableObject preserves server, client, handler, and namespace types", () 
     ) {};
 
     // @ts-expect-error unknown RPC method names are rejected.
-    Counter.call(stub, "missing");
+    void Counter.call(stub, "missing");
 
     // @ts-expect-error method arguments come from the code-owned definition.
-    Counter.call(stub, "add", "one", "two");
+    void Counter.call(stub, "add", "one", "two");
 
     // @ts-expect-error all tuple arguments are required.
-    Counter.call(stub, "add", 1);
+    void Counter.call(stub, "add", 1);
 
     void handler;
   };

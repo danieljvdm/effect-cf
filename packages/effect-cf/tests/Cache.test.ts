@@ -177,11 +177,13 @@ test("Cache methods map rejected promises", async () => {
     "api-cache",
   );
   const request = "https://example.com/item";
-  const operations = [
+  const operations: ReadonlyArray<
+    readonly [string, Effect.Effect<unknown, Cache.CacheOperationError>]
+  > = [
     ["match", cache.match(request)],
     ["put", cache.put(request, new Response("fresh"))],
     ["delete", cache.delete(request)],
-  ] as const;
+  ];
 
   for (const [operation, effect] of operations) {
     await expect(Effect.runPromise(effect)).rejects.toMatchObject({

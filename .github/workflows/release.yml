@@ -33,6 +33,10 @@ jobs:
           run-install: |
             args: ["--frozen-lockfile", "--ignore-scripts"]
       - run: bun ./node_modules/@danieljvdm/dev-kit/bin/dev-kit.mjs apply --locked
+      # Build here rather than from a `prepublishOnly` script: npm's lifecycle
+      # environment resolves a different TypeScript than Vite+ does, which
+      # emits different declarations and needs an undeclared dependency.
+      - run: vp run effect-cf#build
       - name: Upgrade npm for trusted publishing
         run: npm install -g npm@latest
       - name: Create Release Pull Request or Publish

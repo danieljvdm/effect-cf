@@ -36,27 +36,26 @@
     "dev": "vp pack --watch",
     "test": "vp test",
     "check": "vp check",
-    "prepublishOnly": "vp run build"
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@cloudflare/containers": "catalog:",
     "@cloudflare/vitest-pool-workers": "catalog:",
     "@cloudflare/workers-types": "catalog:",
-    "@effect/platform-node": "4.0.0-beta.77",
+    "@effect/platform-node": "4.0.0-beta.105",
     "@effect/sql-d1": "catalog:",
     "@effect/sql-pg": "catalog:",
     "@effect/sql-sqlite-do": "catalog:",
     "@effect/vitest": "catalog:",
     "effect": "catalog:",
-    "typescript": "^6.0.2",
     "vite-plus": "catalog:",
     "vitest": "catalog:"
   },
   "peerDependencies": {
-    "@effect/sql-d1": "^4.0.0-beta.77",
-    "@effect/sql-pg": "^4.0.0-beta.77",
-    "@effect/sql-sqlite-do": "^4.0.0-beta.77",
-    "effect": "^4.0.0-beta.77"
+    "@effect/sql-d1": "^4.0.0-beta.105",
+    "@effect/sql-pg": "^4.0.0-beta.105",
+    "@effect/sql-sqlite-do": "^4.0.0-beta.105",
+    "effect": "^4.0.0-beta.105"
   },
   "peerDependenciesMeta": {
     "@effect/sql-pg": {

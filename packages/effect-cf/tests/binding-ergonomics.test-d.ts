@@ -57,6 +57,7 @@ const queueProgram = Effect.gen(function* () {
 });
 
 // @ts-expect-error AvatarQueue.layer must be provided before the program can run.
+// @effect-diagnostics-next-line missingEffectContext:off
 const missingQueueLayer: Effect.Effect<void, unknown, never> = queueProgram;
 
 declare const env: Cloudflare.Env;
@@ -602,11 +603,13 @@ const durableObjectProgram = Effect.gen(function* () {
 });
 
 // @ts-expect-error CounterDurableObject.layer must be provided before the program can run.
+// @effect-diagnostics-next-line missingEffectContext:off
 const missingDurableObjectLayer: Effect.Effect<void, unknown, never> = durableObjectProgram;
 
 declare const counterStub: Effect.Success<ReturnType<typeof CounterDurableObject.getByName>>;
 
 // @ts-expect-error Static direct methods require the namespace layer.
+// @effect-diagnostics-next-line missingEffectContext:off
 const staticDirectMethodWithoutLayer: Effect.Effect<number, unknown, never> =
   CounterDurableObject.increment(counterStub, 1);
 

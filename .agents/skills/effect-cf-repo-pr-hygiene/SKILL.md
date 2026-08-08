@@ -1,5 +1,5 @@
 ---
-name: pr-hygiene
+name: effect-cf-repo-pr-hygiene
 description: Use before creating or updating PRs, choosing PR titles, writing PR bodies, or adding changesets for this repository.
 ---
 

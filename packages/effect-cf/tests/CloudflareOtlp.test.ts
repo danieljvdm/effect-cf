@@ -223,7 +223,7 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
     }),
   );
 
-  it.effect("uses OTEL resource variables before explicit resource options", () =>
+  it.effect("uses explicit resource options before OTEL resource variables", () =>
     Effect.gen(function* () {
       const collector = yield* OtlpCollector;
       const handler = Worker.makeFetchHandler(Layer.empty, {
@@ -237,6 +237,45 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
               "deployment.environment": "explicit",
             },
           },
+        }),
+        fetch: Effect.succeed(new Response("ok")).pipe(Effect.withSpan("resource.fetch")),
+      });
+
+      const response = yield* Effect.promise(() =>
+        handler.fetch(
+          new Request("https://worker.test/resource"),
+          makeEnv({
+            OTEL_TRACES_EXPORTER: "otlp",
+            OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.endpoint}/v1/traces`,
+            OTEL_SERVICE_NAME: "env-service",
+            OTEL_RESOURCE_ATTRIBUTES:
+              "service.name=resource-service,service.version=1.2.3,deployment.environment=dev",
+          }),
+          makeExecutionContext(),
+        ),
+      );
+
+      expect(response.status).toBe(200);
+
+      const request = yield* collector.nextRequest;
+      const payload: unknown = JSON.parse(request.body);
+      const resourceSpans = getArray(payload, "resourceSpans");
+      const resource = getRecord(resourceSpans[0], "resource");
+      const resourceAttributes = getArray(resource, "attributes");
+
+      expect(getStringAttribute(resourceAttributes, "service.name")).toBe("explicit-service");
+      expect(getStringAttribute(resourceAttributes, "service.version")).toBe("explicit-version");
+      expect(getStringAttribute(resourceAttributes, "deployment.environment")).toBe("explicit");
+    }),
+  );
+
+  it.effect("falls back to OTEL resource variables when resource options are omitted", () =>
+    Effect.gen(function* () {
+      const collector = yield* OtlpCollector;
+      const handler = Worker.makeFetchHandler(Layer.empty, {
+        eventLayer: CloudflareOtlp.workerLayer({
+          signals: ["traces"],
+          serialization: "json",
         }),
         fetch: Effect.succeed(new Response("ok")).pipe(Effect.withSpan("resource.fetch")),
       });

@@ -83,6 +83,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
     });
 
     // @ts-expect-error AvatarQueue.layer must be provided before the program can run.
+    // @effect-diagnostics-next-line missingEffectContext:off
     const missingLayer: Effect.Effect<void, unknown, never> = program;
 
     const provided: Effect.Effect<void, unknown, never> = program.pipe(
@@ -271,7 +272,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
   }) {}
 
   void (() => {
-    ArtifactWorkflow.createBatch([
+    void ArtifactWorkflow.createBatch([
       // @ts-expect-error Workflow bindings accept decoded `payload`, not native `params`.
       { id: "bad", params: { segmentId: "s_1", attempt: "1" } },
     ]);

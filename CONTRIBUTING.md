@@ -13,9 +13,13 @@ vp install
 Run before opening a PR:
 
 ```bash
-vp check
-vp test
+vp run check
 ```
+
+That runs format, lint, tests, and typechecks every workspace package with the
+Effect-patched TypeScript-Go compiler — the same suite CI runs. Individual
+stages are available as `vp fmt --check`, `vp lint`, `vp test`, and
+`vp run typecheck`.
 
 Useful local commands:
 

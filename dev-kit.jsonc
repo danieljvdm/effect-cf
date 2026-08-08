@@ -8,6 +8,19 @@
     "effectTsgo": { "enabled": true },
     "vitePlus": {
       "hooks": { "enabled": true },
+      "quality": {
+        "workflow": {
+          "enabled": true,
+          // Examples and the worker test fixtures resolve `effect-cf` through
+          // its published `dist` entrypoints.
+          "beforeChecks": [
+            {
+              "name": "Build effect-cf",
+              "run": ["vp run effect-cf#build"],
+            },
+          ],
+        },
+      },
     },
   },
   "targets": {

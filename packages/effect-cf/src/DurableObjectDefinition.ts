@@ -9,6 +9,13 @@ import type * as Rpc from "./Rpc";
 import * as RpcDefinition from "./RpcDefinition";
 import type { WorkerEnvironment } from "./Environment";
 
+/**
+ * The client tuple types are re-established by the final `TagClass` cast, so
+ * these internal invocations erase the binding client's generic argument
+ * tuples instead of instantiating them at `never`.
+ */
+type UnsafeInvoke<E> = (...args: ReadonlyArray<unknown>) => Effect.Effect<unknown, E>;
+
 export type ServiceFreeSchema = S.Codec<any, any, never, never>;
 
 export interface Method<
@@ -313,7 +320,11 @@ export const Tag =
       Effect.gen(function* () {
         const namespace = yield* tag;
 
-        return yield* namespace.rpc(stub, method as never, ...(args as never));
+        return yield* (namespace.rpc as UnsafeInvoke<DurableObjectNamespace.DurableObjectRpcError>)(
+          stub,
+          method,
+          ...args,
+        );
       });
 
     const call = <Method extends keyof ClientApi>(
@@ -324,7 +335,9 @@ export const Tag =
       Effect.gen(function* () {
         const namespace = yield* tag;
 
-        return yield* namespace.call(stub, method as never, ...(args as never));
+        return yield* (
+          namespace.call as UnsafeInvoke<DurableObjectNamespace.DurableObjectRpcError>
+        )(stub, method, ...args);
       });
 
     const scopedCall = <Method extends keyof ClientApi>(
@@ -335,7 +348,9 @@ export const Tag =
       Effect.gen(function* () {
         const namespace = yield* tag;
 
-        return yield* namespace.scopedCall(stub, method as never, ...(args as never));
+        return yield* (
+          namespace.scopedCall as UnsafeInvoke<DurableObjectNamespace.DurableObjectRpcError>
+        )(stub, method, ...args);
       });
 
     const unsafeRaw = Effect.fnUntraced(function* () {

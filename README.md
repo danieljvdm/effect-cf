@@ -229,6 +229,29 @@ const layer = AnalyticsQuery.layerConfig(
 ).pipe(Layer.provide(FetchHttpClient.layer));
 ```
 
+Email Service transactional sends:
+
+```ts
+import { Effect } from "effect";
+import { Email } from "effect-cf";
+
+class TransactionalEmail extends Email.Tag<TransactionalEmail>()("TransactionalEmail") {}
+
+const program = Effect.gen(function* () {
+  const email = yield* TransactionalEmail;
+
+  return yield* email.send({
+    from: { name: "Example", email: "welcome@example.com" },
+    to: "user@example.com",
+    subject: "Welcome to Example",
+    text: "Welcome! Thanks for signing up.",
+    html: "<h1>Welcome!</h1><p>Thanks for signing up.</p>",
+  });
+});
+```
+
+Messages are validated against the documented Cloudflare Email Sending limits before the binding is called, so a bad recipient list or oversized header fails with `EmailValidationError` and no round trip. Cloudflare's `E_*` codes are reported on `EmailOperationError.code`. See [`examples/email/README.md`](examples/email/README.md) for the Wrangler configuration and domain onboarding steps.
+
 ## Changelog
 
 See [packages/effect-cf/CHANGELOG.md](./packages/effect-cf/CHANGELOG.md).

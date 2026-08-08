@@ -320,6 +320,8 @@ Messages that violate a documented limit fail with `EmailValidationError` carryi
 
 Cloudflare's total message size limit is exposed as `Email.sendLimits.maxMessageBytes` but is not enforced, because the encoded MIME size is only known once Cloudflare composes the message. Oversized messages fail at the binding with `E_CONTENT_TOO_LARGE`.
 
+See [`examples/email/README.md`](../../examples/email/README.md) for domain onboarding, binding restrictions, and typed recovery from `EmailValidationError` and `EmailOperationError`.
+
 ## Analytics Engine Example
 
 Analytics Engine tags expose Cloudflare dataset bindings as Effect-wrapped `writeDataPoint(...)` operations. Writes use Cloudflare's native non-blocking runtime API and are validated against Workers Analytics Engine limits before reaching the binding.

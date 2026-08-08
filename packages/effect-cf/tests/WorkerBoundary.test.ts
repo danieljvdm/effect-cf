@@ -1,4 +1,4 @@
-import { Clock, Config, ConfigProvider, Context, Effect, Layer, Stream } from "effect";
+import { Clock, Config, ConfigProvider, Context, Data, Effect, Layer, Stream } from "effect";
 import { HttpEffect, HttpServerResponse } from "effect/unstable/http";
 import { expect, test } from "vite-plus/test";
 
@@ -11,6 +11,8 @@ class RenderValue extends Context.Service<RenderValue, string>()(
 class EventValue extends Context.Service<EventValue, string>()(
   "effect-cf/test/WorkerBoundary/EventValue",
 ) {}
+
+class BoomError extends Data.TaggedError("BoomError") {}
 
 const makeExecutionContext = () =>
   ({
@@ -224,7 +226,7 @@ test("Worker.fetch keeps request-scoped resources alive while streaming bodies",
 
 test("Worker.fetch renders handler failures as HTTP error responses", async () => {
   const Live = Worker.make(Layer.empty, {
-    fetch: Effect.fail(new Error("boom")),
+    fetch: Effect.fail(new BoomError()),
   });
   const worker = new Live(makeExecutionContext(), {} as Cloudflare.Env);
 
@@ -240,7 +242,7 @@ test("Worker.fetch applies pre-response handlers to rendered error responses", a
         Effect.succeed(HttpServerResponse.setHeader(response, "cache-control", "no-store")),
       );
 
-      return yield* Effect.fail(new Error("boom"));
+      return yield* new BoomError();
     }),
   });
   const worker = new Live(makeExecutionContext(), {} as Cloudflare.Env);

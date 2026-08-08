@@ -5,20 +5,12 @@ import type {
   EmailSendResult as CloudflareEmailSendResult,
   SendEmail as CloudflareSendEmail,
 } from "@cloudflare/workers-types";
-import { type Redacted, Config, Context, Data, Effect, Layer, Schema as S } from "effect";
-import {
-  FetchHttpClient,
-  type Headers,
-  HttpClient,
-  type HttpClientResponse,
-  HttpClientRequest,
-} from "effect/unstable/http";
+import { Context, Data, Effect, type Layer } from "effect";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
 
 const expectedSendEmailBinding = "Send Email binding with send()";
-const defaultSendingApiBaseUrl = "https://api.cloudflare.com/client/v4";
 const textEncoder = new TextEncoder();
 
 /** Documented Cloudflare Email Sending limits. */
@@ -62,25 +54,6 @@ export const emailErrorCodes = [
 /** A documented Cloudflare Email Sending error code. */
 export type EmailErrorCode = (typeof emailErrorCodes)[number];
 
-const sendingApiErrorSchema = S.Struct({
-  code: S.Number,
-  message: S.String,
-});
-
-const sendingResultSchema = S.Struct({
-  delivered: S.Array(S.String),
-  permanent_bounces: S.Array(S.String),
-  queued: S.Array(S.String),
-});
-
-const sendingResponseSchema = S.Struct({
-  success: S.Boolean,
-  errors: S.Array(sendingApiErrorSchema),
-  result: S.NullOr(sendingResultSchema),
-});
-
-const decodeSendingResponse = S.decodeUnknownEffect(sendingResponseSchema);
-
 /** Error raised when a Cloudflare Send Email operation fails. */
 export class EmailOperationError extends Data.TaggedError("EmailOperationError")<{
   readonly binding: string;
@@ -100,21 +73,9 @@ export interface EmailViolation {
 
 /** Error raised when a message violates documented Cloudflare Email Sending limits. */
 export class EmailValidationError extends Data.TaggedError("EmailValidationError")<{
-  /** Binding name for binding sends, or Cloudflare account id for REST sends. */
-  readonly source: string;
+  readonly binding: string;
   readonly operation: string;
   readonly violations: ReadonlyArray<EmailViolation>;
-}> {}
-
-/** Error raised when a Cloudflare Email Sending REST API request fails. */
-export class EmailSendingError extends Data.TaggedError("EmailSendingError")<{
-  readonly operation: string;
-  readonly accountId: string;
-  readonly message: string;
-  readonly status?: number;
-  readonly errors?: ReadonlyArray<EmailSendingApiError>;
-  readonly body?: string;
-  readonly cause?: unknown;
 }> {}
 
 /** Typed Cloudflare Send Email binding definition. */
@@ -132,17 +93,6 @@ export type EmailSendResult = CloudflareEmailSendResult;
 export type EmailBinding = CloudflareSendEmail;
 export type EmailRecipients = string | EmailAddress | ReadonlyArray<string | EmailAddress>;
 export type EmailSendError = EmailOperationError | EmailValidationError;
-export type EmailSendingApiError = S.Schema.Type<typeof sendingApiErrorSchema>;
-
-/** Per-recipient delivery status returned by the Email Sending REST API. */
-export interface EmailSendingResult {
-  /** Addresses the message was delivered to immediately. */
-  readonly delivered: ReadonlyArray<string>;
-  /** Addresses that permanently bounced. */
-  readonly permanentBounces: ReadonlyArray<string>;
-  /** Addresses whose delivery was queued for later. */
-  readonly queued: ReadonlyArray<string>;
-}
 
 export interface EmailSendOptions {
   /** Validates builder messages against documented limits. Defaults to `true`. */
@@ -162,40 +112,7 @@ export interface EmailClient {
   readonly definition: EmailDefinition;
 }
 
-/** Cloudflare Email Sending REST API definition. */
-export interface EmailSendingDefinition {
-  /** Cloudflare account id that owns the onboarded sending domain. */
-  readonly accountId: string;
-  /** API token with the Email Sending permission. */
-  readonly apiToken: Redacted.Redacted<string>;
-  /** Base Cloudflare API URL. Defaults to `https://api.cloudflare.com/client/v4`. */
-  readonly apiBaseUrl?: string | URL;
-  /** Validates messages against documented limits. Defaults to `true`. */
-  readonly validate?: boolean;
-}
-
-export interface EmailSendingOptions {
-  /** Additional request headers. Authorization is always derived from `apiToken`. */
-  readonly headers?: Headers.Input;
-}
-
-export interface EmailSendingClient {
-  readonly send: (
-    message: EmailMessageBuilder,
-    options?: EmailSendingOptions,
-  ) => Effect.Effect<EmailSendingResult, EmailSendingError | EmailValidationError | S.SchemaError>;
-  readonly raw: (
-    message: EmailMessageBuilder,
-    options?: EmailSendingOptions,
-  ) => Effect.Effect<
-    HttpClientResponse.HttpClientResponse,
-    EmailSendingError | EmailValidationError
-  >;
-  readonly definition: EmailSendingDefinition;
-}
-
 declare const EmailServiceTypeId: unique symbol;
-declare const EmailSendingServiceTypeId: unique symbol;
 
 /** Nominal service marker for Send Email services created with {@link make}. */
 export interface EmailService<Id extends string> {
@@ -204,22 +121,9 @@ export interface EmailService<Id extends string> {
   };
 }
 
-/** Nominal service marker for Email Sending REST services created with {@link makeSending}. */
-export interface EmailSendingService<Id extends string> {
-  readonly [EmailSendingServiceTypeId]: {
-    readonly id: Id;
-  };
-}
-
 export type LayerOptions = {
   readonly binding: string;
   readonly send?: EmailSendOptions;
-};
-
-export type SendingConfigOptions = {
-  readonly accountId?: Config.Config<string>;
-  readonly apiToken?: Config.Config<Redacted.Redacted<string>>;
-  readonly apiBaseUrl?: Config.Config<string>;
 };
 
 export interface TagClass<Self, Id extends string> extends Context.ServiceClass<
@@ -237,24 +141,6 @@ export interface TagClass<Self, Id extends string> extends Context.ServiceClass<
   >;
 }
 
-export interface SendingTagClass<Self, Id extends string> extends Context.ServiceClass<
-  Self,
-  Id,
-  EmailSendingClient
-> {
-  readonly id: Id;
-  readonly layer: (
-    definition: EmailSendingDefinition,
-  ) => Layer.Layer<Self, never, HttpClient.HttpClient>;
-  readonly fetchLayer: (definition: EmailSendingDefinition) => Layer.Layer<Self>;
-  readonly layerConfig: (
-    config?: Config.Config<EmailSendingDefinition>,
-  ) => Layer.Layer<Self, Config.ConfigError, HttpClient.HttpClient>;
-  readonly fetchLayerConfig: (
-    config?: Config.Config<EmailSendingDefinition>,
-  ) => Layer.Layer<Self, Config.ConfigError>;
-}
-
 const emailErrorCode = (cause: unknown): EmailOperationError["code"] => {
   if (typeof cause !== "object" || cause === null) {
     return undefined;
@@ -269,31 +155,10 @@ const emailError = (binding: string, operation: string, cause: unknown) =>
   new EmailOperationError({ binding, operation, cause, code: emailErrorCode(cause) });
 
 const emailValidationError = (
-  source: string,
+  binding: string,
   operation: string,
   violations: ReadonlyArray<EmailViolation>,
-) => new EmailValidationError({ source, operation, violations });
-
-const emailSendingError = (
-  definition: EmailSendingDefinition,
-  operation: string,
-  message: string,
-  options?: {
-    readonly status?: number;
-    readonly errors?: ReadonlyArray<EmailSendingApiError>;
-    readonly body?: string;
-    readonly cause?: unknown;
-  },
-) =>
-  new EmailSendingError({
-    operation,
-    accountId: definition.accountId,
-    message,
-    status: options?.status,
-    errors: options?.errors,
-    body: options?.body,
-    cause: options?.cause,
-  });
+) => new EmailValidationError({ binding, operation, violations });
 
 const tryEmailPromise = <A>(
   binding: string,
@@ -548,14 +413,14 @@ export const validateMessage = (message: EmailMessageBuilder): ReadonlyArray<Ema
 };
 
 const validateSendInput = (
-  source: string,
+  binding: string,
   operation: string,
   message: EmailMessageBuilder,
 ): Effect.Effect<EmailMessageBuilder, EmailValidationError> => {
   const violations = validateMessage(message);
 
   return violations.length > 0
-    ? Effect.fail(emailValidationError(source, operation, violations))
+    ? Effect.fail(emailValidationError(binding, operation, violations))
     : Effect.succeed(message);
 };
 
@@ -592,274 +457,12 @@ export const makeClient =
     };
   };
 
-const base64 = (content: ArrayBuffer | ArrayBufferView) => {
-  const bytes =
-    content instanceof ArrayBuffer
-      ? new Uint8Array(content)
-      : new Uint8Array(content.buffer, content.byteOffset, content.byteLength);
-  const chunkSize = 0x8000;
-  let binary = "";
-
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
-  }
-
-  return btoa(binary);
-};
-
-const sendingAddress = (value: string | EmailAddress) => {
-  if (typeof value === "string") {
-    return value;
-  }
-
-  return value.name === undefined || value.name === ""
-    ? { address: value.email }
-    : { address: value.email, name: value.name };
-};
-
-const sendingRecipients = (value: EmailRecipients) =>
-  Array.isArray(value) ? value.map(sendingAddress) : sendingAddress(value as string | EmailAddress);
-
-const sendingAttachment = (attachment: EmailAttachment) => ({
-  content: typeof attachment.content === "string" ? attachment.content : base64(attachment.content),
-  filename: attachment.filename,
-  type: attachment.type,
-  disposition: attachment.disposition,
-  ...(attachment.contentId === undefined ? {} : { content_id: attachment.contentId }),
-});
-
-/**
- * Converts a structured Workers message into the Cloudflare Email Sending REST
- * API payload, which uses `address` keys and snake_case fields.
- */
-export const toSendingPayload = (message: EmailMessageBuilder): Record<string, unknown> => {
-  const fields = message as {
-    readonly to?: EmailRecipients;
-    readonly cc?: EmailRecipients;
-    readonly bcc?: EmailRecipients;
-    readonly from: string | EmailAddress;
-    readonly replyTo?: string | EmailAddress;
-    readonly subject: string;
-    readonly text?: string;
-    readonly html?: string;
-    readonly attachments?: ReadonlyArray<EmailAttachment>;
-    readonly headers?: Record<string, string>;
-  };
-
-  return {
-    from: sendingAddress(fields.from),
-    subject: fields.subject,
-    ...(fields.to === undefined ? {} : { to: sendingRecipients(fields.to) }),
-    ...(fields.cc === undefined ? {} : { cc: sendingRecipients(fields.cc) }),
-    ...(fields.bcc === undefined ? {} : { bcc: sendingRecipients(fields.bcc) }),
-    ...(fields.replyTo === undefined ? {} : { reply_to: sendingAddress(fields.replyTo) }),
-    ...(fields.text === undefined ? {} : { text: fields.text }),
-    ...(fields.html === undefined ? {} : { html: fields.html }),
-    ...(fields.attachments === undefined
-      ? {}
-      : { attachments: fields.attachments.map(sendingAttachment) }),
-    ...(fields.headers === undefined ? {} : { headers: fields.headers }),
-  };
-};
-
-const sendingApiUrl = (definition: EmailSendingDefinition) => {
-  const baseUrl = new URL(definition.apiBaseUrl ?? defaultSendingApiBaseUrl);
-  const pathname = baseUrl.pathname.replace(/\/+$/, "");
-
-  baseUrl.pathname = `${pathname}/accounts/${definition.accountId}/email/sending/send`;
-
-  return baseUrl.href;
-};
-
-const sendingRequest = (
-  definition: EmailSendingDefinition,
-  message: EmailMessageBuilder,
-  options?: EmailSendingOptions,
-) => {
-  let request = HttpClientRequest.post(sendingApiUrl(definition)).pipe(
-    HttpClientRequest.acceptJson,
-    HttpClientRequest.bodyJsonUnsafe(toSendingPayload(message)),
-  );
-
-  if (options?.headers !== undefined) {
-    request = HttpClientRequest.setHeaders(request, options.headers);
-  }
-
-  return HttpClientRequest.bearerToken(request, definition.apiToken);
-};
-
-const apiErrors = (body: string): ReadonlyArray<EmailSendingApiError> | undefined => {
-  const parsed = (() => {
-    try {
-      return JSON.parse(body) as unknown;
-    } catch {
-      return undefined;
-    }
-  })();
-
-  if (typeof parsed !== "object" || parsed === null) {
-    return undefined;
-  }
-
-  const errors = Reflect.get(parsed, "errors");
-
-  if (!Array.isArray(errors)) {
-    return undefined;
-  }
-
-  const decoded = errors.filter(
-    (error): error is EmailSendingApiError =>
-      typeof error === "object" &&
-      error !== null &&
-      typeof Reflect.get(error, "code") === "number" &&
-      typeof Reflect.get(error, "message") === "string",
-  );
-
-  return decoded.length === 0 ? undefined : decoded;
-};
-
-const sendingResponseText = (
-  definition: EmailSendingDefinition,
-  response: HttpClientResponse.HttpClientResponse,
-  operation: string,
-) =>
-  response.text.pipe(
-    Effect.catch((cause) =>
-      Effect.fail(
-        emailSendingError(definition, operation, "Failed to read Email Sending API response body", {
-          cause,
-        }),
-      ),
-    ),
-  );
-
-const executeSendRequest = (
-  definition: EmailSendingDefinition,
-  httpClient: HttpClient.HttpClient,
-  message: EmailMessageBuilder,
-  options?: EmailSendingOptions,
-) =>
-  Effect.gen(function* () {
-    if (definition.validate ?? true) {
-      yield* validateSendInput(definition.accountId, "send", message);
-    }
-
-    const response = yield* httpClient
-      .execute(sendingRequest(definition, message, options))
-      .pipe(
-        Effect.mapError((cause) =>
-          emailSendingError(definition, "send", "Email Sending API request failed", { cause }),
-        ),
-      );
-
-    if (response.status < 200 || response.status >= 300) {
-      const body = yield* sendingResponseText(definition, response, "sendErrorBody");
-
-      return yield* Effect.fail(
-        emailSendingError(
-          definition,
-          "send",
-          `Email Sending API returned HTTP ${response.status}`,
-          { status: response.status, body, errors: apiErrors(body) },
-        ),
-      );
-    }
-
-    return response;
-  });
-
-const makeSendingClientWith = (
-  definition: EmailSendingDefinition,
-  httpClient: HttpClient.HttpClient,
-): EmailSendingClient => {
-  const raw = (message: EmailMessageBuilder, options?: EmailSendingOptions) =>
-    executeSendRequest(definition, httpClient, message, options);
-
-  const send = (message: EmailMessageBuilder, options?: EmailSendingOptions) =>
-    Effect.gen(function* () {
-      const response = yield* raw(message, options);
-      const json = yield* response.json.pipe(
-        Effect.catch((cause) =>
-          Effect.fail(
-            emailSendingError(
-              definition,
-              "json",
-              "Failed to read Email Sending API JSON response body",
-              { cause },
-            ),
-          ),
-        ),
-      );
-      const decoded = yield* decodeSendingResponse(json);
-
-      if (!decoded.success || decoded.result === null) {
-        return yield* Effect.fail(
-          emailSendingError(definition, "send", "Email Sending API reported a failed send", {
-            status: response.status,
-            errors: decoded.errors,
-          }),
-        );
-      }
-
-      return {
-        delivered: decoded.result.delivered,
-        permanentBounces: decoded.result.permanent_bounces,
-        queued: decoded.result.queued,
-      } satisfies EmailSendingResult;
-    });
-
-  return { definition, raw, send };
-};
-
-export const makeSendingClient = (definition: EmailSendingDefinition) =>
-  Effect.map(HttpClient.HttpClient, (httpClient) => makeSendingClientWith(definition, httpClient));
-
-export const sendingConfig = (options?: SendingConfigOptions) =>
-  Config.all({
-    accountId: options?.accountId ?? Config.string("CLOUDFLARE_ACCOUNT_ID"),
-    apiToken: options?.apiToken ?? Config.redacted("CLOUDFLARE_API_TOKEN"),
-    apiBaseUrl:
-      options?.apiBaseUrl ??
-      Config.string("CLOUDFLARE_API_BASE_URL").pipe(Config.withDefault(defaultSendingApiBaseUrl)),
-  });
-
 export const layer = <Self>(tag: Context.Service<Self, EmailClient>, definition: LayerOptions) =>
   Binding.layer(tag, definition.binding, isEmailBinding, makeClient(definition, definition.send), {
     expected: expectedSendEmailBinding,
   });
 
-export const sendingLayer = <Self>(
-  tag: Context.Service<Self, EmailSendingClient>,
-  definition: EmailSendingDefinition,
-) => Layer.effect(tag, makeSendingClient(definition));
-
-export const sendingFetchLayer = <Self>(
-  tag: Context.Service<Self, EmailSendingClient>,
-  definition: EmailSendingDefinition,
-) => sendingLayer(tag, definition).pipe(Layer.provide(FetchHttpClient.layer));
-
-export const sendingLayerConfig = <Self>(
-  tag: Context.Service<Self, EmailSendingClient>,
-  config: Config.Config<EmailSendingDefinition> = sendingConfig(),
-) =>
-  Layer.effect(
-    tag,
-    Effect.gen(function* () {
-      const definition = yield* config;
-
-      return yield* makeSendingClient(definition);
-    }),
-  );
-
-export const sendingFetchLayerConfig = <Self>(
-  tag: Context.Service<Self, EmailSendingClient>,
-  config: Config.Config<EmailSendingDefinition> = sendingConfig(),
-) => sendingLayerConfig(tag, config).pipe(Layer.provide(FetchHttpClient.layer));
-
 export const make = <Id extends string>(id: Id) => Tag<EmailService<Id>>()<Id>(id);
-
-export const makeSending = <Id extends string>(id: Id) =>
-  SendingTag<EmailSendingService<Id>>()<Id>(id);
 
 export const Tag =
   <Self>() =>
@@ -872,25 +475,4 @@ export const Tag =
       id,
       layer: makeLayer,
     }) as TagClass<Self, Id>;
-  };
-
-export const SendingTag =
-  <Self>() =>
-  <Id extends string>(id: Id) => {
-    const tag = Context.Service<Self, EmailSendingClient>()(id);
-    const makeLayer = (definition: EmailSendingDefinition) => sendingLayer(tag, definition);
-    const makeFetchLayer = (definition: EmailSendingDefinition) =>
-      sendingFetchLayer(tag, definition);
-    const makeLayerConfig = (config?: Config.Config<EmailSendingDefinition>) =>
-      sendingLayerConfig(tag, config);
-    const makeFetchLayerConfig = (config?: Config.Config<EmailSendingDefinition>) =>
-      sendingFetchLayerConfig(tag, config);
-
-    return Object.assign(tag, {
-      id,
-      layer: makeLayer,
-      fetchLayer: makeFetchLayer,
-      layerConfig: makeLayerConfig,
-      fetchLayerConfig: makeFetchLayerConfig,
-    }) as SendingTagClass<Self, Id>;
   };

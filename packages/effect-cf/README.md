@@ -37,7 +37,7 @@ Runtime creation belongs at Cloudflare entrypoints, not inside binding helpers.
 - `R2` - typed R2 bucket binding helper with Effect-wrapped object and multipart operations
 - `Hyperdrive` - typed Hyperdrive binding helper for connection strings and optional Postgres SQL integration
 - `Images` - typed Cloudflare Images binding helper with transformation APIs and optional hosted image operations
-- `Email` - typed Cloudflare Email Service helpers for `send_email` bindings and the Email Sending REST API
+- `Email` - typed Cloudflare Email Service binding helper for `send_email` bindings, with limit validation and typed error codes
 - `AnalyticsEngine` - typed Cloudflare Analytics Engine write bindings and SQL API query helpers
 - `Queue` - typed Queue producer/consumer tags plus client and error types
 - `Workflow` - typed Workflow entrypoints, steps, starter clients, and instance types
@@ -318,36 +318,7 @@ Onboard the sending domain under **Compute > Email Service > Email Sending**, th
 
 Messages that violate a documented limit fail with `EmailValidationError` carrying every violation, without calling the binding. Use `layer({ binding, send: { validate: false } })` to skip validation and let Cloudflare reject the message instead. Raw RFC 5322 `EmailMessage` values are always passed through untouched, so the legacy `cloudflare:email` API keeps working.
 
-Outside Workers — or when no binding is available — `Email.SendingTag` wraps the Email Sending REST API. Configuration can stay in Effect `Config`, including a redacted API token, and the outbound transport is an Effect `HttpClient` dependency. Use `fetchLayerConfig(...)` as shorthand when the platform fetch-backed client is enough.
-
-```ts
-import { Effect } from "effect";
-import { Email, WorkerConfig } from "effect-cf";
-
-class EmailSending extends Email.SendingTag<EmailSending>()("EmailSending") {}
-
-export const EmailSendingLayer = EmailSending.fetchLayerConfig(
-  Email.sendingConfig({
-    accountId: WorkerConfig.string("CLOUDFLARE_ACCOUNT_ID"),
-    apiToken: WorkerConfig.redacted("CLOUDFLARE_API_TOKEN"),
-  }),
-);
-
-export const sendInvoice = (to: string) =>
-  Effect.gen(function* () {
-    const sending = yield* EmailSending;
-    const result = yield* sending.send({
-      from: "invoices@example.com",
-      to,
-      subject: "Your Invoice",
-      html: "<h1>Invoice attached</h1>",
-    });
-
-    return result.delivered;
-  });
-```
-
-`send(...)` returns the per-recipient delivery status as `{ delivered, permanentBounces, queued }`. Failed requests fail with `EmailSendingError`, which carries the HTTP status and Cloudflare's numeric `errors` array. Attachment content given as `ArrayBuffer` or a typed array is base64 encoded for the REST payload; `Email.toSendingPayload(...)` exposes that conversion directly. SMTP submission is not covered, because Workers cannot open the outbound SMTP connection it requires.
+Cloudflare's total message size limit is exposed as `Email.sendLimits.maxMessageBytes` but is not enforced, because the encoded MIME size is only known once Cloudflare composes the message. Oversized messages fail at the binding with `E_CONTENT_TOO_LARGE`.
 
 ## Analytics Engine Example
 

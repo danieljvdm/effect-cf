@@ -9,7 +9,7 @@ import {
   type Schema as S,
   type Scope,
 } from "effect";
-import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import type * as Binding from "./Binding";
 import { WorkerConfig, WorkerEnvironment, type WorkerEnv } from "./Environment";
@@ -196,14 +196,41 @@ export const renderHttpResponse = <A extends HttpServerResponse.HttpServerRespon
 
 const renderFetchSuccess = <E, R>(
   effect: Effect.Effect<WorkerFetchSuccess, E, R>,
-): Effect.Effect<Response, E, R> =>
-  Effect.flatMap(effect, (response) =>
-    response instanceof Response
-      ? Effect.succeed(response)
-      : Effect.map(Effect.context<never>(), (context) =>
-          HttpServerResponse.toWeb(response, { context }),
-        ),
-  );
+): Effect.Effect<Response, E, Exclude<R, Scope.Scope> | HttpServerRequest.HttpServerRequest> =>
+  Effect.suspend(() => {
+    // Native `Response` values bypass all HTTP response processing (including
+    // pre-response handlers), so app-level `HttpEffect.toHandled` wrappers and
+    // WebSocket upgrade responses pass through untouched.
+    let nativeResponse: Response | undefined;
+    let webResponse: Response | undefined;
+
+    const handled = HttpEffect.toHandled(
+      Effect.flatMap(effect, (response) => {
+        if (response instanceof Response) {
+          nativeResponse = response;
+
+          return Effect.succeed(HttpServerResponse.empty());
+        }
+
+        return Effect.succeed(response);
+      }),
+      (request, response) =>
+        nativeResponse !== undefined
+          ? Effect.void
+          : Effect.map(Effect.context<never>(), (context) => {
+              webResponse = HttpServerResponse.toWeb(HttpEffect.scopeTransferToStream(response), {
+                withoutBody: request.method === "HEAD",
+                context,
+              });
+            }),
+    );
+
+    // `toHandled` re-fails with the original cause after rendering the error
+    // response, so both branches return the response captured above.
+    const captured = () => nativeResponse ?? webResponse ?? new Response(null, { status: 500 });
+
+    return Effect.matchCause(handled, { onFailure: captured, onSuccess: captured });
+  });
 
 const isWorkerOptions = <ROut, REvent, EventLayerError, Rpc extends WorkerRpc<ROut | REvent>>(
   options: WorkerOptions<ROut, REvent, EventLayerError, Rpc> | WorkerHandler<ROut>,

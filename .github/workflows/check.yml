@@ -1,0 +1,55 @@
+name: Check
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # setup-bun resolves the consumer's packageManager or engines.bun version.
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Set up Vite+ and install dependencies
+        uses: voidzero-dev/setup-vp@v1.16.1
+        with:
+          # Vite+ version intentionally resolves from the consumer manifest/lock.
+          node-version: "24"
+          cache: true
+          run-install: |
+            args: ["--frozen-lockfile", "--ignore-scripts"]
+
+      - name: Verify locked Dev Kit setup
+        run: bun ./node_modules/@danieljvdm/dev-kit/bin/dev-kit.mjs apply --locked
+
+      - name: "Build effect-cf"
+        run: |
+          vp run effect-cf#build
+
+      - name: Check formatting
+        run: vp fmt --check
+
+      - name: Lint
+        run: vp lint
+
+      - name: Run tests
+        run: vp test
+
+      - name: Type check with Effect TypeScript-Go
+        run: vp run typecheck

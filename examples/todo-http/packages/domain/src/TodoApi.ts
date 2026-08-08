@@ -42,11 +42,11 @@ export const TodoStats = S.Struct({
 });
 export type TodoStats = S.Schema.Type<typeof TodoStats>;
 
-export class TodoNotFound extends S.TaggedErrorClass<TodoNotFound>()("TodoNotFound", {
+export class TodoNotFound extends S.TaggedError<TodoNotFound>()("TodoNotFound", {
   id: S.String,
 }) {}
 
-export class DatabaseError extends S.TaggedErrorClass<DatabaseError>()("DatabaseError", {
+export class DatabaseError extends S.TaggedError<DatabaseError>()("DatabaseError", {
   message: S.String,
 }) {}
 

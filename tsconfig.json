@@ -6,6 +6,40 @@
     "moduleResolution": "nodenext",
     "allowImportingTsExtensions": true,
     "esModuleInterop": true,
-    "plugins": [{ "name": "@effect/language-service" }]
-  }
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "diagnosticSeverity": {
+          "instanceOfSchema": "suggestion",
+          "nestedEffectGenYield": "suggestion",
+          "newSchemaClass": "suggestion",
+          "preferSchemaTypeProperty": "suggestion",
+          // Dev Kit's recommended profile reports the next two as `warning`, and
+          // the language service defaults the last three to `warning`. The
+          // compiler exits non-zero on warnings, and the Cloudflare host
+          // boundaries currently produce 204 of them. Keep the guidance visible
+          // in editors at `suggestion` until the error channels are typed.
+          // Tracked in https://github.com/danieljvdm/effect-cf/issues/63 —
+          // drop each override as its count reaches zero.
+          "anyUnknownInErrorContext": "suggestion",
+          "unsafeEffectTypeAssertion": "suggestion",
+          "unknownInEffectCatch": "suggestion",
+          "promiseInEffectSuccess": "suggestion",
+          "multipleEffectProvide": "suggestion"
+        },
+        "overrides": [
+          {
+            "include": ["**/src/**/*.ts"],
+            "options": {
+              "diagnosticSeverity": {
+                "nodeBuiltinImport": "warning",
+                "preferSchemaOverJson": "suggestion"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "include": ["vite.config.ts"]
 }

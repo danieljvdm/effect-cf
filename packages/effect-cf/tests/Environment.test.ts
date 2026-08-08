@@ -11,14 +11,14 @@ const AppConfig = Config.all({
   sampleRate: WorkerConfig.number("SAMPLE_RATE"),
 });
 
-WorkerConfig.string("OPTIONAL_SCALAR");
-WorkerConfig.redacted("SECRET_VALUE");
+void WorkerConfig.string("OPTIONAL_SCALAR");
+void WorkerConfig.redacted("SECRET_VALUE");
 
 // @ts-expect-error Durable Object namespace bindings are not scalar config keys.
-WorkerConfig.string("TEST_COUNTER_DO");
+void WorkerConfig.string("TEST_COUNTER_DO");
 
 // @ts-expect-error Unknown keys must be declared on Cloudflare.Env.
-WorkerConfig.string("MISSING_CONFIG_KEY");
+void WorkerConfig.string("MISSING_CONFIG_KEY");
 
 test("WorkerConfig.layer reads scalar config from WorkerEnvironment", async () => {
   const env = {

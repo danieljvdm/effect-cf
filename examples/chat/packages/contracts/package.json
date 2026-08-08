@@ -23,7 +23,8 @@
   },
   "scripts": {
     "build": "tsc --noEmit",
-    "check": "vp check"
+    "check": "vp check",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "effect": "catalog:",
@@ -31,7 +32,6 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
-    "typescript": "~6.0.2",
     "vite-plus": "catalog:"
   }
 }

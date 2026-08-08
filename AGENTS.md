@@ -6,6 +6,16 @@ This project uses `@danieljvdm/dev-kit` to manage portable agent skills and repr
 
 For dev-kit operations, use the `dev-kit` skill and read `.agents/skills/dev-kit/SKILL.md` before changing managed outputs.
 
+# Learning more about the Effect
+
+This repository uses the Effect Typescript library.
+
+Before writing any Effect code, first read `node_modules/effect/AGENTS.md`
+**completely**, and follow the links in the file when required.
+
+If you need to learn more about particular Effect apis and concepts that the
+guide doesn't cover, search through the source code in `node_modules/effect/src`.
+
 ## Project command policy
 
 Vite+ is the unified toolchain and command authority for this repository. It wraps Vite, Rolldown, Vitest, tsdown, Oxlint, Oxfmt, and Vite Task behind the `vp` CLI; Vite+ is distinct from Vite.
@@ -15,10 +25,12 @@ Run `vp help` for available commands and `vp <command> --help` for command-speci
 Use these repository commands:
 
 - Install dependencies: `vp install`.
+- Full validation: `vp run check`.
 - Static checks: `vp check`.
 - Format check: `vp fmt --check`; format fixes: `vp fmt`.
 - Lint only: `vp lint`; lint fixes: `vp lint --fix`.
 - Tests only: `vp test`.
+- Typecheck only: `vp run typecheck`.
 - Other repository tasks and package scripts: `vp run <task>`.
 - Toolchain or runtime troubleshooting: run `vp env doctor` and include its output when asking for help.
 
@@ -36,4 +48,4 @@ Do not use `bun run`, `npm run`, `pnpm run`, or `yarn run` in this repository. D
 
 # Repo-Local Skills
 
-- Use `.agents/skills/pr-hygiene/SKILL.md` before creating or updating PRs, choosing PR titles, writing PR bodies, or adding changesets.
+- Use `.agents/skills/effect-cf-repo-pr-hygiene/SKILL.md` before creating or updating PRs, choosing PR titles, writing PR bodies, or adding changesets.

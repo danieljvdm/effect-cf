@@ -17,11 +17,19 @@ export type Signal = "logs" | "traces" | "metrics";
 /** OTLP payload serialization used by the Effect OTLP exporters. */
 export type Serialization = "json" | "protobuf";
 
-/** Resource metadata shared by Worker and Durable Object OTLP layers. */
+/**
+ * Resource metadata shared by Worker and Durable Object OTLP layers.
+ *
+ * Precedence follows Effect's `OtlpResource.fromConfig`: explicit
+ * `serviceName`/`serviceVersion` win over matching explicit `attributes`, and
+ * explicit attributes win over `OTEL_SERVICE_NAME`, `OTEL_SERVICE_VERSION`, and
+ * `OTEL_RESOURCE_ATTRIBUTES`. Omit an option to let operators set it from the
+ * environment.
+ */
 export interface ResourceOptions {
-  /** Explicit service name. OTEL resource environment variables take precedence. */
+  /** Explicit service name. Takes precedence over OTEL environment variables. */
   readonly serviceName?: string;
-  /** Explicit service version. OTEL resource environment variables take precedence. */
+  /** Explicit service version. Takes precedence over OTEL environment variables. */
   readonly serviceVersion?: string;
   /** Additional resource attributes attached to exported telemetry. */
   readonly attributes?: Record<string, unknown>;
@@ -116,11 +124,8 @@ const serializationLayer = (serialization: Serialization | undefined) =>
 
 type SignalLayer = ReturnType<typeof OtlpLogger.layerFromConfig>;
 
+/** Merges a non-empty signal layer list; callers handle the empty case. */
 const mergeSignalLayers = (layers: ReadonlyArray<SignalLayer>): SignalLayer => {
-  if (layers.length === 0) {
-    return Layer.empty;
-  }
-
   let merged = layers[0]!;
 
   for (let index = 1; index < layers.length; index++) {
@@ -166,6 +171,10 @@ const makeLayer = (
         headers: options.headers,
       }),
     );
+  }
+
+  if (layers.length === 0) {
+    return Layer.empty;
   }
 
   return mergeSignalLayers(layers).pipe(

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "check": "vp check",
+    "typecheck": "tsc --noEmit",
     "test": "vp test"
   },
   "dependencies": {
@@ -14,7 +15,6 @@
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
     "@effect/vitest": "catalog:",
-    "typescript": "~6.0.2",
     "vite-plus": "catalog:",
     "vitest": "catalog:"
   }

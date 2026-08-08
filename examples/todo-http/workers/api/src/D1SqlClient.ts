@@ -66,6 +66,7 @@ const makeConnection = (db: D1Database): SqlConnection.Connection => {
       Stream.fromIterableEffect(execute(sql, params, transformRows)),
     executeValues,
     executeUnprepared: execute,
+    executeValuesUnprepared: executeValues,
   };
 };
 

@@ -8,6 +8,13 @@ import type * as Rpc from "./Rpc";
 import * as RpcDefinition from "./RpcDefinition";
 import * as ServiceBinding from "./ServiceBinding";
 
+/**
+ * The client tuple types are re-established by the final `TagClass` cast, so
+ * these internal invocations erase the binding client's generic argument
+ * tuples instead of instantiating them at `never`.
+ */
+type UnsafeInvoke<E> = (...args: ReadonlyArray<unknown>) => Effect.Effect<unknown, E>;
+
 export type ServiceFreeSchema = S.Codec<any, any, never, never>;
 
 export interface Method<
@@ -267,7 +274,10 @@ export const Tag =
       Effect.gen(function* () {
         const service = yield* tag;
 
-        return yield* service.rpc(method as never, ...(args as never));
+        return yield* (service.rpc as UnsafeInvoke<ServiceBinding.ServiceBindingRpcError>)(
+          method,
+          ...args,
+        );
       });
 
     const call = <Method extends keyof ClientApi>(
@@ -277,7 +287,10 @@ export const Tag =
       Effect.gen(function* () {
         const service = yield* tag;
 
-        return yield* service.call(method as never, ...(args as never));
+        return yield* (service.call as UnsafeInvoke<ServiceBinding.ServiceBindingRpcError>)(
+          method,
+          ...args,
+        );
       });
 
     const scopedCall = <Method extends keyof ClientApi>(
@@ -287,7 +300,10 @@ export const Tag =
       Effect.gen(function* () {
         const service = yield* tag;
 
-        return yield* service.scopedCall(method as never, ...(args as never));
+        return yield* (service.scopedCall as UnsafeInvoke<ServiceBinding.ServiceBindingRpcError>)(
+          method,
+          ...args,
+        );
       });
 
     const directMethods = ServiceBinding.makeDirectMethods<Self, ClientApi, SelfDefinition>(

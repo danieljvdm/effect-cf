@@ -1,0 +1,4 @@
+interface:
+  display_name: "Build Effect CLIs"
+  short_description: "Build typed Effect command-line applications"
+  default_prompt: "Use $build-effect-clis to build a typed Effect CLI with clear commands, platform boundaries, and tests."

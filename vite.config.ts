@@ -36,6 +36,10 @@ const recommended = createRecommendedVitePlusConfig({
 
 export default defineConfig({
   ...recommended,
+  // Declared explicitly, not just spread: Vite+'s Git hook setup scans this file
+  // for a literal `staged` key and injects an unformatted one when it can't
+  // find it, which mutates the working tree during `dev-kit apply`.
+  staged: { ...recommended.staged },
   test: {
     projects: [
       {

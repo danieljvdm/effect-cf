@@ -1,5 +1,5 @@
-import { Clock, Config, ConfigProvider, Context, Effect, Layer, Stream } from "effect";
-import { HttpServerResponse } from "effect/unstable/http";
+import { Clock, Config, ConfigProvider, Context, Data, Effect, Layer, Stream } from "effect";
+import { HttpEffect, HttpServerResponse } from "effect/unstable/http";
 import { expect, test } from "vite-plus/test";
 
 import { DurableObject, Worker, WorkerConfig } from "../src/index";
@@ -11,6 +11,8 @@ class RenderValue extends Context.Service<RenderValue, string>()(
 class EventValue extends Context.Service<EventValue, string>()(
   "effect-cf/test/WorkerBoundary/EventValue",
 ) {}
+
+class BoomError extends Data.TaggedError("BoomError") {}
 
 const makeExecutionContext = () =>
   ({
@@ -128,6 +130,127 @@ test("Worker.fetch renders Effect HttpServerResponse values", async () => {
   );
 
   await expect(contextStreamResponse.text()).resolves.toBe("from-context");
+});
+
+test("Worker.fetch runs pre-response handlers on HttpServerResponse results", async () => {
+  const Live = Worker.make(Layer.empty, {
+    fetch: Effect.gen(function* () {
+      yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+        Effect.succeed(
+          response.pipe(
+            HttpServerResponse.setHeader("cache-control", "no-store"),
+            HttpServerResponse.setCookieUnsafe("challenge", "abc"),
+          ),
+        ),
+      );
+
+      return HttpServerResponse.text("signed-in", { status: 202 });
+    }),
+  });
+  const worker = new Live(makeExecutionContext(), {} as Cloudflare.Env);
+
+  const response = await worker.fetch(new Request("https://worker.test/auth"));
+
+  expect(response.status).toBe(202);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect((response.headers as Headers & { getSetCookie(): Array<string> }).getSetCookie()).toEqual([
+    "challenge=abc",
+  ]);
+  await expect(response.text()).resolves.toBe("signed-in");
+});
+
+test("Worker.fetch bypasses pre-response handlers for native Response results", async () => {
+  const Live = Worker.make(Layer.empty, {
+    fetch: Effect.gen(function* () {
+      yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+        Effect.succeed(HttpServerResponse.setCookieUnsafe(response, "challenge", "abc")),
+      );
+
+      return new Response("already-handled", {
+        headers: { "set-cookie": "challenge=from-app" },
+      });
+    }),
+  });
+  const worker = new Live(makeExecutionContext(), {} as Cloudflare.Env);
+
+  const response = await worker.fetch(new Request("https://worker.test/"));
+
+  expect((response.headers as Headers & { getSetCookie(): Array<string> }).getSetCookie()).toEqual([
+    "challenge=from-app",
+  ]);
+  await expect(response.text()).resolves.toBe("already-handled");
+});
+
+test("Worker.fetch suppresses HttpServerResponse bodies for HEAD requests", async () => {
+  const Live = Worker.make(Layer.empty, {
+    fetch: Effect.succeed(HttpServerResponse.text("body", { headers: { "x-test": "yes" } })),
+  });
+  const worker = new Live(makeExecutionContext(), {} as Cloudflare.Env);
+
+  const response = await worker.fetch(new Request("https://worker.test/", { method: "HEAD" }));
+
+  expect(response.status).toBe(200);
+  expect(response.headers.get("x-test")).toBe("yes");
+  expect(response.body).toBeNull();
+});
+
+test("Worker.fetch keeps request-scoped resources alive while streaming bodies", async () => {
+  const events: Array<string> = [];
+
+  const Live = Worker.make(Layer.empty, {
+    fetch: Effect.gen(function* () {
+      yield* Effect.acquireRelease(
+        Effect.sync(() => events.push("acquire")),
+        () => Effect.sync(() => events.push("release")),
+      );
+
+      return HttpServerResponse.stream(
+        Stream.make("chunk-1", "chunk-2").pipe(
+          Stream.tap((chunk) =>
+            Effect.sync(() =>
+              events.push(events.includes("release") ? `${chunk}-after-release` : chunk),
+            ),
+          ),
+          Stream.encodeText,
+        ),
+      );
+    }),
+  });
+  const worker = new Live(makeExecutionContext(), {} as Cloudflare.Env);
+
+  const response = await worker.fetch(new Request("https://worker.test/stream"));
+
+  await expect(response.text()).resolves.toBe("chunk-1chunk-2");
+  await expect.poll(() => events).toEqual(["acquire", "chunk-1", "chunk-2", "release"]);
+});
+
+test("Worker.fetch renders handler failures as HTTP error responses", async () => {
+  const Live = Worker.make(Layer.empty, {
+    fetch: Effect.fail(new BoomError()),
+  });
+  const worker = new Live(makeExecutionContext(), {} as Cloudflare.Env);
+
+  const response = await worker.fetch(new Request("https://worker.test/"));
+
+  expect(response.status).toBe(500);
+});
+
+test("Worker.fetch applies pre-response handlers to rendered error responses", async () => {
+  const Live = Worker.make(Layer.empty, {
+    fetch: Effect.gen(function* () {
+      yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+        Effect.succeed(HttpServerResponse.setHeader(response, "cache-control", "no-store")),
+      );
+
+      return yield* new BoomError();
+    }),
+  });
+  const worker = new Live(makeExecutionContext(), {} as Cloudflare.Env);
+
+  const response = await worker.fetch(new Request("https://worker.test/auth"));
+
+  expect(response.status).toBe(500);
+  expect(response.headers.get("cache-control")).toBe("no-store");
 });
 
 test("Worker.renderHttpResponse converts HttpServerResponse values explicitly", async () => {

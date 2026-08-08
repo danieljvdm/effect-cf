@@ -81,9 +81,7 @@ export const fromDurableObjectState = (
     Effect.context<R>().pipe(
       Effect.flatMap((context) =>
         Effect.promise(() =>
-          state.blockConcurrencyWhile(() =>
-            runPromiseExitPreservingTypedFailures(Effect.provideContext(effect, context)),
-          ),
+          state.blockConcurrencyWhile(() => runPromiseExitPreservingTypedFailures(context, effect)),
         ),
       ),
       Effect.flatten,
@@ -92,9 +90,7 @@ export const fromDurableObjectState = (
     Effect.context<R>().pipe(
       Effect.flatMap((context) =>
         Effect.promise(() =>
-          state.blockConcurrencyWhile(() =>
-            Effect.runPromise(Effect.provideContext(effect, context)),
-          ),
+          state.blockConcurrencyWhile(() => Effect.runPromiseWith(context)(effect)),
         ),
       ),
     ),
@@ -116,10 +112,11 @@ export const fromDurableObjectState = (
   abort: (reason?: string) => Effect.sync(() => state.abort(reason)),
 });
 
-const runPromiseExitPreservingTypedFailures = async <A, E>(
-  effect: Effect.Effect<A, E>,
+const runPromiseExitPreservingTypedFailures = async <A, E, R>(
+  context: Context.Context<R>,
+  effect: Effect.Effect<A, E, R>,
 ): Promise<Exit.Exit<A, E>> => {
-  const exit = await Effect.runPromiseExit(effect);
+  const exit = await Effect.runPromiseExitWith(context)(effect);
 
   if (Exit.isFailure(exit) && (Cause.hasDies(exit.cause) || Cause.hasInterrupts(exit.cause))) {
     throw Cause.squash(exit.cause);

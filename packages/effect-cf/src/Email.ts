@@ -9,6 +9,7 @@ import { Context, Data, Effect, type Layer } from "effect";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
+import * as ErrorMessage from "./internal/ErrorMessage";
 
 const expectedSendEmailBinding = "Send Email binding with send()";
 const textEncoder = new TextEncoder();
@@ -27,7 +28,14 @@ export const sendLimits = {
   maxAllowlistHeaders: 20,
 } as const;
 
-/** Error codes reported by Cloudflare Email Sending. */
+/**
+ * Error codes reported by Cloudflare Email Sending.
+ *
+ * Surfaced on {@link EmailOperationError} `code` on a best-effort basis: the
+ * runtime attaches them as a non-standard `code` property on thrown errors,
+ * which may be missing depending on the runtime or dev-time proxying
+ * (miniflare remote bindings serialize errors and can strip it).
+ */
 export const emailErrorCodes = [
   "E_VALIDATION_ERROR",
   "E_FIELD_MISSING",
@@ -59,9 +67,21 @@ export class EmailOperationError extends Data.TaggedError("EmailOperationError")
   readonly binding: string;
   readonly operation: string;
   readonly cause: unknown;
-  /** Cloudflare error code taken from the thrown error, when present. */
+  /**
+   * Cloudflare error code taken from the thrown error, when present.
+   *
+   * Best-effort: may be `undefined` depending on the runtime or dev-time
+   * proxying — miniflare remote bindings (`"remote": true`) serialize thrown
+   * errors and can strip the non-standard `code` property.
+   */
   readonly code?: EmailErrorCode | (string & {});
-}> {}
+}> {
+  override get message(): string {
+    const code = this.code === undefined ? "" : ` (${this.code})`;
+
+    return `Email ${this.operation} failed for binding "${this.binding}"${code}: ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 /** A single message field that violates a documented Email Sending limit. */
 export interface EmailViolation {
@@ -76,7 +96,11 @@ export class EmailValidationError extends Data.TaggedError("EmailValidationError
   readonly binding: string;
   readonly operation: string;
   readonly violations: ReadonlyArray<EmailViolation>;
-}> {}
+}> {
+  override get message(): string {
+    return `Email ${this.operation} for binding "${this.binding}" failed validation: ${ErrorMessage.violationsMessage(this.violations)}`;
+  }
+}
 
 /** Typed Cloudflare Send Email binding definition. */
 export interface EmailDefinition {
@@ -108,7 +132,7 @@ export interface EmailClient {
     (message: EmailMessage): Effect.Effect<EmailSendResult, EmailSendError>;
     (builder: EmailMessageBuilder): Effect.Effect<EmailSendResult, EmailSendError>;
   };
-  readonly unsafeRaw: Effect.Effect<EmailBinding>;
+  readonly rawUnsafe: Effect.Effect<EmailBinding>;
   readonly definition: EmailDefinition;
 }
 
@@ -141,6 +165,12 @@ export interface TagClass<Self, Id extends string> extends Context.ServiceClass<
   >;
 }
 
+/**
+ * Best-effort extraction of the Cloudflare error `code` from a thrown error.
+ * Returns `undefined` when the property is absent — e.g. when a dev-time
+ * proxy such as a miniflare remote binding (`"remote": true`) serializes the
+ * error and strips non-standard properties.
+ */
 const emailErrorCode = (cause: unknown): EmailOperationError["code"] => {
   if (typeof cause !== "object" || cause === null) {
     return undefined;
@@ -439,21 +469,18 @@ export const makeClient =
   (email: EmailBinding): EmailClient => {
     const runtime = email as EmailRuntimeBinding;
     const validate = options?.validate ?? true;
-    const send = ((message: EmailSendInput) => {
-      const dispatch = () =>
-        tryEmailPromise(definition.binding, "send", () => runtime.send(message));
-
-      if (!validate || !isEmailMessageBuilder(message)) {
-        return dispatch();
+    const send = Effect.fn("Email.send")(function* (message: EmailSendInput) {
+      if (validate && isEmailMessageBuilder(message)) {
+        yield* validateSendInput(definition.binding, "send", message);
       }
 
-      return validateSendInput(definition.binding, "send", message).pipe(Effect.flatMap(dispatch));
+      return yield* tryEmailPromise(definition.binding, "send", () => runtime.send(message));
     }) as EmailClient["send"];
 
     return {
       definition,
       send,
-      unsafeRaw: Effect.succeed(email),
+      rawUnsafe: Effect.succeed(email),
     };
   };
 

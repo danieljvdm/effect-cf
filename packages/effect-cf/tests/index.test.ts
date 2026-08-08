@@ -86,7 +86,7 @@ const makeNamespace = (stub: unknown) => {
 };
 
 test("exports Cloudflare primitives", () => {
-  expect(Binding.TypeId).toBe("effect-cf/Binding");
+  expect(Binding.TypeId).toBe("~effect-cf/Binding");
 });
 
 test("registers disposable RPC results with Effect scopes", async () => {

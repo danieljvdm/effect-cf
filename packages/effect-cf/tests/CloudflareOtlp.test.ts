@@ -2,6 +2,7 @@ import { NodeHttpServer } from "@effect/platform-node";
 import { expect, it, layer } from "@effect/vitest";
 import { ConfigProvider, Context, Effect, Layer, Queue } from "effect";
 import { HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { OtlpExporter } from "effect/unstable/observability";
 import process from "node:process";
 
 import { CloudflareOtlp, Worker } from "../src/index";
@@ -172,7 +173,7 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
     Effect.gen(function* () {
       const collector = yield* OtlpCollector;
       const handler = Worker.makeFetchHandler(Layer.empty, {
-        eventLayer: CloudflareOtlp.workerLayer({
+        eventLayer: CloudflareOtlp.layerWorker({
           signals: ["traces"],
           serialization: "json",
           resource: { serviceName: "effect-cf-test" },
@@ -227,7 +228,7 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
     Effect.gen(function* () {
       const collector = yield* OtlpCollector;
       const handler = Worker.makeFetchHandler(Layer.empty, {
-        eventLayer: CloudflareOtlp.workerLayer({
+        eventLayer: CloudflareOtlp.layerWorker({
           signals: ["traces"],
           serialization: "json",
           resource: {
@@ -273,7 +274,7 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
     Effect.gen(function* () {
       const collector = yield* OtlpCollector;
       const handler = Worker.makeFetchHandler(Layer.empty, {
-        eventLayer: CloudflareOtlp.workerLayer({
+        eventLayer: CloudflareOtlp.layerWorker({
           signals: ["traces"],
           serialization: "json",
         }),
@@ -308,6 +309,41 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
     }),
   );
 
+  it.effect("flushes buffered telemetry on demand via OtlpExporter.Flusher", () =>
+    Effect.gen(function* () {
+      const collector = yield* OtlpCollector;
+
+      yield* Effect.gen(function* () {
+        yield* Effect.succeed("ok").pipe(Effect.withSpan("flush.on-demand"));
+
+        const flusher = yield* OtlpExporter.Flusher;
+
+        yield* flusher.flush;
+
+        const request = yield* collector.nextRequest;
+
+        expect(request.path).toBe("/v1/traces");
+        expect(request.body).toContain("flush.on-demand");
+      }).pipe(
+        Effect.provide(
+          CloudflareOtlp.layerJson({
+            signals: ["traces"],
+            resource: { serviceName: "flusher-test" },
+          }),
+        ),
+        Effect.provide(
+          ConfigProvider.layer(
+            ConfigProvider.fromUnknown({
+              OTEL_TRACES_EXPORTER: "otlp",
+              OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.endpoint}/v1/traces`,
+              OTEL_BSP_SCHEDULE_DELAY: "600000",
+            }),
+          ),
+        ),
+      );
+    }),
+  );
+
   it.effect("derives signal paths from the generic OTLP endpoint", () =>
     Effect.gen(function* () {
       const collector = yield* OtlpCollector;
@@ -315,7 +351,7 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
       yield* Effect.succeed("ok").pipe(
         Effect.withSpan("generic.endpoint"),
         Effect.provide(
-          CloudflareOtlp.workerLayer({
+          CloudflareOtlp.layerWorker({
             signals: ["traces"],
             serialization: "json",
             resource: { serviceName: "generic-endpoint-test" },
@@ -352,7 +388,7 @@ it.effect("CloudflareOtlp layer is disabled when the OTEL signal exporter is uns
 
     try {
       const handler = Worker.makeFetchHandler(Layer.empty, {
-        eventLayer: CloudflareOtlp.workerLayer({
+        eventLayer: CloudflareOtlp.layerWorker({
           signals: ["traces"],
           resource: { serviceName: "disabled-test" },
         }),
@@ -391,7 +427,7 @@ it.effect("CloudflareOtlp layer is disabled when no endpoint is configured", () 
 
     try {
       const handler = Worker.makeFetchHandler(Layer.empty, {
-        eventLayer: CloudflareOtlp.workerLayer({
+        eventLayer: CloudflareOtlp.layerWorker({
           signals: ["traces"],
           resource: { serviceName: "disabled-test" },
         }),
@@ -431,7 +467,7 @@ it.effect("CloudflareOtlp layer honors OTEL_SDK_DISABLED", () =>
 
     try {
       const handler = Worker.makeFetchHandler(Layer.empty, {
-        eventLayer: CloudflareOtlp.workerLayer({
+        eventLayer: CloudflareOtlp.layerWorker({
           signals: ["traces"],
           resource: { serviceName: "disabled-test" },
         }),
@@ -462,7 +498,7 @@ it.effect("CloudflareOtlp layer honors OTEL_SDK_DISABLED", () =>
 mapleSmokeTest("CloudflareOtlp exports Worker spans to Maple local OTLP", () =>
   Effect.gen(function* () {
     const handler = Worker.makeFetchHandler(Layer.empty, {
-      eventLayer: CloudflareOtlp.workerLayer({
+      eventLayer: CloudflareOtlp.layerWorker({
         signals: ["traces"],
         resource: { serviceName: "effect-cf-maple-smoke" },
       }),

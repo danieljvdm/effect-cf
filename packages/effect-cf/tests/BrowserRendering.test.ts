@@ -61,7 +61,7 @@ test("Browser Rendering layer validates the binding shape", async () => {
       Effect.gen(function* () {
         const rendering = yield* TestBrowser;
 
-        yield* rendering.unsafeRaw;
+        yield* rendering.rawUnsafe;
       }).pipe(
         Effect.provide(
           TestBrowser.layer({ binding: "MYBROWSER" }).pipe(

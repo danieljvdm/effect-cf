@@ -43,6 +43,33 @@ it.effect("provides an Effect SQL client from Durable Object SQLite storage", ()
   }).pipe(Effect.provide(sqlLayer));
 });
 
+it.effect("supports sql.withTransaction through Durable Object storage", () => {
+  const seen: Array<{
+    readonly query: string;
+    readonly bindings: ReadonlyArray<unknown>;
+  }> = [];
+  const state = makeRawDurableObjectState((query, bindings) => {
+    seen.push({ query, bindings });
+
+    return makeCursor([], []);
+  });
+
+  const stateLayer = Layer.succeed(
+    DurableObjectState.DurableObjectState,
+    DurableObjectState.fromDurableObjectState(state),
+  );
+  const sqlLayer = DurableObjectSqlite.layer().pipe(Layer.provide(stateLayer));
+
+  return Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+
+    yield* sql.withTransaction(sql`INSERT INTO todos (title) VALUES (${"tx"})`);
+
+    assert.strictEqual(seen.length, 1);
+    assert.deepStrictEqual(seen[0]?.bindings, ["tx"]);
+  }).pipe(Effect.provide(sqlLayer));
+});
+
 function makeRawDurableObjectState(
   exec: (
     query: string,
@@ -58,6 +85,8 @@ function makeRawDurableObjectState(
       getAlarm: async () => null,
       setAlarm: async () => undefined,
       deleteAlarm: async () => undefined,
+      transaction: (closure: (txn: { rollback: () => void }) => Promise<unknown>) =>
+        closure({ rollback: () => {} }),
       sql: {
         exec: (query: string, ...bindings: Array<SqlStorageValue>) => exec(query, bindings),
         databaseSize: 0,

@@ -47,6 +47,26 @@ it.effect("acceptUpgrade accepts the server socket and returns the client respon
   }),
 );
 
+it.effect("acceptUpgrade fails with a typed error for non-serializable attachments", () =>
+  Effect.gen(function* () {
+    const state = makeFakeDurableObjectState();
+
+    const failure = yield* DurableObjectWebSocket.acceptUpgrade({
+      attachment: { callback: () => {} },
+    }).pipe(
+      Effect.flip,
+      Effect.provideService(
+        DurableObjectState.DurableObjectState,
+        DurableObjectState.DurableObjectState.of(state),
+      ),
+    );
+
+    assert.strictEqual(failure._tag, "DurableWebSocketAttachmentError");
+    assert.strictEqual(failure.operation, "serialize");
+    assert.deepStrictEqual(state.accepted, []);
+  }),
+);
+
 it.effect("wraps send, close, and attachment operations as Effects", () =>
   Effect.gen(function* () {
     const raw = makeFakeWebSocket();

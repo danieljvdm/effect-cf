@@ -2,6 +2,7 @@ import { Context, Data, Effect, type Layer } from "effect";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
+import * as ErrorMessage from "./internal/ErrorMessage";
 
 const expectedBrowserRenderingBinding = "Browser Rendering binding resource";
 
@@ -12,7 +13,11 @@ export class BrowserRenderingOperationError extends Data.TaggedError(
   readonly binding: string;
   readonly operation: string;
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Browser Rendering ${this.operation} failed for binding "${this.binding}": ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 /** Typed Browser Rendering binding definition. */
 export interface BrowserRenderingDefinition {
@@ -106,7 +111,7 @@ export interface BrowserRenderingClient<
     connect: BrowserRenderingConnect<RawBinding, Browser, ConnectOptions>,
     options?: ConnectOptions,
   ) => Effect.Effect<BrowserRenderingBrowserClient<Browser, Page>, BrowserRenderingOperationError>;
-  readonly unsafeRaw: Effect.Effect<RawBinding>;
+  readonly rawUnsafe: Effect.Effect<RawBinding>;
   readonly definition: BrowserRenderingDefinition;
 }
 
@@ -251,15 +256,33 @@ export const makeClient =
   ) =>
   (binding: RawBinding): BrowserRenderingClient<RawBinding> => ({
     definition,
-    launchWith: (launch, options) =>
+    launchWith: <
+      Browser extends BrowserRenderingBrowserLike<Page>,
+      Page extends BrowserRenderingPageLike = BrowserRenderingPageLike,
+      LaunchOptions = unknown,
+    >(
+      launch: BrowserRenderingLaunch<RawBinding, Browser, LaunchOptions>,
+      options?: LaunchOptions,
+    ) =>
       tryBrowserRenderingPromise(definition.binding, "launch", () => launch(binding, options)).pipe(
-        Effect.map((browser) => wrapBrowser(definition.binding, browser)),
+        Effect.map((browser) => wrapBrowser<Browser, Page>(definition.binding, browser)),
+        Effect.withSpan("BrowserRendering.launchWith"),
       ),
-    connectWith: (connect, options) =>
+    connectWith: <
+      Browser extends BrowserRenderingBrowserLike<Page>,
+      Page extends BrowserRenderingPageLike = BrowserRenderingPageLike,
+      ConnectOptions = unknown,
+    >(
+      connect: BrowserRenderingConnect<RawBinding, Browser, ConnectOptions>,
+      options?: ConnectOptions,
+    ) =>
       tryBrowserRenderingPromise(definition.binding, "connect", () =>
         connect(binding, options),
-      ).pipe(Effect.map((browser) => wrapBrowser(definition.binding, browser))),
-    unsafeRaw: Effect.succeed(binding),
+      ).pipe(
+        Effect.map((browser) => wrapBrowser<Browser, Page>(definition.binding, browser)),
+        Effect.withSpan("BrowserRendering.connectWith"),
+      ),
+    rawUnsafe: Effect.succeed(binding),
   });
 
 export const layer = <Self>(

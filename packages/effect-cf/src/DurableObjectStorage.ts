@@ -1,5 +1,7 @@
 import { Data, Effect, Exit, Option, Schema as S } from "effect";
 
+import * as ErrorMessage from "./internal/ErrorMessage";
+
 /** Supported primitive value types for Durable Object SQL APIs. */
 export type SqlStorageValue = globalThis.SqlStorageValue;
 
@@ -7,7 +9,11 @@ export type SqlStorageValue = globalThis.SqlStorageValue;
 export class StorageOperationError extends Data.TaggedError("StorageOperationError")<{
   readonly operation: string;
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Durable Object storage ${this.operation} failed: ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 type StorageEffect<A> = Effect.Effect<A, StorageOperationError>;
 

@@ -35,7 +35,7 @@ const hyperdriveLayer = (hyperdrive: globalThis.Hyperdrive) =>
     it.effect("keeps native binding access on the yielded service", () =>
       Effect.gen(function* () {
         const binding = yield* TestHyperdrive;
-        const raw = yield* binding.unsafeRaw;
+        const raw = yield* binding.rawUnsafe;
 
         assert.strictEqual(raw, hyperdrive);
       }),

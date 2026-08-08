@@ -100,8 +100,8 @@ const makeFakeStorage = (
         const deleted = yield* service.default.delete("https://example.com/item", {
           ignoreMethod: true,
         });
-        const rawCache = yield* service.default.unsafeRaw;
-        const rawStorage = yield* service.unsafeRaw;
+        const rawCache = yield* service.default.rawUnsafe;
+        const rawStorage = yield* service.rawUnsafe;
 
         assert.strictEqual(deleted, true);
         assert.deepStrictEqual(putCalls, [{ request: "https://example.com/item", response }]);
@@ -130,7 +130,7 @@ test("CacheStorage opens named caches", async () => {
     Effect.gen(function* () {
       const service = yield* Cache.CacheStorage;
       const cache = yield* service.open("api-cache");
-      const raw = yield* cache.unsafeRaw;
+      const raw = yield* cache.rawUnsafe;
 
       assert.strictEqual(cache.name, "api-cache");
       assert.strictEqual(raw, namedCache);

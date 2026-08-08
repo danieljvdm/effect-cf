@@ -14,6 +14,7 @@ import type {
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
+import * as ErrorMessage from "./internal/ErrorMessage";
 
 const expectedWorkersAiBinding = "Workers AI binding with run(), gateway(), and models()";
 
@@ -22,7 +23,11 @@ export class WorkersAiOperationError extends Data.TaggedError("WorkersAiOperatio
   readonly binding: string;
   readonly operation: string;
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Workers AI ${this.operation} failed for binding "${this.binding}": ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 /** Typed Workers AI binding definition. */
 export interface WorkersAiDefinition {
@@ -101,7 +106,7 @@ export interface WorkersAiClient<ModelList extends AiModelListType = AiModels> {
   readonly gateway: (
     gatewayId: string,
   ) => Effect.Effect<CloudflareAiGateway, WorkersAiOperationError>;
-  readonly unsafeRaw: Effect.Effect<WorkersAiBinding<ModelList>>;
+  readonly rawUnsafe: Effect.Effect<WorkersAiBinding<ModelList>>;
   readonly definition: WorkersAiDefinition;
 }
 
@@ -177,10 +182,12 @@ export const embeddingResponse = (value: {
 export const makeClient =
   <ModelList extends AiModelListType = AiModels>(definition: WorkersAiDefinition) =>
   (ai: WorkersAiBinding<ModelList>): WorkersAiClient<ModelList> => {
-    const run = ((model: string, input: Record<string, unknown>, options?: WorkersAiOptions) =>
-      tryWorkersAiPromise(definition.binding, "run", () =>
-        ai.run(model as string & {}, input, options),
-      )) as WorkersAiClient<ModelList>["run"];
+    const run = Effect.fn("WorkersAi.run")(
+      (model: string, input: Record<string, unknown>, options?: WorkersAiOptions) =>
+        tryWorkersAiPromise(definition.binding, "run", () =>
+          ai.run(model as string & {}, input, options),
+        ),
+    ) as WorkersAiClient<ModelList>["run"];
 
     return {
       definition,
@@ -190,22 +197,25 @@ export const makeClient =
         () => ai.aiGatewayLogId,
       ),
       run,
-      runEmbedding: (model, input, options) =>
-        run(model, input, options).pipe(
-          Effect.map((response) =>
-            embeddingResponse(
-              response as {
-                readonly data?: ReadonlyArray<ReadonlyArray<number>>;
-                readonly shape?: ReadonlyArray<number>;
-              },
+      runEmbedding: Effect.fn("WorkersAi.runEmbedding")(
+        (model: string, input: WorkersAiEmbeddingInput, options?: WorkersAiOptions) =>
+          run(model, input as Record<string, unknown>, options).pipe(
+            Effect.map((response) =>
+              embeddingResponse(
+                response as {
+                  readonly data?: ReadonlyArray<ReadonlyArray<number>>;
+                  readonly shape?: ReadonlyArray<number>;
+                },
+              ),
             ),
           ),
-        ),
-      models: (params) =>
+      ),
+      models: Effect.fn("WorkersAi.models")((params?: WorkersAiModelsSearchParams) =>
         tryWorkersAiPromise(definition.binding, "models", () => ai.models(params)),
+      ),
       gateway: (gatewayId) =>
         tryWorkersAiSync(definition.binding, "gateway", () => ai.gateway(gatewayId)),
-      unsafeRaw: Effect.succeed(ai),
+      rawUnsafe: Effect.succeed(ai),
     };
   };
 

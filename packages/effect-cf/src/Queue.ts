@@ -3,6 +3,7 @@ import { Data, Effect, type Scope } from "effect";
 import type { ExecutionContext, WorkerContext } from "./Worker";
 import type { WorkerEnvironment } from "./Environment";
 import * as QueueDefinition from "./QueueDefinition";
+import * as ErrorMessage from "./internal/ErrorMessage";
 
 export interface QueueMessage<Body> {
   readonly raw: globalThis.Message<unknown>;
@@ -28,7 +29,11 @@ export class QueueMessageDecodeError extends Data.TaggedError("QueueMessageDecod
   readonly messageId: string;
   readonly index: number;
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Queue "${this.queue}" failed to decode message "${this.messageId}" at index ${this.index}: ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 type RuntimeContext<ROut> = ExecutionContext | WorkerContext | WorkerEnvironment | ROut;
 

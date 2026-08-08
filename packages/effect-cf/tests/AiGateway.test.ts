@@ -1,5 +1,5 @@
 import { assert, expect, layer, test } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Fiber, Layer } from "effect";
 
 import { AiGateway, Binding, WorkerEnvironment } from "../src/index";
 
@@ -84,6 +84,67 @@ test("AI Gateway layer validates the AI binding shape", async () => {
       ),
     ),
   ).rejects.toBeInstanceOf(Binding.BindingValidationError);
+});
+
+test("AI Gateway HTTP client aborts in-flight requests on interruption", async () => {
+  let capturedSignal: AbortSignal | null | undefined;
+  let started = () => {};
+  const requestStarted = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const request = ((_input, init) => {
+    capturedSignal = init?.signal;
+    started();
+
+    return new Promise<Response>(() => {});
+  }) as typeof fetch;
+  const client = AiGateway.makeHttpClient({ accountId: "account", gatewayId: "default" }, request);
+
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const fiber = yield* Effect.forkChild(client.fetch({}));
+
+      yield* Effect.promise(() => requestStarted);
+      yield* Fiber.interrupt(fiber);
+    }),
+  );
+
+  expect(capturedSignal).toBeDefined();
+  expect(capturedSignal?.aborted).toBe(true);
+});
+
+test("AI Gateway binding fetch aborts in-flight requests on interruption", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedSignal: AbortSignal | null | undefined;
+  let started = () => {};
+  const requestStarted = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+
+  globalThis.fetch = ((_input, init) => {
+    capturedSignal = init?.signal;
+    started();
+
+    return new Promise<Response>(() => {});
+  }) as typeof fetch;
+
+  try {
+    const client = AiGateway.makeClient({ binding: "AI", gatewayId: "default" }, makeFakeGateway());
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const fiber = yield* Effect.forkChild(client.fetch({}));
+
+        yield* Effect.promise(() => requestStarted);
+        yield* Fiber.interrupt(fiber);
+      }),
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  expect(capturedSignal).toBeDefined();
+  expect(capturedSignal?.aborted).toBe(true);
 });
 
 test("AI Gateway wraps operation failures", async () => {

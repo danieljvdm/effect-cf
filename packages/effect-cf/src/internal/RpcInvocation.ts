@@ -58,17 +58,20 @@ export const lookupRpcMethod = <Api, Method extends AsyncMethodKey<Api>, Error>(
     catch: makeError,
   });
 
-export const invokeRpcMethod = <Api, Method extends AsyncMethodKey<Api>, Error>(
+export const invokeRpcMethod = Effect.fnUntraced(function* <
+  Api,
+  Method extends AsyncMethodKey<Api>,
+  Error,
+>(
   target: unknown,
   method: Method,
   args: AsyncMethodArgs<Api, Method>,
   makeError: (cause: unknown) => Error,
-): Effect.Effect<AsyncMethodCloudflareReturn<Api, Method>, Error> =>
-  Effect.gen(function* () {
-    const fn = yield* lookupRpcMethod<Api, Method, Error>(target, method, makeError);
+): Effect.fn.Return<AsyncMethodCloudflareReturn<Api, Method>, Error> {
+  const fn = yield* lookupRpcMethod<Api, Method, Error>(target, method, makeError);
 
-    return yield* Effect.try({
-      try: () => fn(...args),
-      catch: makeError,
-    });
+  return yield* Effect.try({
+    try: () => fn(...args),
+    catch: makeError,
   });
+});

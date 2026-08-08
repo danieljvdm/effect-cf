@@ -1,9 +1,13 @@
 import { D1Client } from "@effect/sql-d1";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, type Config } from "effect";
+import type { SqlClient } from "effect/unstable/sql";
 
 import * as Binding from "./Binding";
+import type { WorkerEnvironment } from "./Environment";
 
-const TypeId = "effect-cf/D1" as const;
+const TypeId = "~effect-cf/D1" as const;
+
+export type TypeId = typeof TypeId;
 const expectedD1Database = "D1 database binding with prepare(), batch(), and exec()";
 
 /** Typed D1 binding definition. */
@@ -66,7 +70,13 @@ export const Service =
       expected: expectedD1Database,
     });
 
-    const sqlLayer = (options?: D1SqlLayerOptions) =>
+    const sqlLayer = (
+      options?: D1SqlLayerOptions,
+    ): Layer.Layer<
+      D1Client.D1Client | SqlClient.SqlClient,
+      Config.ConfigError | Binding.BindingNotFoundError | Binding.BindingValidationError,
+      WorkerEnvironment
+    > =>
       Layer.unwrap(
         Effect.gen(function* () {
           const db = yield* tag;

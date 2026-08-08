@@ -1,10 +1,10 @@
 /// <reference types="@cloudflare/vitest-pool-workers/types" />
 
-import { createExecutionContext } from "cloudflare:test";
-import { Effect, Layer, Schema as S } from "effect";
+import { createExecutionContext, env } from "cloudflare:test";
+import { Effect, Layer, Predicate, Schema as S } from "effect";
 import { expect, test } from "vite-plus/test";
 
-import { DurableObject, DurableObjectNamespace, ServiceBinding, Worker } from "../src/index";
+import { DurableObject, DurableObjectNamespace, Rpc, ServiceBinding, Worker } from "../src/index";
 
 class Counter extends DurableObject.Tag<Counter>()("WorkerPoolCounter", {
   get: DurableObject.method({ success: S.Number }),
@@ -171,6 +171,25 @@ test("service binding RPC validation runs inside the Workers runtime", async () 
 
   expect(validResponse.status).toBe(200);
   await expect(validResponse.text()).resolves.toBe("hello");
+});
+
+test("rpc decode failures keep their error tag across the Durable Object RPC boundary", async () => {
+  const namespace = env.TEST_COUNTER_DO;
+
+  if (namespace === undefined) {
+    throw new Error("TEST_COUNTER_DO binding is missing");
+  }
+
+  const stub = namespace.get(namespace.idFromName("rpc-boundary-decode-error"));
+  const cause = await Effect.runPromise(
+    Rpc.resolve(stub.increment(123 as never)).pipe(Effect.flip),
+  );
+
+  expect(Predicate.isTagged(cause, "RpcArgumentDecodeError")).toBe(true);
+  expect(cause).toMatchObject({
+    definition: "TestCounter",
+    method: "increment",
+  });
 });
 
 test("workers compose service bindings and Durable Object RPC contracts in the Workers runtime", async () => {

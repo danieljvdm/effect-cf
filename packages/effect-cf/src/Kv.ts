@@ -6,16 +6,24 @@ import { Context, Data, Effect, Option, Schema as S, type Layer } from "effect";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
+import * as ErrorMessage from "./internal/ErrorMessage";
 
 const expectedKvNamespace =
   "KV namespace binding with get(), put(), delete(), getWithMetadata(), and list()";
 
+/** KV operation represented by {@link KvOperationError}. */
+export type KvOperation = "put" | "get" | "getWithMetadata" | "list" | "delete";
+
 /** Error raised when a KV operation fails. */
 export class KvOperationError extends Data.TaggedError("KvOperationError")<{
   readonly binding: string;
-  readonly operation: string;
+  readonly operation: KvOperation;
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Kv ${this.operation} failed for binding "${this.binding}": ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 /** `KVNamespace.put` options. */
 export type KvPutOptions = CloudflareKVNamespacePutOptions;
@@ -95,8 +103,8 @@ export interface KvClient<Key, Value, EncodedValue> {
   readonly list: <Metadata = unknown>(
     options?: KvListOptions<Metadata>,
   ) => Effect.Effect<KvListResult<Key, Metadata>, KvOperationError | S.SchemaError>;
-  readonly remove: (key: Key) => Effect.Effect<void, KvOperationError | S.SchemaError>;
-  readonly unsafeRaw: Effect.Effect<KVNamespace>;
+  readonly delete: (key: Key) => Effect.Effect<void, KvOperationError | S.SchemaError>;
+  readonly rawUnsafe: Effect.Effect<KVNamespace>;
   readonly definition: KvDefinition<Key, Value, EncodedValue>;
 }
 
@@ -123,18 +131,12 @@ export interface TagClass<
   >;
 }
 
-const maybeString = (value: string | null | undefined): Option.Option<string> =>
-  value === null || value === undefined ? Option.none() : Option.some(value);
-
-const maybeNumber = (value: number | undefined): Option.Option<number> =>
-  value === undefined ? Option.none() : Option.some(value);
-
-const kvError = (binding: string, operation: string, cause: unknown) =>
+const kvError = (binding: string, operation: KvOperation, cause: unknown) =>
   new KvOperationError({ binding, operation, cause });
 
 const tryKvPromise = <A>(
   binding: string,
-  operation: string,
+  operation: KvOperation,
   evaluate: () => Promise<A>,
 ): Effect.Effect<A, KvOperationError> =>
   Effect.tryPromise({
@@ -163,12 +165,15 @@ export const makeClient = <Key, Value, EncodedValue>(
 ): ((kv: KVNamespace) => KvClient<Key, Value, EncodedValue>) => {
   const encodeKey = S.encodeEffect(definition.key);
   const decodeKey = S.decodeUnknownEffect(definition.key);
-  const encodeValue = S.encodeEffect(S.fromJsonString(S.toCodecJson(definition.value)));
-  const decodeValue = S.decodeUnknownEffect(S.fromJsonString(S.toCodecJson(definition.value)));
+  const jsonValue = S.fromJsonString(S.toCodecJson(definition.value));
+  const encodeValue = S.encodeEffect(jsonValue);
+  const decodeValue = S.decodeUnknownEffect(jsonValue);
 
   return (kv) => ({
     definition,
-    put: Effect.fnUntraced(function* (key: Key, value: Value, options?: KvPutOptions) {
+    put: Effect.fn("Kv.put", {
+      attributes: { binding: definition.binding, operation: "put" },
+    })(function* (key: Key, value: Value, options?: KvPutOptions) {
       const keyEncoded = yield* encodeKey(key);
       const valueEncoded = yield* encodeValue(value);
 
@@ -176,7 +181,9 @@ export const makeClient = <Key, Value, EncodedValue>(
         kv.put(keyEncoded, valueEncoded, options),
       );
     }),
-    get: Effect.fnUntraced(function* (key: Key) {
+    get: Effect.fn("Kv.get", {
+      attributes: { binding: definition.binding, operation: "get" },
+    })(function* (key: Key) {
       const keyEncoded = yield* encodeKey(key);
       const valueEncoded = yield* tryKvPromise(definition.binding, "get", () => kv.get(keyEncoded));
 
@@ -186,10 +193,9 @@ export const makeClient = <Key, Value, EncodedValue>(
 
       return yield* decodeValue(valueEncoded).pipe(Effect.map(Option.some));
     }),
-    getWithMetadata: Effect.fnUntraced(function* <Metadata>(
-      key: Key,
-      metadataSchema: S.Codec<Metadata, unknown>,
-    ) {
+    getWithMetadata: Effect.fn("Kv.getWithMetadata", {
+      attributes: { binding: definition.binding, operation: "getWithMetadata" },
+    })(function* <Metadata>(key: Key, metadataSchema: S.Codec<Metadata, unknown>) {
       const keyEncoded = yield* encodeKey(key);
       const result = yield* tryKvPromise(definition.binding, "getWithMetadata", () =>
         kv.getWithMetadata<Metadata>(keyEncoded),
@@ -208,10 +214,12 @@ export const makeClient = <Key, Value, EncodedValue>(
       return Option.some({
         value,
         metadata,
-        cacheStatus: maybeString(result.cacheStatus),
+        cacheStatus: Option.fromNullishOr(result.cacheStatus),
       });
     }),
-    list: Effect.fnUntraced(function* <Metadata = unknown>(options?: KvListOptions<Metadata>) {
+    list: Effect.fn("Kv.list", {
+      attributes: { binding: definition.binding, operation: "list" },
+    })(function* <Metadata = unknown>(options?: KvListOptions<Metadata>) {
       const { metadataSchema, ...kvOptions } = options ?? {};
       const result = yield* tryKvPromise(definition.binding, "list", () =>
         kv.list<Metadata>(kvOptions),
@@ -229,7 +237,7 @@ export const makeClient = <Key, Value, EncodedValue>(
 
         keys.push({
           name: decodedName,
-          expiration: maybeNumber(key.expiration),
+          expiration: Option.fromUndefinedOr(key.expiration),
           metadata: decodedMetadata,
         });
       }
@@ -237,16 +245,18 @@ export const makeClient = <Key, Value, EncodedValue>(
       return {
         keys,
         listComplete: result.list_complete,
-        cursor: maybeString("cursor" in result ? result.cursor : undefined),
-        cacheStatus: maybeString(result.cacheStatus),
+        cursor: Option.fromNullishOr("cursor" in result ? result.cursor : undefined),
+        cacheStatus: Option.fromNullishOr(result.cacheStatus),
       };
     }),
-    remove: Effect.fnUntraced(function* (key: Key) {
+    delete: Effect.fn("Kv.delete", {
+      attributes: { binding: definition.binding, operation: "delete" },
+    })(function* (key: Key) {
       const keyEncoded = yield* encodeKey(key);
 
       yield* tryKvPromise(definition.binding, "delete", () => kv.delete(keyEncoded));
     }),
-    unsafeRaw: Effect.succeed(kv),
+    rawUnsafe: Effect.succeed(kv),
   });
 };
 

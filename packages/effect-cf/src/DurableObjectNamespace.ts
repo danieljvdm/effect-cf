@@ -1,9 +1,11 @@
-import { Data, Effect, type Context, type Scope } from "effect";
+import { Data, Effect, type Context, type Layer, type Scope } from "effect";
 
 import * as Binding from "./Binding";
+import type { WorkerEnvironment } from "./Environment";
 import * as CloudflareRpc from "./Rpc";
 import type * as DurableObjectDefinition from "./DurableObjectDefinition";
 import * as RpcDefinition from "./RpcDefinition";
+import * as ErrorMessage from "./internal/ErrorMessage";
 import * as RpcInvocation from "./internal/RpcInvocation";
 
 const expectedDurableObjectNamespace =
@@ -86,7 +88,11 @@ export class DurableObjectRpcError extends Data.TaggedError("DurableObjectRpcErr
   readonly binding: string;
   readonly method: string;
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Durable Object RPC method "${this.method}" failed for binding "${this.binding}": ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 /**
  * Failure raised when forwarding a request to a Durable Object stub.
@@ -94,7 +100,11 @@ export class DurableObjectRpcError extends Data.TaggedError("DurableObjectRpcErr
 export class DurableObjectFetchError extends Data.TaggedError("DurableObjectFetchError")<{
   readonly binding: string;
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Durable Object fetch failed for binding "${this.binding}": ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 type StubMethodKey<Api> = RpcInvocation.AsyncMethodKey<Api>;
 type StubMethodArgs<Api, Method extends keyof Api> = RpcInvocation.AsyncMethodArgs<Api, Method>;
@@ -316,7 +326,7 @@ export type DurableObjectNamespaceEffectClient<
    * Prefer the typed helpers above unless Cloudflare exposes a platform feature
    * that is not wrapped by effect-cf yet.
    */
-  readonly unsafeRaw: Effect.Effect<DurableObjectNamespaceClient<Api>>;
+  readonly rawUnsafe: Effect.Effect<DurableObjectNamespaceClient<Api>>;
 };
 
 export type DurableObjectNamespaceStaticClient<
@@ -360,7 +370,7 @@ export type DurableObjectNamespaceStaticClient<
     method: Method,
     ...args: StubMethodArgs<Api, Method>
   ) => Effect.Effect<Awaited<StubMethodSuccess<Api, Method>>, unknown, Scope.Scope | R>;
-  readonly unsafeRaw: () => Effect.Effect<DurableObjectNamespaceClient<Api>, never, R>;
+  readonly rawUnsafe: () => Effect.Effect<DurableObjectNamespaceClient<Api>, never, R>;
 };
 
 const hasFunction = (value: object, key: string): boolean =>
@@ -416,104 +426,93 @@ export const makeClient = <
         catch: (cause) => new DurableObjectFetchError({ binding: definition.binding, cause }),
       });
 
-    const rpc = <Method extends StubMethodKey<Api>>(
-      stub: StubClient,
-      method: Method,
-      ...args: StubMethodArgs<Api, Method>
-    ) =>
-      Effect.gen(function* () {
-        const methodName = String(method);
-        const encodedArgs =
-          definition.definition === undefined
-            ? args
-            : yield* RpcDefinition.encodeArgs(
-                definition.definition,
-                methodName as RpcDefinition.Definition.MethodNames<NonNullable<Definition>>,
-                args as never,
-              ).pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new DurableObjectRpcError({
-                      binding: definition.binding,
-                      method: methodName,
-                      cause,
-                    }),
-                ),
-              );
+    const rpc = Effect.fn("DurableObjectNamespace.rpc")(function* <
+      Method extends StubMethodKey<Api>,
+    >(stub: StubClient, method: Method, ...args: StubMethodArgs<Api, Method>) {
+      const methodName = String(method);
+      const encodedArgs =
+        definition.definition === undefined
+          ? args
+          : yield* RpcDefinition.encodeArgs(
+              definition.definition,
+              methodName as RpcDefinition.Definition.MethodNames<NonNullable<Definition>>,
+              args as never,
+            ).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new DurableObjectRpcError({
+                    binding: definition.binding,
+                    method: methodName,
+                    cause,
+                  }),
+              ),
+            );
 
-        return yield* RpcInvocation.invokeRpcMethod(
-          stub,
-          method,
-          encodedArgs as StubMethodArgs<Api, Method>,
+      return yield* RpcInvocation.invokeRpcMethod(
+        stub,
+        method,
+        encodedArgs as StubMethodArgs<Api, Method>,
+        (cause) =>
+          new DurableObjectRpcError({
+            binding: definition.binding,
+            method: methodName,
+            cause,
+          }),
+      );
+    });
+
+    const decodeSuccess = Effect.fn("DurableObjectNamespace.decodeSuccess")(function* <
+      Method extends StubMethodKey<Api>,
+    >(methodName: string, value: Awaited<StubMethodCloudflareReturn<Api, Method>>) {
+      if (definition.definition === undefined) {
+        return value as StubMethodSuccess<Api, Method>;
+      }
+
+      const decoded = yield* RpcDefinition.decodeSuccess(
+        definition.definition,
+        methodName as RpcDefinition.Definition.MethodNames<NonNullable<Definition>>,
+        value,
+      ).pipe(
+        Effect.mapError(
           (cause) =>
             new DurableObjectRpcError({
               binding: definition.binding,
               method: methodName,
               cause,
             }),
-        );
-      });
+        ),
+      );
 
-    const decodeSuccess = <Method extends StubMethodKey<Api>>(
-      methodName: string,
-      value: Awaited<StubMethodCloudflareReturn<Api, Method>>,
-    ) =>
-      Effect.gen(function* () {
-        if (definition.definition === undefined) {
-          return value as StubMethodSuccess<Api, Method>;
-        }
+      return decoded as StubMethodSuccess<Api, Method>;
+    });
 
-        const decoded = yield* RpcDefinition.decodeSuccess(
-          definition.definition,
-          methodName as RpcDefinition.Definition.MethodNames<NonNullable<Definition>>,
-          value,
-        ).pipe(
-          Effect.mapError(
-            (cause) =>
-              new DurableObjectRpcError({
-                binding: definition.binding,
-                method: methodName,
-                cause,
-              }),
-          ),
-        );
+    const call = Effect.fn("DurableObjectNamespace.call")(function* <
+      Method extends StubMethodKey<Api>,
+    >(stub: StubClient, method: Method, ...args: StubMethodArgs<Api, Method>) {
+      const methodName = String(method);
+      const value = yield* CloudflareRpc.resolve(yield* rpc(stub, method, ...args)).pipe(
+        Effect.mapError(
+          (cause) =>
+            new DurableObjectRpcError({
+              binding: definition.binding,
+              method: methodName,
+              cause,
+            }),
+        ),
+      );
 
-        return decoded as StubMethodSuccess<Api, Method>;
-      });
+      return yield* decodeSuccess<Method>(methodName, value);
+    });
 
-    const call = <Method extends StubMethodKey<Api>>(
-      stub: StubClient,
-      method: Method,
-      ...args: StubMethodArgs<Api, Method>
-    ) =>
-      Effect.gen(function* () {
-        const methodName = String(method);
-        const value = yield* CloudflareRpc.resolve(yield* rpc(stub, method, ...args)).pipe(
-          Effect.mapError(
-            (cause) =>
-              new DurableObjectRpcError({
-                binding: definition.binding,
-                method: methodName,
-                cause,
-              }),
-          ),
-        );
+    const scopedCall = Effect.fn("DurableObjectNamespace.scopedCall")(function* <
+      Method extends StubMethodKey<Api>,
+    >(stub: StubClient, method: Method, ...args: StubMethodArgs<Api, Method>) {
+      const methodName = String(method);
+      const result = yield* rpc(stub, method, ...args);
+      const value = yield* CloudflareRpc.scoped(result);
 
-        return yield* decodeSuccess<Method>(methodName, value);
-      });
-
-    const scopedCall = <Method extends StubMethodKey<Api>>(
-      stub: StubClient,
-      method: Method,
-      ...args: StubMethodArgs<Api, Method>
-    ) =>
-      Effect.gen(function* () {
-        const methodName = String(method);
-        const result = yield* rpc(stub, method, ...args);
-        const value = yield* CloudflareRpc.scoped(result);
-
-        return yield* decodeSuccess<Method>(methodName, value);
-      });
+      return yield* decodeSuccess<Method>(methodName, value);
+    });
 
     const directMethods = makeDirectMethods<never, Api, Definition>(definition.definition, {
       call,
@@ -533,7 +532,7 @@ export const makeClient = <
       rpc,
       call,
       scopedCall,
-      unsafeRaw: Effect.succeed(namespace),
+      rawUnsafe: Effect.succeed(namespace),
     }) as DurableObjectNamespaceEffectClient<Api, Definition>;
   };
 };
@@ -545,7 +544,11 @@ export const layer = <
 >(
   tag: Context.Service<Self, DurableObjectNamespaceEffectClient<Api, Definition>>,
   definition: DurableObjectNamespaceBindingDefinition<Definition>,
-) =>
+): Layer.Layer<
+  Self,
+  Binding.BindingNotFoundError | Binding.BindingValidationError,
+  WorkerEnvironment
+> =>
   Binding.layer(
     tag,
     definition.binding,

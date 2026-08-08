@@ -1,15 +1,17 @@
 import { assert, expect, it, layer, test } from "@effect/vitest";
 import type { WorkflowStep } from "cloudflare:workers";
-import { Cause, Effect, Exit, Layer, Option, Schema as S, type Scope } from "effect";
+import { Cause, Context, Effect, Exit, Layer, Option, Schema as S, type Scope } from "effect";
 
 import {
   type DurableObjectNamespace,
   type QueueBinding,
   type Rpc,
   type ServiceBinding,
+  ContainerNamespace,
   DurableObjectDefinition,
   DurableObjectStorage,
   Queue,
+  RpcDefinition,
   WorkerDefinition,
   WorkerEnvironment,
   Workflow,
@@ -141,7 +143,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
     );
   });
 
-  test("definition-backed Queue bindings accept local producer shape", async () => {
+  test("definition-backed Queue bindings require sendBatch() and metrics()", async () => {
     const sent: Array<unknown> = [];
     const localEnv = {
       AVATAR_QUEUE: {
@@ -161,34 +163,39 @@ test("definition-backed Worker RPC validates encoded success values", async () =
         ),
       );
 
-    await Effect.runPromise(
-      provided(
-        Effect.gen(function* () {
-          yield* AvatarQueue.send({ userId: "u_1", attempts: 2 });
-
-          const queue = yield* AvatarQueue;
-
-          yield* queue.sendBatch(
-            [
-              { body: { userId: "u_2", attempts: 3 }, contentType: "json" },
-              { body: { userId: "u_3", attempts: 4 }, delaySeconds: 7 },
-            ],
-            { delaySeconds: 5 },
-          );
-        }),
-      ),
-    );
+    await Effect.runPromise(provided(AvatarQueue.send({ userId: "u_1", attempts: 2 })));
 
     assert.deepStrictEqual(sent, [
       { message: { userId: "u_1", attempts: "2" }, options: undefined },
-      {
-        message: { userId: "u_2", attempts: "3" },
-        options: { contentType: "json", delaySeconds: 5 },
-      },
-      {
-        message: { userId: "u_3", attempts: "4" },
-        options: { contentType: undefined, delaySeconds: 7 },
-      },
+    ]);
+
+    const missingSendBatch = await Effect.runPromiseExit(
+      provided(
+        AvatarQueue.sendBatch(
+          [
+            { body: { userId: "u_2", attempts: 3 }, contentType: "json" },
+            { body: { userId: "u_3", attempts: 4 }, delaySeconds: 7 },
+          ],
+          { delaySeconds: 5 },
+        ),
+      ),
+    );
+
+    assert.ok(Exit.isFailure(missingSendBatch));
+    expect(Cause.pretty(missingSendBatch.cause)).toContain(
+      'QueueOperationError: Cloudflare queue binding "AVATAR_QUEUE" does not provide sendBatch()',
+    );
+    await expect(
+      Effect.runPromise(
+        provided(AvatarQueue.sendBatch([{ body: { userId: "u_2", attempts: 3 } }])),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "QueueOperationError",
+      binding: "AVATAR_QUEUE",
+      operation: "sendBatch",
+    });
+    assert.deepStrictEqual(sent, [
+      { message: { userId: "u_1", attempts: "2" }, options: undefined },
     ]);
 
     const missingMetrics = await Effect.runPromiseExit(provided(AvatarQueue.metrics()));
@@ -703,6 +710,89 @@ test("definition-backed Worker RPC validates encoded success values", async () =
   });
 }
 
+test("Durable Object tags do not collide with unrelated services sharing the id", () => {
+  class Unrelated extends Context.Service<Unrelated, string>()("CollisionRoom") {}
+  const CollisionRoom = DurableObjectDefinition.make("CollisionRoom", {
+    ping: DurableObjectDefinition.method({ success: S.String }),
+  });
+
+  const context = Context.add(Context.make(Unrelated, "unrelated"), CollisionRoom, {} as never);
+
+  assert.strictEqual(CollisionRoom.id, "CollisionRoom");
+  assert.strictEqual(Context.get(context, Unrelated), "unrelated");
+});
+
+test("queue, workflow, and container definitions with the same id resolve independently", async () => {
+  class SharedQueue extends Queue.Tag<SharedQueue>()("Shared", {
+    message: S.String,
+  }) {}
+  class SharedWorkflow extends Workflow.Tag<SharedWorkflow>()("Shared", {
+    payload: S.String,
+    result: S.String,
+  }) {}
+  class SharedContainers extends ContainerNamespace.Tag<SharedContainers>()("Shared") {}
+
+  assert.strictEqual(SharedQueue.id, "Shared");
+  assert.strictEqual(SharedWorkflow.id, "Shared");
+  assert.strictEqual(SharedContainers.id, "Shared");
+  assert.strictEqual(SharedQueue.key, "effect-cf/Queue/Shared");
+  assert.strictEqual(SharedWorkflow.key, "effect-cf/Workflow/Shared");
+  assert.strictEqual(SharedContainers.key, "effect-cf/Container/Shared");
+
+  const sent: Array<unknown> = [];
+  const created: Array<unknown> = [];
+  const namesLookedUp: Array<string> = [];
+  const instance = {
+    id: "wf_shared",
+    pause: async () => undefined,
+    resume: async () => undefined,
+    terminate: async () => undefined,
+    restart: async () => undefined,
+    status: async () => ({ status: "complete", output: "done" }),
+    sendEvent: async () => undefined,
+  } as unknown as WorkflowInstance;
+  const env = {
+    SHARED_QUEUE: {
+      send: async (message: unknown) => {
+        sent.push(message);
+      },
+    },
+    SHARED_WORKFLOW: {
+      create: async (options: unknown) => {
+        created.push(options);
+
+        return instance;
+      },
+      createBatch: async () => [instance],
+      get: async () => instance,
+    },
+    SHARED_CONTAINERS: {
+      getByName: (name: string) => {
+        namesLookedUp.push(name);
+
+        return { fetch: async () => new Response("ok") };
+      },
+    },
+  } as unknown as Cloudflare.Env;
+  const live = Layer.mergeAll(
+    SharedQueue.layer({ binding: "SHARED_QUEUE" }),
+    SharedWorkflow.layer({ binding: "SHARED_WORKFLOW" }),
+    SharedContainers.layer({ binding: "SHARED_CONTAINERS" }),
+  ).pipe(Layer.provide(Layer.succeed(WorkerEnvironment, env)));
+
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      yield* SharedQueue.send("hello");
+      yield* SharedWorkflow.create("payload");
+      yield* SharedContainers.getByName("shared-1");
+    }).pipe(Effect.provide(live)),
+  );
+
+  assert.deepStrictEqual(sent, ["hello"]);
+  assert.deepStrictEqual(created, [{ params: "payload" }]);
+  assert.deepStrictEqual(namesLookedUp, ["shared-1"]);
+});
+
 test("reserved RPC method names are rejected", () => {
   expect(() =>
     WorkerDefinition.make("BadWorker", {
@@ -794,3 +884,39 @@ const makeMessageBatch = (
 type DurableObjectStorageObject = Parameters<
   typeof DurableObjectStorage.fromDurableObjectStorage
 >[0];
+
+test("QueueMessageDecodeError composes queue, message id, index, and cause message", () => {
+  const error = new Queue.QueueMessageDecodeError({
+    queue: "my-queue",
+    messageId: "message-1",
+    index: 2,
+    cause: new Error("Expected number, received string"),
+  });
+
+  assert.strictEqual(
+    error.message,
+    'Queue "my-queue" failed to decode message "message-1" at index 2: Expected number, received string',
+  );
+});
+
+test("schema-backed RPC wire errors render a message and survive the wire envelope", () => {
+  const error = new RpcDefinition.RpcArgumentCountError({
+    definition: "TestWorker",
+    method: "double",
+    expected: 1,
+    actual: 2,
+  });
+
+  assert.strictEqual(
+    error.message,
+    'TestWorker RPC method "double" expected 1 arguments but received 2',
+  );
+
+  const decoded = RpcDefinition.decodeWireError(RpcDefinition.encodeWireError(error));
+
+  assert.instanceOf(decoded, RpcDefinition.RpcArgumentCountError);
+  assert.strictEqual(
+    (decoded as RpcDefinition.RpcArgumentCountError).message,
+    'TestWorker RPC method "double" expected 1 arguments but received 2',
+  );
+});

@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Option, Queue } from "effect";
+import { Context, Effect, Layer, Predicate, Queue } from "effect";
 import * as RpcMessage from "effect/unstable/rpc/RpcMessage";
 import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
 import * as RpcServer from "effect/unstable/rpc/RpcServer";
@@ -52,7 +52,13 @@ export class DurableObjectRpcWebSocket extends Context.Service<
 /**
  * Builds a layer that bridges Durable Object websocket events to `RpcServer.Protocol`.
  */
-export const layer = (options: LayerOptions = {}) =>
+export const layer = (
+  options: LayerOptions = {},
+): Layer.Layer<
+  RpcServer.Protocol | DurableObjectRpcWebSocket,
+  never,
+  DurableObjectState | RpcSerialization.RpcSerialization
+> =>
   Layer.effectContext(
     Effect.gen(function* () {
       const tag = options.tag ?? defaultTag;
@@ -156,7 +162,7 @@ export const layer = (options: LayerOptions = {}) =>
               connection?.socket.raw.close();
             }),
           clientIds: Effect.sync(() => clientIds),
-          initialMessage: Effect.succeed(Option.none()),
+          initialMessage: Effect.succeedNone,
           supportsAck: true,
           supportsTransferables: false,
           supportsSpanPropagation: true,
@@ -174,7 +180,7 @@ export const layer = (options: LayerOptions = {}) =>
             const connection = register(socket);
             const decoded = yield* Effect.try({
               try: () => connection.parser.decode(normalizeMessage(message)),
-              catch: RpcMessage.ResponseDefectEncoded,
+              catch: (cause) => cause,
             });
 
             const run = writeRequest;
@@ -189,10 +195,12 @@ export const layer = (options: LayerOptions = {}) =>
               yield* run(connection.id, current as RpcMessage.FromClientEncoded);
             }
           }).pipe(
-            Effect.catch((error) => {
+            Effect.catch((cause) => {
               const connection = register(socket);
 
-              return send(connection, error);
+              return Predicate.isTagged(cause, "MaxBufferSizeExceeded")
+                ? Effect.ignore(connection.socket.close(1009, String(cause)))
+                : send(connection, RpcMessage.ResponseDefectEncoded(cause));
             }),
           ),
         close: unregister,

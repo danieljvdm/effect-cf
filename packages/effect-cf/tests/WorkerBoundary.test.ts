@@ -1,5 +1,6 @@
 import { Clock, Config, ConfigProvider, Context, Data, Effect, Layer, Stream } from "effect";
 import { HttpEffect, HttpServerResponse } from "effect/unstable/http";
+import { OtlpExporter } from "effect/unstable/observability";
 import { expect, test } from "vite-plus/test";
 
 import { DurableObject, Worker, WorkerConfig } from "../src/index";
@@ -20,6 +21,20 @@ const makeExecutionContext = () =>
     waitUntil: () => undefined,
     passThroughOnException: () => undefined,
   }) as unknown as globalThis.ExecutionContext;
+
+const makeWaitUntilContext = () => {
+  const waitUntilPromises: Array<Promise<unknown>> = [];
+
+  const executionContext = {
+    props: undefined,
+    waitUntil: (promise: Promise<unknown>) => {
+      waitUntilPromises.push(promise);
+    },
+    passThroughOnException: () => undefined,
+  } as unknown as globalThis.ExecutionContext;
+
+  return { executionContext, waitUntilPromises };
+};
 
 const makeDurableObjectState = () =>
   ({
@@ -48,6 +63,66 @@ test("Worker.makeFetchHandler returns an ExportedHandler-compatible fetch object
 
   expect(response.status).toBe(200);
   await expect(response.text()).resolves.toBe("ok");
+});
+
+test("Worker.makeFetchHandler builds the runtime once per env and rebinds request context", async () => {
+  let builds = 0;
+  const countingLayer = Layer.effectDiscard(
+    Effect.sync(() => {
+      builds++;
+    }),
+  );
+
+  const handler = Worker.makeFetchHandler(countingLayer, {
+    fetch: Effect.gen(function* () {
+      const ctx = yield* Worker.WorkerContext;
+
+      yield* ctx.waitUntil(Effect.void);
+
+      return new Response("ok");
+    }),
+  });
+
+  const env = {} as Cloudflare.Env;
+  const first = makeWaitUntilContext();
+  const second = makeWaitUntilContext();
+
+  await handler.fetch(new Request("https://worker.test/one"), env, first.executionContext);
+  await handler.fetch(new Request("https://worker.test/two"), env, second.executionContext);
+
+  expect(builds).toBe(1);
+  expect(first.waitUntilPromises).toHaveLength(1);
+  expect(second.waitUntilPromises).toHaveLength(1);
+});
+
+test("Worker.fetch flushes runtime OTLP telemetry through waitUntil", async () => {
+  const flushes: Array<string> = [];
+  const flusherProbe = Layer.effectDiscard(
+    Effect.gen(function* () {
+      const flusher = yield* OtlpExporter.Flusher;
+
+      yield* flusher.register(
+        Effect.sync(() => {
+          flushes.push("flush");
+        }),
+      );
+    }),
+  ).pipe(Layer.provideMerge(OtlpExporter.layerFlusher));
+
+  const Live = Worker.make(flusherProbe, {
+    fetch: Effect.succeed(new Response("ok")),
+  });
+  const { executionContext, waitUntilPromises } = makeWaitUntilContext();
+  const worker = new Live(executionContext, {} as Cloudflare.Env);
+
+  const response = await worker.fetch(new Request("https://worker.test/"));
+
+  expect(response.status).toBe(200);
+  expect(waitUntilPromises).toHaveLength(1);
+
+  await Promise.all(waitUntilPromises);
+
+  expect(flushes).toEqual(["flush"]);
 });
 
 test("Worker.make accepts a fetch Effect shorthand", async () => {
@@ -253,18 +328,16 @@ test("Worker.fetch applies pre-response handlers to rendered error responses", a
   expect(response.headers.get("cache-control")).toBe("no-store");
 });
 
-test("Worker.renderHttpResponse converts HttpServerResponse values explicitly", async () => {
+test("Worker.fetch accepts HttpServerResponse values returned directly", async () => {
   const Live = Worker.make(Layer.empty, {
-    fetch: Worker.renderHttpResponse(
-      Effect.succeed(HttpServerResponse.text("from-explicit-adapter")),
-    ),
+    fetch: Effect.succeed(HttpServerResponse.text("from-direct-response")),
   });
   const worker = new Live(makeExecutionContext(), {} as Cloudflare.Env);
 
   const response = await worker.fetch(new Request("https://worker.test/"));
 
   expect(response.status).toBe(200);
-  await expect(response.text()).resolves.toBe("from-explicit-adapter");
+  await expect(response.text()).resolves.toBe("from-direct-response");
 });
 
 test("Worker fetch handlers read Effect config from env by default", async () => {
@@ -345,7 +418,14 @@ test("Worker handlers use an epoch nanosecond clock derived from wall time", asy
     const response = await worker.fetch(new Request("https://worker.test/clock"));
     const body = (await response.json()) as { readonly nanos: string };
 
-    expect(BigInt(body.nanos)).toBe(BigInt(fixedMillis) * BigInt(1_000_000));
+    // The default clock anchors epoch nanoseconds to a monotonic source and
+    // re-anchors once wall-clock skew exceeds one second, so nanoseconds stay
+    // within that threshold of `Date.now()`.
+    const wallNanos = BigInt(fixedMillis) * BigInt(1_000_000);
+    const skew = BigInt(body.nanos) - wallNanos;
+    const absoluteSkew = skew < BigInt(0) ? -skew : skew;
+
+    expect(absoluteSkew).toBeLessThan(BigInt(1_000_000_000));
   } finally {
     Date.now = originalDateNow;
   }

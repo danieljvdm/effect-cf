@@ -13,7 +13,7 @@ export interface HyperdriveDefinition {
 
 export interface HyperdriveClient {
   readonly connectionString: string;
-  readonly unsafeRaw: Effect.Effect<Hyperdrive>;
+  readonly rawUnsafe: Effect.Effect<Hyperdrive>;
   readonly definition: HyperdriveDefinition;
 }
 
@@ -60,7 +60,7 @@ export const makeClient =
   (hyperdrive: Hyperdrive): HyperdriveClient => ({
     definition,
     connectionString: hyperdrive.connectionString,
-    unsafeRaw: Effect.succeed(hyperdrive),
+    rawUnsafe: Effect.succeed(hyperdrive),
   });
 
 export const layer = <Self>(

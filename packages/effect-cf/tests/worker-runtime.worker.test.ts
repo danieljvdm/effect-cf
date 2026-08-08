@@ -1,7 +1,7 @@
 /// <reference types="@cloudflare/vitest-pool-workers/types" />
 
 import { createExecutionContext } from "cloudflare:test";
-import { Effect, Layer } from "effect";
+import { Clock, Duration, Effect, Layer } from "effect";
 import { expect, test } from "vite-plus/test";
 
 import { Worker } from "../src/index";
@@ -21,6 +21,30 @@ test("Worker.make fetch runs in the Workers runtime", async () => {
 
   expect(response.status).toBe(201);
   await expect(response.text()).resolves.toBe(request.url);
+});
+
+test("Worker handlers can read the clock and sleep in the Workers runtime", async () => {
+  const WorkerClass = Worker.make(Layer.empty, {
+    fetch: Effect.gen(function* () {
+      const millisBefore = yield* Clock.currentTimeMillis;
+      const [duration] = yield* Effect.timed(Effect.sleep(Duration.millis(20)));
+
+      return Response.json({
+        millisBefore,
+        sleptMillis: Duration.toMillis(duration),
+      });
+    }),
+  });
+
+  const instance = new WorkerClass(createExecutionContext(), {} as Cloudflare.Env);
+  const response = await instance.fetch(new Request("https://worker.test/clock"));
+  const body = (await response.json()) as {
+    readonly millisBefore: number;
+    readonly sleptMillis: number;
+  };
+
+  expect(body.millisBefore).toBeGreaterThan(Date.UTC(2024, 0, 1));
+  expect(body.sleptMillis).toBeGreaterThanOrEqual(15);
 });
 
 test("RPC-only Workers use the default fetch response in the Workers runtime", async () => {

@@ -96,7 +96,7 @@ it.effect("wraps a named Container and its lifecycle operations", () => {
     });
     yield* instance.stop("SIGTERM");
     yield* instance.destroy;
-    const raw = yield* instance.unsafeRaw;
+    const raw = yield* instance.rawUnsafe;
 
     assert.deepStrictEqual(state, { lastChange: 42, status: "healthy" });
     assert.strictEqual(raw, fake.stub);
@@ -123,9 +123,9 @@ it.effect("supports static byName helpers", () => {
     yield* instance.start();
     yield* instance.stop();
     yield* instance.destroy;
-    assert.strictEqual(yield* instance.unsafeRaw, fake.stub);
+    assert.strictEqual(yield* instance.rawUnsafe, fake.stub);
 
-    const namespace = yield* TestContainers.unsafeRaw();
+    const namespace = yield* TestContainers.rawUnsafe;
 
     assert.strictEqual(namespace, fake.namespace);
   }).pipe(Effect.provide(fake.live));
@@ -142,7 +142,7 @@ it.effect("defers lookup and reports synchronous namespace lookup failures", () 
   const live = TestContainers.layer({ binding: "CONTAINERS" }).pipe(
     Layer.provide(Layer.succeed(WorkerEnvironment, env)),
   );
-  const raw = TestContainers.byName("deferred").unsafeRaw;
+  const raw = TestContainers.byName("deferred").rawUnsafe;
 
   return Effect.gen(function* () {
     const error = yield* Effect.flip(raw);

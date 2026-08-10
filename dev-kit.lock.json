@@ -74,12 +74,12 @@
       "target": "agents",
       "mode": "copy",
       "kind": "directory",
-      "digest": "sha256:b56eae01cbd217c62597f883f22213b810374605301c143d9d7b7864af4e0cb4",
+      "digest": "sha256:29213ca0b1179936b79a7293465fb36438c4d725e9d8c2630b431174af567899",
       "catalog": {
         "package": "@effect-cf/repo",
         "version": "0.0.0",
         "skill": "pr-hygiene",
-        "digest": "sha256:9b80526abdf0d3dbd96044578872c6b07cc1b9b9c70727c75eb8220886865166"
+        "digest": "sha256:b3d50061943c0affefb82ecb9472f6d10104e7b72650d137d5a24e4a54b8028c"
       }
     },
     {
@@ -162,7 +162,7 @@
         "package": "@effect-cf/repo",
         "version": "0.0.0",
         "skill": "pr-hygiene",
-        "digest": "sha256:9b80526abdf0d3dbd96044578872c6b07cc1b9b9c70727c75eb8220886865166"
+        "digest": "sha256:b3d50061943c0affefb82ecb9472f6d10104e7b72650d137d5a24e4a54b8028c"
       }
     },
     {

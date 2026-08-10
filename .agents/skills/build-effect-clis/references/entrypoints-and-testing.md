@@ -4,6 +4,11 @@ Separate command definition from execution. Importing a command module in a test
 or another program must not parse `process.argv`, start fibers, or terminate the
 process.
 
+For a fixed CI or automation script with no public command syntax, export its
+Effect workflow and provide platform Layers only in a thin executable module;
+it does not need an artificial `Command` tree. Use the same `runMain` boundary,
+typed failures, platform services, and import-safety rules shown below.
+
 ```ts
 // src/cli/command.ts
 export const command = root.pipe(Command.withSubcommands([deploy, status]));

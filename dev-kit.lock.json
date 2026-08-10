@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "toolVersion": "0.13.0",
-  "manifestDigest": "sha256:a7d718ff59f40a508a5d15198ff9dcc6ea3a096139b237d57525499bcd3d0388",
+  "toolVersion": "0.14.0",
+  "manifestDigest": "sha256:d0062ee25430667652f25392e4684a4db953cca99cb3874ad0a6e9c55ef7f7bb",
   "setup": {
     "effectSource": {
       "packageName": "effect",
@@ -24,7 +24,7 @@
       "target": "agents",
       "mode": "copy",
       "kind": "directory",
-      "digest": "sha256:eeb369f5bb47886f5a4869540f3f5664fbb28b03a6cc5f6ea287db8ca3a6545d"
+      "digest": "sha256:a2c7c8bdcda9c2fd07b7b11db1636a42ac8ba26d6a8753316590d03cccf2177c"
     },
     {
       "resourceId": "skill:build-effect-clis@agents",
@@ -33,7 +33,7 @@
       "target": "agents",
       "mode": "copy",
       "kind": "directory",
-      "digest": "sha256:0a4ba7f621f4fe472528931b55f987d93fc5e300cce7378accfbea84e2363337"
+      "digest": "sha256:7b301376e71dcc3c040bd31cbac72296ee8c9896fd355f365ec0fff4a1fa7b6c"
     },
     {
       "resourceId": "skill:cloudflare@agents",
@@ -90,6 +90,15 @@
       "mode": "copy",
       "kind": "directory",
       "digest": "sha256:c9b42fee517f1077152ccf7231adf5912c048179368bc78837edea2a61815286"
+    },
+    {
+      "resourceId": "skill:open-pull-request@agents",
+      "path": ".agents/skills/open-pull-request",
+      "skill": "open-pull-request",
+      "target": "agents",
+      "mode": "copy",
+      "kind": "directory",
+      "digest": "sha256:b722b785a969463ed093ff517f461193d38442eb5e9ae607e0964f2f521529f5"
     },
     {
       "resourceId": "skill:testing@agents",
@@ -173,6 +182,15 @@
       "mode": "symlink",
       "kind": "symlink",
       "digest": "sha256:057d09728194631224706ae6afbf877107388501832bf0f3e2c6516c7d55f242"
+    },
+    {
+      "resourceId": "skill:open-pull-request@claude",
+      "path": ".claude/skills/open-pull-request",
+      "skill": "open-pull-request",
+      "target": "claude",
+      "mode": "symlink",
+      "kind": "symlink",
+      "digest": "sha256:7fb29cd1804361f3d09fa0925109d56daa20bc8b038a8d0ee23c85052f11708e"
     },
     {
       "resourceId": "skill:testing@claude",

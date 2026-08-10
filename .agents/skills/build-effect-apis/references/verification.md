@@ -11,6 +11,20 @@ test integration and command authority.
 - Assert each expected error carries the intended HTTP status and body encoding.
 - Compare or smoke-test generated OpenAPI when the public contract changes.
 
+## Unknown codec audit
+
+Inventory every `Schema.decodeUnknown*` and `Schema.encodeUnknown*` call in the
+changed scope. Record a concrete untyped-boundary justification for each one,
+such as `JSON.parse`, `Response.json`, an external message, or a persistence API
+whose declared result is actually `unknown`. Replace any call whose input is
+already the schema's `Encoded` or `Type` with the corresponding typed `Effect`,
+`Sync`, `Exit`, `Option`, `Result`, or `Promise` codec.
+
+An unknown codec is not a valid workaround for a `Schema.Class` or other static
+type mismatch: map or construct the correct typed value instead. If the
+repository enforces this policy with a lint warning, keep any necessary local
+suppression documented with the same concrete boundary justification.
+
 ## Server tests
 
 - Build every changed group and fail the test if an endpoint handler is missing.
@@ -47,4 +61,5 @@ Account for every changed endpoint across these columns:
 | Params, query, headers, payload, success, errors | Scope, provided services, errors | Identifier, invariants, workflow | Typed call shape, identity, cache/invalidation | Round-trip and boundary behavior |
 
 Completion means every changed endpoint has an entry in every applicable
-column and the repository's formatter, linter, typechecker, and tests pass.
+column, every unknown codec call has a concrete boundary justification, and the
+repository's formatter, linter, typechecker, and tests pass.

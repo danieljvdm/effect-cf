@@ -8,7 +8,7 @@
         "@changesets/changelog-github": "^0.7.0",
         "@changesets/cli": "^2.31.0",
         "@cloudflare/vitest-pool-workers": "catalog:",
-        "@danieljvdm/dev-kit": "0.13.0",
+        "@danieljvdm/dev-kit": "0.14.0",
         "@effect-cf/repo": "workspace:*",
         "@effect/tsgo": "0.33.0",
         "@types/bun": "^1.3.14",
@@ -289,7 +289,7 @@
     },
     "packages/effect-cf": {
       "name": "effect-cf",
-      "version": "0.18.0",
+      "version": "0.22.0",
       "devDependencies": {
         "@cloudflare/containers": "catalog:",
         "@cloudflare/vitest-pool-workers": "catalog:",
@@ -304,12 +304,14 @@
         "vitest": "catalog:",
       },
       "peerDependencies": {
-        "@effect/sql-d1": "^4.0.0-beta.105",
-        "@effect/sql-pg": "^4.0.0-beta.105",
-        "@effect/sql-sqlite-do": "^4.0.0-beta.105",
-        "effect": "^4.0.0-beta.105",
+        "@cloudflare/workers-types": "^4.20260611.1",
+        "@effect/sql-d1": "4.0.0-beta.105",
+        "@effect/sql-pg": "4.0.0-beta.105",
+        "@effect/sql-sqlite-do": "4.0.0-beta.105",
+        "effect": "4.0.0-beta.105",
       },
       "optionalPeers": [
+        "@cloudflare/workers-types",
         "@effect/sql-pg",
       ],
     },
@@ -407,7 +409,7 @@
 
     "@cspotcode/source-map-support": ["@cspotcode/source-map-support@0.8.1", "", { "dependencies": { "@jridgewell/trace-mapping": "0.3.9" } }, "sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw=="],
 
-    "@danieljvdm/dev-kit": ["@danieljvdm/dev-kit@0.13.0", "", { "dependencies": { "@effect/platform-bun": "4.0.0-beta.105", "@stylistic/eslint-plugin": "5.10.0", "effect": "4.0.0-beta.105", "jsonc-parser": "3.3.1", "semver": "7.8.5" }, "peerDependencies": { "oxfmt": ">=0.60.0 <0.61.0", "oxlint": ">=1.75.0 <2.0.0", "vite-plus": ">=0.2.6 <0.3.0" }, "optionalPeers": ["oxfmt", "oxlint", "vite-plus"], "bin": { "dev-kit": "bin/dev-kit.mjs" } }, "sha512-ANmaKcNvtUtHj111OKNPE5/+HuTGEPzzsoR30crCIhOuLq6llni0ylF33067oCy4qkphkKMS6MXcf3hBRYv/7w=="],
+    "@danieljvdm/dev-kit": ["@danieljvdm/dev-kit@0.14.0", "", { "dependencies": { "@effect/platform-bun": "4.0.0-beta.105", "@stylistic/eslint-plugin": "5.10.0", "effect": "4.0.0-beta.105", "jsonc-parser": "3.3.1", "semver": "7.8.5" }, "peerDependencies": { "oxfmt": ">=0.60.0 <0.61.0", "oxlint": ">=1.75.0 <2.0.0", "vite-plus": ">=0.2.6 <0.3.0" }, "optionalPeers": ["oxfmt", "oxlint", "vite-plus"], "bin": { "dev-kit": "bin/dev-kit.mjs" } }, "sha512-uAONpbsS+MycSU2maDScEJjRgH1CmGlvTnJP+QRwSa68uDMc/kAiRmvBm4UJXoEs7l9i1XQVlIyya5HY4MncFA=="],
 
     "@effect-cf/example-contracts": ["@effect-cf/example-contracts@workspace:examples/chat/packages/contracts"],
 

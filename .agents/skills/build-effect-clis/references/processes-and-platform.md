@@ -1,8 +1,9 @@
 # Processes and platform services
 
 Use Effect platform services inside CLI workflows. Keep direct `node:*`, Bun
-globals, `process`, filesystem calls, and shell execution at explicit adapters
-or the executable boundary.
+globals, `process`, filesystem calls, and shell execution inside explicit
+boundary adapters. The executable boundary itself should use Effect platform
+runtime and service APIs.
 
 ## Own subprocess behavior in a service
 

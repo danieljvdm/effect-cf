@@ -38,7 +38,7 @@
     "@changesets/changelog-github": "^0.7.0",
     "@changesets/cli": "^2.31.0",
     "@cloudflare/vitest-pool-workers": "catalog:",
-    "@danieljvdm/dev-kit": "0.13.0",
+    "@danieljvdm/dev-kit": "0.14.0",
     "@effect-cf/repo": "workspace:*",
     "@effect/tsgo": "0.33.0",
     "@types/bun": "^1.3.14",

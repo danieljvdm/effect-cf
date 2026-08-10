@@ -64,6 +64,28 @@ from another version.
   runs on Cloudflare Workers or uses `effect-cf`, bindings, Durable Objects,
   Queues, WebSockets, streaming, or raw byte routes.
 
+## Choose typed Schema codecs by default
+
+Match the codec to the static type at the call site. When decoding a value that
+is already typed as the schema's `Encoded` type, use `Schema.decodeEffect` or
+the typed `Schema.decodeSync`, `Schema.decodeExit`, `Schema.decodeOption`,
+`Schema.decodeResult`, or `Schema.decodePromise` variant. When encoding a value
+that is already typed as the schema's `Type`, use `Schema.encodeEffect` or the
+corresponding typed `Schema.encodeSync`, `Schema.encodeExit`,
+`Schema.encodeOption`, `Schema.encodeResult`, or `Schema.encodePromise` variant.
+
+Reserve `Schema.decodeUnknown*` and `Schema.encodeUnknown*` for genuinely
+untyped boundaries: values from `JSON.parse`, `Response.json`, external
+messages, or persistence APIs whose declared result is actually `unknown`.
+Never choose an unknown codec to bypass a `Schema.Class` or other static type
+mismatch. Map the source value or construct the correct schema `Type` first,
+then use the typed encoder; similarly, establish the correct `Encoded` value
+before using a typed decoder.
+
+This rule is toolchain-neutral. A repository may reinforce it with a lint
+warning and a documented local suppression for a justified untyped boundary,
+but the boundary and type reasoning remain the source of truth.
+
 ## Boundary rules
 
 - Let schemas own wire validation, encoding, status metadata, and branded IDs.

@@ -66,6 +66,53 @@ it.effect("blockConcurrencyWhileOrReset intentionally rejects the callback on fa
   }),
 );
 
+it.effect("waitUntil runs background Effects with the caller's context", () =>
+  Effect.gen(function* () {
+    const { state, tracker } = makeRawDurableObjectState();
+    const service = DurableObjectState.fromDurableObjectState(state);
+    const completed: Array<string> = [];
+
+    yield* service
+      .waitUntil(
+        Effect.gen(function* () {
+          const { message } = yield* Effect.service(FailureMessage);
+
+          completed.push(message);
+        }),
+      )
+      .pipe(Effect.provideService(FailureMessage, { message: "background done" }));
+
+    assert.strictEqual(tracker.waitUntilPromises.length, 1);
+    yield* Effect.promise(() => Promise.all(tracker.waitUntilPromises));
+    assert.deepStrictEqual(completed, ["background done"]);
+
+    yield* service.waitUntil(Promise.resolve("raw"));
+    assert.strictEqual(tracker.waitUntilPromises.length, 2);
+  }),
+);
+
+it.effect("waitUntil propagate mode rejects the native waitUntil promise", () =>
+  Effect.gen(function* () {
+    const { state, tracker } = makeRawDurableObjectState();
+    const service = DurableObjectState.fromDurableObjectState(state);
+
+    yield* service.waitUntil(Effect.fail("background failure"), {
+      mode: "propagate",
+      onFailure: () => Effect.void,
+    });
+
+    assert.strictEqual(tracker.waitUntilPromises.length, 1);
+    const rejected = yield* Effect.promise(() =>
+      tracker.waitUntilPromises[0]!.then(
+        () => false,
+        () => true,
+      ),
+    );
+
+    assert.isTrue(rejected);
+  }),
+);
+
 it.effect("wraps hibernation metadata and abort helpers", () =>
   Effect.gen(function* () {
     const { state, tracker } = makeRawDurableObjectState();
@@ -111,6 +158,7 @@ interface BlockConcurrencyTracker {
   sockets: Array<WebSocket>;
   hibernatableTimeout: number | null;
   readonly abortReasons: Array<string | undefined>;
+  readonly waitUntilPromises: Array<Promise<unknown>>;
 }
 
 function makeRawDurableObjectState(): {
@@ -127,12 +175,15 @@ function makeRawDurableObjectState(): {
     sockets: [],
     hibernatableTimeout: null,
     abortReasons: [],
+    waitUntilPromises: [],
   };
 
   const state = {
     id: {} as globalThis.DurableObjectId,
     storage: makeRawDurableObjectStorage(),
-    waitUntil: () => {},
+    waitUntil: (promise: Promise<unknown>) => {
+      tracker.waitUntilPromises.push(promise);
+    },
     blockConcurrencyWhile: async <T>(callback: () => Promise<T>) => {
       tracker.calls += 1;
 

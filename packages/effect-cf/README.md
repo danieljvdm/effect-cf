@@ -87,6 +87,12 @@ export const readCounter = Effect.gen(function* () {
 
 Define Wrangler bindings and migrations in the consuming application. Durable Object namespace bindings are provided with `YourObject.layer({ binding })`, and consumers use `const namespace = yield* YourObject`.
 
+`DurableObjectState.waitUntil` accepts either a raw Promise or an Effect. The
+Effect form runs in the background with the caller's Effect context and the
+same failure modes as `WorkerContext.waitUntil`, so Durable Objects can
+schedule background Effects (for example a pump consuming an outbound
+WebSocket) without capturing a Context and calling `Effect.runPromiseWith`.
+
 ## Container Example
 
 Container entrypoints remain owned by `@cloudflare/containers`; `effect-cf`

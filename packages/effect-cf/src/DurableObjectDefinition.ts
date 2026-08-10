@@ -38,15 +38,10 @@ export namespace Method {
       ? [S.Schema.Type<Head>, ...ArgsFromSchemas<Tail>]
       : Array<S.Schema.Type<Args[number]>>;
 
-  type EncodedArgsFromSchemas<Args extends ReadonlyArray<ServiceFreeSchema>> =
-    Args extends readonly []
-      ? []
-      : Args extends readonly [
-            infer Head extends ServiceFreeSchema,
-            ...infer Tail extends ReadonlyArray<ServiceFreeSchema>,
-          ]
-        ? [S.Codec.Encoded<Head>, ...EncodedArgsFromSchemas<Tail>]
-        : Array<S.Codec.Encoded<Args[number]>>;
+  /** Method schemas cross the wire through their canonical JSON codec. */
+  type EncodedArgsFromSchemas<Args extends ReadonlyArray<ServiceFreeSchema>> = {
+    [Index in keyof Args]: S.Json;
+  };
 
   export type Args<Self extends Any> = ArgsFromSchemas<Self["args"]>;
 
@@ -54,7 +49,7 @@ export namespace Method {
 
   export type Success<Self extends Any> = S.Schema.Type<Self["success"]>;
 
-  export type EncodedSuccess<Self extends Any> = S.Codec.Encoded<Self["success"]>;
+  export type EncodedSuccess<Self extends Any> = S.Json;
 }
 
 export type Methods = Record<string, Method.Any>;

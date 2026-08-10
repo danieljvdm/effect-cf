@@ -1,6 +1,16 @@
 import { assert, expect, it, layer, test } from "@effect/vitest";
 import type { WorkflowStep } from "cloudflare:workers";
-import { Cause, Context, Effect, Exit, Layer, Option, Schema as S, type Scope } from "effect";
+import {
+  Cause,
+  Context,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  Result,
+  Schema as S,
+  type Scope,
+} from "effect";
 
 import {
   type DurableObjectNamespace,
@@ -705,6 +715,129 @@ test("definition-backed Worker RPC validates encoded success values", async () =
 
         assert.strictEqual(received, "hello");
         assert.strictEqual(value, "HELLO");
+      }),
+    );
+  });
+}
+
+{
+  class TaskPayload extends S.Class<TaskPayload>("TaskPayload")({
+    id: S.String,
+    attempts: S.Number,
+  }) {}
+
+  class TaskFailure extends S.TaggedError<TaskFailure>()("TaskFailure", {
+    reason: S.String,
+    cause: S.Defect(),
+  }) {}
+
+  const TaskRoom = DurableObjectDefinition.make("TaskRoom", {
+    complete: DurableObjectDefinition.method({
+      args: [TaskPayload] as const,
+      success: S.Result(TaskPayload, TaskFailure),
+    }),
+  });
+
+  // Workers RPC structured-clones every value crossing an isolate boundary and
+  // rejects anything that is not a plain object/array/primitive, so wire
+  // values must not carry prototypes (`Result`, Schema classes, live causes).
+  const expectStructuredCloneSafe = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(expectStructuredCloneSafe);
+
+      return;
+    }
+
+    if (typeof value === "object" && value !== null) {
+      expect(Object.getPrototypeOf(value)).toBe(Object.prototype);
+      Object.values(value).forEach(expectStructuredCloneSafe);
+    }
+  };
+
+  const makeState = () =>
+    ({
+      id: { toString: () => "task-room" },
+      storage: {},
+      waitUntil: () => undefined,
+    }) as unknown as globalThis.DurableObjectState;
+
+  test("Durable Object RPC methods return schema-encoded plain values over the wire", async () => {
+    const Live = TaskRoom.make(Layer.empty, {
+      rpc: {
+        complete: (payload) =>
+          Effect.result(
+            payload.attempts > 2
+              ? Effect.fail(
+                  new TaskFailure({ reason: "too many attempts", cause: new Error("boom") }),
+                )
+              : Effect.succeed(new TaskPayload({ id: payload.id, attempts: payload.attempts + 1 })),
+          ),
+      },
+    });
+    const instance = new Live(makeState(), {} as Cloudflare.Env);
+
+    const succeeded: unknown = await (
+      instance as unknown as { complete(payload: unknown): Promise<unknown> }
+    ).complete({ id: "task-1", attempts: 0 });
+
+    assert.strictEqual(Result.isResult(succeeded), false);
+    expectStructuredCloneSafe(succeeded);
+    assert.deepStrictEqual(succeeded, {
+      _tag: "Success",
+      success: { id: "task-1", attempts: 1 },
+    });
+
+    const failed: unknown = await (
+      instance as unknown as { complete(payload: unknown): Promise<unknown> }
+    ).complete({ id: "task-1", attempts: 3 });
+
+    expectStructuredCloneSafe(failed);
+    expect(failed).toMatchObject({
+      _tag: "Failure",
+      failure: { _tag: "TaskFailure", reason: "too many attempts" },
+    });
+  });
+
+  const receivedArgs: Array<unknown> = [];
+  const stub = {
+    id: {} as DurableObjectId,
+    fetch: async () => new Response("ok"),
+    complete: async (...args: Array<unknown>) => {
+      receivedArgs.push(...args);
+
+      return { _tag: "Success", success: { id: "task-1", attempts: 1 } };
+    },
+  };
+  const namespace = {
+    newUniqueId: () => ({}) as DurableObjectId,
+    idFromName: () => ({}) as DurableObjectId,
+    idFromString: () => ({}) as DurableObjectId,
+    jurisdiction: () => namespace,
+    get: () => stub,
+    getByName: () => stub,
+  };
+  const env = {
+    TASK_ROOMS: namespace,
+  } as unknown as Cloudflare.Env;
+
+  layer(
+    TaskRoom.layer({ binding: "TASK_ROOMS" }).pipe(
+      Layer.provide(Layer.succeed(WorkerEnvironment, env)),
+    ),
+  )("definition-backed Durable Object RPC with declaration schemas", (it) => {
+    it.effect("sends encoded args and decodes wire results into instances", () =>
+      Effect.gen(function* () {
+        receivedArgs.length = 0;
+
+        const result = yield* TaskRoom.byName("main").complete(
+          new TaskPayload({ id: "task-1", attempts: 0 }),
+        );
+
+        assert.deepStrictEqual(receivedArgs, [{ id: "task-1", attempts: 0 }]);
+        expectStructuredCloneSafe(receivedArgs[0]);
+        assert.ok(Result.isSuccess(result));
+        assert.instanceOf(result.success, TaskPayload);
+        assert.deepStrictEqual(result.success, new TaskPayload({ id: "task-1", attempts: 1 }));
       }),
     );
   });

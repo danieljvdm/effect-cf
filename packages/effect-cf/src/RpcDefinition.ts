@@ -154,6 +154,14 @@ export type ReservedMethodName =
 
 export type ServiceFreeSchema = S.Codec<any, any, never, never>;
 
+/**
+ * Workers RPC structured-clones every value that crosses an isolate boundary
+ * and rejects class instances. Declaration schemas such as `Schema.Result`
+ * keep their container instance in their `Encoded` form, so the declared
+ * schemas are lowered to their canonical JSON codec before touching the wire.
+ */
+const wireCodec = <Schema extends S.Constraint>(schema: Schema) => S.toCodecJson(schema);
+
 export interface Method<
   Args extends ReadonlyArray<ServiceFreeSchema> = ReadonlyArray<ServiceFreeSchema>,
   Success extends ServiceFreeSchema = ServiceFreeSchema,
@@ -174,15 +182,10 @@ export namespace Method {
       ? [S.Schema.Type<Head>, ...ArgsFromSchemas<Tail>]
       : Array<S.Schema.Type<Args[number]>>;
 
-  type EncodedArgsFromSchemas<Args extends ReadonlyArray<ServiceFreeSchema>> =
-    Args extends readonly []
-      ? []
-      : Args extends readonly [
-            infer Head extends ServiceFreeSchema,
-            ...infer Tail extends ReadonlyArray<ServiceFreeSchema>,
-          ]
-        ? [S.Codec.Encoded<Head>, ...EncodedArgsFromSchemas<Tail>]
-        : Array<S.Codec.Encoded<Args[number]>>;
+  /** Method schemas cross the wire through their canonical JSON codec. */
+  type EncodedArgsFromSchemas<Args extends ReadonlyArray<ServiceFreeSchema>> = {
+    [Index in keyof Args]: S.Json;
+  };
 
   export type Args<Self extends Any> = ArgsFromSchemas<Self["args"]>;
 
@@ -190,7 +193,7 @@ export namespace Method {
 
   export type Success<Self extends Any> = S.Schema.Type<Self["success"]>;
 
-  export type EncodedSuccess<Self extends Any> = S.Codec.Encoded<Self["success"]>;
+  export type EncodedSuccess<Self extends Any> = S.Json;
 }
 
 export type Methods = Record<string, Method.Any>;
@@ -274,7 +277,10 @@ export const decodeArgs = Effect.fnUntraced(function* <
   }
 
   const decoded = yield* (
-    S.decodeUnknownEffect(S.Tuple(methodDefinition.args))(args) as Effect.Effect<unknown, unknown>
+    S.decodeUnknownEffect(wireCodec(S.Tuple(methodDefinition.args)))(args) as Effect.Effect<
+      unknown,
+      unknown
+    >
   ).pipe(
     Effect.mapError(
       (cause) =>
@@ -312,7 +318,10 @@ export const encodeArgs = Effect.fnUntraced(function* <
   }
 
   const encoded = yield* (
-    S.encodeUnknownEffect(S.Tuple(methodDefinition.args))(args) as Effect.Effect<unknown, unknown>
+    S.encodeUnknownEffect(wireCodec(S.Tuple(methodDefinition.args)))(args) as Effect.Effect<
+      unknown,
+      unknown
+    >
   ).pipe(
     Effect.mapError(
       (cause) =>
@@ -338,7 +347,7 @@ export const encodeSuccess = <
   const methodDefinition = definition.methods[methodName];
 
   return (
-    S.encodeEffect(methodDefinition.success)(value) as Effect.Effect<
+    S.encodeUnknownEffect(wireCodec(methodDefinition.success))(value) as Effect.Effect<
       Method.EncodedSuccess<Self["methods"][MethodName]>,
       unknown
     >
@@ -365,7 +374,7 @@ export const decodeSuccess = <
   const methodDefinition = definition.methods[methodName];
 
   return (
-    S.decodeUnknownEffect(methodDefinition.success)(value) as Effect.Effect<
+    S.decodeUnknownEffect(wireCodec(methodDefinition.success))(value) as Effect.Effect<
       Method.Success<Self["methods"][MethodName]>,
       unknown
     >

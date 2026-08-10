@@ -51,7 +51,11 @@ jobs:
         uses: changesets/action@v1
         with:
           version: vp run changeset:version
-          publish: vp run changeset:publish
+          # Attempt npm publish only when merging a Version Packages PR. On
+          # other pushes the publish path is a no-op that depends on an npm
+          # registry read, which can serve stale version lists and fail the
+          # run with "cannot publish over previously published versions".
+          publish: ${{ startsWith(github.event.head_commit.message, 'Version Packages') && 'vp run changeset:publish' || '' }}
           github-token: ${{ steps.app-token.outputs.token }}
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}

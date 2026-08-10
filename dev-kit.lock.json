@@ -1,7 +1,7 @@
 {
   "version": 1,
   "toolVersion": "0.14.0",
-  "manifestDigest": "sha256:d0062ee25430667652f25392e4684a4db953cca99cb3874ad0a6e9c55ef7f7bb",
+  "manifestDigest": "sha256:59daada55c27a503f1cb45ca64547c793a69152ec8726847d760ee56588b641b",
   "setup": {
     "effectSource": {
       "packageName": "effect",
@@ -101,6 +101,20 @@
       "digest": "sha256:b722b785a969463ed093ff517f461193d38442eb5e9ae607e0964f2f521529f5"
     },
     {
+      "resourceId": "skill:tdd@agents",
+      "path": ".agents/skills/tdd",
+      "skill": "tdd",
+      "target": "agents",
+      "mode": "copy",
+      "kind": "directory",
+      "digest": "sha256:ea2d26eda005b10a2de4bdb7de44d33072f2a8e82dbf670952ce30a9c2d7c475",
+      "catalog": {
+        "source": "mattpocock-skills",
+        "repository": "https://github.com/mattpocock/skills.git",
+        "resolved": "2ab958093e83e0ec752e6c1c5932da465bf23e0c"
+      }
+    },
+    {
       "resourceId": "skill:testing@agents",
       "path": ".agents/skills/testing",
       "skill": "testing",
@@ -191,6 +205,20 @@
       "mode": "symlink",
       "kind": "symlink",
       "digest": "sha256:7fb29cd1804361f3d09fa0925109d56daa20bc8b038a8d0ee23c85052f11708e"
+    },
+    {
+      "resourceId": "skill:tdd@claude",
+      "path": ".claude/skills/tdd",
+      "skill": "tdd",
+      "target": "claude",
+      "mode": "symlink",
+      "kind": "symlink",
+      "digest": "sha256:398300a0bb92f35b234df99037308cbda7d5e10fe9b082902faf7bf8f5a47984",
+      "catalog": {
+        "source": "mattpocock-skills",
+        "repository": "https://github.com/mattpocock/skills.git",
+        "resolved": "2ab958093e83e0ec752e6c1c5932da465bf23e0c"
+      }
     },
     {
       "resourceId": "skill:testing@claude",

@@ -1,5 +1,13 @@
 # effect-cf
 
+## 0.23.0
+
+### Minor Changes
+
+- [#78](https://github.com/danieljvdm/effect-cf/pull/78) [`f753742`](https://github.com/danieljvdm/effect-cf/commit/f753742500603ea604f4f11d4c7840a41efb849b) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Extend the `ContainerNamespace` client with the remaining caller-side Container primitives: `waitForPort` (preserving the native retry-count result), the runtime host-policy operations (`setAllowedHosts`, `setDeniedHosts`, `allowHost`, `denyHost`, `removeAllowedHost`, `removeDeniedHost`), and numeric stop signals alongside the named ones. `ContainerNamespace.Tag` now accepts an optional exact native namespace type (for example `DurableObjectNamespace<CodexSandbox>`) so `rawUnsafe` on the namespace and on named instances preserves the exact native namespace and stub types, including extra subclass methods. Existing consumers compile unchanged via default type parameters.
+
+- [#78](https://github.com/danieljvdm/effect-cf/pull/78) [`f753742`](https://github.com/danieljvdm/effect-cf/commit/f753742500603ea604f4f11d4c7840a41efb849b) Thanks [@danieljvdm](https://github.com/danieljvdm)! - `DurableObjectState.waitUntil` now also accepts an Effect, running it in the background with the caller's Effect context and the same failure modes as `WorkerContext.waitUntil` (`"observe"` logs or routes failures to `onFailure`; `"propagate"` also rejects the native `waitUntil` promise). The existing Promise form is unchanged, so Durable Objects no longer need to capture a Context and call `Effect.runPromiseWith` to schedule background Effects.
+
 ## 0.22.0
 
 ### Minor Changes

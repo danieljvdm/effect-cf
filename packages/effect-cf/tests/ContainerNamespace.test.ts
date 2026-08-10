@@ -8,10 +8,16 @@ import { Binding, ContainerNamespace, WorkerEnvironment, type WorkerEnv } from "
 class TestContainers extends ContainerNamespace.Tag<TestContainers>()("TestContainers") {}
 
 type Call =
+  | { readonly operation: "allowHost"; readonly hostname: string }
+  | { readonly operation: "denyHost"; readonly hostname: string }
   | { readonly operation: "destroy" }
   | { readonly operation: "fetch"; readonly input: RequestInfo | URL; readonly init?: RequestInit }
   | { readonly operation: "getByName"; readonly name: string }
   | { readonly operation: "getState" }
+  | { readonly operation: "removeAllowedHost"; readonly hostname: string }
+  | { readonly operation: "removeDeniedHost"; readonly hostname: string }
+  | { readonly operation: "setAllowedHosts"; readonly hosts: ReadonlyArray<string> }
+  | { readonly operation: "setDeniedHosts"; readonly hosts: ReadonlyArray<string> }
   | {
       readonly operation: "start";
       readonly options?: ContainerNamespace.ContainerStartOptions;
@@ -21,11 +27,16 @@ type Call =
       readonly operation: "startAndWaitForPorts";
       readonly options?: ContainerNamespace.ContainerStartAndWaitForPortsOptions;
     }
-  | { readonly operation: "stop"; readonly signal?: ContainerNamespace.ContainerSignal };
+  | { readonly operation: "stop"; readonly signal?: ContainerNamespace.ContainerStopSignal }
+  | {
+      readonly operation: "waitForPort";
+      readonly options: ContainerNamespace.ContainerWaitOptions;
+    };
 
 const makeFake = (options?: {
   readonly fetchFailure?: unknown;
   readonly stopFailure?: unknown;
+  readonly waitForPortFailure?: unknown;
 }) => {
   const calls: Array<Call> = [];
   const response = new Response("container", {
@@ -60,6 +71,32 @@ const makeFake = (options?: {
       if (options?.stopFailure !== undefined) {
         throw options.stopFailure;
       }
+    },
+    waitForPort: async (waitOptions) => {
+      calls.push({ operation: "waitForPort", options: waitOptions });
+      if (options?.waitForPortFailure !== undefined) {
+        throw options.waitForPortFailure;
+      }
+
+      return 2;
+    },
+    setAllowedHosts: async (hosts) => {
+      calls.push({ operation: "setAllowedHosts", hosts });
+    },
+    setDeniedHosts: async (hosts) => {
+      calls.push({ operation: "setDeniedHosts", hosts });
+    },
+    allowHost: async (hostname) => {
+      calls.push({ operation: "allowHost", hostname });
+    },
+    denyHost: async (hostname) => {
+      calls.push({ operation: "denyHost", hostname });
+    },
+    removeAllowedHost: async (hostname) => {
+      calls.push({ operation: "removeAllowedHost", hostname });
+    },
+    removeDeniedHost: async (hostname) => {
+      calls.push({ operation: "removeDeniedHost", hostname });
     },
   };
   const namespace: ContainerNamespace.ContainerNamespaceResource = {
@@ -121,6 +158,8 @@ it.effect("supports static byName helpers", () => {
       status: "healthy",
     });
     yield* instance.start();
+    assert.strictEqual(yield* instance.waitForPort({ portToCheck: 8080 }), 2);
+    yield* instance.allowHost("api.example.com");
     yield* instance.stop();
     yield* instance.destroy;
     assert.strictEqual(yield* instance.rawUnsafe, fake.stub);
@@ -128,6 +167,54 @@ it.effect("supports static byName helpers", () => {
     const namespace = yield* TestContainers.rawUnsafe;
 
     assert.strictEqual(namespace, fake.namespace);
+  }).pipe(Effect.provide(fake.live));
+});
+
+it.effect("waits for ports and manages host policy on named instances", () => {
+  const fake = makeFake();
+
+  return Effect.gen(function* () {
+    const containers = yield* TestContainers;
+    const instance = yield* containers.getByName("sandbox-1");
+    const retries = yield* instance.waitForPort({ portToCheck: 8080, retries: 3 });
+
+    yield* instance.setAllowedHosts(["api.example.com", "cdn.example.com"]);
+    yield* instance.allowHost("registry.example.com");
+    yield* instance.removeAllowedHost("cdn.example.com");
+    yield* instance.setDeniedHosts(["evil.example.com"]);
+    yield* instance.denyHost("worse.example.com");
+    yield* instance.removeDeniedHost("evil.example.com");
+    yield* instance.stop(9);
+
+    assert.strictEqual(retries, 2);
+    assert.deepStrictEqual(fake.calls, [
+      { operation: "getByName", name: "sandbox-1" },
+      { operation: "waitForPort", options: { portToCheck: 8080, retries: 3 } },
+      { operation: "setAllowedHosts", hosts: ["api.example.com", "cdn.example.com"] },
+      { operation: "allowHost", hostname: "registry.example.com" },
+      { operation: "removeAllowedHost", hostname: "cdn.example.com" },
+      { operation: "setDeniedHosts", hosts: ["evil.example.com"] },
+      { operation: "denyHost", hostname: "worse.example.com" },
+      { operation: "removeDeniedHost", hostname: "evil.example.com" },
+      { operation: "stop", signal: 9 },
+    ]);
+  }).pipe(Effect.provide(fake.live));
+});
+
+it.effect("maps rejected waitForPort calls to ContainerOperationError", () => {
+  const cause = new Error("port never opened");
+  const fake = makeFake({ waitForPortFailure: cause });
+
+  return Effect.gen(function* () {
+    const error = yield* Effect.flip(
+      TestContainers.byName("sandbox-2").waitForPort({ portToCheck: 8080 }),
+    );
+
+    assert.instanceOf(error, ContainerNamespace.ContainerOperationError);
+    assert.strictEqual(error.binding, "CONTAINERS");
+    assert.strictEqual(error.instance, "sandbox-2");
+    assert.strictEqual(error.operation, "waitForPort");
+    assert.strictEqual(error.cause, cause);
   }).pipe(Effect.provide(fake.live));
 });
 
@@ -257,5 +344,41 @@ it("tracks the service requirement in the static API", () => {
 
   expectTypeOf(TestContainers.byName("render-4").fetch("https://container.test/")).toEqualTypeOf<
     Effect.Effect<Response, ContainerNamespace.ContainerOperationError, TestContainers>
+  >();
+
+  expectTypeOf(TestContainers.byName("render-4").waitForPort({ portToCheck: 8080 })).toEqualTypeOf<
+    Effect.Effect<number, ContainerNamespace.ContainerOperationError, TestContainers>
+  >();
+
+  expectTypeOf(
+    TestContainers.byName("render-4").setAllowedHosts(["api.example.com"] as const),
+  ).toEqualTypeOf<
+    Effect.Effect<void, ContainerNamespace.ContainerOperationError, TestContainers>
+  >();
+});
+
+type CodexSandbox = CloudflareContainer & {
+  runCode(source: string): Promise<string>;
+};
+type SandboxNamespace = globalThis.DurableObjectNamespace<CodexSandbox>;
+type SandboxStub = ReturnType<SandboxNamespace["getByName"]>;
+
+class Sandboxes extends ContainerNamespace.Tag<Sandboxes, SandboxNamespace>()("Sandboxes") {}
+
+it("preserves exact native namespace and stub types through rawUnsafe", () => {
+  expectTypeOf(Sandboxes.rawUnsafe).toEqualTypeOf<
+    Effect.Effect<SandboxNamespace, never, Sandboxes>
+  >();
+
+  expectTypeOf(Sandboxes.byName("codex").rawUnsafe).toEqualTypeOf<
+    Effect.Effect<SandboxStub, ContainerNamespace.ContainerOperationError, Sandboxes>
+  >();
+
+  expectTypeOf(Sandboxes.getByName("codex")).toEqualTypeOf<
+    Effect.Effect<
+      ContainerNamespace.ContainerInstanceClient<SandboxStub>,
+      ContainerNamespace.ContainerOperationError,
+      Sandboxes
+    >
   >();
 });

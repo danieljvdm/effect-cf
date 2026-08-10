@@ -87,6 +87,12 @@ export const readCounter = Effect.gen(function* () {
 
 Define Wrangler bindings and migrations in the consuming application. Durable Object namespace bindings are provided with `YourObject.layer({ binding })`, and consumers use `const namespace = yield* YourObject`.
 
+`DurableObjectState.waitUntil` accepts either a raw Promise or an Effect. The
+Effect form runs in the background with the caller's Effect context and the
+same failure modes as `WorkerContext.waitUntil`, so Durable Objects can
+schedule background Effects (for example a pump consuming an outbound
+WebSocket) without capturing a Context and calling `Effect.runPromiseWith`.
+
 ## Container Example
 
 Container entrypoints remain owned by `@cloudflare/containers`; `effect-cf`
@@ -118,11 +124,29 @@ export default Worker.make(RenderersLive, {
 ```
 
 The instance client exposes `state`, `fetch`, `start`,
-`startAndWaitForPorts`, `stop`, `destroy`, and the Effect-valued native
-`rawUnsafe` stub.
+`startAndWaitForPorts`, `waitForPort`, `stop` (named or numeric signals),
+`destroy`, the runtime host-policy operations (`setAllowedHosts`,
+`setDeniedHosts`, `allowHost`, `denyHost`, `removeAllowedHost`,
+`removeDeniedHost`), and the Effect-valued native `rawUnsafe` stub.
+Host-policy operations only forward the native remote calls; applications
+continue to own hostname policy and outbound handlers.
 Responses are returned unchanged, including non-2xx and WebSocket upgrade
 responses. If the Container uses outbound interception, also export
 `ContainerProxy` from `@cloudflare/containers`.
+
+`ContainerNamespace.Tag` accepts an optional second type parameter carrying
+the exact native namespace type. `rawUnsafe` on the namespace and on named
+instances then preserves that exact type, including extra subclass methods,
+instead of the minimal structural shape:
+
+```ts
+class Sandboxes extends ContainerNamespace.Tag<Sandboxes, DurableObjectNamespace<CodexSandbox>>()(
+  "Sandboxes",
+) {}
+
+// Effect<DurableObjectStub<CodexSandbox>, ContainerOperationError, Sandboxes>
+const stub = Sandboxes.byName("codex").rawUnsafe;
+```
 
 See [`examples/containers/README.md`](../../examples/containers/README.md) for
 the corresponding Wrangler configuration and entrypoint responsibilities.

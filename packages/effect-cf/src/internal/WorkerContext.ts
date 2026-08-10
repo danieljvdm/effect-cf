@@ -13,16 +13,14 @@ const causeError = <E>(cause: Cause.Cause<E>) => {
 };
 
 const failureHandler = <E, R>(
+  label: string,
   cause: Cause.Cause<E>,
   options: WorkerContextWaitUntilOptions<E, R> | undefined,
 ) =>
-  (
-    options?.onFailure?.(cause) ??
-    Effect.logError("WorkerContext.waitUntil failed", Cause.pretty(cause))
-  ).pipe(
+  (options?.onFailure?.(cause) ?? Effect.logError(`${label} failed`, Cause.pretty(cause))).pipe(
     Effect.catchCause((handlerCause) =>
       Effect.logError(
-        "WorkerContext.waitUntil failure handler failed",
+        `${label} failure handler failed`,
         Cause.pretty(cause),
         Cause.pretty(handlerCause),
       ),
@@ -30,18 +28,19 @@ const failureHandler = <E, R>(
   );
 
 /**
- * Builds the `WorkerContext` service from a native `ExecutionContext`.
+ * Builds a `waitUntil` scheduler for any Cloudflare lifecycle that accepts
+ * background promises (`ExecutionContext`, `DurableObjectState`).
  *
  * Background effects capture the calling fiber's context via `Effect.context`
- * before being handed to `ctx.waitUntil`, so the default module-level
- * `Effect.runPromiseExit` runner is sufficient; entrypoints may still pass a
- * runtime-bound runner.
+ * before being registered, so the default module-level `Effect.runPromiseExit`
+ * runner is sufficient; entrypoints may still pass a runtime-bound runner.
  */
-export const fromExecutionContext = (
-  ctx: globalThis.ExecutionContext,
+export const makeWaitUntilScheduler = (
+  label: string,
+  register: (promise: Promise<unknown>) => void,
   runPromiseExit: RunWaitUntilEffect = (effect) => Effect.runPromiseExit(effect),
-): WorkerContextService => {
-  const schedule = <A, E, R, R2 = never>(
+) => {
+  return <A, E, R, R2 = never>(
     effect: Effect.Effect<A, E, R>,
     options: WorkerContextWaitUntilOptions<E, R2> | undefined,
     mode: "observe" | "propagate",
@@ -51,17 +50,14 @@ export const fromExecutionContext = (
         Effect.sync(() => {
           const runHandler = (cause: Cause.Cause<E>) =>
             runPromiseExit(
-              Effect.scoped(Effect.provideContext(failureHandler(cause, options), context)),
+              Effect.scoped(Effect.provideContext(failureHandler(label, cause, options), context)),
             ).then((exit) => {
               if (Exit.isFailure(exit)) {
-                console.error(
-                  "WorkerContext.waitUntil failure handler failed",
-                  Cause.pretty(exit.cause),
-                );
+                console.error(`${label} failure handler failed`, Cause.pretty(exit.cause));
               }
             });
 
-          ctx.waitUntil(
+          register(
             runPromiseExit(Effect.scoped(Effect.provideContext(effect, context))).then(
               async (exit) => {
                 if (Exit.isSuccess(exit)) {
@@ -79,6 +75,20 @@ export const fromExecutionContext = (
         }),
       ),
     );
+};
+
+/**
+ * Builds the `WorkerContext` service from a native `ExecutionContext`.
+ */
+export const fromExecutionContext = (
+  ctx: globalThis.ExecutionContext,
+  runPromiseExit: RunWaitUntilEffect = (effect) => Effect.runPromiseExit(effect),
+): WorkerContextService => {
+  const schedule = makeWaitUntilScheduler(
+    "WorkerContext.waitUntil",
+    (promise) => ctx.waitUntil(promise),
+    runPromiseExit,
+  );
 
   return {
     raw: ctx,

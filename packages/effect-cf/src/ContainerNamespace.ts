@@ -6,8 +6,11 @@ import * as ErrorMessage from "./internal/ErrorMessage";
 
 const expectedContainerNamespace = "Container namespace binding with getByName()";
 
-/** Signal accepted by Cloudflare Container instances. */
+/** Named signal accepted by Cloudflare Container instances. */
 export type ContainerSignal = "SIGKILL" | "SIGINT" | "SIGTERM";
+
+/** Named or numeric signal accepted by Container `stop()`. */
+export type ContainerStopSignal = ContainerSignal | number;
 
 /** Per-instance Container startup configuration. */
 export interface ContainerStartOptions {
@@ -63,8 +66,15 @@ export interface ContainerStub {
   getState(): Promise<ContainerState>;
   start(options?: ContainerStartOptions, waitOptions?: ContainerWaitOptions): Promise<void>;
   startAndWaitForPorts(options?: ContainerStartAndWaitForPortsOptions): Promise<void>;
-  stop(signal?: ContainerSignal): Promise<void>;
+  waitForPort(options: ContainerWaitOptions): Promise<number>;
+  stop(signal?: ContainerStopSignal): Promise<void>;
   destroy(): Promise<void>;
+  setAllowedHosts(hosts: Array<string>): Promise<void>;
+  setDeniedHosts(hosts: Array<string>): Promise<void>;
+  allowHost(hostname: string): Promise<void>;
+  denyHost(hostname: string): Promise<void>;
+  removeAllowedHost(hostname: string): Promise<void>;
+  removeDeniedHost(hostname: string): Promise<void>;
 }
 
 /** Native Container namespace binding shape. */
@@ -74,6 +84,11 @@ export interface ContainerNamespaceResource {
     options?: globalThis.DurableObjectNamespaceGetDurableObjectOptions,
   ): ContainerStub;
 }
+
+/** Exact native stub type produced by a Container namespace binding. */
+export type ContainerStubOf<Namespace extends ContainerNamespaceResource> = ReturnType<
+  Namespace["getByName"]
+>;
 
 /** Container namespace binding metadata. */
 export interface ContainerNamespaceDefinition {
@@ -94,8 +109,8 @@ export class ContainerOperationError extends Data.TaggedError("ContainerOperatio
 }
 
 /** Effect-wrapped client for one named Container instance. */
-export interface ContainerInstanceClient {
-  readonly rawUnsafe: Effect.Effect<ContainerStub, ContainerOperationError>;
+export interface ContainerInstanceClient<Stub extends ContainerStub = ContainerStub> {
+  readonly rawUnsafe: Effect.Effect<Stub, ContainerOperationError>;
   readonly state: Effect.Effect<ContainerState, ContainerOperationError>;
   readonly fetch: (
     input: RequestInfo | URL,
@@ -108,29 +123,51 @@ export interface ContainerInstanceClient {
   readonly startAndWaitForPorts: (
     options?: ContainerStartAndWaitForPortsOptions,
   ) => Effect.Effect<void, ContainerOperationError>;
-  readonly stop: (signal?: ContainerSignal) => Effect.Effect<void, ContainerOperationError>;
+  readonly waitForPort: (
+    options: ContainerWaitOptions,
+  ) => Effect.Effect<number, ContainerOperationError>;
+  readonly stop: (signal?: ContainerStopSignal) => Effect.Effect<void, ContainerOperationError>;
   readonly destroy: Effect.Effect<void, ContainerOperationError>;
+  readonly setAllowedHosts: (
+    hosts: ReadonlyArray<string>,
+  ) => Effect.Effect<void, ContainerOperationError>;
+  readonly setDeniedHosts: (
+    hosts: ReadonlyArray<string>,
+  ) => Effect.Effect<void, ContainerOperationError>;
+  readonly allowHost: (hostname: string) => Effect.Effect<void, ContainerOperationError>;
+  readonly denyHost: (hostname: string) => Effect.Effect<void, ContainerOperationError>;
+  readonly removeAllowedHost: (hostname: string) => Effect.Effect<void, ContainerOperationError>;
+  readonly removeDeniedHost: (hostname: string) => Effect.Effect<void, ContainerOperationError>;
 }
 
 /** Effect client for a Container namespace binding. */
-export interface ContainerNamespaceClient {
+export interface ContainerNamespaceClient<
+  Namespace extends ContainerNamespaceResource = ContainerNamespaceResource,
+> {
   readonly definition: ContainerNamespaceDefinition;
   readonly getByName: (
     name: string,
     options?: globalThis.DurableObjectNamespaceGetDurableObjectOptions,
-  ) => Effect.Effect<ContainerInstanceClient, ContainerOperationError>;
+  ) => Effect.Effect<ContainerInstanceClient<ContainerStubOf<Namespace>>, ContainerOperationError>;
   readonly byName: (
     name: string,
     options?: globalThis.DurableObjectNamespaceGetDurableObjectOptions,
-  ) => ContainerInstanceClient;
-  readonly rawUnsafe: Effect.Effect<ContainerNamespaceResource>;
+  ) => ContainerInstanceClient<ContainerStubOf<Namespace>>;
+  readonly rawUnsafe: Effect.Effect<Namespace>;
 }
 
-export type ContainerNamespaceStaticClient<R> = {
+export type ContainerNamespaceStaticClient<
+  R,
+  Namespace extends ContainerNamespaceResource = ContainerNamespaceResource,
+> = {
   readonly getByName: (
     name: string,
     options?: globalThis.DurableObjectNamespaceGetDurableObjectOptions,
-  ) => Effect.Effect<ContainerInstanceClient, ContainerOperationError, R>;
+  ) => Effect.Effect<
+    ContainerInstanceClient<ContainerStubOf<Namespace>>,
+    ContainerOperationError,
+    R
+  >;
   readonly byName: (
     name: string,
     options?: globalThis.DurableObjectNamespaceGetDurableObjectOptions,
@@ -147,21 +184,44 @@ export type ContainerNamespaceStaticClient<R> = {
     readonly startAndWaitForPorts: (
       options?: ContainerStartAndWaitForPortsOptions,
     ) => Effect.Effect<void, ContainerOperationError, R>;
-    readonly stop: (signal?: ContainerSignal) => Effect.Effect<void, ContainerOperationError, R>;
+    readonly waitForPort: (
+      options: ContainerWaitOptions,
+    ) => Effect.Effect<number, ContainerOperationError, R>;
+    readonly stop: (
+      signal?: ContainerStopSignal,
+    ) => Effect.Effect<void, ContainerOperationError, R>;
     readonly destroy: Effect.Effect<void, ContainerOperationError, R>;
-    readonly rawUnsafe: Effect.Effect<ContainerStub, ContainerOperationError, R>;
+    readonly setAllowedHosts: (
+      hosts: ReadonlyArray<string>,
+    ) => Effect.Effect<void, ContainerOperationError, R>;
+    readonly setDeniedHosts: (
+      hosts: ReadonlyArray<string>,
+    ) => Effect.Effect<void, ContainerOperationError, R>;
+    readonly allowHost: (hostname: string) => Effect.Effect<void, ContainerOperationError, R>;
+    readonly denyHost: (hostname: string) => Effect.Effect<void, ContainerOperationError, R>;
+    readonly removeAllowedHost: (
+      hostname: string,
+    ) => Effect.Effect<void, ContainerOperationError, R>;
+    readonly removeDeniedHost: (
+      hostname: string,
+    ) => Effect.Effect<void, ContainerOperationError, R>;
+    readonly rawUnsafe: Effect.Effect<ContainerStubOf<Namespace>, ContainerOperationError, R>;
   };
-  readonly rawUnsafe: Effect.Effect<ContainerNamespaceResource, never, R>;
+  readonly rawUnsafe: Effect.Effect<Namespace, never, R>;
 };
 
 export type LayerOptions = {
   readonly binding: string;
 };
 
-export interface TagClass<Self, Id extends string>
+export interface TagClass<
+  Self,
+  Id extends string,
+  Namespace extends ContainerNamespaceResource = ContainerNamespaceResource,
+>
   extends
-    Context.ServiceClass<Self, `effect-cf/Container/${Id}`, ContainerNamespaceClient>,
-    ContainerNamespaceStaticClient<Self> {
+    Context.ServiceClass<Self, `effect-cf/Container/${Id}`, ContainerNamespaceClient<Namespace>>,
+    ContainerNamespaceStaticClient<Self, Namespace> {
   readonly id: Id;
   readonly layer: (
     options: LayerOptions,
@@ -189,14 +249,34 @@ const tryContainerPromise = <A>(
       }),
   });
 
-const makeInstanceClient = (
+const makeInstanceClient = <Stub extends ContainerStub>(
   definition: ContainerNamespaceDefinition,
   instance: string,
-  stub: ContainerStub,
-): ContainerInstanceClient => {
+  stub: Stub,
+): ContainerInstanceClient<Stub> => {
   const spanOptions = (operation: string) => ({
     attributes: { binding: definition.binding, instance, operation },
   });
+  const hostListOperation = (operation: "setAllowedHosts" | "setDeniedHosts") =>
+    Effect.fn(
+      `ContainerNamespace.${operation}`,
+      spanOptions(operation),
+    )(function* (hosts: ReadonlyArray<string>) {
+      return yield* tryContainerPromise(definition, instance, operation, () =>
+        stub[operation]([...hosts]),
+      );
+    });
+  const hostnameOperation = (
+    operation: "allowHost" | "denyHost" | "removeAllowedHost" | "removeDeniedHost",
+  ) =>
+    Effect.fn(
+      `ContainerNamespace.${operation}`,
+      spanOptions(operation),
+    )(function* (hostname: string) {
+      return yield* tryContainerPromise(definition, instance, operation, () =>
+        stub[operation](hostname),
+      );
+    });
 
   return {
     rawUnsafe: Effect.succeed(stub),
@@ -238,15 +318,29 @@ const makeInstanceClient = (
         stub.startAndWaitForPorts(options),
       );
     }),
+    waitForPort: Effect.fn(
+      "ContainerNamespace.waitForPort",
+      spanOptions("waitForPort"),
+    )(function* (options: ContainerWaitOptions) {
+      return yield* tryContainerPromise(definition, instance, "waitForPort", () =>
+        stub.waitForPort(options),
+      );
+    }),
     stop: Effect.fn(
       "ContainerNamespace.stop",
       spanOptions("stop"),
-    )(function* (signal?: ContainerSignal) {
+    )(function* (signal?: ContainerStopSignal) {
       return yield* tryContainerPromise(definition, instance, "stop", () => stub.stop(signal));
     }),
     destroy: tryContainerPromise(definition, instance, "destroy", () => stub.destroy()).pipe(
       Effect.withSpan("ContainerNamespace.destroy", spanOptions("destroy")),
     ),
+    setAllowedHosts: hostListOperation("setAllowedHosts"),
+    setDeniedHosts: hostListOperation("setDeniedHosts"),
+    allowHost: hostnameOperation("allowHost"),
+    denyHost: hostnameOperation("denyHost"),
+    removeAllowedHost: hostnameOperation("removeAllowedHost"),
+    removeDeniedHost: hostnameOperation("removeDeniedHost"),
   };
 };
 
@@ -257,13 +351,22 @@ export const isContainerNamespaceResource = (value: unknown): value is Container
 
 export const makeClient =
   (definition: ContainerNamespaceDefinition) =>
-  (namespace: ContainerNamespaceResource): ContainerNamespaceClient => {
+  <Namespace extends ContainerNamespaceResource>(
+    namespace: Namespace,
+  ): ContainerNamespaceClient<Namespace> => {
     const getByName = (
       name: string,
       options?: globalThis.DurableObjectNamespaceGetDurableObjectOptions,
     ) =>
       Effect.try({
-        try: () => makeInstanceClient(definition, name, namespace.getByName(name, options)),
+        try: () =>
+          makeInstanceClient(
+            definition,
+            name,
+            // getByName has a single call signature, so its return type is
+            // exactly the namespace's stub type.
+            namespace.getByName(name, options) as ContainerStubOf<Namespace>,
+          ),
         catch: (cause) =>
           new ContainerOperationError({
             binding: definition.binding,
@@ -276,7 +379,7 @@ export const makeClient =
     const byName = (
       name: string,
       options?: globalThis.DurableObjectNamespaceGetDurableObjectOptions,
-    ): ContainerInstanceClient => {
+    ): ContainerInstanceClient<ContainerStubOf<Namespace>> => {
       const instance = getByName(name, options);
 
       return {
@@ -287,8 +390,20 @@ export const makeClient =
           Effect.flatMap(instance, (client) => client.start(startOptions, waitOptions)),
         startAndWaitForPorts: (startOptions) =>
           Effect.flatMap(instance, (client) => client.startAndWaitForPorts(startOptions)),
+        waitForPort: (waitOptions) =>
+          Effect.flatMap(instance, (client) => client.waitForPort(waitOptions)),
         stop: (signal) => Effect.flatMap(instance, (client) => client.stop(signal)),
         destroy: Effect.flatMap(instance, (client) => client.destroy),
+        setAllowedHosts: (hosts) =>
+          Effect.flatMap(instance, (client) => client.setAllowedHosts(hosts)),
+        setDeniedHosts: (hosts) =>
+          Effect.flatMap(instance, (client) => client.setDeniedHosts(hosts)),
+        allowHost: (hostname) => Effect.flatMap(instance, (client) => client.allowHost(hostname)),
+        denyHost: (hostname) => Effect.flatMap(instance, (client) => client.denyHost(hostname)),
+        removeAllowedHost: (hostname) =>
+          Effect.flatMap(instance, (client) => client.removeAllowedHost(hostname)),
+        removeDeniedHost: (hostname) =>
+          Effect.flatMap(instance, (client) => client.removeDeniedHost(hostname)),
       };
     };
 
@@ -300,13 +415,21 @@ export const makeClient =
     };
   };
 
-export const layer = <Self>(
-  tag: Context.Service<Self, ContainerNamespaceClient>,
+export const layer = <Self, Namespace extends ContainerNamespaceResource>(
+  tag: Context.Service<Self, ContainerNamespaceClient<Namespace>>,
   definition: ContainerNamespaceDefinition,
 ) =>
-  Binding.layer(tag, definition.binding, isContainerNamespaceResource, makeClient(definition), {
-    expected: expectedContainerNamespace,
-  });
+  Binding.layer(
+    tag,
+    definition.binding,
+    // Runtime validation stays structural; the exact namespace type is
+    // asserted by the consumer's binding declaration, like env typing.
+    isContainerNamespaceResource as (value: unknown) => value is Namespace,
+    makeClient(definition),
+    {
+      expected: expectedContainerNamespace,
+    },
+  );
 
 export const make = <Id extends string>(id: Id) => Tag<ContainerNamespaceService<Id>>()<Id>(id);
 
@@ -321,9 +444,9 @@ export interface ContainerNamespaceService<Id extends string> {
 
 /** Creates a typed Effect service for a Cloudflare Container namespace. */
 export const Tag =
-  <Self>() =>
+  <Self, Namespace extends ContainerNamespaceResource = ContainerNamespaceResource>() =>
   <Id extends string>(id: Id) => {
-    const tag = Context.Service<Self, ContainerNamespaceClient>()(
+    const tag = Context.Service<Self, ContainerNamespaceClient<Namespace>>()(
       `effect-cf/Container/${id}` as const,
     );
     const makeLayer = (definition: LayerOptions) => layer(tag, definition);
@@ -352,9 +475,25 @@ export const Tag =
         Effect.flatMap(getByName(name, options), (instance) =>
           instance.startAndWaitForPorts(startOptions),
         ),
-      stop: (signal?: ContainerSignal) =>
+      waitForPort: (waitOptions: ContainerWaitOptions) =>
+        Effect.flatMap(getByName(name, options), (instance) => instance.waitForPort(waitOptions)),
+      stop: (signal?: ContainerStopSignal) =>
         Effect.flatMap(getByName(name, options), (instance) => instance.stop(signal)),
       destroy: Effect.flatMap(getByName(name, options), (instance) => instance.destroy),
+      setAllowedHosts: (hosts: ReadonlyArray<string>) =>
+        Effect.flatMap(getByName(name, options), (instance) => instance.setAllowedHosts(hosts)),
+      setDeniedHosts: (hosts: ReadonlyArray<string>) =>
+        Effect.flatMap(getByName(name, options), (instance) => instance.setDeniedHosts(hosts)),
+      allowHost: (hostname: string) =>
+        Effect.flatMap(getByName(name, options), (instance) => instance.allowHost(hostname)),
+      denyHost: (hostname: string) =>
+        Effect.flatMap(getByName(name, options), (instance) => instance.denyHost(hostname)),
+      removeAllowedHost: (hostname: string) =>
+        Effect.flatMap(getByName(name, options), (instance) =>
+          instance.removeAllowedHost(hostname),
+        ),
+      removeDeniedHost: (hostname: string) =>
+        Effect.flatMap(getByName(name, options), (instance) => instance.removeDeniedHost(hostname)),
       rawUnsafe: Effect.flatMap(getByName(name, options), (instance) => instance.rawUnsafe),
     });
 
@@ -366,7 +505,7 @@ export const Tag =
       getByName,
       byName,
       rawUnsafe,
-    }) as TagClass<Self, Id>;
+    }) as TagClass<Self, Id, Namespace>;
   };
 
 export const ContainerNamespace = Tag;

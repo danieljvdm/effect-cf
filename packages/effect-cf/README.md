@@ -118,11 +118,29 @@ export default Worker.make(RenderersLive, {
 ```
 
 The instance client exposes `state`, `fetch`, `start`,
-`startAndWaitForPorts`, `stop`, `destroy`, and the Effect-valued native
-`rawUnsafe` stub.
+`startAndWaitForPorts`, `waitForPort`, `stop` (named or numeric signals),
+`destroy`, the runtime host-policy operations (`setAllowedHosts`,
+`setDeniedHosts`, `allowHost`, `denyHost`, `removeAllowedHost`,
+`removeDeniedHost`), and the Effect-valued native `rawUnsafe` stub.
+Host-policy operations only forward the native remote calls; applications
+continue to own hostname policy and outbound handlers.
 Responses are returned unchanged, including non-2xx and WebSocket upgrade
 responses. If the Container uses outbound interception, also export
 `ContainerProxy` from `@cloudflare/containers`.
+
+`ContainerNamespace.Tag` accepts an optional second type parameter carrying
+the exact native namespace type. `rawUnsafe` on the namespace and on named
+instances then preserves that exact type, including extra subclass methods,
+instead of the minimal structural shape:
+
+```ts
+class Sandboxes extends ContainerNamespace.Tag<Sandboxes, DurableObjectNamespace<CodexSandbox>>()(
+  "Sandboxes",
+) {}
+
+// Effect<DurableObjectStub<CodexSandbox>, ContainerOperationError, Sandboxes>
+const stub = Sandboxes.byName("codex").rawUnsafe;
+```
 
 See [`examples/containers/README.md`](../../examples/containers/README.md) for
 the corresponding Wrangler configuration and entrypoint responsibilities.

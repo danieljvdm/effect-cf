@@ -177,8 +177,12 @@ export const makeClient = <
       status: operation("status", () => raw.status()).pipe(
         Effect.flatMap((status) =>
           Effect.gen(function* () {
+            // Cloudflare reports `output: null` as a no-output sentinel while an
+            // instance is not complete; only a complete instance may carry a real
+            // null result (e.g. Schema.Null).
             const output =
-              status.output === undefined
+              status.output === undefined ||
+              (status.output === null && status.status !== "complete")
                 ? Option.none<ResultValue>()
                 : Option.some(
                     yield* decodeResult(status.output).pipe(

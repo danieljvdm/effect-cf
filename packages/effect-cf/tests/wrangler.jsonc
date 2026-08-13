@@ -4,6 +4,9 @@
   "main": "./worker-fixture.ts",
   "compatibility_date": "2026-04-24",
   "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "APP_NAME": "effect-cf-tests",
+  },
   "durable_objects": {
     "bindings": [
       {

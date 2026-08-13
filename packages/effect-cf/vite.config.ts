@@ -53,9 +53,9 @@ export default defineConfig({
     ],
   },
   pack: {
-    entry: ["src/index.ts", "src/HyperdrivePg.ts"],
+    entry: ["src/index.ts", "src/HyperdrivePg.ts", "src/Vitest.ts"],
     deps: {
-      neverBundle: ["cloudflare:workers"],
+      neverBundle: ["cloudflare:test", "cloudflare:workers"],
     },
     dts: {
       tsgo: true,

@@ -27,6 +27,11 @@
       "import": "./dist/HyperdrivePg.mjs",
       "default": "./dist/HyperdrivePg.mjs"
     },
+    "./vitest": {
+      "types": "./dist/Vitest.d.mts",
+      "import": "./dist/Vitest.mjs",
+      "default": "./dist/Vitest.mjs"
+    },
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -53,6 +58,7 @@
     "vitest": "catalog:"
   },
   "peerDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.16.15",
     "@cloudflare/workers-types": "^4.20260611.1",
     "@effect/sql-d1": "4.0.0-beta.105",
     "@effect/sql-pg": "4.0.0-beta.105",
@@ -60,6 +66,9 @@
     "effect": "4.0.0-beta.105"
   },
   "peerDependenciesMeta": {
+    "@cloudflare/vitest-pool-workers": {
+      "optional": true
+    },
     "@cloudflare/workers-types": {
       "optional": true
     },

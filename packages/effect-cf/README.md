@@ -43,6 +43,66 @@ Runtime creation belongs at Cloudflare entrypoints, not inside binding helpers.
 - `Workflow` - typed Workflow entrypoints, steps, starter clients, and instance types
 - `Rpc` - Cloudflare RPC type helpers and scoped disposal utilities
 - `WorkerConfig` - Effect `Config` helpers backed by Cloudflare `env`
+- `effect-cf/vitest` - Effect-native runners and scoped test helpers for Cloudflare's Vitest Workers pool
+
+## Vitest Workers Pool
+
+Install and configure
+[`@cloudflare/vitest-pool-workers`](https://github.com/cloudflare/workers-sdk/tree/main/packages/vitest-pool-workers#readme),
+then import the test-only helpers from `effect-cf/vitest`. The `fetch` runner
+constructs the Worker with the current test environment and waits for all
+`waitUntil` work before completing the Effect.
+
+```ts
+import { assert, it } from "@effect/vitest";
+import { Config, Effect } from "effect";
+import * as PoolWorkers from "effect-cf/vitest";
+
+import WorkerEntrypoint from "../src/index";
+
+it.effect("serves a request", () =>
+  Effect.gen(function* () {
+    const response = yield* PoolWorkers.fetch(
+      WorkerEntrypoint,
+      new Request("https://worker.test/health"),
+    );
+
+    assert.strictEqual(response.status, 200);
+  }),
+);
+
+it.effect("reads Wrangler vars", () =>
+  Config.string("APP_NAME").pipe(
+    Effect.tap((appName) => assert.strictEqual(appName, "test-app")),
+    Effect.provide(PoolWorkers.layer),
+  ),
+);
+```
+
+Queue consumers can be invoked with typed message bodies while retaining the
+pool's acknowledgement and retry result:
+
+```ts
+it.effect("acknowledges a job", () =>
+  Effect.gen(function* () {
+    const { result } = yield* PoolWorkers.queue(MyQueueConsumer, "jobs", [
+      {
+        id: "job-1",
+        timestamp: new Date(),
+        attempts: 1,
+        body: { accountId: "account-1" },
+      },
+    ]);
+
+    assert.deepStrictEqual(result.explicitAcks, ["job-1"]);
+  }),
+);
+```
+
+`withExecutionContext` supports lower-level tests that need a native
+`ExecutionContext`. `introspectWorkflow` and `introspectWorkflowInstance`
+acquire the pool's disposable Workflow introspectors in the current Effect
+scope, so use them inside `Effect.scoped`.
 
 ## Worker Example
 

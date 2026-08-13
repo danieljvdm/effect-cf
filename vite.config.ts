@@ -2,7 +2,13 @@ import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
 import { createRecommendedVitePlusConfig } from "@danieljvdm/dev-kit/vite-plus";
 import { defineConfig } from "vite-plus";
 
-const testExcludes = ["**/node_modules/**", "**/dist/**", "**/.git/**", ".repos/**"];
+const testExcludes = [
+  "**/node_modules/**",
+  "**/dist/**",
+  "**/.git/**",
+  ".repos/**",
+  ".worktrees/**",
+];
 
 // Every workspace package exposes a pure `typecheck` script backed by the
 // Effect-patched TypeScript-Go compiler.

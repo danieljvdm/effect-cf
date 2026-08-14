@@ -47,7 +47,7 @@ Runtime creation belongs at Cloudflare entrypoints, not inside binding helpers.
 
 ## Vitest Workers Pool
 
-Install and configure
+Install and configure a `^0.21.3` release of
 [`@cloudflare/vitest-pool-workers`](https://github.com/cloudflare/workers-sdk/tree/main/packages/vitest-pool-workers#readme),
 then import the test-only helpers from `effect-cf/vitest`. The `fetch` runner
 constructs the Worker with the current test environment and waits for all
@@ -99,10 +99,101 @@ it.effect("acknowledges a job", () =>
 );
 ```
 
+Scheduled handlers and Pages Functions use the same lifecycle behavior: their
+Effects complete only after the event's `waitUntil` work has settled. Pages
+tests must configure the `ASSETS` binding required by Pool Workers.
+
+```ts
+it.effect("runs the cron handler", () =>
+  PoolWorkers.scheduled(worker.scheduled, {
+    cron: "30 * * * *",
+    scheduledTime: new Date("2030-01-01T00:00:00Z"),
+  }),
+);
+
+it.effect("runs a Pages Function", () =>
+  Effect.gen(function* () {
+    const response = yield* PoolWorkers.pages(onRequest, {
+      request: new Request("https://pages.test/users/dan"),
+      params: { user: "dan" },
+      data: { authenticated: true },
+    });
+
+    assert.strictEqual(response.status, 200);
+  }),
+);
+```
+
+`runInDurableObject` carries the test's Effect context into the Durable Object
+I/O context and provides the same wrapped `DurableObjectState` service used by
+production handlers. Typed failures remain in the Effect error channel.
+
+```ts
+it.effect("seeds a Durable Object", () =>
+  Effect.gen(function* () {
+    const stub = env.COUNTERS.getByName("home");
+
+    yield* PoolWorkers.runInDurableObject(stub, () =>
+      Effect.gen(function* () {
+        const state = yield* DurableObjectState;
+        yield* state.storage.put("count", 41);
+      }),
+    );
+
+    assert.strictEqual(yield* PoolWorkers.runDurableObjectAlarm(stub), true);
+
+    // Recreate in-memory state while preserving Durable Object storage.
+    yield* PoolWorkers.evictDurableObject(stub);
+  }),
+);
+```
+
+The subpath also exposes Effects for `listDurableObjectIds`, `reset`,
+`abortAllDurableObjects`, `evictAllDurableObjects`, and `applyD1Migrations`.
+`adminSecretsStore` returns an Effect-native admin client whose `create`,
+`update`, `duplicate`, `delete`, `list`, and `get` operations are Effects.
+
 `withExecutionContext` supports lower-level tests that need a native
-`ExecutionContext`. `introspectWorkflow` and `introspectWorkflowInstance`
-acquire the pool's disposable Workflow introspectors in the current Effect
-scope, so use them inside `Effect.scoped`.
+`ExecutionContext`. Workflow introspectors and all of their modifiers and query
+operations are Effect-native. They are disposed with the current Effect scope,
+and modifier callbacks carry the caller's Effect context and typed failures.
+
+```ts
+it.effect("controls a Workflow instance", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const instanceId = crypto.randomUUID();
+      const instance = yield* PoolWorkers.introspectWorkflowInstance(
+        env.REPORT_WORKFLOW,
+        instanceId,
+      );
+
+      yield* instance.modify((modifier) =>
+        Effect.gen(function* () {
+          yield* modifier.disableSleeps();
+          yield* modifier.mockStepResult({ name: "render-report" }, "reports/test.json");
+        }),
+      );
+      yield* Effect.promise(() =>
+        env.REPORT_WORKFLOW.create({
+          id: instanceId,
+          params: { reportId: "test", requestedBy: "dan@example.com" },
+        }),
+      );
+
+      yield* instance.waitForStatus("complete");
+      assert.deepStrictEqual(yield* instance.getOutput, {
+        objectKey: "reports/test.json",
+        notified: true,
+      });
+    }),
+  ),
+);
+```
+
+Use `introspectWorkflow` when the instance ID is not known before creation. Its
+`modifyAll` and `get` operations are Effects, and each instance returned by
+`get` uses the same Effect-native interface shown above.
 
 ## Worker Example
 

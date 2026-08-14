@@ -4,9 +4,34 @@
   "main": "./worker-fixture.ts",
   "compatibility_date": "2026-04-24",
   "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./assets",
+    "binding": "ASSETS",
+  },
   "vars": {
     "APP_NAME": "effect-cf-tests",
   },
+  "d1_databases": [
+    {
+      "binding": "TEST_DB",
+      "database_name": "effect-cf-tests",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+    },
+  ],
+  "secrets_store_secrets": [
+    {
+      "binding": "TEST_SECRET",
+      "store_id": "aaaabbbbccccdddd0000000000000000",
+      "secret_name": "effect-cf-test-secret",
+    },
+  ],
+  "workflows": [
+    {
+      "name": "effect-cf-test-workflow",
+      "binding": "TEST_WORKFLOW",
+      "class_name": "TestWorkflowEntrypoint",
+    },
+  ],
   "durable_objects": {
     "bindings": [
       {

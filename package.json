@@ -63,7 +63,7 @@
   "catalog": {
     "@cloudflare/containers": "0.3.7",
     "@cloudflare/workers-types": "4.20260611.1",
-    "@cloudflare/vitest-pool-workers": "0.16.15",
+    "@cloudflare/vitest-pool-workers": "0.21.3",
     "@effect/sql-d1": "4.0.0-beta.105",
     "@effect/sql-pg": "4.0.0-beta.105",
     "@effect/sql-sqlite-do": "4.0.0-beta.105",

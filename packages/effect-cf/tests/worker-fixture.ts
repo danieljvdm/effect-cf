@@ -5,6 +5,7 @@ import {
   DurableObjectState,
   Worker,
   WorkerDefinition,
+  Workflow,
 } from "../src/index";
 
 export const TestWorkerDefinition = WorkerDefinition.make("TestWorker", {
@@ -79,9 +80,32 @@ const TestCounterLive = TestCounterDefinition.make(Layer.empty, {
 
     return Response.json({ count: next });
   }),
+  alarm: () =>
+    Effect.gen(function* () {
+      const state = yield* DurableObjectState.DurableObjectState;
+
+      yield* state.storage.put("count", { count: 0 });
+    }),
 });
 
-export class TestCounterDurableObject extends TestCounterLive {}
+export class TestCounterDurableObject extends TestCounterLive {
+  readonly instanceId = crypto.randomUUID();
+}
+
+export interface TestWorkflowPayload {
+  readonly value: string;
+}
+
+export const TestWorkflowEntrypoint = Workflow.make(Layer.empty, {
+  run: (payload: TestWorkflowPayload) =>
+    Effect.gen(function* () {
+      const value = yield* Workflow.step("produce-value", Effect.succeed(payload.value));
+
+      yield* Workflow.sleep("pause", "1 hour");
+
+      return { value };
+    }),
+});
 
 export default Worker.make(Layer.empty, {
   fetch: Effect.sync(() => new Response("effect-cf test fixture", { status: 200 })),

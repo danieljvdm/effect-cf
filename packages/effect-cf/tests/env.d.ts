@@ -8,6 +8,8 @@ declare global {
       TEST_COUNTER_DO?: DurableObjectNamespace<TestWorkerModule.TestCounterDurableObject>;
       TEST_KV?: KVNamespace;
       TEST_DB?: D1Database;
+      TEST_SECRET?: SecretsStoreSecret;
+      TEST_WORKFLOW?: Workflow<TestWorkerModule.TestWorkflowPayload>;
       TEST_BUCKET?: R2Bucket;
       EMAIL?: SendEmail;
       HYPERDRIVE?: Hyperdrive;

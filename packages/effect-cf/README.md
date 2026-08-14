@@ -99,6 +99,57 @@ it.effect("acknowledges a job", () =>
 );
 ```
 
+Scheduled handlers and Pages Functions use the same lifecycle behavior: their
+Effects complete only after the event's `waitUntil` work has settled. Pages
+tests must configure the `ASSETS` binding required by Pool Workers.
+
+```ts
+it.effect("runs the cron handler", () =>
+  PoolWorkers.scheduled(worker.scheduled, {
+    cron: "30 * * * *",
+    scheduledTime: new Date("2030-01-01T00:00:00Z"),
+  }),
+);
+
+it.effect("runs a Pages Function", () =>
+  Effect.gen(function* () {
+    const response = yield* PoolWorkers.pages(onRequest, {
+      request: new Request("https://pages.test/users/dan"),
+      params: { user: "dan" },
+      data: { authenticated: true },
+    });
+
+    assert.strictEqual(response.status, 200);
+  }),
+);
+```
+
+`runInDurableObject` carries the test's Effect context into the Durable Object
+I/O context and provides the same wrapped `DurableObjectState` service used by
+production handlers. Typed failures remain in the Effect error channel.
+
+```ts
+it.effect("seeds a Durable Object", () =>
+  Effect.gen(function* () {
+    const stub = env.COUNTERS.getByName("home");
+
+    yield* PoolWorkers.runInDurableObject(stub, () =>
+      Effect.gen(function* () {
+        const state = yield* DurableObjectState;
+        yield* state.storage.put("count", 41);
+      }),
+    );
+
+    assert.strictEqual(yield* PoolWorkers.runDurableObjectAlarm(stub), true);
+  }),
+);
+```
+
+The subpath also exposes Effects for `listDurableObjectIds`, `reset`,
+`abortAllDurableObjects`, and `applyD1Migrations`. `adminSecretsStore` returns
+an Effect-native admin client whose `create`, `update`, `duplicate`, `delete`,
+`list`, and `get` operations are Effects.
+
 `withExecutionContext` supports lower-level tests that need a native
 `ExecutionContext`. `introspectWorkflow` and `introspectWorkflowInstance`
 acquire the pool's disposable Workflow introspectors in the current Effect

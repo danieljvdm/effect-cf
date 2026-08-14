@@ -79,6 +79,12 @@ const TestCounterLive = TestCounterDefinition.make(Layer.empty, {
 
     return Response.json({ count: next });
   }),
+  alarm: () =>
+    Effect.gen(function* () {
+      const state = yield* DurableObjectState.DurableObjectState;
+
+      yield* state.storage.put("count", { count: 0 });
+    }),
 });
 
 export class TestCounterDurableObject extends TestCounterLive {}

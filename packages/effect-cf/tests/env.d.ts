@@ -9,6 +9,7 @@ declare global {
       TEST_KV?: KVNamespace;
       TEST_DB?: D1Database;
       TEST_SECRET?: SecretsStoreSecret;
+      TEST_WORKFLOW?: Workflow<TestWorkerModule.TestWorkflowPayload>;
       TEST_BUCKET?: R2Bucket;
       EMAIL?: SendEmail;
       HYPERDRIVE?: Hyperdrive;

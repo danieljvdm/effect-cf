@@ -13,6 +13,8 @@ import {
   createMessageBatch,
   createPagesEventContext,
   createScheduledController,
+  evictAllDurableObjects as evictAllDurableObjectsPromise,
+  evictDurableObject as evictDurableObjectPromise,
   getQueueResult,
   introspectWorkflow as introspectWorkflowPromise,
   introspectWorkflowInstance as introspectWorkflowInstancePromise,
@@ -22,7 +24,7 @@ import {
   runInDurableObject as runInDurableObjectPromise,
   waitOnExecutionContext,
 } from "cloudflare:test";
-import { ConfigProvider, Effect, Layer } from "effect";
+import { ConfigProvider, Effect, Exit, Layer } from "effect";
 
 import {
   DurableObjectState,
@@ -30,6 +32,7 @@ import {
   fromDurableObjectState,
 } from "./DurableObjectState";
 import { WorkerConfig, WorkerEnvironment, type WorkerEnv } from "./Environment";
+import type { WorkflowInstanceStatusName } from "./WorkflowBinding";
 
 const currentEnv: WorkerEnv = env;
 
@@ -237,6 +240,19 @@ export const runDurableObjectAlarm = Effect.fn("effect-cf/vitest/runDurableObjec
   return yield* Effect.promise(() => runDurableObjectAlarmPromise(stub));
 });
 
+/** Options controlling how Durable Object eviction handles WebSockets. */
+export interface DurableObjectEvictionOptions {
+  readonly webSockets?: "close" | "hibernate";
+}
+
+/** Gracefully evicts one running Durable Object while preserving durable storage. */
+export const evictDurableObject = Effect.fn("effect-cf/vitest/evictDurableObject")(function* (
+  stub: globalThis.DurableObjectStub<RpcDurableObject>,
+  options?: DurableObjectEvictionOptions,
+) {
+  yield* Effect.promise(() => evictDurableObjectPromise(stub, options));
+});
+
 /** Lists all IDs created in a Durable Object namespace. */
 export const listDurableObjectIds = Effect.fn("effect-cf/vitest/listDurableObjectIds")(function* <
   Object extends RpcDurableObject | undefined,
@@ -253,6 +269,13 @@ export const reset = Effect.fn("effect-cf/vitest/reset")(function* () {
 export const abortAllDurableObjects = Effect.fn("effect-cf/vitest/abortAllDurableObjects")(
   function* () {
     yield* Effect.promise(abortAllDurableObjectsPromise);
+  },
+);
+
+/** Gracefully evicts all running Durable Objects while preserving durable storage. */
+export const evictAllDurableObjects = Effect.fn("effect-cf/vitest/evictAllDurableObjects")(
+  function* (options?: DurableObjectEvictionOptions) {
+    yield* Effect.promise(() => evictAllDurableObjectsPromise(options));
   },
 );
 
@@ -315,25 +338,163 @@ export const adminSecretsStore = Effect.fn("effect-cf/vitest/adminSecretsStore")
 });
 
 type WorkflowBinding = Parameters<typeof introspectWorkflowPromise>[0];
+type NativeWorkflowIntrospector = Awaited<ReturnType<typeof introspectWorkflowPromise>>;
+type NativeWorkflowInstanceIntrospector = Awaited<
+  ReturnType<typeof introspectWorkflowInstancePromise>
+>;
+type NativeWorkflowInstanceModifier = Parameters<
+  Parameters<NativeWorkflowInstanceIntrospector["modify"]>[0]
+>[0];
+
+/** Identifies one occurrence of a Workflow step or sleep. */
+export interface WorkflowStepTarget {
+  readonly name: string;
+  readonly index?: number;
+}
+
+/** Event delivered to a mocked Workflow `waitForEvent` operation. */
+export interface WorkflowMockEvent {
+  readonly type: string;
+  readonly payload: unknown;
+}
+
+/** Effect-native Workflow behavior modifier. */
+export interface WorkflowInstanceModifier {
+  readonly disableSleeps: (steps?: ReadonlyArray<WorkflowStepTarget>) => Effect.Effect<void>;
+  readonly disableRetryDelays: (steps?: ReadonlyArray<WorkflowStepTarget>) => Effect.Effect<void>;
+  readonly mockStepResult: (step: WorkflowStepTarget, result: unknown) => Effect.Effect<void>;
+  readonly mockStepError: (
+    step: WorkflowStepTarget,
+    error: Error,
+    times?: number,
+  ) => Effect.Effect<void>;
+  readonly forceStepTimeout: (step: WorkflowStepTarget, times?: number) => Effect.Effect<void>;
+  readonly mockEvent: (event: WorkflowMockEvent) => Effect.Effect<void>;
+  readonly forceEventTimeout: (step: WorkflowStepTarget) => Effect.Effect<void>;
+}
+
+/** Effect-native introspector for one Workflow instance. */
+export interface WorkflowInstanceIntrospector {
+  readonly raw: NativeWorkflowInstanceIntrospector;
+  readonly modify: <A, E, R>(
+    use: (modifier: WorkflowInstanceModifier) => Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E, R>;
+  readonly waitForStepResult: (step: WorkflowStepTarget) => Effect.Effect<unknown>;
+  readonly waitForStatus: (status: WorkflowInstanceStatusName) => Effect.Effect<void>;
+  readonly getOutput: Effect.Effect<unknown>;
+  readonly getError: Effect.Effect<{ readonly name: string; readonly message: string }>;
+}
+
+/** Effect-native introspector for subsequently created Workflow instances. */
+export interface WorkflowIntrospector {
+  readonly raw: NativeWorkflowIntrospector;
+  readonly modifyAll: <A, E, R>(
+    use: (modifier: WorkflowInstanceModifier) => Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E, R>;
+  readonly get: Effect.Effect<ReadonlyArray<WorkflowInstanceIntrospector>>;
+}
+
+const wrapWorkflowModifier = (
+  modifier: NativeWorkflowInstanceModifier,
+): WorkflowInstanceModifier => ({
+  disableSleeps: (steps) =>
+    Effect.promise(() => modifier.disableSleeps(steps === undefined ? undefined : [...steps])),
+  disableRetryDelays: (steps) =>
+    Effect.promise(() => modifier.disableRetryDelays(steps === undefined ? undefined : [...steps])),
+  mockStepResult: (step, result) => Effect.promise(() => modifier.mockStepResult(step, result)),
+  mockStepError: (step, error, times) =>
+    Effect.promise(() => modifier.mockStepError(step, error, times)),
+  forceStepTimeout: (step, times) =>
+    Effect.promise(async () => {
+      await modifier.forceStepTimeout(step, times);
+    }),
+  mockEvent: (event) => Effect.promise(() => modifier.mockEvent(event)),
+  forceEventTimeout: (step) => Effect.promise(() => modifier.forceEventTimeout(step)),
+});
+
+const runWorkflowModifier = Effect.fnUntraced(function* <A, E, R>(
+  register: (use: (modifier: NativeWorkflowInstanceModifier) => Promise<void>) => Promise<unknown>,
+  use: (modifier: WorkflowInstanceModifier) => Effect.Effect<A, E, R>,
+): Effect.fn.Return<A, E, R> {
+  const context = yield* Effect.context<R>();
+  const exit = yield* Effect.promise(async () => {
+    let callbackExit: Exit.Exit<A, E> | undefined;
+
+    try {
+      await register(async (modifier) => {
+        callbackExit = await Effect.runPromiseExitWith(context)(
+          use(wrapWorkflowModifier(modifier)),
+        );
+
+        if (Exit.isFailure(callbackExit)) {
+          throw callbackExit;
+        }
+      });
+    } catch (cause) {
+      if (callbackExit !== undefined && Exit.isFailure(callbackExit)) {
+        return callbackExit;
+      }
+
+      throw cause;
+    }
+
+    if (callbackExit === undefined) {
+      throw new Error("Pool Workers did not invoke the Workflow modifier callback");
+    }
+
+    return callbackExit;
+  });
+
+  return yield* exit;
+});
+
+const wrapWorkflowInstanceIntrospector = (
+  introspector: NativeWorkflowInstanceIntrospector,
+): WorkflowInstanceIntrospector => ({
+  raw: introspector,
+  modify: (use) => runWorkflowModifier((callback) => introspector.modify(callback), use),
+  waitForStepResult: (step) => Effect.promise(() => introspector.waitForStepResult(step)),
+  waitForStatus: (status) => Effect.promise(() => introspector.waitForStatus(status)),
+  getOutput: Effect.promise(() => introspector.getOutput()),
+  getError: Effect.promise(() => introspector.getError()),
+});
+
+const wrapWorkflowIntrospector = (
+  introspector: NativeWorkflowIntrospector,
+): WorkflowIntrospector => ({
+  raw: introspector,
+  modifyAll: (use) => runWorkflowModifier((callback) => introspector.modifyAll(callback), use),
+  get: Effect.promise(async () => {
+    const instances = await introspector.get();
+
+    return instances.map(wrapWorkflowInstanceIntrospector);
+  }),
+});
 
 /**
- * Acquires a Workflow introspector that is disposed when the surrounding
- * Effect scope closes.
+ * Acquires an Effect-native Workflow introspector that is disposed when the
+ * surrounding Effect scope closes.
  */
 export const introspectWorkflow = Effect.fn("effect-cf/vitest/introspectWorkflow")(function* (
   workflow: WorkflowBinding,
 ) {
-  return yield* Effect.acquireDisposable(Effect.promise(() => introspectWorkflowPromise(workflow)));
+  const introspector = yield* Effect.acquireDisposable(
+    Effect.promise(() => introspectWorkflowPromise(workflow)),
+  );
+
+  return wrapWorkflowIntrospector(introspector);
 });
 
 /**
- * Acquires a Workflow instance introspector that is disposed when the
- * surrounding Effect scope closes.
+ * Acquires an Effect-native Workflow instance introspector that is disposed
+ * when the surrounding Effect scope closes.
  */
 export const introspectWorkflowInstance = Effect.fn("effect-cf/vitest/introspectWorkflowInstance")(
   function* (workflow: WorkflowBinding, instanceId: string) {
-    return yield* Effect.acquireDisposable(
+    const introspector = yield* Effect.acquireDisposable(
       Effect.promise(() => introspectWorkflowInstancePromise(workflow, instanceId)),
     );
+
+    return wrapWorkflowInstanceIntrospector(introspector);
   },
 );

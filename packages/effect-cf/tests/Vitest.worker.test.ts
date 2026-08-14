@@ -191,7 +191,99 @@ it.effect("runs Effects inside Durable Objects with caller services and state", 
     ).pipe(Effect.flip);
 
     assert.strictEqual(error, "expected failure");
+
+    const instanceId = yield* PoolWorkers.runInDurableObject(stub, (instance) =>
+      Effect.succeed(instance.instanceId),
+    );
+
+    yield* PoolWorkers.evictDurableObject(stub);
+
+    const evictedInstanceId = yield* PoolWorkers.runInDurableObject(stub, (instance) =>
+      Effect.succeed(instance.instanceId),
+    );
+    const persistedCount = yield* PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      state.storage.get<{ count: number }>("count"),
+    );
+
+    assert.notStrictEqual(evictedInstanceId, instanceId);
+    assert.deepStrictEqual(persistedCount, { count: 0 });
+
+    yield* PoolWorkers.evictAllDurableObjects();
+
+    const globallyEvictedInstanceId = yield* PoolWorkers.runInDurableObject(stub, (instance) =>
+      Effect.succeed(instance.instanceId),
+    );
+
+    assert.notStrictEqual(globallyEvictedInstanceId, evictedInstanceId);
   }).pipe(Effect.provideService(TestValue, "from-test-context"));
+});
+
+it.effect("introspects one Workflow instance with Effect-native modifiers", () => {
+  const workflow = env.TEST_WORKFLOW as Workflow<import("./worker-fixture").TestWorkflowPayload>;
+  const instanceId = crypto.randomUUID();
+
+  return Effect.scoped(
+    Effect.gen(function* () {
+      const introspector = yield* PoolWorkers.introspectWorkflowInstance(workflow, instanceId);
+      const modified = yield* introspector.modify((modifier) =>
+        Effect.gen(function* () {
+          assert.strictEqual(yield* TestValue, "from-workflow-context");
+
+          yield* modifier.disableSleeps([{ name: "pause" }]);
+          yield* modifier.disableRetryDelays([{ name: "produce-value" }]);
+          yield* modifier.mockStepResult({ name: "produce-value" }, "mocked");
+
+          return "configured";
+        }),
+      );
+
+      assert.strictEqual(modified, "configured");
+
+      yield* Effect.promise(() =>
+        workflow.create({ id: instanceId, params: { value: "original" } }),
+      );
+      yield* introspector.waitForStatus("complete");
+
+      assert.strictEqual(
+        yield* introspector.waitForStepResult({ name: "produce-value" }),
+        "mocked",
+      );
+      assert.deepStrictEqual(yield* introspector.getOutput, { value: "mocked" });
+
+      const error = yield* introspector
+        .modify(() => Effect.fail("expected failure"))
+        .pipe(Effect.flip);
+
+      assert.strictEqual(error, "expected failure");
+    }).pipe(Effect.provideService(TestValue, "from-workflow-context")),
+  );
+});
+
+it.effect("introspects subsequently created Workflows with Effects", () => {
+  const workflow = env.TEST_WORKFLOW as Workflow<import("./worker-fixture").TestWorkflowPayload>;
+
+  return Effect.scoped(
+    Effect.gen(function* () {
+      const introspector = yield* PoolWorkers.introspectWorkflow(workflow);
+
+      yield* introspector.modifyAll((modifier) => modifier.disableSleeps());
+      yield* Effect.promise(() =>
+        workflow.create({ params: { value: "from-workflow-introspector" } }),
+      );
+
+      const instances = yield* introspector.get;
+
+      assert.strictEqual(instances.length, 1);
+
+      const [instance] = instances;
+
+      assert.isDefined(instance);
+      yield* instance.waitForStatus("complete");
+      assert.deepStrictEqual(yield* instance.getOutput, {
+        value: "from-workflow-introspector",
+      });
+    }),
+  );
 });
 
 it.effect("applies D1 migrations as an Effect", () =>

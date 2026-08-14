@@ -25,6 +25,13 @@
       "secret_name": "effect-cf-test-secret",
     },
   ],
+  "workflows": [
+    {
+      "name": "effect-cf-test-workflow",
+      "binding": "TEST_WORKFLOW",
+      "class_name": "TestWorkflowEntrypoint",
+    },
+  ],
   "durable_objects": {
     "bindings": [
       {

@@ -1,5 +1,17 @@
 # effect-cf
 
+## 0.25.0
+
+### Minor Changes
+
+- [#85](https://github.com/danieljvdm/effect-cf/pull/85) [`2c46f9d`](https://github.com/danieljvdm/effect-cf/commit/2c46f9d64774edb7994e3879313077e2a203777a) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Remove compatibility APIs. Use `WorkerConfig.providerLayer`,
+  `AnalyticsEngine.writeDataPoint` or `writeDataPoints`, and
+  `DurableObjectAlarm.processDue`; Email sends now require structured builder messages.
+
+### Patch Changes
+
+- [#87](https://github.com/danieljvdm/effect-cf/pull/87) [`6d6fdfa`](https://github.com/danieljvdm/effect-cf/commit/6d6fdfaaf4812bb46c49b49aad3fd2ca50af76f6) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Allow compatible Effect releases in package development dependency ranges.
+
 ## 0.24.0
 
 ### Minor Changes

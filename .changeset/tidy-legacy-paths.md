@@ -1,5 +1,5 @@
 ---
-"effect-cf": major
+"effect-cf": minor
 ---
 
 Remove compatibility APIs. Use `WorkerConfig.providerLayer`,

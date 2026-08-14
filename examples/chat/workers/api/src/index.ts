@@ -23,7 +23,7 @@ const ApiConfig = Config.all({
 });
 
 const layer = Layer.mergeAll(
-  WorkerConfig.layer,
+  WorkerConfig.providerLayer,
   AnalyticsWorker.layer({ binding: "ANALYTICS_WORKER" }),
   ChatRoom.layer({ binding: "CHAT_ROOM" }),
   UserCache.layer({ binding: "USER_CACHE" }),

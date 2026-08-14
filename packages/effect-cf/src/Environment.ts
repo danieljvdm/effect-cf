@@ -41,7 +41,7 @@ type ScalarConfigKey = Extract<
  * const program = Effect.gen(function* () {
  *   const config = yield* AppConfig;
  *   // ...
- * }).pipe(Effect.provide(WorkerConfig.layer));
+ * }).pipe(Effect.provide(WorkerConfig.providerLayer));
  * ```
  *
  * Keys are constrained to scalar `Cloudflare.Env` properties (`string`,
@@ -108,9 +108,6 @@ export namespace WorkerConfig {
    */
   export const providerLayer: Layer.Layer<never, never, WorkerEnvironment> =
     ConfigProvider.layer(provider);
-
-  /** Alias for `providerLayer` for concise use in worker layers. */
-  export const layer: Layer.Layer<never, never, WorkerEnvironment> = providerLayer;
 
   /** Build a `ConfigProvider` layer with a custom `env` conversion function. */
   export const layerWith = (

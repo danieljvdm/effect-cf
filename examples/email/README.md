@@ -87,7 +87,3 @@ and let Cloudflare reject the message instead.
 Total message size is exposed as `Email.sendLimits.maxMessageBytes` but is not
 checked locally, because the encoded MIME size is only known once Cloudflare
 composes the message. Oversized messages fail with `E_CONTENT_TOO_LARGE`.
-
-Raw RFC 5322 messages built with `EmailMessage` from `cloudflare:email` are
-passed to the binding untouched, so existing Email Routing code keeps working
-alongside structured sends.

@@ -4,18 +4,18 @@ Effect-native Cloudflare primitives for Workers, Durable Objects, Containers, bi
 
 ## Install
 
-`effect-cf` currently targets Effect 4 beta.
+`effect-cf` targets Effect `4.0.0-beta.105`.
 
 ```bash
-bun add effect-cf "effect@^4.0.0-beta.65"
+bun add effect-cf "effect@4.0.0-beta.105"
 ```
 
 ```bash
-pnpm add effect-cf "effect@^4.0.0-beta.65"
+pnpm add effect-cf "effect@4.0.0-beta.105"
 ```
 
 ```bash
-npm install effect-cf "effect@^4.0.0-beta.65"
+npm install effect-cf "effect@4.0.0-beta.105"
 ```
 
 ## Goal
@@ -491,7 +491,7 @@ Onboard the sending domain under **Compute > Email Service > Email Sending**, th
 }
 ```
 
-Messages that violate a documented limit fail with `EmailValidationError` carrying every violation, without calling the binding. Use `layer({ binding, send: { validate: false } })` to skip validation and let Cloudflare reject the message instead. Raw RFC 5322 `EmailMessage` values are always passed through untouched, so the legacy `cloudflare:email` API keeps working.
+Messages that violate a documented limit fail with `EmailValidationError` carrying every violation, without calling the binding. Use `layer({ binding, send: { validate: false } })` to skip validation and let Cloudflare reject the message instead.
 
 Cloudflare's total message size limit is exposed as `Email.sendLimits.maxMessageBytes` but is not enforced, because the encoded MIME size is only known once Cloudflare composes the message. Oversized messages fail at the binding with `E_CONTENT_TOO_LARGE`.
 
@@ -511,7 +511,6 @@ export const RequestAnalyticsLayer = RequestAnalytics.layer({
   binding: "REQUEST_ANALYTICS",
   write: {
     onInvalid: "error",
-    batchSize: 100,
   },
 });
 
@@ -526,7 +525,7 @@ export const recordPageView = (request: Request) =>
       doubles: [1],
     });
 
-    yield* analytics.writeBatch(
+    yield* analytics.writeDataPoints(
       [
         {
           indexes: [url.hostname],

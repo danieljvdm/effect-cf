@@ -6,11 +6,11 @@ import { Binding, Email, WorkerEnvironment } from "../src/index";
 class TestEmail extends Email.Tag<TestEmail>()("test/TestEmail") {}
 
 interface SendCall {
-  readonly message: Email.EmailSendInput;
+  readonly message: Email.EmailMessageBuilder;
 }
 
 interface FakeEmailOptions {
-  readonly send?: (message: Email.EmailSendInput) => Promise<Email.EmailSendResult>;
+  readonly send?: (message: Email.EmailMessageBuilder) => Promise<Email.EmailSendResult>;
 }
 
 const makeFakeEmail = (options: FakeEmailOptions = {}) =>
@@ -57,34 +57,6 @@ const emailLayer = (email: SendEmail) =>
           text: "Welcome to Example",
           headers: { "X-Template": "welcome" },
         });
-      }),
-    );
-  });
-}
-
-{
-  const calls: Array<SendCall> = [];
-  const email = makeFakeEmail({
-    send: async (message) => {
-      calls.push({ message });
-
-      return { messageId: "email-message-1" };
-    },
-  });
-
-  layer(emailLayer(email))("Send Email native messages", (it) => {
-    it.effect("wraps native EmailMessage sends", () =>
-      Effect.gen(function* () {
-        const email = yield* TestEmail;
-        const message = {
-          from: "team@example.com",
-          to: "user@example.com",
-        } satisfies Email.EmailMessage;
-
-        const result = yield* email.send(message);
-
-        assert.strictEqual(result.messageId, "email-message-1");
-        assert.deepStrictEqual(calls[0]?.message, message);
       }),
     );
   });

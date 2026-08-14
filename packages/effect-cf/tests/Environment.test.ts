@@ -40,7 +40,7 @@ test("WorkerConfig.providerFromEnv preserves empty strings when requested", asyn
   expect(result).toBe("");
 });
 
-test("WorkerConfig.layer reads scalar config from WorkerEnvironment", async () => {
+test("WorkerConfig.providerLayer reads scalar config from WorkerEnvironment", async () => {
   const env = {
     DATABASE_URL: "postgres://example.test/app",
     SECRET_VALUE: "secret",
@@ -59,7 +59,7 @@ test("WorkerConfig.layer reads scalar config from WorkerEnvironment", async () =
         databaseUrl: Redacted.value(config.databaseUrl),
       };
     }).pipe(
-      Effect.provide(WorkerConfig.layer),
+      Effect.provide(WorkerConfig.providerLayer),
       Effect.provide(Layer.succeed(WorkerEnvironment, env)),
       Effect.orDie,
     ),

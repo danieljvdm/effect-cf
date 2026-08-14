@@ -1,7 +1,6 @@
 import type {
   EmailAddress as CloudflareEmailAddress,
   EmailAttachment as CloudflareEmailAttachment,
-  EmailMessage as CloudflareEmailMessage,
   EmailSendResult as CloudflareEmailSendResult,
   SendEmail as CloudflareSendEmail,
 } from "@cloudflare/workers-types";
@@ -110,9 +109,7 @@ export interface EmailDefinition {
 
 export type EmailAddress = CloudflareEmailAddress;
 export type EmailAttachment = CloudflareEmailAttachment;
-export type EmailMessage = CloudflareEmailMessage;
 export type EmailMessageBuilder = Parameters<CloudflareSendEmail["send"]>[0];
-export type EmailSendInput = EmailMessage | EmailMessageBuilder;
 export type EmailSendResult = CloudflareEmailSendResult;
 export type EmailBinding = CloudflareSendEmail;
 export type EmailRecipients = string | EmailAddress | ReadonlyArray<string | EmailAddress>;
@@ -124,14 +121,11 @@ export interface EmailSendOptions {
 }
 
 interface EmailRuntimeBinding {
-  readonly send: (message: EmailSendInput) => Promise<EmailSendResult>;
+  readonly send: (message: EmailMessageBuilder) => Promise<EmailSendResult>;
 }
 
 export interface EmailClient {
-  readonly send: {
-    (message: EmailMessage): Effect.Effect<EmailSendResult, EmailSendError>;
-    (builder: EmailMessageBuilder): Effect.Effect<EmailSendResult, EmailSendError>;
-  };
+  readonly send: (message: EmailMessageBuilder) => Effect.Effect<EmailSendResult, EmailSendError>;
   readonly rawUnsafe: Effect.Effect<EmailBinding>;
   readonly definition: EmailDefinition;
 }
@@ -199,29 +193,6 @@ const tryEmailPromise = <A>(
     try: evaluate,
     catch: (cause) => emailError(binding, operation, cause),
   });
-
-const builderFields = [
-  "subject",
-  "html",
-  "text",
-  "cc",
-  "bcc",
-  "replyTo",
-  "attachments",
-  "headers",
-] as const;
-
-/**
- * Distinguishes structured Email Sending messages from raw MIME `EmailMessage`
- * values, which only carry envelope `from` and `to` addresses.
- */
-export const isEmailMessageBuilder = (message: EmailSendInput): message is EmailMessageBuilder => {
-  if (typeof message !== "object" || message === null) {
-    return false;
-  }
-
-  return builderFields.some((field) => Reflect.get(message, field) !== undefined);
-};
 
 const byteLength = (value: string) => textEncoder.encode(value).byteLength;
 
@@ -469,13 +440,13 @@ export const makeClient =
   (email: EmailBinding): EmailClient => {
     const runtime = email as EmailRuntimeBinding;
     const validate = options?.validate ?? true;
-    const send = Effect.fn("Email.send")(function* (message: EmailSendInput) {
-      if (validate && isEmailMessageBuilder(message)) {
+    const send = Effect.fn("Email.send")(function* (message: EmailMessageBuilder) {
+      if (validate) {
         yield* validateSendInput(definition.binding, "send", message);
       }
 
       return yield* tryEmailPromise(definition.binding, "send", () => runtime.send(message));
-    }) as EmailClient["send"];
+    });
 
     return {
       definition,

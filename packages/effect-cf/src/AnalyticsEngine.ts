@@ -132,15 +132,7 @@ export interface AnalyticsEngineWriteOptions {
   readonly onInvalid?: AnalyticsEngineInvalidWritePolicy;
 }
 
-export interface AnalyticsEngineWriteBatchOptions extends AnalyticsEngineWriteOptions {
-  /**
-   * Maximum points per native batch call. Values are clamped to Cloudflare's
-   * per-invocation limit.
-   */
-  readonly batchSize?: number;
-}
-
-export type AnalyticsEngineWritePolicy = AnalyticsEngineWriteBatchOptions;
+export type AnalyticsEngineWritePolicy = AnalyticsEngineWriteOptions;
 
 export interface AnalyticsEngineQueryResult<Row = AnalyticsEngineQueryRow> {
   readonly meta: ReadonlyArray<AnalyticsEngineQueryColumn>;
@@ -167,17 +159,9 @@ export interface AnalyticsEngineClient {
     dataPoint?: AnalyticsEngineDataPoint,
     options?: AnalyticsEngineWriteOptions,
   ) => Effect.Effect<void, AnalyticsEngineWriteError>;
-  readonly write: (
-    dataPoint?: AnalyticsEngineDataPoint,
-    options?: AnalyticsEngineWriteOptions,
-  ) => Effect.Effect<void, AnalyticsEngineWriteError>;
   readonly writeDataPoints: (
     dataPoints: ReadonlyArray<AnalyticsEngineDataPoint>,
-    options?: AnalyticsEngineWriteBatchOptions,
-  ) => Effect.Effect<void, AnalyticsEngineWriteError>;
-  readonly writeBatch: (
-    dataPoints: ReadonlyArray<AnalyticsEngineDataPoint>,
-    options?: AnalyticsEngineWriteBatchOptions,
+    options?: AnalyticsEngineWriteOptions,
   ) => Effect.Effect<void, AnalyticsEngineWriteError>;
   readonly rawUnsafe: Effect.Effect<AnalyticsEngineBinding>;
   readonly definition: AnalyticsEngineDefinition;
@@ -320,20 +304,11 @@ const tryAnalyticsEngineSync = <A>(
     catch: (cause) => analyticsEngineError(binding, operation, cause),
   });
 
-const normalizeBatchSize = (batchSize: number | undefined) => {
-  if (batchSize === undefined || !Number.isFinite(batchSize) || batchSize <= 0) {
-    return writeLimits.maxDataPointsPerInvocation;
-  }
-
-  return Math.min(Math.floor(batchSize), writeLimits.maxDataPointsPerInvocation);
-};
-
 const resolveWritePolicy = (
   defaults: AnalyticsEngineWritePolicy | undefined,
-  options: AnalyticsEngineWriteBatchOptions | undefined,
+  options: AnalyticsEngineWriteOptions | undefined,
 ) => ({
   onInvalid: options?.onInvalid ?? defaults?.onInvalid ?? "error",
-  batchSize: normalizeBatchSize(options?.batchSize ?? defaults?.batchSize),
 });
 
 const fieldPath = (prefix: string, field: string) => (prefix === "" ? field : `${prefix}.${field}`);
@@ -544,23 +519,10 @@ const writeChunks = (
   operation: string,
   dataset: AnalyticsEngineBinding,
   dataPoints: ReadonlyArray<AnalyticsEngineDataPoint>,
-  batchSize: number,
 ): Effect.Effect<void, AnalyticsEngineOperationError> =>
   Effect.gen(function* () {
-    const writeDataPoints = Reflect.get(dataset, "writeDataPoints");
-
-    for (let index = 0; index < dataPoints.length; index += batchSize) {
-      const chunk = dataPoints.slice(index, index + batchSize);
-
-      if (typeof writeDataPoints === "function") {
-        yield* tryAnalyticsEngineSync(binding, operation, () =>
-          writeDataPoints.call(dataset, chunk),
-        );
-      } else {
-        for (const point of chunk) {
-          yield* tryAnalyticsEngineSync(binding, operation, () => dataset.writeDataPoint(point));
-        }
-      }
+    for (const point of dataPoints) {
+      yield* tryAnalyticsEngineSync(binding, operation, () => dataset.writeDataPoint(point));
     }
   });
 
@@ -747,7 +709,7 @@ export const makeClient =
 
     const writeDataPoints = Effect.fn("AnalyticsEngine.writeDataPoints")(function* (
       dataPoints: ReadonlyArray<AnalyticsEngineDataPoint>,
-      options?: AnalyticsEngineWriteBatchOptions,
+      options?: AnalyticsEngineWriteOptions,
     ) {
       const policy = resolveWritePolicy(defaults, options);
       const validPoints = yield* validateDataPoints(
@@ -757,21 +719,13 @@ export const makeClient =
         policy,
       );
 
-      yield* writeChunks(
-        definition.binding,
-        "writeDataPoints",
-        dataset,
-        validPoints,
-        policy.batchSize,
-      );
+      yield* writeChunks(definition.binding, "writeDataPoints", dataset, validPoints);
     });
 
     return {
       definition,
       writeDataPoint,
-      write: writeDataPoint,
       writeDataPoints,
-      writeBatch: writeDataPoints,
       rawUnsafe: Effect.succeed(dataset),
     };
   };

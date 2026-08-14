@@ -252,11 +252,6 @@ const emailProgram = Effect.gen(function* () {
     ],
   });
 
-  yield* email.send({
-    from: "team@example.com",
-    to: "user@example.com",
-  } satisfies Email.EmailMessage);
-
   // @ts-expect-error builder messages require a subject.
   yield* email.send({
     from: "team@example.com",
@@ -324,7 +319,7 @@ export class RequestAnalytics extends AnalyticsEngine.Tag<RequestAnalytics>()("R
 
 export const RequestAnalyticsLayer = RequestAnalytics.layer({
   binding: "REQUEST_ANALYTICS",
-  write: { onInvalid: "drop", batchSize: 100 },
+  write: { onInvalid: "drop" },
 });
 
 export class RequestAnalyticsQuery extends AnalyticsEngine.QueryTag<RequestAnalyticsQuery>()(
@@ -367,7 +362,7 @@ const analyticsEngineProgram = Effect.gen(function* () {
   ).toEqualTypeOf<Effect.Effect<void, AnalyticsEngine.AnalyticsEngineWriteError>>();
 
   expectTypeOf(
-    analytics.write({ indexes: ["example.com"], blobs: ["/pricing"], doubles: [1] }),
+    analytics.writeDataPoint({ indexes: ["example.com"], blobs: ["/pricing"], doubles: [1] }),
   ).toEqualTypeOf<Effect.Effect<void, AnalyticsEngine.AnalyticsEngineWriteError>>();
 
   expectTypeOf(
@@ -376,12 +371,12 @@ const analyticsEngineProgram = Effect.gen(function* () {
         { indexes: ["example.com"], blobs: ["/pricing"], doubles: [1] },
         { indexes: ["example.com"], blobs: ["/home"], doubles: [1] },
       ],
-      { onInvalid: "error", batchSize: 2 },
+      { onInvalid: "error" },
     ),
   ).toEqualTypeOf<Effect.Effect<void, AnalyticsEngine.AnalyticsEngineWriteError>>();
 
   expectTypeOf(
-    analytics.writeBatch([{ indexes: ["example.com"], blobs: ["/pricing"], doubles: [1] }]),
+    analytics.writeDataPoints([{ indexes: ["example.com"], blobs: ["/pricing"], doubles: [1] }]),
   ).toEqualTypeOf<Effect.Effect<void, AnalyticsEngine.AnalyticsEngineWriteError>>();
 
   expectTypeOf(analytics.rawUnsafe).toEqualTypeOf<

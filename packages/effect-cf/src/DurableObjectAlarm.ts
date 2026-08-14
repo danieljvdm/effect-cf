@@ -457,8 +457,6 @@ export const processDue = <R = never, E = never, OnFailureR = never, OnFailureE 
     return yield* durableObjectAlarm.processDueAlarms(handle, options);
   });
 
-export const process = processDue;
-
 export type AlarmPayloadSchema = S.Codec<any, any, never, never>;
 
 export type AlarmFailurePolicy = "ordered" | "retry" | "skip-and-advance-repeat";

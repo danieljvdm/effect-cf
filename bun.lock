@@ -289,7 +289,7 @@
     },
     "packages/effect-cf": {
       "name": "effect-cf",
-      "version": "0.23.1",
+      "version": "0.24.0",
       "devDependencies": {
         "@cloudflare/containers": "catalog:",
         "@cloudflare/vitest-pool-workers": "catalog:",
@@ -306,10 +306,10 @@
       "peerDependencies": {
         "@cloudflare/vitest-pool-workers": "^0.21.3",
         "@cloudflare/workers-types": "^4.20260611.1",
-        "@effect/sql-d1": "4.0.0-beta.105",
-        "@effect/sql-pg": "4.0.0-beta.105",
-        "@effect/sql-sqlite-do": "4.0.0-beta.105",
-        "effect": "4.0.0-beta.105",
+        "@effect/sql-d1": "^4.0.0-beta.105",
+        "@effect/sql-pg": "^4.0.0-beta.105",
+        "@effect/sql-sqlite-do": "^4.0.0-beta.105",
+        "effect": "^4.0.0-beta.105",
       },
       "optionalPeers": [
         "@cloudflare/vitest-pool-workers",

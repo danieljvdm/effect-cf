@@ -1,5 +1,13 @@
 # effect-cf
 
+## 0.24.0
+
+### Minor Changes
+
+- [#82](https://github.com/danieljvdm/effect-cf/pull/82) [`877f289`](https://github.com/danieljvdm/effect-cf/commit/877f289a19ff15bdca1e7f9320aee3be1cffb3de) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add an `effect-cf/vitest` entrypoint with Effect-native Workers environment, fetch, queue, execution-context, and scoped Workflow testing helpers for Cloudflare's Vitest Workers pool.
+
+- [#84](https://github.com/danieljvdm/effect-cf/pull/84) [`9bbd554`](https://github.com/danieljvdm/effect-cf/commit/9bbd5543ca463447d0eb6a08d6441c7b72086b40) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add Effect-native scheduled and Pages runners, Durable Object test controls, D1 migrations, binding reset helpers, Workflow introspectors, and a Secrets Store admin client to `effect-cf/vitest`. The optional `@cloudflare/vitest-pool-workers` peer dependency now requires `^0.21.3`.
+
 ## 0.23.1
 
 ### Patch Changes

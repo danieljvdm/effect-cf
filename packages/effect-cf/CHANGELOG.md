@@ -1,5 +1,12 @@
 # effect-cf
 
+## 0.25.1
+
+### Patch Changes
+
+- [#88](https://github.com/danieljvdm/effect-cf/pull/88) [`18941d4`](https://github.com/danieljvdm/effect-cf/commit/18941d418c296c39a36d909516eb22a74778c8e7) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Upgrade to Effect 4 beta.107 and use its explicit environment-record config provider for
+  Cloudflare variables.
+
 ## 0.25.0
 
 ### Minor Changes

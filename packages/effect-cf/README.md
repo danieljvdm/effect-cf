@@ -4,18 +4,18 @@ Effect-native Cloudflare primitives for Workers, Durable Objects, Containers, bi
 
 ## Install
 
-`effect-cf` targets Effect `4.0.0-beta.105`.
+`effect-cf` targets Effect `^4.0.0-beta.105`.
 
 ```bash
-bun add effect-cf "effect@4.0.0-beta.105"
+bun add effect-cf "effect@^4.0.0-beta.105"
 ```
 
 ```bash
-pnpm add effect-cf "effect@4.0.0-beta.105"
+pnpm add effect-cf "effect@^4.0.0-beta.105"
 ```
 
 ```bash
-npm install effect-cf "effect@4.0.0-beta.105"
+npm install effect-cf "effect@^4.0.0-beta.105"
 ```
 
 ## Goal

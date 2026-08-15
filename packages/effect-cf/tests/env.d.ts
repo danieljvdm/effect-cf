@@ -1,5 +1,6 @@
 /// <reference types="@cloudflare/vitest-pool-workers/types" />
 
+import type * as EffectArtifacts from "../src/Artifacts";
 import type * as TestWorkerModule from "./worker-fixture";
 
 declare global {
@@ -16,6 +17,7 @@ declare global {
       IMAGES?: ImagesBinding;
       AI?: Ai;
       REQUEST_ANALYTICS?: AnalyticsEngineDataset;
+      ARTIFACTS?: EffectArtifacts.ArtifactsBinding;
       RECIPE_VECTORS?: Vectorize;
       MYBROWSER?: unknown;
       DATABASE_URL?: string;

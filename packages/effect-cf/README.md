@@ -1,6 +1,6 @@
 # effect-cf
 
-Effect-native Cloudflare primitives for Workers, Durable Objects, Containers, bindings, Cache, KV, D1, Queues, Email, Analytics Engine, Workflows, and Durable Object storage.
+Effect-native Cloudflare primitives for Workers, Durable Objects, Containers, bindings, Cache, KV, D1, R2, Artifacts, Queues, Email, Analytics Engine, Workflows, and Durable Object storage.
 
 ## Install
 
@@ -35,6 +35,7 @@ Runtime creation belongs at Cloudflare entrypoints, not inside binding helpers.
 - `Kv` - typed KV namespace helper
 - `D1` - typed D1 database binding helper with an `@effect/sql-d1` backed SQL layer
 - `R2` - typed R2 bucket binding helper with Effect-wrapped object and multipart operations
+- `Artifacts` - typed Cloudflare Artifacts namespace and repository helpers, including repository lifecycle, tokens, and Git object reads
 - `Hyperdrive` - typed Hyperdrive binding helper for connection strings and optional Postgres SQL integration
 - `Images` - typed Cloudflare Images binding helper with transformation APIs and optional hosted image operations
 - `Email` - typed Cloudflare Email Service binding helper for `send_email` bindings, with limit validation and typed error codes
@@ -398,6 +399,50 @@ export const readArtifact = (key: string) =>
 ```
 
 Use `createMultipartUpload(...)` or `resumeMultipartUpload(...)` for large objects; returned upload handles wrap `uploadPart`, `complete`, and `abort` in Effect.
+
+## Artifacts Example
+
+Artifacts tags expose every namespace and repository-handle binding operation as an Effect. Configure the binding under Wrangler's `artifacts` field:
+
+```jsonc
+{
+  "artifacts": [
+    {
+      "binding": "ARTIFACTS",
+      "namespace": "default",
+      // Optional in local development:
+      "remote": true,
+    },
+  ],
+}
+```
+
+```ts
+import { Effect } from "effect";
+import { Artifacts } from "effect-cf";
+
+class Repositories extends Artifacts.Tag<Repositories>()("Repositories") {}
+
+export const RepositoriesLayer = Repositories.layer({ binding: "ARTIFACTS" });
+
+export const createWorkspace = Effect.gen(function* () {
+  const artifacts = yield* Repositories;
+  const created = yield* artifacts.create("agent-workspace", {
+    description: "Versioned agent workspace",
+    setDefaultBranch: "main",
+  });
+  const repo = yield* artifacts.get(created.name);
+  const readToken = yield* repo.createToken("read", 3600);
+
+  return {
+    remote: created.remote,
+    token: readToken.plaintext,
+    history: yield* repo.log({ ref: "main", limit: 10 }),
+  };
+});
+```
+
+`create`, `import`, and `fork` return an initial plaintext token. Treat returned tokens as secrets and avoid logging or persisting them unnecessarily.
 
 ## Hyperdrive Example
 

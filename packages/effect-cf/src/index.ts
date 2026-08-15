@@ -1,5 +1,6 @@
 export * as AiGateway from "./AiGateway";
 export * as AnalyticsEngine from "./AnalyticsEngine";
+export * as Artifacts from "./Artifacts";
 export * as Binding from "./Binding";
 export * as BrowserRendering from "./BrowserRendering";
 export * as Cache from "./Cache";

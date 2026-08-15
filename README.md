@@ -2,6 +2,8 @@
 
 Effect-native primitives for Cloudflare Workers, Durable Objects, bindings, Cache, KV, Email, Analytics Engine, and Durable Object storage.
 
+This monorepo also publishes [`effect-webtransport`](packages/effect-webtransport), a platform-generic Effect WebTransport library (sessions, streams, datagrams, `Socket`/RPC adapters, and WebSocket fallback selection). `effect-cf`'s `WebTransport` module documents the Cloudflare boundary: Workers cannot accept inbound WebTransport sessions today, so the module exposes typed capabilities and decoded HTTP/3 request metadata instead.
+
 ## Install
 
 `effect-cf` targets Effect `^4.0.0-beta.105`.

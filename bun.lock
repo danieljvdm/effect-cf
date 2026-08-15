@@ -212,6 +212,7 @@
         "@effect-cf/todo-rpc-ws-domain": "workspace:*",
         "@vitejs/plugin-react": "^6.0.1",
         "effect": "catalog:",
+        "effect-webtransport": "workspace:*",
         "react": "^19.2.5",
         "react-dom": "^19.2.5",
       },
@@ -289,7 +290,7 @@
     },
     "packages/effect-cf": {
       "name": "effect-cf",
-      "version": "0.24.0",
+      "version": "0.25.1",
       "devDependencies": {
         "@cloudflare/containers": "catalog:",
         "@cloudflare/vitest-pool-workers": "catalog:",
@@ -316,6 +317,19 @@
         "@cloudflare/workers-types",
         "@effect/sql-pg",
       ],
+    },
+    "packages/effect-webtransport": {
+      "name": "effect-webtransport",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@effect/vitest": "catalog:",
+        "effect": "catalog:",
+        "vite-plus": "catalog:",
+        "vitest": "catalog:",
+      },
+      "peerDependencies": {
+        "effect": "^4.0.0-beta.107 <4.0.0-rc.0",
+      },
     },
     "tools/effect-cf-repo": {
       "name": "@effect-cf/repo",
@@ -963,6 +977,8 @@
     "effect": ["effect@4.0.0-beta.107", "", { "dependencies": { "@standard-schema/spec": "^1.1.0", "fast-check": "^4.9.0", "kubernetes-types": "^1.30.0", "msgpackr": "^2.0.4", "uuid": "^14.0.1" } }, "sha512-OoBAv8eF+yanc+C6xhgEUnWeXUSHA6ynnscYqpkAY9GSnzZWystsIjBowVqCkLpHGlnRtdIqYT3wHwpOY6JDnQ=="],
 
     "effect-cf": ["effect-cf@workspace:packages/effect-cf"],
+
+    "effect-webtransport": ["effect-webtransport@workspace:packages/effect-webtransport"],
 
     "enquirer": ["enquirer@2.4.1", "", { "dependencies": { "ansi-colors": "^4.1.1", "strip-ansi": "^6.0.1" } }, "sha512-rRqJg/6gd538VHvR3PSrdRBb/1Vy2YfzHqzvbhGIQpDRKIa4FgV/54b5Q1xYSxOOwKvjXweS26E0Q+nAMwp2pQ=="],
 

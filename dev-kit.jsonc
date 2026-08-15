@@ -19,12 +19,12 @@
       "quality": {
         "workflow": {
           "enabled": true,
-          // Examples and the worker test fixtures resolve `effect-cf` through
-          // its published `dist` entrypoints.
+          // Examples and the worker test fixtures resolve the publishable
+          // packages through their published `dist` entrypoints.
           "beforeChecks": [
             {
-              "name": "Build effect-cf",
-              "run": ["vp run effect-cf#build"],
+              "name": "Build packages",
+              "run": ["vp run effect-cf#build", "vp run effect-webtransport#build"],
             },
           ],
         },

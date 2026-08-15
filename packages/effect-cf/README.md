@@ -42,6 +42,7 @@ Runtime creation belongs at Cloudflare entrypoints, not inside binding helpers.
 - `Queue` - typed Queue producer/consumer tags plus client and error types
 - `Workflow` - typed Workflow entrypoints, steps, starter clients, and instance types
 - `Rpc` - Cloudflare RPC type helpers and scoped disposal utilities
+- `WebTransport` - truthful WebTransport/HTTP-3 boundary: typed runtime capabilities and decoded inbound protocol metadata
 - `WorkerConfig` - Effect `Config` helpers backed by Cloudflare `env`
 - `effect-cf/vitest` - Effect-native runners and scoped test helpers for Cloudflare's Vitest Workers pool
 
@@ -697,6 +698,36 @@ if (Worker.isWebSocketUpgrade(request)) {
 ```
 
 Use `DurableObjectRpcWebSocket.layer(...)` for Effect RPC-over-WebSocket transports. It owns protocol parsing and RPC client bookkeeping; use `DurableWebSocket` for general application sockets, rooms, presence, and broadcast flows.
+
+## WebTransport and HTTP/3
+
+Cloudflare Workers cannot accept inbound WebTransport sessions today: workerd contains no QUIC/HTTP-3 stack, there is no `WebSocketPair`-style session API, and the maintainers state the feature "is not currently on our priority list" ([cloudflare/workerd#6451](https://github.com/cloudflare/workerd/issues/6451)). Inbound HTTP/3 is a zone-level setting — the edge terminates QUIC and the Worker still receives an ordinary `fetch` Request. Durable Object hibernatable WebSockets remain the only bidirectional push channel into Worker code.
+
+The `WebTransport` module gives that boundary a typed shape rather than pretending otherwise:
+
+```ts
+import { Effect, Option } from "effect";
+import { WebTransport } from "effect-cf";
+
+const fetch = Effect.fn("fetch")(function* (request: Request) {
+  // Decoded metadata about the browser→edge hop (HTTP/3 does not reach you).
+  const transport = WebTransport.inboundTransport(request);
+  const viaHttp3 = Option.match(transport, {
+    onNone: () => false,
+    onSome: WebTransport.isHttp3,
+  });
+
+  // Feature-detected runtime capabilities: { inboundSessions: false, ... }.
+  const capabilities = yield* WebTransport.capabilities;
+
+  // Explicit typed boundary where a future inbound session API would slot in.
+  // yield* WebTransport.inboundSessionsUnsupported;
+
+  return Response.json({ viaHttp3, capabilities });
+});
+```
+
+For clients that prefer WebTransport where it exists and fall back to Cloudflare-supported WebSockets, see the companion [`effect-webtransport`](../effect-webtransport) package's `Fallback` module — `examples/todo-rpc-ws` wires it up end to end.
 
 ## License
 

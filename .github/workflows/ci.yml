@@ -49,7 +49,8 @@ jobs:
           needs_changeset=false
           has_changeset=false
           while IFS= read -r file; do
-            if [[ "$file" == packages/effect-cf/src/* || "$file" == packages/effect-cf/package.json ]]; then
+            if [[ "$file" == packages/effect-cf/src/* || "$file" == packages/effect-cf/package.json ||
+                  "$file" == packages/effect-webtransport/src/* || "$file" == packages/effect-webtransport/package.json ]]; then
               needs_changeset=true
             fi
             if [[ "$file" == .changeset/*.md && "$file" != ".changeset/README.md" ]]; then
@@ -58,7 +59,7 @@ jobs:
           done <<<"$changed_files"
 
           if [[ "$needs_changeset" == true && "$has_changeset" != true ]]; then
-            echo "PRs that change packages/effect-cf/src or its package.json must include a changeset under .changeset/."
+            echo "PRs that change a publishable package's src or package.json must include a changeset under .changeset/."
             echo "Internal-only PRs need no changeset. Never add an empty changeset: a pending changeset on main silently blocks the next release publish."
             exit 1
           fi

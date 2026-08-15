@@ -121,6 +121,12 @@ export interface DurableObjectOptions<
    * the Durable Object's single managed runtime boundary.
    */
   readonly alarms?: Effect.Effect<unknown, unknown, HandlerContext<RRuntime | REvent>>;
+  /**
+   * Optional raw alarm handler.
+   *
+   * After every invocation, the configured OTLP flusher is scheduled through
+   * `DurableObjectState.waitUntil`, including when the handler fails.
+   */
   readonly alarm?: (
     alarmInfo?: globalThis.AlarmInvocationInfo,
   ) => Effect.Effect<void, unknown, HandlerContext<RRuntime | REvent>>;
@@ -204,22 +210,16 @@ export const make = <
     alarm(alarmInfo?: globalThis.AlarmInvocationInfo): Promise<void> | void {
       const logicalAlarms = options.alarms?.pipe(Effect.asVoid);
       const rawAlarm = options.alarm?.(alarmInfo);
+      const alarmEffect =
+        logicalAlarms !== undefined && rawAlarm !== undefined
+          ? Effect.gen(function* () {
+              yield* logicalAlarms;
+              yield* rawAlarm;
+            })
+          : (logicalAlarms ?? rawAlarm);
 
-      if (logicalAlarms !== undefined && rawAlarm !== undefined) {
-        return this[RunSymbol](
-          Effect.gen(function* () {
-            yield* logicalAlarms;
-            yield* rawAlarm;
-          }),
-        );
-      }
-
-      if (logicalAlarms !== undefined) {
-        return this[RunSymbol](logicalAlarms);
-      }
-
-      if (rawAlarm !== undefined) {
-        return this[RunSymbol](rawAlarm);
+      if (alarmEffect !== undefined) {
+        return this[RunSymbol](alarmEffect.pipe(Effect.onExit(() => scheduleTelemetryFlush)));
       }
     }
 

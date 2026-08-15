@@ -3,8 +3,9 @@
  *
  * Every layer exposes {@link OtlpExporter.Flusher}, which drains buffered
  * telemetry on demand. Cloudflare isolates can freeze before the periodic
- * export interval fires. Effect-backed Worker fetch handlers and Worker or
- * Durable Object native RPC handlers schedule this flusher automatically.
+ * export interval fires. Effect-backed Worker fetch handlers, Worker or
+ * Durable Object native RPC handlers, and Durable Object alarm handlers
+ * schedule this flusher automatically.
  * Flush or scheduling failures do not replace the handler outcome and emit
  * only bounded framework diagnostics without attaching the foreign cause.
  * Other entrypoint lifecycles can flush explicitly or hand the flush to their

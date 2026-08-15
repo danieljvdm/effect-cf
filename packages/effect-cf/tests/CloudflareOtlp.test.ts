@@ -5,7 +5,7 @@ import { HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { OtlpExporter } from "effect/unstable/observability";
 import process from "node:process";
 
-import { CloudflareOtlp, Worker, WorkerDefinition } from "../src/index";
+import { CloudflareOtlp, DurableObject, Worker, WorkerDefinition } from "../src/index";
 
 const TelemetryWorker = WorkerDefinition.make("CloudflareOtlpTelemetryWorker", {
   run: WorkerDefinition.method({ success: S.String }),
@@ -28,6 +28,20 @@ const makeWaitUntilExecutionContext = () => {
   } as unknown as globalThis.ExecutionContext;
 
   return { executionContext, waitUntilPromises };
+};
+
+const makeWaitUntilDurableObjectState = () => {
+  const waitUntilPromises: Array<Promise<unknown>> = [];
+  const state = {
+    id: { toString: () => "durable-object:telemetry-test" },
+    storage: {},
+    waitUntil: (promise: Promise<unknown>) => {
+      waitUntilPromises.push(promise);
+    },
+    blockConcurrencyWhile: async <A>(callback: () => Promise<A>) => callback(),
+  } as unknown as globalThis.DurableObjectState;
+
+  return { state, waitUntilPromises };
 };
 
 const processEnv = process.env;
@@ -281,6 +295,46 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
       expect(request.body).toContain("effect-cf-rpc-test");
       expect(request.body).toContain("test.rpc");
       expect(request.body).toContain("native-rpc");
+    }),
+  );
+
+  it.effect("exports Durable Object alarm spans through waitUntil", () =>
+    Effect.gen(function* () {
+      const collector = yield* OtlpCollector;
+      const DurableObjectClass = DurableObject.make(Layer.empty, {
+        eventLayer: CloudflareOtlp.layerDurableObject({
+          signals: ["traces"],
+          serialization: "json",
+          resource: { serviceName: "effect-cf-alarm-test" },
+          className: "TelemetryAlarm",
+        }),
+        alarm: () =>
+          Effect.void.pipe(
+            Effect.withSpan("test.alarm", { attributes: { transport: "durable-object-alarm" } }),
+          ),
+      });
+      const { state, waitUntilPromises } = makeWaitUntilDurableObjectState();
+      const durableObject = new DurableObjectClass(
+        state,
+        makeEnv({
+          OTEL_TRACES_EXPORTER: "otlp",
+          OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.endpoint}/v1/traces`,
+          OTEL_BSP_SCHEDULE_DELAY: "600000",
+        }),
+      );
+
+      yield* Effect.promise(() => Promise.resolve(durableObject.alarm?.()));
+
+      expect(waitUntilPromises).toHaveLength(1);
+
+      yield* Effect.promise(() => Promise.all(waitUntilPromises));
+
+      const request = yield* collector.nextRequest;
+
+      expect(request.path).toBe("/v1/traces");
+      expect(request.body).toContain("effect-cf-alarm-test");
+      expect(request.body).toContain("test.alarm");
+      expect(request.body).toContain("durable-object-alarm");
     }),
   );
 
@@ -608,6 +662,36 @@ mapleSmokeTest("CloudflareOtlp exports WorkerDefinition RPC spans to Maple local
     const result = yield* Effect.promise(() => worker.run());
 
     expect(result).toBe("result");
+    expect(waitUntilPromises).toHaveLength(1);
+
+    yield* Effect.promise(() => Promise.all(waitUntilPromises));
+  }),
+);
+
+mapleSmokeTest("CloudflareOtlp exports Durable Object alarm spans to Maple local OTLP", () =>
+  Effect.gen(function* () {
+    const DurableObjectClass = DurableObject.make(Layer.empty, {
+      eventLayer: CloudflareOtlp.layerDurableObject({
+        signals: ["traces"],
+        resource: { serviceName: "effect-cf-maple-alarm-smoke" },
+        className: "MapleTelemetryAlarm",
+      }),
+      alarm: () => Effect.void.pipe(Effect.withSpan("maple.alarm")),
+    });
+    const { state, waitUntilPromises } = makeWaitUntilDurableObjectState();
+    const durableObject = new DurableObjectClass(
+      state,
+      makeEnv({
+        OTEL_TRACES_EXPORTER: "otlp",
+        OTEL_EXPORTER_OTLP_ENDPOINT:
+          processEnv?.OTEL_EXPORTER_OTLP_ENDPOINT ?? "http://127.0.0.1:4318",
+        OTEL_SERVICE_NAME: "effect-cf-maple-alarm-smoke",
+        OTEL_BSP_SCHEDULE_DELAY: "600000",
+      }),
+    );
+
+    yield* Effect.promise(() => Promise.resolve(durableObject.alarm?.()));
+
     expect(waitUntilPromises).toHaveLength(1);
 
     yield* Effect.promise(() => Promise.all(waitUntilPromises));

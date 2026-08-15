@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.25.3
+
+### Patch Changes
+
+- [#92](https://github.com/danieljvdm/effect-cf/pull/92) [`f174800`](https://github.com/danieljvdm/effect-cf/commit/f1748004e463d4e54c22e7c77fdea68ff8de7f82) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Flush configured OTLP telemetry after Durable Object alarm handlers, including failed alarms, so buffered telemetry is exported consistently with fetch and native RPC handlers.
+
 ## 0.25.2
 
 ### Patch Changes

@@ -7,6 +7,7 @@ import { DurableObjectState, fromDurableObjectState } from "./DurableObjectState
 import { fromWebSocket, type DurableWebSocket } from "./DurableObjectWebSocket";
 import * as Entrypoint from "./internal/Entrypoint";
 import * as Runtime from "./internal/Runtime";
+import * as Telemetry from "./internal/Telemetry";
 
 const reservedMethodNames = new Set<string>([
   "constructor",
@@ -28,6 +29,11 @@ type RunOptions = {
 };
 
 const RunSymbol = Symbol.for("effect-cf/DurableObject/run");
+
+const scheduleTelemetryFlush: Effect.Effect<void, never, DurableObjectState> =
+  Telemetry.scheduleTelemetryFlush((flush) =>
+    Effect.flatMap(DurableObjectState, (state) => state.waitUntil(flush)),
+  );
 
 /**
  * Effect type for Durable Object lifecycle and RPC handlers.
@@ -98,7 +104,12 @@ export interface DurableObjectOptions<
    * Object storage if work must happen only once per id.
    */
   readonly initialize?: Effect.Effect<void, unknown, HandlerContext<RRuntime>>;
-  /** Optional RPC methods exposed as Durable Object instance methods. */
+  /**
+   * Optional RPC methods exposed as Durable Object instance methods.
+   *
+   * After every invocation, the configured OTLP flusher is scheduled through
+   * `DurableObjectState.waitUntil`, including when the handler fails.
+   */
   readonly rpc?: Rpc;
   /** Optional fetch handler for HTTP/WebSocket requests. */
   readonly fetch?: Effect.Effect<Response, unknown, FetchContext<RRuntime | REvent>>;
@@ -244,6 +255,7 @@ export const make = <
     options.rpc,
     reservedMethodNames,
     (self, effect) => self[RunSymbol](effect),
+    () => scheduleTelemetryFlush,
   );
 
   return Entrypoint.assumeEntrypointClass<DurableObjectClass<Rpc, ROut | REvent>>(

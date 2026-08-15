@@ -3,8 +3,12 @@
  *
  * Every layer exposes {@link OtlpExporter.Flusher}, which drains buffered
  * telemetry on demand. Cloudflare isolates can freeze before the periodic
- * export interval fires, so flush explicitly before returning a response, or
- * hand the flush to `ctx.waitUntil`:
+ * export interval fires. Effect-backed Worker fetch handlers and Worker or
+ * Durable Object native RPC handlers schedule this flusher automatically.
+ * Flush or scheduling failures do not replace the handler outcome and emit
+ * only bounded framework diagnostics without attaching the foreign cause.
+ * Other entrypoint lifecycles can flush explicitly or hand the flush to their
+ * `waitUntil` mechanism:
  *
  * ```ts
  * const flusher = yield* OtlpExporter.Flusher;

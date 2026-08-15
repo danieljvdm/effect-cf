@@ -19,6 +19,7 @@ export const defineEntrypointRpcMethods = <Self>(
   rpc: EntrypointRpc | undefined,
   reservedMethodNames: ReadonlySet<string>,
   run: (self: Self, effect: Effect.Effect<any, any, any>) => Promise<unknown>,
+  onExit?: (self: Self) => Effect.Effect<void, never, any>,
 ): void => {
   const methods = rpc ?? {};
 
@@ -28,11 +29,13 @@ export const defineEntrypointRpcMethods = <Self>(
     Object.defineProperty(prototype, key, {
       enumerable: true,
       value(this: Self, ...args: AnyArgs) {
+        const handler = Effect.suspend(() => method(...args)).pipe(
+          Effect.mapError(RpcDefinition.encodeWireError),
+        );
+
         return run(
           this,
-          Effect.suspend(() => method(...args)).pipe(
-            Effect.mapError(RpcDefinition.encodeWireError),
-          ),
+          onExit === undefined ? handler : handler.pipe(Effect.onExit(() => onExit(this))),
         );
       },
     });

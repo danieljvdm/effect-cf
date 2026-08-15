@@ -1,21 +1,13 @@
 import { WorkerEntrypoint as CloudflareWorkerEntrypoint } from "cloudflare:workers";
-import {
-  type Cause,
-  Context,
-  Effect,
-  Layer,
-  type ManagedRuntime,
-  Option,
-  type Scope,
-} from "effect";
+import { type Cause, Context, Effect, Layer, type ManagedRuntime, type Scope } from "effect";
 import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import { OtlpExporter } from "effect/unstable/observability";
 
 import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 import { fromMessage, fromMessageBatch, type QueueHandler } from "./Queue";
 import type * as RpcDefinition from "./RpcDefinition";
 import * as Entrypoint from "./internal/Entrypoint";
 import * as Runtime from "./internal/Runtime";
+import * as Telemetry from "./internal/Telemetry";
 import { fromExecutionContext } from "./internal/WorkerContext";
 
 /**
@@ -208,7 +200,12 @@ export interface WorkerOptions<
   >;
   /** Queue consumer handler invoked per message batch. */
   readonly queue?: QueueHandler<RRuntime | REvent>;
-  /** Optional RPC methods exposed as class instance methods. */
+  /**
+   * Optional RPC methods exposed as class instance methods.
+   *
+   * After every invocation, the configured OTLP flusher is scheduled through
+   * `WorkerContext.waitUntil`, including when the handler fails.
+   */
   readonly rpc?: Rpc;
 }
 
@@ -292,14 +289,10 @@ const isWorkerOptions = <ROut, REvent, EventLayerError, Rpc extends WorkerRpc<RO
  * (including streaming bodies still being consumed). It is a no-op when the
  * context does not contain an `OtlpExporter.Flusher`.
  */
-const scheduleTelemetryFlush: Effect.Effect<void, never, WorkerContext> = Effect.flatMap(
-  Effect.serviceOption(OtlpExporter.Flusher),
-  Option.match({
-    onNone: () => Effect.void,
-    onSome: (flusher) =>
-      Effect.flatMap(WorkerContext, (workerContext) => workerContext.waitUntil(flusher.flush)),
-  }),
-);
+const scheduleTelemetryFlush: Effect.Effect<void, never, WorkerContext> =
+  Telemetry.scheduleTelemetryFlush((flush) =>
+    Effect.flatMap(WorkerContext, (workerContext) => workerContext.waitUntil(flush)),
+  );
 
 /**
  * Creates a Cloudflare worker class backed by a single managed Effect runtime.
@@ -424,6 +417,7 @@ export function make<
     options.rpc,
     reservedMethodNames,
     (self, effect) => self[RunSymbol](effect),
+    () => scheduleTelemetryFlush,
   );
 
   return Entrypoint.assumeEntrypointClass<WorkerClass<Rpc, ROut | REvent>>(EffectWorker);

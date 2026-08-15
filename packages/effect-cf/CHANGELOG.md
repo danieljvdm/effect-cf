@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.25.2
+
+### Patch Changes
+
+- [#90](https://github.com/danieljvdm/effect-cf/pull/90) [`56c1b2d`](https://github.com/danieljvdm/effect-cf/commit/56c1b2dfa30cbcc2336f28a8d8f7a48032f565df) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Flush configured OTLP telemetry after native Worker and Durable Object RPC handlers complete. Flush and scheduling failures keep the handler outcome unchanged and emit only bounded framework diagnostics.
+
 ## 0.25.1
 
 ### Patch Changes

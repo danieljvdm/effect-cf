@@ -1,7 +1,7 @@
 {
   "version": 1,
   "toolVersion": "0.14.0",
-  "manifestDigest": "sha256:59daada55c27a503f1cb45ca64547c793a69152ec8726847d760ee56588b641b",
+  "manifestDigest": "sha256:d632eef835e02b46deeb7866de3b2c711abc95f10c0214f1137d63a4c1521339",
   "setup": {
     "effectSource": {
       "packageName": "effect",
@@ -235,7 +235,7 @@
       "sourcePath": "templates/vite-plus/github-actions-check.yml",
       "mode": "copy",
       "kind": "file",
-      "digest": "sha256:27d06667f945e3457d4c028feea48fe828d43e31b4f042acfed2ed1448b3d1c5"
+      "digest": "sha256:84e1775fdcc0c7405abd0a6b59e72ffb08115f214805f6ab29863a838c5ced5e"
     },
     {
       "resourceId": "setup:agent-instructions",

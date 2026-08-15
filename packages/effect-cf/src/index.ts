@@ -28,6 +28,7 @@ export * as Rpc from "./Rpc";
 export * as RpcDefinition from "./RpcDefinition";
 export * as ServiceBinding from "./ServiceBinding";
 export * as Vectorize from "./Vectorize";
+export * as WebTransport from "./WebTransport";
 export * as Worker from "./Worker";
 export * as WorkerDefinition from "./WorkerDefinition";
 export * as WorkersAi from "./WorkersAi";

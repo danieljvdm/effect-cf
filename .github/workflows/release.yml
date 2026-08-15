@@ -37,6 +37,7 @@ jobs:
       # environment resolves a different TypeScript than Vite+ does, which
       # emits different declarations and needs an undeclared dependency.
       - run: vp run effect-cf#build
+      - run: vp run effect-webtransport#build
       - name: Upgrade npm for trusted publishing
         run: npm install -g npm@latest
       - name: Create GitHub App token

@@ -38,9 +38,10 @@ jobs:
       - name: Verify locked Dev Kit setup
         run: bun ./node_modules/@danieljvdm/dev-kit/bin/dev-kit.mjs apply --locked
 
-      - name: "Build effect-cf"
+      - name: "Build packages"
         run: |
           vp run effect-cf#build
+          vp run effect-webtransport#build
 
       - name: Check formatting
         run: vp fmt --check

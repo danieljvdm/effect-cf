@@ -14,6 +14,7 @@ const testExcludes = [
 // Effect-patched TypeScript-Go compiler.
 const typecheckPackages = [
   "packages/effect-cf",
+  "packages/effect-webtransport",
   "examples/chat/durable-objects/chat-room",
   "examples/chat/packages/contracts",
   "examples/chat/web",
@@ -100,9 +101,16 @@ export default defineConfig({
     cache: true,
     tasks: {
       ...recommended.run.tasks,
-      // Examples consume `effect-cf` through its published `dist` entrypoints.
-      check: { command: recommended.run.tasks.check, dependsOn: ["effect-cf#build"] },
-      typecheck: { ...recommended.run.tasks.typecheck, dependsOn: ["effect-cf#build"] },
+      // Examples consume the publishable packages through their published
+      // `dist` entrypoints.
+      check: {
+        command: recommended.run.tasks.check,
+        dependsOn: ["effect-cf#build", "effect-webtransport#build"],
+      },
+      typecheck: {
+        ...recommended.run.tasks.typecheck,
+        dependsOn: ["effect-cf#build", "effect-webtransport#build"],
+      },
     },
   },
 });

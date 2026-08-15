@@ -15,9 +15,9 @@
  * - There is no outbound WebTransport/QUIC/UDP client capability either;
  *   `cloudflare:sockets` `connect()` is TCP-only, and
  *   `@cloudflare/workers-types` contains no WebTransport types.
- * - Durable Objects' hibernatable WebSockets (`acceptWebSocket`,
- *   `webSocketMessage`, `webSocketClose`) remain the only bidirectional push
- *   channel into a Worker or Durable Object.
+ * - Workers and Durable Objects can accept inbound WebSocket connections;
+ *   Durable Objects additionally support hibernation (`acceptWebSocket`,
+ *   `webSocketMessage`, `webSocketClose`).
  *
  * Consequently a browser's WebTransport session can never reach Worker code:
  * clients should attempt WebTransport only against origins that actually

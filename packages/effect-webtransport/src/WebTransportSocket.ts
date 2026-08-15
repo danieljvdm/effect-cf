@@ -20,7 +20,7 @@
  * writable stream's backpressure, and each finished run closes its stream
  * with a FIN.
  */
-import { Context, Deferred, Effect, FiberSet, Latch, Layer, Scope } from "effect";
+import { Context, Deferred, Effect, Exit, FiberSet, Latch, Layer, Scope } from "effect";
 import { Socket } from "effect/unstable/socket";
 
 import * as WebTransport from "./WebTransport";
@@ -44,7 +44,7 @@ export interface MakeSocketOptions extends FromBidirectionalStreamOptions {
 /** Default close-code classifier: only a graceful end (code 1000) is clean. */
 export const defaultCloseCodeIsError = (code: number): boolean => code !== 1000;
 
-const toSocketOpenError = (error: WebTransport.WebTransportError): Socket.SocketError =>
+const toSocketOpenError = (error: unknown): Socket.SocketError =>
   new Socket.SocketError({
     reason: new Socket.SocketOpenError({ kind: "Unknown", cause: error }),
   });
@@ -83,17 +83,27 @@ export const fromBidirectionalStream = <R>(
       Effect.scopedWith(
         Effect.fnUntraced(function* (scope) {
           const stream = yield* Scope.provide(Effect.mapError(acquire, toSocketOpenError), scope);
-          const reader = stream.readable.getReader();
+          const reader = yield* Effect.try({
+            try: () => stream.readable.getReader(),
+            catch: toSocketOpenError,
+          });
 
           yield* Scope.addFinalizer(
             scope,
             Effect.promise(() => reader.cancel().then(swallow, swallow)),
           );
-          const writer = stream.writable.getWriter();
+          const writer = yield* Effect.try({
+            try: () => stream.writable.getWriter(),
+            catch: toSocketOpenError,
+          });
 
-          yield* Scope.addFinalizer(
-            scope,
-            Effect.promise(() => writer.close().then(swallow, swallow)),
+          yield* Scope.addFinalizerExit(scope, (exit) =>
+            Effect.promise(() =>
+              (Exit.isSuccess(exit) ? writer.close() : writer.abort(exit.cause)).then(
+                swallow,
+                swallow,
+              ),
+            ),
           );
           const fiberSet = yield* FiberSet.make<any, E | Socket.SocketError>().pipe(
             Scope.provide(scope),

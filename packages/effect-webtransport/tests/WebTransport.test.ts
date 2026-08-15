@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Exit, Fiber, Scope, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, Option, Scope, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
 import * as WebTransport from "../src/WebTransport";
@@ -243,6 +243,50 @@ describe("streams", () => {
     }),
   );
 
+  it.effect("writer aborts an in-flight write when interrupted", () =>
+    Effect.gen(function* () {
+      const writeStarted = yield* Deferred.make<void>();
+      const writeInterrupted = yield* Deferred.make<void>();
+      let releaseWrite = () => {};
+      let writeController!: WritableStreamDefaultController;
+      const writable = new WritableStream<Uint8Array>({
+        write(_chunk, controller) {
+          writeController = controller;
+          Effect.runSync(Deferred.succeed(writeStarted, undefined));
+
+          return new Promise<void>((resolve, reject) => {
+            releaseWrite = resolve;
+            controller.signal.addEventListener("abort", () => reject(controller.signal.reason), {
+              once: true,
+            });
+          });
+        },
+      });
+      const fiber = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const write = yield* WebTransport.writer(writable);
+
+          yield* write(bytes(1)).pipe(
+            Effect.onInterrupt(() => Deferred.succeed(writeInterrupted, undefined)),
+          );
+        }),
+      ).pipe(Effect.forkChild);
+
+      yield* Deferred.await(writeStarted);
+      const interruptFiber = yield* Fiber.interrupt(fiber).pipe(Effect.forkChild);
+
+      yield* Deferred.await(writeInterrupted);
+      for (let i = 0; i < 10 && !writeController.signal.aborted; i++) {
+        yield* Effect.yieldNow;
+      }
+      const wasAborted = writeController.signal.aborted;
+
+      releaseWrite();
+      yield* Fiber.join(interruptFiber);
+      assert.isTrue(wasAborted);
+    }),
+  );
+
   it.effect("incomingBidirectionalStreams surfaces peer-initiated streams", () =>
     Effect.gen(function* () {
       const fake = makeFakeWebTransport();
@@ -259,6 +303,38 @@ describe("streams", () => {
     }),
   );
 
+  it.effect("incomingBidirectionalStreams supports sequential consumers", () =>
+    Effect.gen(function* () {
+      const fake = makeFakeWebTransport();
+      const session = WebTransport.fromNative(fake.native);
+      const first = makeFakeBidi();
+      const second = makeFakeBidi();
+
+      fake.pushIncomingBidi(first.native);
+      fake.pushIncomingBidi(second.native);
+      const firstReceived = yield* Stream.runHead(session.incomingBidirectionalStreams);
+      const secondReceived = yield* Stream.runHead(session.incomingBidirectionalStreams);
+
+      assert.deepStrictEqual(firstReceived, Option.some(first.native));
+      assert.deepStrictEqual(secondReceived, Option.some(second.native));
+    }),
+  );
+
+  it.effect("incomingBidirectionalStreams maps a locked source to ReadError", () =>
+    Effect.gen(function* () {
+      const fake = makeFakeWebTransport();
+      const session = WebTransport.fromNative(fake.native);
+      const reader = fake.native.incomingBidirectionalStreams.getReader();
+      const error = yield* Stream.runHead(session.incomingBidirectionalStreams).pipe(
+        Effect.flip,
+        Effect.ensuring(Effect.sync(() => reader.releaseLock())),
+      );
+      const reason = expectReason(error, "ReadError");
+
+      assert.strictEqual((reason as WebTransport.ReadError).source, "incomingStreams");
+    }),
+  );
+
   it.effect("incomingUnidirectionalStreams fails typed when the platform lacks them", () =>
     Effect.gen(function* () {
       const fake = makeFakeWebTransport({ omitUnidirectional: true });
@@ -272,6 +348,38 @@ describe("streams", () => {
         (reason as WebTransport.UnsupportedError).feature,
         "UnidirectionalStreams",
       );
+    }),
+  );
+
+  it.effect("incomingUnidirectionalStreams supports sequential consumers", () =>
+    Effect.gen(function* () {
+      const fake = makeFakeWebTransport();
+      const session = WebTransport.fromNative(fake.native);
+      const first = new ReadableStream<Uint8Array>();
+      const second = new ReadableStream<Uint8Array>();
+
+      fake.pushIncomingUni(first);
+      fake.pushIncomingUni(second);
+      const firstReceived = yield* Stream.runHead(session.incomingUnidirectionalStreams);
+      const secondReceived = yield* Stream.runHead(session.incomingUnidirectionalStreams);
+
+      assert.deepStrictEqual(firstReceived, Option.some(first));
+      assert.deepStrictEqual(secondReceived, Option.some(second));
+    }),
+  );
+
+  it.effect("incomingUnidirectionalStreams maps a locked source to ReadError", () =>
+    Effect.gen(function* () {
+      const fake = makeFakeWebTransport();
+      const session = WebTransport.fromNative(fake.native);
+      const reader = fake.native.incomingUnidirectionalStreams!.getReader();
+      const error = yield* Stream.runHead(session.incomingUnidirectionalStreams).pipe(
+        Effect.flip,
+        Effect.ensuring(Effect.sync(() => reader.releaseLock())),
+      );
+      const reason = expectReason(error, "ReadError");
+
+      assert.strictEqual((reason as WebTransport.ReadError).source, "incomingStreams");
     }),
   );
 
@@ -298,6 +406,20 @@ describe("streams", () => {
       );
 
       expectReason(error, "ReadError");
+    }),
+  );
+
+  it.effect("readStream maps a locked readable to ReadError", () =>
+    Effect.gen(function* () {
+      const bidi = makeFakeBidi();
+      const reader = bidi.native.readable.getReader();
+      const error = yield* Stream.runCollect(WebTransport.readStream(bidi.native.readable)).pipe(
+        Effect.flip,
+        Effect.ensuring(Effect.sync(() => reader.releaseLock())),
+      );
+      const reason = expectReason(error, "ReadError");
+
+      assert.strictEqual((reason as WebTransport.ReadError).source, "stream");
     }),
   );
 });
@@ -372,6 +494,21 @@ describe("datagrams", () => {
       const collected = yield* Stream.runCollect(session.datagrams.stream);
 
       assert.deepStrictEqual(collected, [bytes(1), bytes(2)]);
+    }),
+  );
+
+  it.effect("stream maps a locked datagram source to ReadError", () =>
+    Effect.gen(function* () {
+      const fake = makeFakeWebTransport();
+      const session = WebTransport.fromNative(fake.native);
+      const reader = fake.datagrams!.native.readable.getReader();
+      const error = yield* Stream.runCollect(session.datagrams.stream).pipe(
+        Effect.flip,
+        Effect.ensuring(Effect.sync(() => reader.releaseLock())),
+      );
+      const reason = expectReason(error, "ReadError");
+
+      assert.strictEqual((reason as WebTransport.ReadError).source, "datagram");
     }),
   );
 

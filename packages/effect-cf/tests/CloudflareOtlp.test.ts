@@ -1,17 +1,34 @@
 import { NodeHttpServer } from "@effect/platform-node";
 import { expect, it, layer } from "@effect/vitest";
-import { ConfigProvider, Context, Effect, Layer, Queue } from "effect";
+import { ConfigProvider, Context, Effect, Layer, Queue, Schema as S } from "effect";
 import { HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { OtlpExporter } from "effect/unstable/observability";
 import process from "node:process";
 
-import { CloudflareOtlp, Worker } from "../src/index";
+import { CloudflareOtlp, Worker, WorkerDefinition } from "../src/index";
+
+const TelemetryWorker = WorkerDefinition.make("CloudflareOtlpTelemetryWorker", {
+  run: WorkerDefinition.method({ success: S.String }),
+});
 
 const makeExecutionContext = (): globalThis.ExecutionContext => ({
   props: undefined,
   waitUntil: () => undefined,
   passThroughOnException: () => undefined,
 });
+
+const makeWaitUntilExecutionContext = () => {
+  const waitUntilPromises: Array<Promise<unknown>> = [];
+  const executionContext = {
+    props: undefined,
+    waitUntil: (promise: Promise<unknown>) => {
+      waitUntilPromises.push(promise);
+    },
+    passThroughOnException: () => undefined,
+  } as unknown as globalThis.ExecutionContext;
+
+  return { executionContext, waitUntilPromises };
+};
 
 const processEnv = process.env;
 
@@ -221,6 +238,49 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
       expect(getStringAttribute(resourceAttributes, "cloudflare.worker.name")).toBe("api-worker");
       expect(spans.map((span) => getString(span, "name"))).toContain("test.fetch");
       expect(getStringAttribute(spanAttributes, "route")).toBe("/");
+    }),
+  );
+
+  it.effect("exports WorkerDefinition RPC spans through waitUntil", () =>
+    Effect.gen(function* () {
+      const collector = yield* OtlpCollector;
+      const WorkerClass = TelemetryWorker.make(Layer.empty, {
+        eventLayer: CloudflareOtlp.layerWorker({
+          signals: ["traces"],
+          serialization: "json",
+          resource: { serviceName: "effect-cf-rpc-test" },
+          workerName: "rpc-worker",
+        }),
+        rpc: {
+          run: () =>
+            Effect.succeed("result").pipe(
+              Effect.withSpan("test.rpc", { attributes: { transport: "native-rpc" } }),
+            ),
+        },
+      });
+      const { executionContext, waitUntilPromises } = makeWaitUntilExecutionContext();
+      const worker = new WorkerClass(
+        executionContext,
+        makeEnv({
+          OTEL_TRACES_EXPORTER: "otlp",
+          OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.endpoint}/v1/traces`,
+          OTEL_BSP_SCHEDULE_DELAY: "600000",
+        }),
+      );
+
+      const result = yield* Effect.promise(() => worker.run());
+
+      expect(result).toBe("result");
+      expect(waitUntilPromises).toHaveLength(1);
+
+      yield* Effect.promise(() => Promise.all(waitUntilPromises));
+
+      const request = yield* collector.nextRequest;
+
+      expect(request.path).toBe("/v1/traces");
+      expect(request.body).toContain("effect-cf-rpc-test");
+      expect(request.body).toContain("test.rpc");
+      expect(request.body).toContain("native-rpc");
     }),
   );
 
@@ -519,5 +579,37 @@ mapleSmokeTest("CloudflareOtlp exports Worker spans to Maple local OTLP", () =>
     );
 
     expect(response.status).toBe(200);
+  }),
+);
+
+mapleSmokeTest("CloudflareOtlp exports WorkerDefinition RPC spans to Maple local OTLP", () =>
+  Effect.gen(function* () {
+    const WorkerClass = TelemetryWorker.make(Layer.empty, {
+      eventLayer: CloudflareOtlp.layerWorker({
+        signals: ["traces"],
+        resource: { serviceName: "effect-cf-maple-rpc-smoke" },
+      }),
+      rpc: {
+        run: () => Effect.succeed("result").pipe(Effect.withSpan("maple.rpc")),
+      },
+    });
+    const { executionContext, waitUntilPromises } = makeWaitUntilExecutionContext();
+    const worker = new WorkerClass(
+      executionContext,
+      makeEnv({
+        OTEL_TRACES_EXPORTER: "otlp",
+        OTEL_EXPORTER_OTLP_ENDPOINT:
+          processEnv?.OTEL_EXPORTER_OTLP_ENDPOINT ?? "http://127.0.0.1:4318",
+        OTEL_SERVICE_NAME: "effect-cf-maple-rpc-smoke",
+        OTEL_BSP_SCHEDULE_DELAY: "600000",
+      }),
+    );
+
+    const result = yield* Effect.promise(() => worker.run());
+
+    expect(result).toBe("result");
+    expect(waitUntilPromises).toHaveLength(1);
+
+    yield* Effect.promise(() => Promise.all(waitUntilPromises));
   }),
 );

@@ -1,9 +1,27 @@
-import { Clock, Config, ConfigProvider, Context, Data, Effect, Layer, Stream } from "effect";
+import {
+  Cause,
+  Clock,
+  Config,
+  ConfigProvider,
+  Context,
+  Data,
+  Effect,
+  Layer,
+  Logger,
+  Schema as S,
+  Stream,
+} from "effect";
 import { HttpEffect, HttpServerResponse } from "effect/unstable/http";
 import { OtlpExporter } from "effect/unstable/observability";
 import { expect, test } from "vite-plus/test";
 
-import { DurableObject, Worker, WorkerConfig } from "../src/index";
+import {
+  DurableObject,
+  DurableObjectDefinition,
+  Worker,
+  WorkerConfig,
+  WorkerDefinition,
+} from "../src/index";
 
 class RenderValue extends Context.Service<RenderValue, string>()(
   "effect-cf/test/WorkerBoundary/RenderValue",
@@ -14,6 +32,15 @@ class EventValue extends Context.Service<EventValue, string>()(
 ) {}
 
 class BoomError extends Data.TaggedError("BoomError") {}
+
+const TelemetryWorker = WorkerDefinition.make("TelemetryWorker", {
+  succeed: WorkerDefinition.method({ success: S.String }),
+  fail: WorkerDefinition.method({ success: S.String }),
+});
+
+const TelemetryDurableObject = DurableObjectDefinition.make("TelemetryDurableObject", {
+  succeed: DurableObjectDefinition.method({ success: S.String }),
+});
 
 const makeExecutionContext = () =>
   ({
@@ -36,13 +63,52 @@ const makeWaitUntilContext = () => {
   return { executionContext, waitUntilPromises };
 };
 
-const makeDurableObjectState = () =>
+const makeDurableObjectState = (waitUntil: (promise: Promise<unknown>) => void = () => undefined) =>
   ({
     id: { toString: () => "durable-object:test" },
     storage: {},
-    waitUntil: () => undefined,
+    waitUntil,
     blockConcurrencyWhile: async <T>(callback: () => Promise<T>) => callback(),
   }) as unknown as globalThis.DurableObjectState;
+
+const makeFlusherProbeLayer = (flushes: Array<string>) =>
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const flusher = yield* OtlpExporter.Flusher;
+
+      yield* flusher.register(
+        Effect.sync(() => {
+          flushes.push("flush");
+        }),
+      );
+    }),
+  ).pipe(Layer.provideMerge(OtlpExporter.layerFlusher));
+
+interface CapturedLog {
+  readonly cause: Cause.Cause<unknown>;
+  readonly level: string;
+  readonly message: unknown;
+}
+
+const makeCapturedLoggerLayer = (logs: Array<CapturedLog>) =>
+  Logger.layer([
+    Logger.make(({ cause, logLevel, message }) => {
+      logs.push({ cause, level: logLevel, message });
+    }),
+  ]);
+
+const expectBoundedTelemetryLog = (
+  logs: Array<CapturedLog>,
+  message: string,
+  foreignFailure: Error,
+) => {
+  expect(logs).toHaveLength(1);
+  expect(logs[0]?.level).toBe("Error");
+  expect(logs[0]?.message).toEqual([message]);
+  expect(logs[0]?.message).not.toContain(foreignFailure);
+  expect(String(logs[0]?.message)).not.toContain(foreignFailure.message);
+  expect(logs[0]?.cause.reasons).toEqual([]);
+};
 
 test("Worker.makeFetchHandler returns an ExportedHandler-compatible fetch object", async () => {
   const handler = Worker.makeFetchHandler(Layer.empty, {
@@ -118,6 +184,147 @@ test("Worker.fetch flushes runtime OTLP telemetry through waitUntil", async () =
   const response = await worker.fetch(new Request("https://worker.test/"));
 
   expect(response.status).toBe(200);
+  expect(waitUntilPromises).toHaveLength(1);
+
+  await Promise.all(waitUntilPromises);
+
+  expect(flushes).toEqual(["flush"]);
+});
+
+test("WorkerDefinition RPC schedules event-scoped OTLP telemetry after success", async () => {
+  const flushes: Array<string> = [];
+  const Live = TelemetryWorker.make(Layer.empty, {
+    eventLayer: makeFlusherProbeLayer(flushes),
+    rpc: {
+      succeed: () => Effect.succeed("result"),
+      fail: () => Effect.succeed("unused"),
+    },
+  });
+  const { executionContext, waitUntilPromises } = makeWaitUntilContext();
+  const worker = new Live(executionContext, {} as Cloudflare.Env);
+
+  await expect(worker.succeed()).resolves.toBe("result");
+  expect(waitUntilPromises).toHaveLength(1);
+
+  await Promise.all(waitUntilPromises);
+
+  expect(flushes).toEqual(["flush"]);
+});
+
+test("WorkerDefinition RPC preserves handler failure and still schedules telemetry", async () => {
+  const flushes: Array<string> = [];
+  const handlerFailure = new BoomError();
+  const Live = TelemetryWorker.make(Layer.empty, {
+    eventLayer: makeFlusherProbeLayer(flushes),
+    rpc: {
+      succeed: () => Effect.succeed("unused"),
+      fail: () => Effect.fail(handlerFailure),
+    },
+  });
+  const { executionContext, waitUntilPromises } = makeWaitUntilContext();
+  const worker = new Live(executionContext, {} as Cloudflare.Env);
+
+  await expect(worker.fail()).rejects.toBe(handlerFailure);
+  expect(waitUntilPromises).toHaveLength(1);
+
+  await Promise.all(waitUntilPromises);
+
+  expect(flushes).toEqual(["flush"]);
+});
+
+test("WorkerDefinition RPC does not schedule background work without a flusher", async () => {
+  const Live = TelemetryWorker.make(Layer.empty, {
+    rpc: {
+      succeed: () => Effect.succeed("result"),
+      fail: () => Effect.succeed("unused"),
+    },
+  });
+  const { executionContext, waitUntilPromises } = makeWaitUntilContext();
+  const worker = new Live(executionContext, {} as Cloudflare.Env);
+
+  await expect(worker.succeed()).resolves.toBe("result");
+  expect(waitUntilPromises).toHaveLength(0);
+});
+
+test("WorkerDefinition RPC logs a bounded diagnostic for telemetry flush failure", async () => {
+  const secret = "Bearer sensitive-exporter-credential";
+  const flushFailure = Object.assign(new Error(`foreign exporter failure: ${secret}`), {
+    headers: { authorization: secret },
+    payload: { secret },
+  });
+  const logs: Array<CapturedLog> = [];
+  let flushAttempts = 0;
+  const failingFlusher = Layer.succeed(OtlpExporter.Flusher, {
+    flush: Effect.sync(() => {
+      flushAttempts++;
+      throw flushFailure;
+    }),
+    register: () => Effect.void,
+  });
+  const Live = TelemetryWorker.make(Layer.mergeAll(failingFlusher, makeCapturedLoggerLayer(logs)), {
+    rpc: {
+      succeed: () => Effect.succeed("result"),
+      fail: () => Effect.succeed("unused"),
+    },
+  });
+  const { executionContext, waitUntilPromises } = makeWaitUntilContext();
+  const worker = new Live(executionContext, {} as Cloudflare.Env);
+
+  await expect(worker.succeed()).resolves.toBe("result");
+  expect(waitUntilPromises).toHaveLength(1);
+  await expect(Promise.all(waitUntilPromises)).resolves.toEqual([undefined]);
+  expect(flushAttempts).toBe(1);
+  expectBoundedTelemetryLog(logs, "Telemetry flush failed", flushFailure);
+});
+
+test("WorkerDefinition RPC logs a bounded diagnostic for telemetry scheduling failure", async () => {
+  const handlerFailure = new BoomError();
+  const secret = "Bearer sensitive-platform-credential";
+  const schedulingFailure = Object.assign(new Error(`foreign waitUntil failure: ${secret}`), {
+    headers: { authorization: secret },
+    payload: { secret },
+  });
+  const logs: Array<CapturedLog> = [];
+  let schedulingAttempts = 0;
+  const Live = TelemetryWorker.make(
+    Layer.mergeAll(OtlpExporter.layerFlusher, makeCapturedLoggerLayer(logs)),
+    {
+      rpc: {
+        succeed: () => Effect.succeed("unused"),
+        fail: () => Effect.fail(handlerFailure),
+      },
+    },
+  );
+  const executionContext = {
+    props: undefined,
+    waitUntil: () => {
+      schedulingAttempts++;
+      throw schedulingFailure;
+    },
+    passThroughOnException: () => undefined,
+  } as unknown as globalThis.ExecutionContext;
+  const worker = new Live(executionContext, {} as Cloudflare.Env);
+
+  await expect(worker.fail()).rejects.toBe(handlerFailure);
+  expect(schedulingAttempts).toBe(1);
+  expectBoundedTelemetryLog(logs, "Telemetry flush scheduling failed", schedulingFailure);
+});
+
+test("DurableObjectDefinition RPC uses DurableObjectState.waitUntil for telemetry", async () => {
+  const flushes: Array<string> = [];
+  const waitUntilPromises: Array<Promise<unknown>> = [];
+  const Live = TelemetryDurableObject.make(Layer.empty, {
+    eventLayer: makeFlusherProbeLayer(flushes),
+    rpc: {
+      succeed: () => Effect.succeed("result"),
+    },
+  });
+  const durableObject = new Live(
+    makeDurableObjectState((promise) => waitUntilPromises.push(promise)),
+    {} as Cloudflare.Env,
+  );
+
+  await expect(durableObject.succeed()).resolves.toBe("result");
   expect(waitUntilPromises).toHaveLength(1);
 
   await Promise.all(waitUntilPromises);

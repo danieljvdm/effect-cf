@@ -701,7 +701,7 @@ Use `DurableObjectRpcWebSocket.layer(...)` for Effect RPC-over-WebSocket transpo
 
 ## WebTransport and HTTP/3
 
-Cloudflare Workers cannot accept inbound WebTransport sessions today: workerd contains no QUIC/HTTP-3 stack, there is no `WebSocketPair`-style session API, and the maintainers state the feature "is not currently on our priority list" ([cloudflare/workerd#6451](https://github.com/cloudflare/workerd/issues/6451)). Inbound HTTP/3 is a zone-level setting — the edge terminates QUIC and the Worker still receives an ordinary `fetch` Request. Durable Object hibernatable WebSockets remain the only bidirectional push channel into Worker code.
+Cloudflare Workers cannot accept inbound WebTransport sessions today: workerd contains no QUIC/HTTP-3 stack, there is no `WebSocketPair`-style session API, and the maintainers state the feature "is not currently on our priority list" ([cloudflare/workerd#6451](https://github.com/cloudflare/workerd/issues/6451), [discussion #6454](https://github.com/cloudflare/workerd/discussions/6454)). Inbound HTTP/3 is a zone-level setting — the edge terminates QUIC and the Worker still receives an ordinary `fetch` Request. Workers and Durable Objects can accept inbound WebSocket connections; Durable Objects additionally support the hibernation WebSocket API.
 
 The `WebTransport` module gives that boundary a typed shape rather than pretending otherwise:
 

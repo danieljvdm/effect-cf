@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Fiber } from "effect";
+import { Deferred, Effect, Fiber } from "effect";
 import { Socket } from "effect/unstable/socket";
 
 import * as WebTransport from "../src/WebTransport";
@@ -76,6 +76,49 @@ describe("WebTransportSocket", () => {
     }),
   );
 
+  it.effect("aborts an in-flight write when the run is interrupted", () =>
+    Effect.gen(function* () {
+      const writeStarted = yield* Deferred.make<void>();
+      let releaseWrite = () => {};
+      let writeController!: WritableStreamDefaultController;
+      const writable = new WritableStream<Uint8Array>({
+        write(_chunk, controller) {
+          writeController = controller;
+          Effect.runSync(Deferred.succeed(writeStarted, undefined));
+
+          return new Promise<void>((resolve, reject) => {
+            releaseWrite = resolve;
+            controller.signal.addEventListener("abort", () => reject(controller.signal.reason), {
+              once: true,
+            });
+          });
+        },
+      });
+      const socket = yield* WebTransportSocket.fromBidirectionalStream(
+        Effect.succeed({
+          readable: new ReadableStream<Uint8Array>(),
+          writable,
+        }),
+      );
+      const write = yield* socket.writer;
+      const runFiber = yield* socket.run(() => {}).pipe(Effect.forkChild);
+      const writeFiber = yield* write(bytes(1)).pipe(Effect.forkChild);
+
+      yield* Deferred.await(writeStarted);
+      const interruptFiber = yield* Fiber.interrupt(runFiber).pipe(Effect.forkChild);
+
+      for (let i = 0; i < 10 && !writeController.signal.aborted; i++) {
+        yield* Effect.yieldNow;
+      }
+      const wasAborted = writeController.signal.aborted;
+
+      releaseWrite();
+      yield* Fiber.join(interruptFiber);
+      yield* Fiber.await(writeFiber);
+      assert.isTrue(wasAborted);
+    }),
+  );
+
   it.effect("a peer FIN ends the run cleanly by default", () =>
     Effect.gen(function* () {
       const fake = makeFakeWebTransport();
@@ -116,6 +159,38 @@ describe("WebTransportSocket", () => {
 
       assert.strictEqual(reason._tag, "SocketOpenError");
       assert.isTrue(WebTransport.WebTransportError.is((reason as Socket.SocketOpenError).cause));
+    }),
+  );
+
+  it.effect("maps a locked readable to SocketOpenError", () =>
+    Effect.gen(function* () {
+      const fake = makeFakeWebTransport();
+      const stream = fake.native.createBidirectionalStream();
+      const native = yield* Effect.promise(() => stream);
+      const reader = native.readable.getReader();
+      const socket = yield* WebTransportSocket.fromBidirectionalStream(Effect.succeed(native));
+      const error = yield* socket
+        .run(() => {})
+        .pipe(Effect.flip, Effect.ensuring(Effect.sync(() => reader.releaseLock())));
+
+      assert.isTrue(Socket.SocketError.is(error));
+      assert.strictEqual((error as Socket.SocketError).reason._tag, "SocketOpenError");
+    }),
+  );
+
+  it.effect("maps a locked writable to SocketOpenError", () =>
+    Effect.gen(function* () {
+      const fake = makeFakeWebTransport();
+      const stream = fake.native.createBidirectionalStream();
+      const native = yield* Effect.promise(() => stream);
+      const writer = native.writable.getWriter();
+      const socket = yield* WebTransportSocket.fromBidirectionalStream(Effect.succeed(native));
+      const error = yield* socket
+        .run(() => {})
+        .pipe(Effect.flip, Effect.ensuring(Effect.sync(() => writer.releaseLock())));
+
+      assert.isTrue(Socket.SocketError.is(error));
+      assert.strictEqual((error as Socket.SocketError).reason._tag, "SocketOpenError");
     }),
   );
 

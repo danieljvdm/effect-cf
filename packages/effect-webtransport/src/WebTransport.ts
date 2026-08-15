@@ -11,14 +11,17 @@
  * Effect resources with typed errors.
  */
 import {
+  Cause,
+  Channel,
   Context,
   type Duration,
   Effect,
+  Exit,
   Layer,
   Predicate,
   Result,
   Schema,
-  type Scope,
+  Scope,
   Stream,
 } from "effect";
 
@@ -410,6 +413,38 @@ export const WebTransport: Context.Service<WebTransport, WebTransport> =
 
 const constVoid = () => undefined;
 
+const streamFromReadable = <A>(options: {
+  readonly evaluate: () => ReadableStream<A>;
+  readonly source: ReadError["source"];
+  readonly releaseLockOnEnd?: boolean | undefined;
+}): Stream.Stream<A, WebTransportError> =>
+  Stream.fromChannel(
+    Channel.fromTransform(
+      Effect.fnUntraced(function* (_, scope) {
+        const reader = yield* Effect.try({
+          try: () => options.evaluate().getReader(),
+          catch: (cause) => wtError(new ReadError({ source: options.source, cause })),
+        });
+
+        yield* Scope.addFinalizer(
+          scope,
+          options.releaseLockOnEnd
+            ? Effect.sync(() => reader.releaseLock())
+            : Effect.promise(() => reader.cancel().then(constVoid, constVoid)),
+        );
+
+        return Effect.tryPromise({
+          try: () => reader.read(),
+          catch: (cause) => wtError(new ReadError({ source: options.source, cause })),
+        }).pipe(
+          Effect.flatMap((result) =>
+            result.done ? Cause.done() : Effect.succeed([result.value] as [A]),
+          ),
+        );
+      }),
+    ),
+  );
+
 const closeBidirectionalStreamSafely = (stream: NativeBidirectionalStream) =>
   Effect.promise(async () => {
     try {
@@ -490,9 +525,9 @@ const makeDatagrams = (native: NativeWebTransport): Datagrams => {
   );
   const stream = Stream.unwrap(
     Effect.map(requireDatagrams, (datagrams) =>
-      Stream.fromReadableStream({
+      streamFromReadable({
         evaluate: () => datagrams.readable,
-        onError: (cause) => wtError(new ReadError({ source: "datagram", cause })),
+        source: "datagram",
         releaseLockOnEnd: true,
       }),
     ),
@@ -536,18 +571,20 @@ export const fromNative = (native: NativeWebTransport): WebTransport => ({
         (writable) => Effect.promise(() => writable.close().then(constVoid, constVoid)),
       );
     }),
-  incomingBidirectionalStreams: Stream.fromReadableStream({
+  incomingBidirectionalStreams: streamFromReadable({
     evaluate: () => native.incomingBidirectionalStreams,
-    onError: (cause) => wtError(new ReadError({ source: "incomingStreams", cause })),
+    source: "incomingStreams",
+    releaseLockOnEnd: true,
   }),
   incomingUnidirectionalStreams: Stream.unwrap(
     Effect.suspend(() =>
       native.incomingUnidirectionalStreams === undefined
         ? Effect.fail(wtError(new UnsupportedError({ feature: "UnidirectionalStreams" })))
         : Effect.succeed(
-            Stream.fromReadableStream({
+            streamFromReadable({
               evaluate: () => native.incomingUnidirectionalStreams!,
-              onError: (cause) => wtError(new ReadError({ source: "incomingStreams", cause })),
+              source: "incomingStreams",
+              releaseLockOnEnd: true,
             }),
           ),
     ),
@@ -683,9 +720,9 @@ export const layer = (
 export const readStream = (
   readable: ReadableStream<Uint8Array>,
 ): Stream.Stream<Uint8Array, WebTransportError> =>
-  Stream.fromReadableStream({
+  streamFromReadable({
     evaluate: () => readable,
-    onError: (cause) => wtError(new ReadError({ source: "stream", cause })),
+    source: "stream",
   });
 
 /**
@@ -705,7 +742,13 @@ export const writer = (
       try: () => writable.getWriter(),
       catch: (cause) => wtError(new WriteError({ source: "stream", cause })),
     }),
-    (writer) => Effect.promise(() => writer.close().then(constVoid, constVoid)),
+    (writer, exit) =>
+      Effect.promise(() =>
+        (Exit.isSuccess(exit) ? writer.close() : writer.abort(exit.cause)).then(
+          constVoid,
+          constVoid,
+        ),
+      ),
   ).pipe(
     Effect.map(
       (writer) =>

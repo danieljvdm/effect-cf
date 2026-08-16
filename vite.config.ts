@@ -53,6 +53,10 @@ export default defineConfig({
         test: {
           name: "node",
           alias: {
+            "cloudflare:workflows": new URL(
+              "./packages/effect-cf/tests/cloudflare-workflows.ts",
+              import.meta.url,
+            ).pathname,
             "cloudflare:workers": new URL(
               "./packages/effect-cf/tests/cloudflare-workers.ts",
               import.meta.url,

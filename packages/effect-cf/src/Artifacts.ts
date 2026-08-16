@@ -6,7 +6,7 @@ import type {
   ArtifactsTokenInfo as CloudflareArtifactsTokenInfo,
   ArtifactsTokenListResult as CloudflareArtifactsTokenListResult,
 } from "@cloudflare/workers-types";
-import { Context, Data, Effect, type Layer, Predicate } from "effect";
+import { Context, Data, Effect, type Layer, Predicate, Schema } from "effect";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
@@ -31,6 +31,7 @@ export type ArtifactsOperation =
   | "getToken"
   | "revokeToken"
   | "fork"
+  | "info"
   | "log"
   | "readCommit"
   | "readTree"
@@ -136,25 +137,28 @@ export type ArtifactsTokenInfo = CloudflareArtifactsTokenInfo;
 /** Repository token list result. */
 export type ArtifactsTokenListResult = CloudflareArtifactsTokenListResult;
 
-/**
- * Commit history returned by `log()`.
- *
- * Cloudflare currently documents this generated type by name but does not
- * publish its fields in the binding reference or Workers type declarations.
- */
-export interface ArtifactsLogResult<Field = unknown> {
-  readonly [field: string]: Field;
+/** Identity recorded for a Git commit author or committer. */
+export interface ArtifactsCommitIdentity {
+  readonly name: string;
+  readonly email: string;
 }
 
-/**
- * Parsed Git commit returned by `readCommit()`.
- *
- * Cloudflare currently documents this generated type by name but does not
- * publish its fields in the binding reference or Workers type declarations.
- */
-export interface ArtifactsCommit<Field = unknown> {
-  readonly [field: string]: Field;
+/** Parsed Git commit returned by `readCommit()` and `log()`. */
+export interface ArtifactsCommit {
+  readonly hash: string;
+  readonly treeHash: string;
+  readonly message: string;
+  readonly author: ArtifactsCommitIdentity;
+  readonly committer: ArtifactsCommitIdentity;
+  readonly parents: ReadonlyArray<string>;
+  /** Unix timestamp in seconds. */
+  readonly authoredAt: number;
+  /** Unix timestamp in seconds. */
+  readonly committedAt: number;
 }
+
+/** Bare commit array returned by `log()`. */
+export type ArtifactsLogResult = ReadonlyArray<ArtifactsCommit>;
 
 /**
  * Parsed Git tree returned by `readTree()`.
@@ -228,7 +232,15 @@ export interface ArtifactsLogOptions {
 }
 
 /** Runtime repository handle, including methods absent from current shipped Workers types. */
-export interface ArtifactsRepoBinding extends ArtifactsRepoInfo {
+export interface ArtifactsRepoBinding extends Partial<ArtifactsRepoInfo> {
+  /**
+   * Read repository metadata.
+   *
+   * Remote bindings expose method-only RPC handles and provide metadata only
+   * through this method. It is optional solely for compatibility with older
+   * local handles that expose metadata as data properties.
+   */
+  readonly info?: () => Promise<ArtifactsRepoInfo>;
   /**
    * Create a Git token for the repository.
    *
@@ -262,8 +274,15 @@ export interface ArtifactsBinding {
   readonly delete: (name: RepoName) => Promise<boolean>;
 }
 
-/** Effect wrapper around a repository handle returned by `Artifacts.get()`. */
+/**
+ * Effect wrapper around a repository handle returned by `Artifacts.get()`.
+ *
+ * The inherited metadata is the snapshot read while resolving the client.
+ * Use `info()` to refresh it from the repository handle.
+ */
 export interface ArtifactsRepoClient extends ArtifactsRepoInfo {
+  /** Read and validate the repository's current metadata. */
+  readonly info: () => Effect.Effect<ArtifactsRepoInfo, ArtifactsOperationError>;
   /**
    * Create a Git token for the repository.
    *
@@ -378,8 +397,48 @@ const spanOptions = (binding: string, operation: ArtifactsOperation) => ({
   attributes: { binding, operation },
 });
 
-const hasFunction = <Candidate>(value: Candidate, key: string): boolean =>
+const hasFunction = <Candidate, Key extends string>(
+  value: Candidate,
+  key: Key,
+): value is Candidate & Record<Key, (...args: ReadonlyArray<any>) => any> =>
   Predicate.hasProperty(value, key) && Predicate.isFunction(value[key]);
+
+const ArtifactsRepoInfoSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  description: Schema.NullOr(Schema.String),
+  defaultBranch: Schema.String,
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+  lastPushAt: Schema.NullOr(Schema.String),
+  source: Schema.NullOr(Schema.String),
+  readOnly: Schema.Boolean,
+  remote: Schema.String,
+});
+
+const decodeRepoInfo = (
+  binding: string,
+  value: ArtifactsRepoInfo | ArtifactsRepoBinding,
+): Effect.Effect<ArtifactsRepoInfo, ArtifactsOperationError> =>
+  Schema.decodeUnknownEffect(ArtifactsRepoInfoSchema)(value).pipe(
+    Effect.mapError((cause) => artifactsError(binding, "info", cause)),
+  );
+
+const readRepoInfo = (
+  binding: string,
+  repo: ArtifactsRepoBinding,
+): Effect.Effect<ArtifactsRepoInfo, ArtifactsOperationError> => {
+  if (hasFunction(repo, "info")) {
+    return tryArtifactsPromise(binding, "info", () => repo.info()).pipe(
+      Effect.flatMap((info) => decodeRepoInfo(binding, info)),
+      Effect.withSpan("Artifacts.info", spanOptions(binding, "info")),
+    );
+  }
+
+  return decodeRepoInfo(binding, repo).pipe(
+    Effect.withSpan("Artifacts.info", spanOptions(binding, "info")),
+  );
+};
 
 /** Tests whether a value exposes the complete documented Artifacts repo handle API. */
 export const isArtifactsRepoBinding = <Candidate>(
@@ -403,17 +462,13 @@ export const isArtifactsBinding = <Candidate>(
   hasFunction(value, "list") &&
   hasFunction(value, "delete");
 
-const wrapRepo = (binding: string, repo: ArtifactsRepoBinding): ArtifactsRepoClient => ({
-  id: repo.id,
-  name: repo.name,
-  description: repo.description,
-  defaultBranch: repo.defaultBranch,
-  createdAt: repo.createdAt,
-  updatedAt: repo.updatedAt,
-  lastPushAt: repo.lastPushAt,
-  source: repo.source,
-  readOnly: repo.readOnly,
-  remote: repo.remote,
+const wrapRepo = (
+  binding: string,
+  repo: ArtifactsRepoBinding,
+  info: ArtifactsRepoInfo,
+): ArtifactsRepoClient => ({
+  ...info,
+  info: () => readRepoInfo(binding, repo),
   createToken: Effect.fn(
     "Artifacts.createToken",
     spanOptions(binding, "createToken"),
@@ -469,7 +524,9 @@ export const makeClient =
       tryArtifactsPromise(definition.binding, "get", () => artifacts.get(name)).pipe(
         Effect.flatMap((repo) =>
           isArtifactsRepoBinding(repo)
-            ? Effect.succeed(wrapRepo(definition.binding, repo))
+            ? readRepoInfo(definition.binding, repo).pipe(
+                Effect.map((info) => wrapRepo(definition.binding, repo, info)),
+              )
             : Effect.fail(
                 artifactsError(
                   definition.binding,

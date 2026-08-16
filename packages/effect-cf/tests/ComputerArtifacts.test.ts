@@ -1,7 +1,8 @@
 import { assert, it } from "@effect/vitest";
 import { Effect } from "effect";
 
-import { Artifacts, ComputerArtifacts } from "../src/index";
+import * as ComputerArtifacts from "../src/ComputerArtifacts";
+import { Artifacts } from "../src/index";
 
 const repoInfo = (name: string): Artifacts.ArtifactsRepoInfo => ({
   id: `${name}-id`,

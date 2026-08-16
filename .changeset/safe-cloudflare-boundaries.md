@@ -1,5 +1,5 @@
 ---
-"effect-cf": patch
+"effect-cf": minor
 "effect-webtransport": patch
 ---
 

@@ -27,6 +27,8 @@ export default defineConfig({
         test: {
           name: "node",
           alias: {
+            "cloudflare:workflows": new URL("./tests/cloudflare-workflows.ts", import.meta.url)
+              .pathname,
             "cloudflare:workers": new URL("./tests/cloudflare-workers.ts", import.meta.url)
               .pathname,
           },
@@ -62,7 +64,7 @@ export default defineConfig({
       "src/Vitest.ts",
     ],
     deps: {
-      neverBundle: ["cloudflare:test", "cloudflare:workers"],
+      neverBundle: ["cloudflare:test", "cloudflare:workers", "cloudflare:workflows"],
     },
     dts: {
       tsgo: true,

@@ -12,7 +12,17 @@ import {
   type WorkflowStepEvent,
   type WorkflowTimeoutDuration,
 } from "cloudflare:workers";
-import { Context, Data, Effect, Layer, type ManagedRuntime, type Scope } from "effect";
+import { NonRetryableError as CloudflareNonRetryableError } from "cloudflare:workflows";
+import {
+  Cause,
+  Context,
+  Data,
+  Effect,
+  Layer,
+  type ManagedRuntime,
+  Option,
+  type Scope,
+} from "effect";
 
 import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 import { ExecutionContext, WorkerContext } from "./Worker";
@@ -46,6 +56,22 @@ export class WorkflowStepError extends Data.TaggedError("WorkflowStepError")<{
     const step = this.step === undefined ? "" : ` in step "${this.step}"`;
 
     return `Workflow ${this.operation} failed${step}: ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
+
+/**
+ * Typed step failure that Cloudflare must treat as terminal instead of retrying.
+ *
+ * The workflow boundary converts this value into Cloudflare's native
+ * `NonRetryableError` while preserving the original cause and its message.
+ */
+export class WorkflowStepNonRetryableError extends Data.TaggedError(
+  "WorkflowStepNonRetryableError",
+)<{
+  readonly cause: unknown;
+}> {
+  override get message(): string {
+    return `Workflow step failed without retry: ${ErrorMessage.causeMessage(this.cause)}`;
   }
 }
 
@@ -93,6 +119,27 @@ const fromWorkflowEvent = <Payload>(
   workflowName: event.workflowName,
 });
 
+const toCloudflareNonRetryableError = (
+  error: WorkflowStepNonRetryableError,
+): CloudflareNonRetryableError => {
+  const cloudflareError = new CloudflareNonRetryableError(error.message);
+
+  cloudflareError.cause = error.cause;
+
+  return cloudflareError;
+};
+
+const exposeCloudflareNonRetryableError = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> =>
+  Effect.catchCause(effect, (cause) => {
+    const error = Cause.findErrorOption(cause);
+
+    return Option.isSome(error) && error.value instanceof WorkflowStepNonRetryableError
+      ? Effect.die(toCloudflareNonRetryableError(error.value))
+      : Effect.failCause(cause);
+  });
+
 const fromWorkflowStep = (
   step: CloudflareWorkflowStep,
   runPromise: RunWorkflowStepEffect,
@@ -105,15 +152,17 @@ const fromWorkflowStep = (
           try: () => {
             const run = (stepContext: CloudflareWorkflowStepContext) =>
               runPromise(
-                Effect.scoped(
-                  Effect.provideService(
-                    Effect.provideContext(
-                      // SAFETY: WorkflowStepContext is provided immediately below; context supplies every other R service.
-                      effect as Effect.Effect<A, E, Exclude<R, WorkflowStepContext>>,
-                      context,
+                exposeCloudflareNonRetryableError(
+                  Effect.scoped(
+                    Effect.provideService(
+                      Effect.provideContext(
+                        // SAFETY: WorkflowStepContext is provided immediately below; context supplies every other R service.
+                        effect as Effect.Effect<A, E, Exclude<R, WorkflowStepContext>>,
+                        context,
+                      ),
+                      WorkflowStepContext,
+                      stepContext,
                     ),
-                    WorkflowStepContext,
-                    stepContext,
                   ),
                 ),
               );

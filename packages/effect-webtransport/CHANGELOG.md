@@ -1,5 +1,11 @@
 # effect-webtransport
 
+## 0.1.1
+
+### Patch Changes
+
+- [#102](https://github.com/danieljvdm/effect-cf/pull/102) [`1b32c54`](https://github.com/danieljvdm/effect-cf/commit/1b32c54757bf404c2454389b0386e0996974cdc6) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Harden Cloudflare and WebTransport runtime boundaries with receiver-safe invocation, truthful return types, validated external data, and stricter event-layer requirements.
+
 ## 0.1.0
 
 ### Minor Changes

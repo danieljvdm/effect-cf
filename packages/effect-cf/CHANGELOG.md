@@ -1,5 +1,15 @@
 # effect-cf
 
+## 0.28.0
+
+### Minor Changes
+
+- [#104](https://github.com/danieljvdm/effect-cf/pull/104) [`4aadbd0`](https://github.com/danieljvdm/effect-cf/commit/4aadbd0b6e76449bac190dbc5abb4c20486c8761) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Allow workflow step Effects to fail terminally with `WorkflowStepNonRetryableError`, which is rethrown to Cloudflare as its native `NonRetryableError`.
+
+- [#104](https://github.com/danieljvdm/effect-cf/pull/104) [`4aadbd0`](https://github.com/danieljvdm/effect-cf/commit/4aadbd0b6e76449bac190dbc5abb4c20486c8761) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Support method-only remote Artifacts repository bindings with a typed `info()` client operation and live commit history shapes.
+
+- [#102](https://github.com/danieljvdm/effect-cf/pull/102) [`1b32c54`](https://github.com/danieljvdm/effect-cf/commit/1b32c54757bf404c2454389b0386e0996974cdc6) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Harden Cloudflare and WebTransport runtime boundaries with receiver-safe invocation, truthful return types, validated external data, and stricter event-layer requirements.
+
 ## 0.27.0
 
 ### Minor Changes

@@ -7,6 +7,7 @@ import {
   Exit,
   Layer,
   Option,
+  Predicate,
   Result,
   Schema as S,
   type Scope,
@@ -26,8 +27,29 @@ import {
   WorkerEnvironment,
   Workflow,
 } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
 const expectType = <T>(_value: T) => {};
+const invokeInvalidDoubleArgument = (
+  worker: { readonly double: (value: number) => Promise<number> },
+  value: string,
+): Promise<void> => {
+  // SAFETY: This boundary test deliberately violates the generated client argument type after
+  // validating the supplied fixture as a string, so the runtime schema rejection is observable.
+  const double = worker.double as typeof worker.double & ((value: string) => Promise<number>);
+
+  return double.call(worker, S.decodeUnknownSync(S.String)(value)).then(() => undefined);
+};
+
+const invalidNumberSuccess = (value: string): number => {
+  const decoded = S.decodeUnknownSync(S.String)(value);
+
+  // SAFETY: This fixture deliberately returns a schema-checked string through a number success
+  // boundary to prove the generated Worker validates encoded handler results.
+  return decoded as string & number;
+};
+
+const makeDurableObjectId = (): DurableObjectId => makePartialTestDouble<DurableObjectId>({});
 
 const TestWorker = WorkerDefinition.make("TestWorker", {
   double: WorkerDefinition.method({
@@ -36,10 +58,10 @@ const TestWorker = WorkerDefinition.make("TestWorker", {
   }),
 });
 
-const executionContext = {
+const executionContext = makePartialTestDouble<ExecutionContext>({
   waitUntil() {},
   passThroughOnException() {},
-} as unknown as ExecutionContext;
+});
 
 test("definition-backed Worker RPC validates arguments and success values", async () => {
   const Live = TestWorker.make(Layer.empty, {
@@ -49,23 +71,27 @@ test("definition-backed Worker RPC validates arguments and success values", asyn
     },
   });
 
-  const worker = new Live({} as ExecutionContext, {} as Cloudflare.Env);
+  const worker = new Live(
+    makePartialTestDouble<ExecutionContext>({}),
+    makePartialTestDouble<Cloudflare.Env>({}),
+  );
 
   await expect(worker.double(21)).resolves.toBe(42);
-  await expect(
-    (worker as unknown as { double(value: unknown): Promise<number> }).double("21"),
-  ).rejects.toBeDefined();
+  await expect(invokeInvalidDoubleArgument(worker, "21")).rejects.toBeDefined();
 });
 
 test("definition-backed Worker RPC validates encoded success values", async () => {
   const Live = TestWorker.make(Layer.empty, {
     fetch: Effect.succeed(new Response("ok")),
     rpc: {
-      double: () => Effect.succeed("not a number" as never),
+      double: () => Effect.succeed(invalidNumberSuccess("not a number")),
     },
   });
 
-  const worker = new Live({} as ExecutionContext, {} as Cloudflare.Env);
+  const worker = new Live(
+    makePartialTestDouble<ExecutionContext>({}),
+    makePartialTestDouble<Cloudflare.Env>({}),
+  );
 
   await expect(worker.double(21)).rejects.toBeDefined();
 });
@@ -113,21 +139,25 @@ test("definition-backed Worker RPC validates encoded success values", async () =
   void assertQueueBindingTypes;
 
   const sent: Array<unknown> = [];
-  const env = {
+  const env = makePartialTestDouble<Cloudflare.Env & { readonly AVATAR_QUEUE: object }>({
     AVATAR_QUEUE: {
       metrics: async () => ({ backlogCount: 0, backlogBytes: 0 }),
-      send: async (message: unknown) => {
+      send: async (message: { readonly userId: string; readonly attempts: string }) => {
         sent.push(message);
 
         return { metadata: { metrics: { backlogCount: 1, backlogBytes: 10 } } };
       },
-      sendBatch: async (messages: Iterable<MessageSendRequest<unknown>>) => {
+      sendBatch: async (
+        messages: Iterable<
+          MessageSendRequest<{ readonly userId: string; readonly attempts: string }>
+        >,
+      ) => {
         sent.push(...Array.from(messages, (message) => message.body));
 
         return { metadata: { metrics: { backlogCount: 2, backlogBytes: 20 } } };
       },
     },
-  } as unknown as Cloudflare.Env;
+  });
 
   layer(
     AvatarQueue.layer({ binding: "AVATAR_QUEUE" }).pipe(
@@ -155,15 +185,18 @@ test("definition-backed Worker RPC validates encoded success values", async () =
 
   test("definition-backed Queue bindings require sendBatch() and metrics()", async () => {
     const sent: Array<unknown> = [];
-    const localEnv = {
+    const localEnv = makePartialTestDouble<Cloudflare.Env & { readonly AVATAR_QUEUE: object }>({
       AVATAR_QUEUE: {
-        send: async (message: unknown, options?: QueueBinding.QueueSendOptions) => {
+        send: async (
+          message: { readonly userId: string; readonly attempts: string },
+          options?: QueueBinding.QueueSendOptions,
+        ) => {
           sent.push({ message, options });
 
           return { metadata: { metrics: { backlogCount: sent.length, backlogBytes: 0 } } };
         },
       },
-    } as unknown as Cloudflare.Env;
+    });
     const provided = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       effect.pipe(
         Effect.provide(
@@ -222,11 +255,11 @@ test("definition-backed Worker RPC validates encoded success values", async () =
   });
 
   test("definition-backed Queue validation errors include binding and expected shape", async () => {
-    const invalidEnv = {
+    const invalidEnv = makePartialTestDouble<Cloudflare.Env & { readonly AVATAR_QUEUE: object }>({
       AVATAR_QUEUE: {
         metrics: async () => ({ backlogCount: 0, backlogBytes: 0 }),
       },
-    } as unknown as Cloudflare.Env;
+    });
 
     const exit = await Effect.runPromiseExit(
       AvatarQueue.send({ userId: "u_1", attempts: 2 }).pipe(
@@ -258,7 +291,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
           yield* batch.messages[0].ack;
         }),
     });
-    const worker = new Live(executionContext, {} as Cloudflare.Env);
+    const worker = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
 
     await worker.queue(
       makeMessageBatch("avatar-queue", [
@@ -274,7 +307,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
     const Live = AvatarQueue.make(Layer.empty, {
       queue: () => Effect.void,
     });
-    const worker = new Live(executionContext, {} as Cloudflare.Env);
+    const worker = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
 
     await expect(
       worker.queue(makeMessageBatch("avatar-queue", [makeMessage("m_1", { userId: "u_1" }, [])])),
@@ -298,32 +331,37 @@ test("definition-backed Worker RPC validates encoded success values", async () =
   let createdOptions: unknown;
   let createdBatchOptions: unknown;
   let restartOptions: unknown;
-  const instance = {
+
+  interface ArtifactCreateOptions {
+    readonly id?: string;
+    readonly params: { readonly segmentId: string; readonly attempt: string };
+  }
+  const instance = makePartialTestDouble<WorkflowInstance>({
     id: "wf_1",
     pause: async () => undefined,
     resume: async () => undefined,
     terminate: async () => undefined,
-    restart: async (options?: unknown) => {
+    restart: async (options?: Parameters<WorkflowInstance["restart"]>[0]) => {
       restartOptions = options;
     },
     status: async () => ({ status: "complete", output: "42" }),
     sendEvent: async () => undefined,
-  } as unknown as WorkflowInstance;
-  const env = {
+  });
+  const env = makePartialTestDouble<Cloudflare.Env & { readonly ARTIFACT_WORKFLOW: object }>({
     ARTIFACT_WORKFLOW: {
-      create: async (options: unknown) => {
+      create: async (options: ArtifactCreateOptions) => {
         createdOptions = options;
 
         return instance;
       },
-      createBatch: async (options: unknown) => {
+      createBatch: async (options: ReadonlyArray<ArtifactCreateOptions>) => {
         createdBatchOptions = options;
 
         return [instance];
       },
       get: async () => instance,
     },
-  } as unknown as Cloudflare.Env;
+  });
 
   layer(
     ArtifactWorkflow.layer({ binding: "ARTIFACT_WORKFLOW" }).pipe(
@@ -343,9 +381,9 @@ test("definition-backed Worker RPC validates encoded success values", async () =
           params: { segmentId: "s_1", attempt: "7" },
         });
         assert.strictEqual(Option.isSome(status.output) ? status.output.value : undefined, 42);
-        yield* created.restart({ from: { name: "prepare", count: 2, type: "step" } });
+        yield* created.restart({ from: { name: "prepare", count: 2, type: "do" } });
         assert.deepStrictEqual(restartOptions, {
-          from: { name: "prepare", count: 2, type: "step" },
+          from: { name: "prepare", count: 2, type: "do" },
         });
       }),
     );
@@ -371,6 +409,16 @@ test("definition-backed Worker RPC validates encoded success values", async () =
     const eventPayloads: Array<unknown> = [];
     const rawEventPayloads: Array<unknown> = [];
     const stepAttempts: Array<number> = [];
+
+    interface FakeStepConfig {
+      readonly retries?: number;
+    }
+    interface FakeStepContext {
+      readonly step: { readonly name: string; readonly count: number };
+      readonly attempt: number;
+      readonly config: FakeStepConfig;
+    }
+    type FakeStepCallback = (context: FakeStepContext) => Promise<number>;
     const Live = ArtifactWorkflow.make(Layer.empty, {
       run: (payload) =>
         Effect.gen(function* () {
@@ -392,24 +440,29 @@ test("definition-backed Worker RPC validates encoded success values", async () =
           return doubled;
         }),
     });
-    const workflow = new Live(executionContext, {} as Cloudflare.Env);
-    const step = {
+    const workflow = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
+    const stepImplementation = {
       do: async (
         name: string,
-        callbackOrConfig: unknown,
-        maybeCallback?: (context: unknown) => Promise<unknown>,
+        callbackOrConfig: FakeStepConfig | FakeStepCallback,
+        maybeCallback?: FakeStepCallback,
       ) => {
         stepNames.push(name);
-        const callback = (maybeCallback ?? callbackOrConfig) as (
-          context: unknown,
-        ) => Promise<unknown>;
+        const callback = maybeCallback ?? callbackOrConfig;
+
+        if (!Predicate.isFunction(callback)) {
+          throw new Error("Expected a workflow step callback");
+        }
 
         return callback({ step: { name, count: 1 }, attempt: 3, config: {} });
       },
       sleep: async () => undefined,
       sleepUntil: async () => undefined,
       waitForEvent: async () => ({ payload: undefined, timestamp: new Date(), type: "event" }),
-    } as unknown as WorkflowStep;
+    };
+    // SAFETY: This entrypoint fixture supplies the exact callback shapes exercised by Workflow.step;
+    // the native overloads add rollback/config variants that this test intentionally does not call.
+    const step = stepImplementation as typeof stepImplementation & WorkflowStep;
 
     const result = await workflow.run(
       {
@@ -431,12 +484,12 @@ test("definition-backed Worker RPC validates encoded success values", async () =
 
 {
   const TestService = TestWorker;
-  const env = {
+  const env = makePartialTestDouble<Cloudflare.Env & { readonly TEST_SERVICE: object }>({
     TEST_SERVICE: {
       fetch: async () => new Response("ok"),
       double: async (value: number) => value * 2,
     },
-  } as unknown as Cloudflare.Env;
+  });
 
   layer(
     TestService.layer({ binding: "TEST_SERVICE" }).pipe(
@@ -481,7 +534,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
   void assertStringNumberServiceTypes;
 
   let received: unknown;
-  const env = {
+  const env = makePartialTestDouble<Cloudflare.Env & { readonly STRING_NUMBER_SERVICE: object }>({
     STRING_NUMBER_SERVICE: {
       fetch: async () => new Response("ok"),
       increment: async (value: string) => {
@@ -490,7 +543,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
         return String(Number(value) + 1);
       },
     },
-  } as unknown as Cloudflare.Env;
+  });
 
   layer(
     StringNumberService.layer({ binding: "STRING_NUMBER_SERVICE" }).pipe(
@@ -514,7 +567,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
         const value = yield* Effect.promise(() => result);
 
         assert.strictEqual(received, "41");
-        assert.strictEqual(value as unknown, "42");
+        expect(value).toBe("42");
       }),
     );
 
@@ -555,12 +608,12 @@ test("definition-backed Worker RPC validates encoded success values", async () =
 
 {
   const TestService = TestWorker;
-  const env = {
+  const env = makePartialTestDouble<Cloudflare.Env & { readonly TEST_SERVICE: object }>({
     TEST_SERVICE: {
       fetch: async () => new Response("ok"),
       double: async () => "not a number",
     },
-  } as unknown as Cloudflare.Env;
+  });
 
   layer(
     TestService.layer({ binding: "TEST_SERVICE" }).pipe(
@@ -595,7 +648,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
   const NumberRooms = NumberRoom;
   let received: unknown;
   const stub = {
-    id: {} as DurableObjectId,
+    id: makeDurableObjectId(),
     fetch: async () => new Response("ok"),
     increment: async (value: string) => {
       received = value;
@@ -604,16 +657,16 @@ test("definition-backed Worker RPC validates encoded success values", async () =
     },
   };
   const namespace = {
-    newUniqueId: () => ({}) as DurableObjectId,
-    idFromName: () => ({}) as DurableObjectId,
-    idFromString: () => ({}) as DurableObjectId,
+    newUniqueId: makeDurableObjectId,
+    idFromName: makeDurableObjectId,
+    idFromString: makeDurableObjectId,
     jurisdiction: () => namespace,
     get: () => stub,
     getByName: () => stub,
   };
-  const env = {
+  const env = makePartialTestDouble<Cloudflare.Env & { readonly NUMBER_ROOMS: object }>({
     NUMBER_ROOMS: namespace,
-  } as unknown as Cloudflare.Env;
+  });
 
   const assertNumberRoomTypes = () => {
     const program = Effect.gen(function* () {
@@ -648,7 +701,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
         const value = yield* Effect.promise(() => result);
 
         assert.strictEqual(received, "41");
-        assert.strictEqual(value as unknown, "42");
+        expect(value).toBe("42");
       }),
     );
 
@@ -676,12 +729,12 @@ test("definition-backed Worker RPC validates encoded success values", async () =
   const TestRooms = TestRoom;
   let received: unknown;
   const namespace = {
-    newUniqueId: () => ({}) as DurableObjectId,
-    idFromName: () => ({}) as DurableObjectId,
-    idFromString: () => ({}) as DurableObjectId,
+    newUniqueId: makeDurableObjectId,
+    idFromName: makeDurableObjectId,
+    idFromString: makeDurableObjectId,
     jurisdiction: () => namespace,
     get: () => ({
-      id: {} as DurableObjectId,
+      id: makeDurableObjectId(),
       fetch: async () => new Response("ok"),
       ping: async (value: string) => {
         received = value;
@@ -690,7 +743,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
       },
     }),
     getByName: () => ({
-      id: {} as DurableObjectId,
+      id: makeDurableObjectId(),
       name: "room",
       fetch: async () => new Response("ok"),
       ping: async (value: string) => {
@@ -700,9 +753,9 @@ test("definition-backed Worker RPC validates encoded success values", async () =
       },
     }),
   };
-  const env = {
+  const env = makePartialTestDouble<Cloudflare.Env & { readonly TEST_ROOMS: object }>({
     TEST_ROOMS: namespace,
-  } as unknown as Cloudflare.Env;
+  });
 
   layer(
     TestRooms.layer({ binding: "TEST_ROOMS" }).pipe(
@@ -741,25 +794,28 @@ test("definition-backed Worker RPC validates encoded success values", async () =
   // Workers RPC structured-clones every value crossing an isolate boundary and
   // rejects anything that is not a plain object/array/primitive, so wire
   // values must not carry prototypes (`Result`, Schema classes, live causes).
-  const expectStructuredCloneSafe = (value: unknown): void => {
+  type JsonValue = typeof S.Json.Type;
+  const decodeJsonValue = S.decodeUnknownSync(S.Json);
+
+  const expectStructuredCloneSafe = (value: JsonValue): void => {
     if (Array.isArray(value)) {
       value.forEach(expectStructuredCloneSafe);
 
       return;
     }
 
-    if (typeof value === "object" && value !== null) {
+    if (Predicate.isObject(value)) {
       expect(Object.getPrototypeOf(value)).toBe(Object.prototype);
-      Object.values(value).forEach(expectStructuredCloneSafe);
+      Object.values(value).forEach((child) => expectStructuredCloneSafe(decodeJsonValue(child)));
     }
   };
 
   const makeState = () =>
-    ({
-      id: { toString: () => "task-room" },
-      storage: {},
+    makePartialTestDouble<globalThis.DurableObjectState>({
+      id: makePartialTestDouble<DurableObjectId>({ toString: () => "task-room" }),
+      storage: makePartialTestDouble<globalThis.DurableObjectStorage>({}),
       waitUntil: () => undefined,
-    }) as unknown as globalThis.DurableObjectState;
+    });
 
   test("Durable Object RPC methods return schema-encoded plain values over the wire", async () => {
     const Live = TaskRoom.make(Layer.empty, {
@@ -774,11 +830,19 @@ test("definition-backed Worker RPC validates encoded success values", async () =
           ),
       },
     });
-    const instance = new Live(makeState(), {} as Cloudflare.Env);
+    const instance = new Live(makeState(), makePartialTestDouble<Cloudflare.Env>({}));
 
-    const succeeded: unknown = await (
-      instance as unknown as { complete(payload: unknown): Promise<unknown> }
-    ).complete({ id: "task-1", attempts: 0 });
+    interface TaskWireRpc {
+      complete(payload: { readonly id: string; readonly attempts: number }): Promise<JsonValue>;
+    }
+    if (!Predicate.hasProperty(instance, "complete") || !Predicate.isFunction(instance.complete)) {
+      throw new Error("TaskRoom instance must provide complete");
+    }
+    // SAFETY: The raw Durable Object entrypoint exposes schema-encoded JSON across the RPC boundary;
+    // the method check protects the only dynamic member used by this fixture.
+    const wireRpc = instance as typeof instance & TaskWireRpc;
+
+    const succeeded = decodeJsonValue(await wireRpc.complete({ id: "task-1", attempts: 0 }));
 
     assert.strictEqual(Result.isResult(succeeded), false);
     expectStructuredCloneSafe(succeeded);
@@ -787,9 +851,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
       success: { id: "task-1", attempts: 1 },
     });
 
-    const failed: unknown = await (
-      instance as unknown as { complete(payload: unknown): Promise<unknown> }
-    ).complete({ id: "task-1", attempts: 3 });
+    const failed = decodeJsonValue(await wireRpc.complete({ id: "task-1", attempts: 3 }));
 
     expectStructuredCloneSafe(failed);
     expect(failed).toMatchObject({
@@ -798,27 +860,27 @@ test("definition-backed Worker RPC validates encoded success values", async () =
     });
   });
 
-  const receivedArgs: Array<unknown> = [];
+  const receivedArgs: Array<typeof S.Json.Type> = [];
   const stub = {
-    id: {} as DurableObjectId,
+    id: makeDurableObjectId(),
     fetch: async () => new Response("ok"),
-    complete: async (...args: Array<unknown>) => {
+    complete: async (...args: Array<typeof S.Json.Type>) => {
       receivedArgs.push(...args);
 
       return { _tag: "Success", success: { id: "task-1", attempts: 1 } };
     },
   };
   const namespace = {
-    newUniqueId: () => ({}) as DurableObjectId,
-    idFromName: () => ({}) as DurableObjectId,
-    idFromString: () => ({}) as DurableObjectId,
+    newUniqueId: makeDurableObjectId,
+    idFromName: makeDurableObjectId,
+    idFromString: makeDurableObjectId,
     jurisdiction: () => namespace,
     get: () => stub,
     getByName: () => stub,
   };
-  const env = {
+  const env = makePartialTestDouble<Cloudflare.Env & { readonly TASK_ROOMS: object }>({
     TASK_ROOMS: namespace,
-  } as unknown as Cloudflare.Env;
+  });
 
   layer(
     TaskRoom.layer({ binding: "TASK_ROOMS" }).pipe(
@@ -849,7 +911,11 @@ test("Durable Object tags do not collide with unrelated services sharing the id"
     ping: DurableObjectDefinition.method({ success: S.String }),
   });
 
-  const context = Context.add(Context.make(Unrelated, "unrelated"), CollisionRoom, {} as never);
+  const context = Context.add(
+    Context.make(Unrelated, "unrelated"),
+    CollisionRoom,
+    makePartialTestDouble<(typeof CollisionRoom)["Service"]>({}),
+  );
 
   assert.strictEqual(CollisionRoom.id, "CollisionRoom");
   assert.strictEqual(Context.get(context, Unrelated), "unrelated");
@@ -875,7 +941,11 @@ test("queue, workflow, and container definitions with the same id resolve indepe
   const sent: Array<unknown> = [];
   const created: Array<unknown> = [];
   const namesLookedUp: Array<string> = [];
-  const instance = {
+
+  interface SharedWorkflowCreateOptions {
+    readonly params: string;
+  }
+  const instance = makePartialTestDouble<WorkflowInstance>({
     id: "wf_shared",
     pause: async () => undefined,
     resume: async () => undefined,
@@ -883,15 +953,21 @@ test("queue, workflow, and container definitions with the same id resolve indepe
     restart: async () => undefined,
     status: async () => ({ status: "complete", output: "done" }),
     sendEvent: async () => undefined,
-  } as unknown as WorkflowInstance;
-  const env = {
+  });
+  const env = makePartialTestDouble<
+    Cloudflare.Env & {
+      readonly SHARED_QUEUE: object;
+      readonly SHARED_WORKFLOW: object;
+      readonly SHARED_CONTAINERS: object;
+    }
+  >({
     SHARED_QUEUE: {
-      send: async (message: unknown) => {
+      send: async (message: string) => {
         sent.push(message);
       },
     },
     SHARED_WORKFLOW: {
-      create: async (options: unknown) => {
+      create: async (options: SharedWorkflowCreateOptions) => {
         created.push(options);
 
         return instance;
@@ -906,7 +982,7 @@ test("queue, workflow, and container definitions with the same id resolve indepe
         return { fetch: async () => new Response("ok") };
       },
     },
-  } as unknown as Cloudflare.Env;
+  });
   const live = Layer.mergeAll(
     SharedQueue.layer({ binding: "SHARED_QUEUE" }),
     SharedWorkflow.layer({ binding: "SHARED_WORKFLOW" }),
@@ -928,10 +1004,11 @@ test("queue, workflow, and container definitions with the same id resolve indepe
 
 test("reserved RPC method names are rejected", () => {
   expect(() =>
+    // @ts-expect-error This runtime test deliberately supplies a statically reserved method.
     WorkerDefinition.make("BadWorker", {
       fetch: WorkerDefinition.method({ success: S.String }),
-    } as never),
-  ).toThrow();
+    }),
+  ).toThrow(/reserved/i);
 });
 
 test("Worker-only lifecycle names are not globally reserved", () => {
@@ -944,8 +1021,10 @@ test("Worker-only lifecycle names are not globally reserved", () => {
 
 it.effect("Durable Object embedded KV exposes schema-backed helpers", () =>
   Effect.gen(function* () {
-    const raw = new Map<string, unknown>();
-    const storage = DurableObjectStorage.fromDurableObjectStorage({
+    type EmbeddedKvFixtureValue = { readonly count: number | string };
+
+    const raw = new Map<string, EmbeddedKvFixtureValue>();
+    const implementation = {
       get: async () => undefined,
       put: async () => undefined,
       delete: async () => false,
@@ -959,14 +1038,18 @@ it.effect("Durable Object embedded KV exposes schema-backed helpers", () =>
         databaseSize: 0,
       },
       kv: {
-        get: <T>(key: string) => raw.get(key) as T | undefined,
-        put: (key: string, value: unknown) => {
+        get: (key: string) => raw.get(key),
+        put: (key: string, value: EmbeddedKvFixtureValue) => {
           raw.set(key, value);
         },
         delete: (key: string) => raw.delete(key),
-        list: <T>() => raw.entries() as IterableIterator<[string, T]>,
+        list: () => raw.entries(),
       },
-    } as unknown as DurableObjectStorageObject);
+    };
+    // SAFETY: This fixture owns a concrete count-value store, while the native embedded-KV API
+    // exposes caller-selected generics. The production schema wrapper validates every retrieved value.
+    const rawStorage = implementation as typeof implementation & DurableObjectStorageObject;
+    const storage = DurableObjectStorage.fromDurableObjectStorage(rawStorage);
 
     const typedKv = storage.kv.schema({
       key: S.String,
@@ -986,12 +1069,12 @@ it.effect("Durable Object embedded KV exposes schema-backed helpers", () =>
   }),
 );
 
-const makeMessage = (
+const makeMessage = <Body>(
   id: string,
-  body: unknown,
+  body: Body,
   acked: Array<string>,
-): globalThis.Message<unknown> =>
-  ({
+): globalThis.Message<Body> =>
+  makePartialTestDouble<globalThis.Message<Body>>({
     id,
     body,
     timestamp: new Date(),
@@ -1000,19 +1083,19 @@ const makeMessage = (
       acked.push(id);
     },
     retry: () => undefined,
-  }) as globalThis.Message<unknown>;
+  });
 
 const makeMessageBatch = (
   queue: string,
   messages: ReadonlyArray<globalThis.Message<unknown>>,
 ): globalThis.MessageBatch<unknown> =>
-  ({
+  makePartialTestDouble<globalThis.MessageBatch<unknown>>({
     queue,
     messages,
     metadata: { metrics: { backlogCount: messages.length, backlogBytes: 0 } },
     ackAll: () => undefined,
     retryAll: () => undefined,
-  }) as globalThis.MessageBatch<unknown>;
+  });
 
 type DurableObjectStorageObject = Parameters<
   typeof DurableObjectStorage.fromDurableObjectStorage
@@ -1049,7 +1132,7 @@ test("schema-backed RPC wire errors render a message and survive the wire envelo
 
   assert.instanceOf(decoded, RpcDefinition.RpcArgumentCountError);
   assert.strictEqual(
-    (decoded as RpcDefinition.RpcArgumentCountError).message,
+    decoded.message,
     'TestWorker RPC method "double" expected 1 arguments but received 2',
   );
 });

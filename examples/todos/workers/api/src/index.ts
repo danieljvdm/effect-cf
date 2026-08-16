@@ -5,7 +5,7 @@ import {
   TodoRpcGroup,
 } from "@effect-cf/todos-domain";
 import { Cause, Effect, Layer } from "effect";
-import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
+import { HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder } from "effect/unstable/httpapi";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import type { SqlError } from "effect/unstable/sql";
@@ -27,44 +27,22 @@ const mapUpdateDatabaseError = <A, R>(
   effect.pipe(Effect.mapError((error) => (error._tag === "SqlError" ? toDatabaseError() : error)));
 
 const TodosLive = HttpApiBuilder.group(TodoHttpApi, "Todos", (handlers) =>
-  handlers
-    .handle("listTodos", () =>
-      Effect.gen(function* () {
-        const todos = yield* TodoRepository;
+  Effect.gen(function* () {
+    const todos = yield* TodoRepository;
 
-        return yield* mapDatabaseError(todos.list.pipe(Effect.map((todos) => ({ todos }))));
-      }),
-    )
-    .handle("createTodo", ({ payload }) =>
-      Effect.gen(function* () {
-        const todos = yield* TodoRepository;
-
-        return yield* mapDatabaseError(todos.create(payload));
-      }),
-    )
-    .handle("updateTodo", ({ params, payload }) =>
-      Effect.gen(function* () {
-        const todos = yield* TodoRepository;
-
-        return yield* mapUpdateDatabaseError(todos.update(params.id, payload));
-      }),
-    )
-    .handle("deleteTodo", ({ params }) =>
-      Effect.gen(function* () {
-        const todos = yield* TodoRepository;
-
-        return yield* mapDatabaseError(
-          todos.delete(params.id).pipe(Effect.map((deleted) => ({ deleted }))),
-        );
-      }),
-    )
-    .handle("stats", () =>
-      Effect.gen(function* () {
-        const todos = yield* TodoRepository;
-
-        return yield* mapDatabaseError(todos.stats);
-      }),
-    ),
+    return handlers
+      .handle("listTodos", () =>
+        mapDatabaseError(todos.list.pipe(Effect.map((todos) => ({ todos })))),
+      )
+      .handle("createTodo", ({ payload }) => mapDatabaseError(todos.create(payload)))
+      .handle("updateTodo", ({ params, payload }) =>
+        mapUpdateDatabaseError(todos.update(params.id, payload)),
+      )
+      .handle("deleteTodo", ({ params }) =>
+        mapDatabaseError(todos.delete(params.id).pipe(Effect.map((deleted) => ({ deleted })))),
+      )
+      .handle("stats", () => mapDatabaseError(todos.stats));
+  }),
 );
 
 const TodoRpcLive = TodoRpcGroup.toLayer({
@@ -82,22 +60,25 @@ const TodoRpcLive = TodoRpcGroup.toLayer({
     }),
 });
 
+const SqlLive = TodoDatabase.sqlLayer();
+const RepositoryLive = TodoRepository.layer.pipe(Layer.provide(SqlLive));
 const HttpApiLive = HttpApiBuilder.layer(TodoHttpApi).pipe(
-  Layer.provide(TodosLive),
+  Layer.provide(TodosLive.pipe(Layer.provide(RepositoryLive))),
   Layer.provide(HttpRouter.cors()),
-) as Layer.Layer<never, never, HttpRouter.HttpRouter | TodoRepository>;
+  Layer.provide(HttpServer.layerServices),
+);
 
 const EffectRpcLive = RpcServer.layerHttp({
   group: TodoRpcGroup,
   path: "/rpc",
   protocol: "http",
-}).pipe(Layer.provide(TodoRpcLive), Layer.provide(RpcSerialization.layerJson));
+}).pipe(
+  Layer.provide(TodoRpcLive.pipe(Layer.provide(RepositoryLive))),
+  Layer.provide(RpcSerialization.layerJson),
+);
 
-const SqlLive = TodoDatabase.sqlLayer();
-const RepositoryLive = TodoRepository.layer.pipe(Layer.provide(SqlLive));
-const BaseLive = Layer.mergeAll(HttpRouter.layer, RepositoryLive);
 const RoutesLive = Layer.mergeAll(HttpApiLive, EffectRpcLive);
-const layer = RoutesLive.pipe(Layer.provideMerge(BaseLive));
+const layer = RoutesLive.pipe(Layer.provideMerge(HttpRouter.layer));
 
 const renderHttpApi = Effect.gen(function* () {
   const router = yield* HttpRouter.HttpRouter;

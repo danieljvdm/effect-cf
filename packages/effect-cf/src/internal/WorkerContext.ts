@@ -4,7 +4,7 @@ import type { WorkerContextService, WorkerContextWaitUntilOptions } from "../Wor
 
 export type RunWaitUntilEffect = <A, E>(
   effect: Effect.Effect<A, E, never>,
-) => Promise<Exit.Exit<A, unknown>>;
+) => Promise<Exit.Exit<A, E>>;
 
 const causeError = <E>(cause: Cause.Cause<E>) => {
   const squashed = Cause.squash(cause);
@@ -64,10 +64,10 @@ export const makeWaitUntilScheduler = (
                   return;
                 }
 
-                await runHandler(exit.cause as Cause.Cause<E>);
+                await runHandler(exit.cause);
 
                 if (mode === "propagate") {
-                  throw causeError(exit.cause as Cause.Cause<E>);
+                  throw causeError(exit.cause);
                 }
               },
             ),

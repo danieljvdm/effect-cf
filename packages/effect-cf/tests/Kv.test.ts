@@ -1,7 +1,12 @@
 import { assert, expect, layer, test } from "@effect/vitest";
-import { Effect, Layer, Option, Schema as S, Tracer } from "effect";
+import { Effect, Layer, Option, Predicate, Schema as S, Tracer } from "effect";
 
 import { Binding, Kv, WorkerEnvironment } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
+
+interface OwnerMetadata {
+  readonly owner: string;
+}
 
 class TestKv extends Kv.Tag<TestKv>()("test/TestKv", {
   key: S.String,
@@ -53,14 +58,14 @@ interface FakeKvOptions {
   readonly delete?: (key: string) => Promise<void>;
   readonly getWithMetadata?: (key: string) => Promise<{
     readonly value: string | null;
-    readonly metadata: Record<string, unknown> | null;
+    readonly metadata: OwnerMetadata | null;
     readonly cacheStatus: string | null;
   }>;
   readonly list?: (options: globalThis.KVNamespaceListOptions | undefined) => Promise<{
     readonly keys: ReadonlyArray<{
       readonly name: string;
       readonly expiration?: number;
-      readonly metadata?: Record<string, unknown>;
+      readonly metadata?: OwnerMetadata;
     }>;
     readonly list_complete: boolean;
     readonly cursor?: string;
@@ -68,15 +73,20 @@ interface FakeKvOptions {
   }>;
 }
 
-const makeFakeKv = (options: FakeKvOptions = {}) =>
-  ({
+const makeFakeKv = (options: FakeKvOptions = {}): KVNamespace => {
+  const implementation = {
     get: options.get ?? (async () => null),
     put: options.put ?? (async () => undefined),
     delete: options.delete ?? (async () => undefined),
     getWithMetadata:
       options.getWithMetadata ?? (async () => ({ value: null, metadata: null, cacheStatus: null })),
     list: options.list ?? (async () => ({ keys: [], list_complete: true, cacheStatus: null })),
-  }) as unknown as KVNamespace;
+  };
+
+  // SAFETY: FakeKvOptions owns the text-mode results exercised by this suite. The native KV
+  // interface's encoding-dependent overloads are adapted once here instead of relabeling reads.
+  return implementation as typeof implementation & KVNamespace;
+};
 
 const testKvLayer = (kv: KVNamespace) =>
   TestKv.layer({ binding: "TEST_KV" }).pipe(
@@ -233,7 +243,10 @@ const valueStyleKvBindingLayer = (kv: KVNamespace) =>
   const kv = makeFakeKv({
     get: async (key) => values.get(key) ?? null,
     put: async (key, value) => {
-      values.set(key, value as string);
+      if (!Predicate.isString(value)) {
+        throw new Error("Expected the schema-backed KV client to encode a string");
+      }
+      values.set(key, value);
     },
   });
 
@@ -366,7 +379,11 @@ test("definition-backed KV bindings report missing and invalid bindings", async 
       }).pipe(
         Effect.provide(
           TestKvBinding.layer({ binding: "TEST_KV" }).pipe(
-            Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_KV: {} as KVNamespace })),
+            Layer.provide(
+              Layer.succeed(WorkerEnvironment, {
+                TEST_KV: makePartialTestDouble<KVNamespace>({}),
+              }),
+            ),
           ),
         ),
       ),

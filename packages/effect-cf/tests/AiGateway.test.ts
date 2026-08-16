@@ -2,6 +2,7 @@ import { assert, expect, layer, test } from "@effect/vitest";
 import { Effect, Fiber, Layer } from "effect";
 
 import { AiGateway, Binding, WorkerEnvironment } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
 class DefaultGateway extends AiGateway.Tag<DefaultGateway>()("test/DefaultGateway") {}
 
@@ -12,7 +13,7 @@ interface FakeGatewayOptions {
 }
 
 const makeFakeGateway = (options: FakeGatewayOptions = {}) =>
-  ({
+  makePartialTestDouble<AiGateway.AiGatewayBinding>({
     run: options.run ?? (async () => new Response("ok")),
     getUrl: async (provider?: string) =>
       provider === undefined
@@ -20,7 +21,7 @@ const makeFakeGateway = (options: FakeGatewayOptions = {}) =>
         : `https://gateway.ai.cloudflare.com/v1/account/default/${provider}`,
     patchLog: async () => undefined,
     getLog: async () =>
-      ({
+      makePartialTestDouble<AiGatewayLog>({
         id: "log-1",
         provider: "workers-ai",
         model: "@cf/test/model",
@@ -34,16 +35,16 @@ const makeFakeGateway = (options: FakeGatewayOptions = {}) =>
         response_size: 1,
         response_head_complete: true,
         created_at: new Date("2026-01-01T00:00:00.000Z"),
-      }) as AiGatewayLog,
-  }) as AiGateway.AiGatewayBinding;
+      }),
+  });
 
 const makeFakeAi = (gateway: AiGateway.AiGatewayBinding) =>
-  ({
+  makePartialTestDouble<Ai>({
     aiGatewayLogId: null,
     gateway: () => gateway,
     models: async () => [],
-    run: async () => ({}),
-  }) as unknown as Ai;
+    run: () => Promise.reject(new Error("unused run")),
+  });
 
 const gatewayLayer = (gateway: AiGateway.AiGatewayBinding) =>
   DefaultGateway.layer({ binding: "AI", gatewayId: "default" }).pipe(
@@ -78,7 +79,7 @@ test("AI Gateway layer validates the AI binding shape", async () => {
       }).pipe(
         Effect.provide(
           DefaultGateway.layer({ binding: "AI", gatewayId: "default" }).pipe(
-            Layer.provide(Layer.succeed(WorkerEnvironment, { AI: {} as Ai })),
+            Layer.provide(Layer.succeed(WorkerEnvironment, { AI: makePartialTestDouble<Ai>({}) })),
           ),
         ),
       ),
@@ -92,12 +93,12 @@ test("AI Gateway HTTP client aborts in-flight requests on interruption", async (
   const requestStarted = new Promise<void>((resolve) => {
     started = resolve;
   });
-  const request = ((_input, init) => {
+  const request: typeof fetch = (_input, init) => {
     capturedSignal = init?.signal;
     started();
 
     return new Promise<Response>(() => {});
-  }) as typeof fetch;
+  };
   const client = AiGateway.makeHttpClient({ accountId: "account", gatewayId: "default" }, request);
 
   await Effect.runPromise(
@@ -121,12 +122,12 @@ test("AI Gateway binding fetch aborts in-flight requests on interruption", async
     started = resolve;
   });
 
-  globalThis.fetch = ((_input, init) => {
+  globalThis.fetch = (_input, init) => {
     capturedSignal = init?.signal;
     started();
 
     return new Promise<Response>(() => {});
-  }) as typeof fetch;
+  };
 
   try {
     const client = AiGateway.makeClient({ binding: "AI", gatewayId: "default" }, makeFakeGateway());

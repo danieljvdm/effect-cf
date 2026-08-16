@@ -1,4 +1,4 @@
-import { Context, Data, Effect, type Layer } from "effect";
+import { Context, Data, Effect, type Layer, Predicate } from "effect";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
@@ -26,6 +26,9 @@ export interface BrowserRenderingDefinition {
 }
 
 export type BrowserRenderingBinding = object;
+export interface BrowserRenderingMethodOptions {}
+export type BrowserRenderingExternalResult = Awaited<ReturnType<Response["json"]>>;
+export type BrowserRenderingPageFunction = string | Function;
 export type BrowserRenderingLaunch<RawBinding, Browser, LaunchOptions = unknown> = (
   binding: RawBinding,
   options?: LaunchOptions,
@@ -43,13 +46,19 @@ export interface BrowserRenderingBrowserLike<Page = BrowserRenderingPageLike> {
 }
 
 export interface BrowserRenderingPageLike {
-  readonly goto?: (url: string, options?: unknown) => Promise<unknown>;
-  readonly setContent?: (html: string, options?: unknown) => Promise<void>;
+  readonly goto?: (
+    url: string,
+    options?: BrowserRenderingMethodOptions,
+  ) => Promise<BrowserRenderingExternalResult>;
+  readonly setContent?: (html: string, options?: BrowserRenderingMethodOptions) => Promise<void>;
   readonly content?: () => Promise<string>;
-  readonly screenshot?: (options?: unknown) => Promise<Uint8Array | string>;
-  readonly pdf?: (options?: unknown) => Promise<Uint8Array>;
-  readonly evaluate?: (pageFunction: unknown, ...args: ReadonlyArray<unknown>) => Promise<unknown>;
-  readonly close?: (options?: unknown) => Promise<void>;
+  readonly screenshot?: (options?: BrowserRenderingMethodOptions) => Promise<Uint8Array | string>;
+  readonly pdf?: (options?: BrowserRenderingMethodOptions) => Promise<Uint8Array>;
+  readonly evaluate?: (
+    pageFunction: BrowserRenderingPageFunction,
+    ...args: ReadonlyArray<unknown>
+  ) => Promise<BrowserRenderingExternalResult>;
+  readonly close?: (options?: BrowserRenderingMethodOptions) => Promise<void>;
 }
 
 export interface BrowserRenderingPageClient<Page extends BrowserRenderingPageLike> {
@@ -66,16 +75,22 @@ export interface BrowserRenderingPageClient<Page extends BrowserRenderingPageLik
     options?: Parameters<NonNullable<Page["setContent"]>>[1],
   ) => Effect.Effect<void, BrowserRenderingOperationError>;
   readonly content: Effect.Effect<string, BrowserRenderingOperationError>;
-  readonly screenshot: <A = Uint8Array | string>(
+  readonly screenshot: (
     options?: Parameters<NonNullable<Page["screenshot"]>>[0],
-  ) => Effect.Effect<A, BrowserRenderingOperationError>;
-  readonly pdf: <A = Uint8Array>(
+  ) => Effect.Effect<
+    Awaited<ReturnType<NonNullable<Page["screenshot"]>>>,
+    BrowserRenderingOperationError
+  >;
+  readonly pdf: (
     options?: Parameters<NonNullable<Page["pdf"]>>[0],
-  ) => Effect.Effect<A, BrowserRenderingOperationError>;
-  readonly evaluate: <A = unknown>(
+  ) => Effect.Effect<Awaited<ReturnType<NonNullable<Page["pdf"]>>>, BrowserRenderingOperationError>;
+  readonly evaluate: (
     pageFunction: Parameters<NonNullable<Page["evaluate"]>>[0],
     ...args: ReadonlyArray<unknown>
-  ) => Effect.Effect<A, BrowserRenderingOperationError>;
+  ) => Effect.Effect<
+    Awaited<ReturnType<NonNullable<Page["evaluate"]>>>,
+    BrowserRenderingOperationError
+  >;
   readonly close: (
     options?: Parameters<NonNullable<Page["close"]>>[0],
   ) => Effect.Effect<void, BrowserRenderingOperationError>;
@@ -181,6 +196,7 @@ const wrapPage = <Page extends BrowserRenderingPageLike>(
 ): BrowserRenderingPageClient<Page> => ({
   raw: page,
   goto: (url, options) =>
+    // SAFETY: the success branch preserves Page.goto's exact awaited return type.
     (page.goto === undefined
       ? missingMethod(binding, "goto")
       : tryBrowserRenderingPromise(binding, "goto", () =>
@@ -197,25 +213,45 @@ const wrapPage = <Page extends BrowserRenderingPageLike>(
     page.content === undefined
       ? missingMethod(binding, "content")
       : tryBrowserRenderingPromise(binding, "content", () => page.content!()),
-  screenshot: (options) =>
-    (page.screenshot === undefined
-      ? missingMethod(binding, "screenshot")
-      : tryBrowserRenderingPromise(binding, "screenshot", () =>
-          page.screenshot!(options),
-        )) as Effect.Effect<never, BrowserRenderingOperationError>,
-  pdf: (options) =>
-    (page.pdf === undefined
-      ? missingMethod(binding, "pdf")
-      : tryBrowserRenderingPromise(binding, "pdf", () => page.pdf!(options))) as Effect.Effect<
-      never,
+  screenshot: (options) => {
+    const screenshot = page.screenshot?.bind(page);
+    const effect =
+      screenshot === undefined
+        ? missingMethod(binding, "screenshot")
+        : tryBrowserRenderingPromise(binding, "screenshot", () => screenshot(options));
+
+    // SAFETY: the success value comes directly from this Page's captured screenshot method.
+    return effect as Effect.Effect<
+      Awaited<ReturnType<NonNullable<Page["screenshot"]>>>,
       BrowserRenderingOperationError
-    >,
-  evaluate: (pageFunction, ...args) =>
-    (page.evaluate === undefined
-      ? missingMethod(binding, "evaluate")
-      : tryBrowserRenderingPromise(binding, "evaluate", () =>
-          page.evaluate!(pageFunction, ...args),
-        )) as Effect.Effect<never, BrowserRenderingOperationError>,
+    >;
+  },
+  pdf: (options) => {
+    const pdf = page.pdf?.bind(page);
+    const effect =
+      pdf === undefined
+        ? missingMethod(binding, "pdf")
+        : tryBrowserRenderingPromise(binding, "pdf", () => pdf(options));
+
+    // SAFETY: the success value comes directly from this Page's captured pdf method.
+    return effect as Effect.Effect<
+      Awaited<ReturnType<NonNullable<Page["pdf"]>>>,
+      BrowserRenderingOperationError
+    >;
+  },
+  evaluate: (pageFunction, ...args) => {
+    const evaluate = page.evaluate?.bind(page);
+    const effect =
+      evaluate === undefined
+        ? missingMethod(binding, "evaluate")
+        : tryBrowserRenderingPromise(binding, "evaluate", () => evaluate(pageFunction, ...args));
+
+    // SAFETY: the success value comes directly from this Page's captured evaluate method.
+    return effect as Effect.Effect<
+      Awaited<ReturnType<NonNullable<Page["evaluate"]>>>,
+      BrowserRenderingOperationError
+    >;
+  },
   close: (options) =>
     page.close === undefined
       ? Effect.void
@@ -247,8 +283,10 @@ const wrapBrowser = <
       : tryBrowserRenderingSync(binding, "disconnect", () => browser.disconnect!()),
 });
 
-export const isBrowserRenderingBinding = (value: unknown): value is BrowserRenderingBinding =>
-  (typeof value === "object" || typeof value === "function") && value !== null;
+export const isBrowserRenderingBinding = <Candidate>(
+  value: Candidate,
+): value is Candidate & BrowserRenderingBinding =>
+  Predicate.isObjectOrArray(value) || Predicate.isFunction(value);
 
 export const makeClient =
   <RawBinding extends BrowserRenderingBinding = BrowserRenderingBinding>(
@@ -302,6 +340,7 @@ export const Tag =
 
     const makeLayer = (definition: LayerOptions) => layer(tag, definition);
 
+    // SAFETY: these are exactly the members required by TagClass, attached to the matching service tag.
     return Object.assign(tag, {
       id,
       layer: makeLayer,

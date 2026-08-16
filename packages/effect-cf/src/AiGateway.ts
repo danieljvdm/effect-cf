@@ -1,4 +1,4 @@
-import { Context, Data, Effect, type Layer } from "effect";
+import { Context, Data, Effect, type Layer, Schema as S } from "effect";
 import type { AiGateway as CloudflareAiGateway } from "@cloudflare/workers-types";
 
 import * as Binding from "./Binding";
@@ -37,6 +37,46 @@ export type AiGatewayProvider = NonNullable<Parameters<AiGatewayBinding["getUrl"
 export type AiGatewayUniversalRequest = Exclude<AiGatewayRunData, ReadonlyArray<unknown>>;
 export type AiGatewayHeaders = NonNullable<AiGatewayUniversalRequest["headers"]>;
 export type AiGatewayRunOptions = Parameters<CloudflareAiGateway["run"]>[1];
+type AiGatewayBindingCandidate = Parameters<typeof isWorkersAiBinding>[0];
+
+const AiGatewayMetadata = S.Record(S.String, S.Union([S.String, S.Number, S.Boolean, S.Null]));
+const AiGatewayHttpMetadata = S.Union([AiGatewayMetadata, S.fromJsonString(AiGatewayMetadata)]);
+const AiGatewayLogResponse = S.Struct({
+  success: S.Literal(true),
+  result: S.Struct({
+    id: S.String,
+    provider: S.String,
+    model: S.String,
+    model_type: S.optional(S.String),
+    path: S.String,
+    duration: S.Number,
+    request_type: S.optional(S.String),
+    request_content_type: S.optional(S.String),
+    status_code: S.Number,
+    response_content_type: S.optional(S.String),
+    success: S.Boolean,
+    cached: S.Boolean,
+    tokens_in: S.optional(S.Number),
+    tokens_out: S.optional(S.Number),
+    metadata: S.optional(AiGatewayHttpMetadata),
+    step: S.optional(S.Number),
+    cost: S.optional(S.Number),
+    custom_cost: S.optional(S.Boolean),
+    request_size: S.Number,
+    request_head: S.optional(S.String),
+    request_head_complete: S.Boolean,
+    response_size: S.Number,
+    response_head: S.optional(S.String),
+    response_head_complete: S.Boolean,
+    created_at: S.DateFromString,
+  }),
+});
+const AiGatewayPatchLogResponse = S.Struct({
+  success: S.Literal(true),
+  result: S.Unknown,
+});
+const decodeAiGatewayLogResponse = S.decodeUnknownPromise(AiGatewayLogResponse);
+const decodeAiGatewayPatchLogResponse = S.decodeUnknownPromise(AiGatewayPatchLogResponse);
 
 export interface AiGatewayFetchOptions {
   readonly provider?: AiGatewayProvider;
@@ -131,7 +171,13 @@ const providerUrl = (baseUrl: string, path = "") => {
 const gatewayUrl = (definition: { readonly accountId: string; readonly gatewayId: string }) =>
   `https://gateway.ai.cloudflare.com/v1/${definition.accountId}/${definition.gatewayId}/`;
 
-export const isAiGatewayBinding = (value: unknown): value is WorkersAiBinding =>
+const ensureSuccessfulResponse = (response: Response): void => {
+  if (!response.ok) {
+    throw new Error(`AI Gateway HTTP request failed with status ${response.status}`);
+  }
+};
+
+export const isAiGatewayBinding = (value: AiGatewayBindingCandidate): value is WorkersAiBinding =>
   isWorkersAiBinding(value);
 
 export const makeClient = (definition: AiGatewayDefinition, gateway: AiGatewayBinding) =>
@@ -144,6 +190,7 @@ export const makeClient = (definition: AiGatewayDefinition, gateway: AiGatewayBi
       ) =>
         tryAiGatewayPromise(definition.binding, "run", () =>
           gateway.run(
+            // SAFETY: spreading the readonly batch produces the mutable array accepted by the binding.
             (Array.isArray(data) ? [...data] : data) as
               | AiGatewayUniversalRequest
               | Array<AiGatewayUniversalRequest>,
@@ -225,6 +272,7 @@ export const makeHttpClient = (
       Array.isArray(options.extraHeaders) ||
       options.extraHeaders instanceof Headers
     ) {
+      // SAFETY: the preceding branches retain only HeadersInit-compatible header containers.
       return options?.extraHeaders as HeadersInit | undefined;
     }
 
@@ -266,14 +314,17 @@ export const makeHttpClient = (
       ),
     ),
     patchLog: Effect.fn("AiGateway.patchLog")((logId: string, data: AiGatewayPatchLog) =>
-      tryAiGatewayPromise(binding, "patchLog", (signal) =>
-        request(providerUrl(gatewayUrl(definition), `logs/${logId}`).href, {
+      tryAiGatewayPromise(binding, "patchLog", async (signal) => {
+        const response = await request(providerUrl(gatewayUrl(definition), `logs/${logId}`).href, {
           method: "PATCH",
           body: JSON.stringify(data),
           headers: { "content-type": "application/json" },
           signal,
-        }).then(() => undefined),
-      ),
+        });
+
+        ensureSuccessfulResponse(response);
+        await decodeAiGatewayPatchLogResponse(await response.json());
+      }),
     ),
     getLog: Effect.fn("AiGateway.getLog")((logId: string) =>
       tryAiGatewayPromise(binding, "getLog", async (signal) => {
@@ -281,7 +332,10 @@ export const makeHttpClient = (
           signal,
         });
 
-        return (await response.json()) as AiGatewayLog;
+        ensureSuccessfulResponse(response);
+        const payload = await decodeAiGatewayLogResponse(await response.json());
+
+        return payload.result;
       }),
     ),
     rawUnsafe: Effect.fail(
@@ -315,6 +369,7 @@ export const Tag =
 
     const makeLayer = (definition: LayerOptions) => layer(tag, definition);
 
+    // SAFETY: these are exactly the members required by TagClass, attached to the matching service tag.
     return Object.assign(tag, {
       id,
       layer: makeLayer,

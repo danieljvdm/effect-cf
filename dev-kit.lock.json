@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "toolVersion": "0.14.0",
-  "manifestDigest": "sha256:d632eef835e02b46deeb7866de3b2c711abc95f10c0214f1137d63a4c1521339",
+  "toolVersion": "0.18.0",
+  "manifestDigest": "sha256:9faf88d655bdfd690457d8bf51fd83292faf110b365260c2b1e8842f01bad179",
   "setup": {
     "effectSource": {
       "packageName": "effect",
@@ -11,7 +11,7 @@
       "tag": "effect@4.0.0-beta.107"
     },
     "effectTsgo": {
-      "effectTsgoVersion": "0.33.0",
+      "effectTsgoVersion": "0.36.4",
       "typescriptPackage": "typescript",
       "typescriptVersion": "7.0.2"
     }
@@ -24,7 +24,7 @@
       "target": "agents",
       "mode": "copy",
       "kind": "directory",
-      "digest": "sha256:a2c7c8bdcda9c2fd07b7b11db1636a42ac8ba26d6a8753316590d03cccf2177c"
+      "digest": "sha256:27c7d684334598d0da9858c5e8bd6bd274db20bf33269b0b9286a50d1613e649"
     },
     {
       "resourceId": "skill:build-effect-clis@agents",
@@ -56,7 +56,7 @@
       "target": "agents",
       "mode": "copy",
       "kind": "directory",
-      "digest": "sha256:fa8a565be13a542e52e91640ebf658e69d1cb5452f5261c4fd37dfca071a716c"
+      "digest": "sha256:883d50fb8cc9c71f6c35d9c077f0f1eaec4422df3d24c854087d0aaa10b5a922"
     },
     {
       "resourceId": "skill:effect-architecture-audit@agents",
@@ -66,6 +66,15 @@
       "mode": "copy",
       "kind": "directory",
       "digest": "sha256:e1ce793618ab672bb4213e415e0e02860acbb0ae81e06f421d857ac94231610e"
+    },
+    {
+      "resourceId": "skill:effect-atom-state@agents",
+      "path": ".agents/skills/effect-atom-state",
+      "skill": "effect-atom-state",
+      "target": "agents",
+      "mode": "copy",
+      "kind": "directory",
+      "digest": "sha256:417939e6f21850b6b73b0f5b67d1e594ba830de43a086eaa3fc7a6947cbde9eb"
     },
     {
       "resourceId": "skill:@effect-cf/repo#pr-hygiene@agents",
@@ -98,7 +107,7 @@
       "target": "agents",
       "mode": "copy",
       "kind": "directory",
-      "digest": "sha256:b722b785a969463ed093ff517f461193d38442eb5e9ae607e0964f2f521529f5"
+      "digest": "sha256:14596520a07ccfdb3743dfa826d8b3de8605f3e8205dcdcce70396acab9ed6b1"
     },
     {
       "resourceId": "skill:tdd@agents",
@@ -174,6 +183,15 @@
       "digest": "sha256:0e75224a7745f66915cd7033b4ebffc57f5b21929c970de3b9b779b120fc4d7e"
     },
     {
+      "resourceId": "skill:effect-atom-state@claude",
+      "path": ".claude/skills/effect-atom-state",
+      "skill": "effect-atom-state",
+      "target": "claude",
+      "mode": "symlink",
+      "kind": "symlink",
+      "digest": "sha256:e231bd47f19be3e4c17f0f1d4442db233256ddcf3562aa59a5e5b12d4660f879"
+    },
+    {
       "resourceId": "skill:@effect-cf/repo#pr-hygiene@claude",
       "path": ".claude/skills/effect-cf-repo-pr-hygiene",
       "skill": "effect-cf-repo-pr-hygiene",
@@ -228,14 +246,6 @@
       "mode": "symlink",
       "kind": "symlink",
       "digest": "sha256:82fb62fd2299e2171e4a204cf80a604732080f812d215b85e667b19d344b0536"
-    },
-    {
-      "resourceId": "setup:vite-plus-github-actions",
-      "path": ".github/workflows/check.yml",
-      "sourcePath": "templates/vite-plus/github-actions-check.yml",
-      "mode": "copy",
-      "kind": "file",
-      "digest": "sha256:84e1775fdcc0c7405abd0a6b59e72ffb08115f214805f6ab29863a838c5ced5e"
     },
     {
       "resourceId": "setup:agent-instructions",

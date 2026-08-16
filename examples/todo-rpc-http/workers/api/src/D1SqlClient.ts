@@ -37,7 +37,7 @@ const makeConnection = (db: D1Database): SqlConnection.Connection => {
       const result = await db
         .prepare(sql)
         .bind(...params)
-        .all<Record<string, unknown>>();
+        .all<SqlConnection.Row>();
       const rows = result.results;
 
       return transformRows === undefined ? rows : transformRows(rows);

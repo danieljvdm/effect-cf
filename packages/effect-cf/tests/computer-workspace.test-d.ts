@@ -93,7 +93,7 @@ const WrappedDurableObject = withComputerWorkspace(BaseDurableObject, (_, state,
   sessionId: state.id.toString(),
   gitIdentity: { name: "Agent", email: "agent@example.test" },
   artifacts: {
-    binding: env.ARTIFACTS as never,
+    binding: env.ARTIFACTS!,
   },
 }));
 

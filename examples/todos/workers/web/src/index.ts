@@ -1,12 +1,12 @@
 import { DatabaseError, TodoRpcGroup } from "@effect-cf/todos-domain";
-import { Cause, Effect, Layer } from "effect";
+import { Cause, Effect, Layer, Schema } from "effect";
 import { HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { Worker } from "effect-cf";
 
 import { ApiWorker, Assets, TodoRpcClient } from "./bindings";
 
-const json = (value: unknown, init?: ResponseInit) => {
+const json = (value: Schema.Json, init?: ResponseInit) => {
   const headers = new Headers(init?.headers);
 
   headers.set("cache-control", "no-store");
@@ -23,8 +23,9 @@ const rewriteApiRequest = (request: Request, url: URL) => {
 };
 
 const cacheHeaders = { "cache-control": "no-store" };
+const decodeResponse = Schema.decodeUnknownSync(Schema.instanceOf(Response));
 
-const mapRpcBridgeError = (error: unknown) =>
+const mapRpcBridgeError = (error: DatabaseError | Error) =>
   error instanceof DatabaseError
     ? error
     : new DatabaseError({ message: "web Worker RPC bridge failed" });
@@ -129,7 +130,7 @@ export const TodoWebWorkerLive = Worker.make(layer, {
     const assets = yield* Assets;
 
     return yield* Effect.tryPromise(() => assets.fetch(request));
-  }),
+  }).pipe(Effect.map(decodeResponse)),
 });
 
 export default TodoWebWorkerLive;

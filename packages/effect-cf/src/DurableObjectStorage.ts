@@ -1,4 +1,4 @@
-import { Data, Effect, Exit, Option, Schema as S } from "effect";
+import { Data, Effect, Exit, Option, Predicate, Schema as S } from "effect";
 
 import * as ErrorMessage from "./internal/ErrorMessage";
 
@@ -260,6 +260,7 @@ const fromSyncKvStorage = (kv: globalThis.SyncKvStorage): SyncKvStorage => ({
     schemaBackedSyncKvStorage(kv, definition),
 });
 
+// SAFETY: every overload is dispatched by the native key form and wrapped with the same Effect error contract.
 const fromDurableObjectTransaction = (
   txn: globalThis.DurableObjectTransaction,
 ): DurableObjectTransaction =>
@@ -279,7 +280,7 @@ const fromDurableObjectTransaction = (
       maybeOptions?: globalThis.DurableObjectPutOptions,
     ) =>
       tryStoragePromise("transaction.put", () =>
-        typeof keyOrEntries === "string"
+        Predicate.isString(keyOrEntries)
           ? txn.put(keyOrEntries, valueOrOptions as T, maybeOptions)
           : txn.put(keyOrEntries, valueOrOptions as globalThis.DurableObjectPutOptions | undefined),
       ),
@@ -334,6 +335,7 @@ export const fromDurableObjectStorage = (
             );
           } catch (cause) {
             if (Exit.isExit(cause) && Exit.isFailure(cause)) {
+              // SAFETY: Exit.isFailure proves this cause carries the closure's typed E failure.
               return Effect.failCause(cause.cause) as Effect.Effect<
                 A,
                 E | StorageOperationError,
@@ -366,6 +368,7 @@ export const fromDurableObjectStorage = (
               (value) => resume(Effect.succeed(value)),
               (cause) => {
                 if (Exit.isExit(cause) && Exit.isFailure(cause)) {
+                  // SAFETY: Exit.isFailure proves this cause carries the closure's typed E failure.
                   resume(
                     Effect.failCause(cause.cause) as Effect.Effect<A, E | StorageOperationError>,
                   );

@@ -2,6 +2,7 @@ import { assert, expect, layer, test } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 
 import { Binding, Vectorize, WorkerEnvironment } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
 class RecipeVectors extends Vectorize.Tag<RecipeVectors>()("test/RecipeVectors") {}
 
@@ -14,7 +15,7 @@ interface FakeVectorizeOptions {
 }
 
 const makeFakeVectorize = (options: FakeVectorizeOptions = {}) =>
-  ({
+  makePartialTestDouble<globalThis.Vectorize>({
     describe: async () => ({
       vectorCount: 1,
       dimensions: 2,
@@ -32,7 +33,7 @@ const makeFakeVectorize = (options: FakeVectorizeOptions = {}) =>
     upsert: options.upsert ?? (async () => ({ mutationId: "upsert-1" })),
     deleteByIds: async () => ({ mutationId: "delete-1" }),
     getByIds: async (ids: Array<string>) => ids.map((id) => ({ id, values: [0.1, 0.2] })),
-  }) as unknown as globalThis.Vectorize;
+  });
 
 const vectorizeLayer = (index: globalThis.Vectorize) =>
   RecipeVectors.layer({ binding: "RECIPE_VECTORS" }).pipe(
@@ -75,7 +76,9 @@ test("Vectorize layer validates the binding shape", async () => {
         Effect.provide(
           RecipeVectors.layer({ binding: "RECIPE_VECTORS" }).pipe(
             Layer.provide(
-              Layer.succeed(WorkerEnvironment, { RECIPE_VECTORS: {} as globalThis.Vectorize }),
+              Layer.succeed(WorkerEnvironment, {
+                RECIPE_VECTORS: makePartialTestDouble<globalThis.Vectorize>({}),
+              }),
             ),
           ),
         ),

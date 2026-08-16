@@ -3,6 +3,15 @@ import { Effect } from "effect";
 
 import * as ComputerArtifacts from "../src/ComputerArtifacts";
 import { Artifacts } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
+
+interface ArtifactCalls {
+  readonly create: Array<string>;
+  readonly get: Array<string>;
+  readonly import: Array<string>;
+  readonly list: Array<string | undefined>;
+  readonly delete: Array<string>;
+}
 
 const repoInfo = (name: string): Artifacts.ArtifactsRepoInfo => ({
   id: `${name}-id`,
@@ -29,12 +38,12 @@ const createResult = (name: string): Artifacts.ArtifactsCreateRepoResult => ({
 
 it.effect("delegates session naming and filtering to the upstream Artifacts facade", () =>
   Effect.gen(function* () {
-    const calls = {
-      create: [] as Array<string>,
-      get: [] as Array<string>,
-      import: [] as Array<string>,
-      list: [] as Array<string | undefined>,
-      delete: [] as Array<string>,
+    const calls: ArtifactCalls = {
+      create: [],
+      get: [],
+      import: [],
+      list: [],
+      delete: [],
     };
     const token = {
       id: "token-1",
@@ -56,8 +65,11 @@ it.effect("delegates session naming and filtering to the upstream Artifacts faca
       listTokens: () => Promise.resolve({ tokens: [token], total: 1 }),
       revokeToken: () => Promise.resolve(true),
       fork: (target: string) => Promise.resolve(createResult(target)),
+      log: () => Promise.reject(new Error("unused log")),
+      readCommit: () => Promise.reject(new Error("unused readCommit")),
+      readTree: () => Promise.reject(new Error("unused readTree")),
     });
-    const binding = {
+    const binding = makePartialTestDouble<Artifacts.ArtifactsBinding>({
       create: (name: string) => {
         calls.create.push(name);
 
@@ -97,7 +109,7 @@ it.effect("delegates session naming and filtering to the upstream Artifacts faca
 
         return Promise.resolve(true);
       },
-    } as unknown as Artifacts.ArtifactsBinding;
+    });
 
     const artifacts = yield* ComputerArtifacts.makeClient(binding, "session-1");
     const created = yield* artifacts.create("build-cache");
@@ -146,7 +158,7 @@ it.effect("delegates session naming and filtering to the upstream Artifacts faca
 it.effect("maps upstream session validation into the Artifacts error channel", () =>
   Effect.gen(function* () {
     const error = yield* ComputerArtifacts.makeClient(
-      {} as Artifacts.ArtifactsBinding,
+      makePartialTestDouble<Artifacts.ArtifactsBinding>({}),
       "invalid__session",
     ).pipe(Effect.flip);
 

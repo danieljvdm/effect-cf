@@ -119,8 +119,9 @@ it.effect("maps rejected platform operations to StorageOperationError", () =>
 
     assert.strictEqual(exit._tag, "Failure");
     if (exit._tag === "Failure") {
-      const error = Cause.squash(exit.cause) as DurableObjectStorage.StorageOperationError;
+      const error = Cause.squash(exit.cause);
 
+      assert.instanceOf(error, DurableObjectStorage.StorageOperationError);
       assert.strictEqual(error._tag, "StorageOperationError");
       assert.strictEqual(error.operation, "sync");
       assert.strictEqual(error.cause, platformError);
@@ -141,11 +142,15 @@ interface StorageOptions {
   readonly syncError?: unknown;
 }
 
-function makeRawDurableObjectStorage(options: StorageOptions = {}): {
+interface RawStorageFixture {
   readonly raw: globalThis.DurableObjectStorage;
   readonly tracker: StorageTracker;
-} {
-  const values = new Map<string, unknown>();
+}
+
+type StorageFixtureValue = number | string;
+
+function makeRawDurableObjectStorage(options: StorageOptions = {}): RawStorageFixture {
+  const values = new Map<string, StorageFixtureValue>();
   const tracker: StorageTracker = {
     deleteAllOptions: [],
     syncCalls: 0,
@@ -155,9 +160,9 @@ function makeRawDurableObjectStorage(options: StorageOptions = {}): {
     transactionSyncRollbacks: 0,
   };
 
-  const raw = {
-    get: async <T = unknown>(key: string) => values.get(key) as T | undefined,
-    put: async <T>(key: string, value: T) => {
+  const implementation = {
+    get: async (key: string) => values.get(key),
+    put: async (key: string, value: StorageFixtureValue) => {
       values.set(key, value);
     },
     delete: async (key: string) => values.delete(key),
@@ -207,28 +212,29 @@ function makeRawDurableObjectStorage(options: StorageOptions = {}): {
       databaseSize: 0,
     },
     kv: {
-      get: <T = unknown>(key: string) => values.get(key) as T | undefined,
-      put: <T>(key: string, value: T) => {
+      get: (key: string) => values.get(key),
+      put: (key: string, value: StorageFixtureValue) => {
         values.set(key, value);
       },
       delete: (key: string) => values.delete(key),
-      list: <T = unknown>() =>
-        Array.from(values.entries())
-          .map(([key, value]) => [key, value as T] as [string, T])
-          [Symbol.iterator](),
+      list: () => values.entries(),
     },
-  } as unknown as globalThis.DurableObjectStorage;
+  };
+
+  // SAFETY: This fixture owns a concrete string/number store covering every value exercised here.
+  // The native storage interface's caller-selected generics are adapted only at this host boundary.
+  const raw = implementation as typeof implementation & globalThis.DurableObjectStorage;
 
   return { raw, tracker };
 }
 
 function makeRawDurableObjectTransaction(
-  values: Map<string, unknown>,
+  values: Map<string, StorageFixtureValue>,
 ): globalThis.DurableObjectTransaction {
-  return {
-    get: async <T = unknown>(key: string) => values.get(key) as T | undefined,
-    list: async <T = unknown>() => new Map(values) as Map<string, T>,
-    put: async <T>(key: string, value: T) => {
+  const implementation = {
+    get: async (key: string) => values.get(key),
+    list: async () => new Map(values),
+    put: async (key: string, value: StorageFixtureValue) => {
       values.set(key, value);
     },
     delete: async (key: string) => values.delete(key),
@@ -238,10 +244,17 @@ function makeRawDurableObjectTransaction(
     getAlarm: async () => null,
     setAlarm: async () => undefined,
     deleteAlarm: async () => undefined,
-  } as unknown as globalThis.DurableObjectTransaction;
+  };
+
+  // SAFETY: The transaction shares its owning fixture's concrete string/number store; the native
+  // caller-selected generic is adapted once here instead of relabeling individual Map reads.
+  return implementation as typeof implementation & globalThis.DurableObjectTransaction;
 }
 
-function restore(values: Map<string, unknown>, snapshot: Map<string, unknown>): void {
+function restore(
+  values: Map<string, StorageFixtureValue>,
+  snapshot: Map<string, StorageFixtureValue>,
+): void {
   values.clear();
   for (const entry of snapshot) {
     values.set(...entry);

@@ -1,6 +1,6 @@
 import { TodoRpcGroup } from "@effect-cf/todos-domain";
 import { Binding, Worker } from "effect-cf";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Predicate, Schema } from "effect";
 import {
   HttpClient,
   HttpClientError,
@@ -15,11 +15,13 @@ interface AssetsFetcher {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
 }
 
-const isFetcher = (value: unknown): value is AssetsFetcher =>
-  typeof value === "object" &&
-  value !== null &&
-  "fetch" in value &&
-  typeof value.fetch === "function";
+const AssetsFetcherSchema = Schema.declare(
+  (value): value is AssetsFetcher =>
+    Predicate.hasProperty(value, "fetch") && Predicate.isFunction(value.fetch),
+  { expected: "Cloudflare assets fetcher binding" },
+);
+
+const isFetcher = Schema.is(AssetsFetcherSchema);
 
 export interface AssetsService {}
 

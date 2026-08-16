@@ -112,10 +112,6 @@ export type WebTransportErrorTypeId = "~effect-webtransport/WebTransport/WebTran
 export const WebTransportErrorTypeId: WebTransportErrorTypeId =
   "~effect-webtransport/WebTransport/WebTransportError";
 
-/** Returns `true` when a value is a `WebTransportError`. */
-export const isWebTransportError = (u: unknown): u is WebTransportError =>
-  Predicate.hasProperty(u, WebTransportErrorTypeId);
-
 /** Failure while establishing a WebTransport session. */
 export class ConnectError extends Schema.Error<ConnectError>(
   "effect-webtransport/WebTransport/ConnectError",
@@ -243,10 +239,9 @@ export class WebTransportError extends Schema.TaggedError<WebTransportError>(
 }) {
   // @effect-diagnostics-next-line overriddenSchemaConstructor:off
   constructor(props: { readonly reason: WebTransportErrorReason }) {
+    super(props);
     if ("cause" in props.reason) {
-      super({ ...props, cause: props.reason.cause } as any);
-    } else {
-      super(props);
+      this.cause = props.reason.cause;
     }
   }
 
@@ -254,11 +249,16 @@ export class WebTransportError extends Schema.TaggedError<WebTransportError>(
   readonly [WebTransportErrorTypeId]: WebTransportErrorTypeId = WebTransportErrorTypeId;
 
   /** Returns `true` when the value is a `WebTransportError`. */
-  static is(u: unknown): u is WebTransportError {
-    return isWebTransportError(u);
+  static is(cause: unknown): cause is WebTransportError {
+    return isWebTransportError(cause);
   }
 
   override readonly message = this.reason.message;
+}
+
+/** Returns `true` when a value is a `WebTransportError`. */
+export function isWebTransportError(cause: unknown): cause is WebTransportError {
+  return Predicate.hasProperty(cause, WebTransportErrorTypeId);
 }
 
 const wtError = (reason: WebTransportErrorReason): WebTransportError =>
@@ -292,8 +292,9 @@ export class WebTransportConstructor extends Context.Service<
 >()("effect-webtransport/WebTransport/WebTransportConstructor") {}
 
 /** Returns `true` when `globalThis` exposes a `WebTransport` constructor. */
-export const isSupportedUnsafe = (): boolean =>
-  typeof (globalThis as Record<string, unknown>)["WebTransport"] === "function";
+const platformGlobal: { readonly WebTransport?: unknown } = globalThis;
+
+export const isSupportedUnsafe = (): boolean => Predicate.isFunction(platformGlobal.WebTransport);
 
 /** Effectful variant of {@link isSupportedUnsafe}. */
 export const isSupported: Effect.Effect<boolean> = Effect.sync(isSupportedUnsafe);
@@ -307,11 +308,14 @@ export const constructorGlobal: Effect.Effect<
   (url: string, options?: NativeConnectOptions) => NativeWebTransport,
   WebTransportError
 > = Effect.suspend(() => {
-  const ctor = (globalThis as Record<string, unknown>)["WebTransport"];
+  const ctor = platformGlobal.WebTransport;
 
-  if (typeof ctor !== "function") {
+  if (!Predicate.isFunction(ctor)) {
     return Effect.fail(wtError(new UnsupportedError({ feature: "WebTransport" })));
   }
+  // SAFETY: Predicate.isFunction establishes only callability. This unsafe global adapter
+  // deliberately trusts the host WebTransport WebIDL binding to be constructable and to
+  // return NativeWebTransport; callers needing substitution provide WebTransportConstructor.
   const make = ctor as new (url: string, options?: NativeConnectOptions) => NativeWebTransport;
 
   return Effect.succeed(
@@ -413,6 +417,8 @@ export const WebTransport: Context.Service<WebTransport, WebTransport> =
 
 const constVoid = () => undefined;
 
+const singleton = <A>(value: A): readonly [A] => [value];
+
 const streamFromReadable = <A>(options: {
   readonly evaluate: () => ReadableStream<A>;
   readonly source: ReadError["source"];
@@ -438,7 +444,7 @@ const streamFromReadable = <A>(options: {
           catch: (cause) => wtError(new ReadError({ source: options.source, cause })),
         }).pipe(
           Effect.flatMap((result) =>
-            result.done ? Cause.done() : Effect.succeed([result.value] as [A]),
+            result.done ? Cause.done() : Effect.succeed(singleton(result.value)),
           ),
         );
       }),
@@ -559,7 +565,7 @@ export const fromNative = (native: NativeWebTransport): WebTransport => ({
     Effect.suspend(() => {
       const create = native.createUnidirectionalStream;
 
-      if (typeof create !== "function") {
+      if (!Predicate.isFunction(create)) {
         return Effect.fail(wtError(new UnsupportedError({ feature: "UnidirectionalStreams" })));
       }
 
@@ -577,17 +583,19 @@ export const fromNative = (native: NativeWebTransport): WebTransport => ({
     releaseLockOnEnd: true,
   }),
   incomingUnidirectionalStreams: Stream.unwrap(
-    Effect.suspend(() =>
-      native.incomingUnidirectionalStreams === undefined
+    Effect.suspend(() => {
+      const incoming = native.incomingUnidirectionalStreams;
+
+      return incoming === undefined
         ? Effect.fail(wtError(new UnsupportedError({ feature: "UnidirectionalStreams" })))
         : Effect.succeed(
             streamFromReadable({
-              evaluate: () => native.incomingUnidirectionalStreams!,
+              evaluate: () => incoming,
               source: "incomingStreams",
               releaseLockOnEnd: true,
             }),
-          ),
-    ),
+          );
+    }),
   ),
   datagrams: makeDatagrams(native),
   close: (info?: NativeCloseInfo) =>
@@ -646,7 +654,7 @@ export const connect = Effect.fn("WebTransport.connect")(function* (
   options?: ConnectOptions,
 ): Effect.fn.Return<WebTransport, WebTransportError, WebTransportConstructor | Scope.Scope> {
   const makeNative = yield* WebTransportConstructor;
-  const resolvedUrl = typeof url === "string" ? url : yield* url;
+  const resolvedUrl = Predicate.isString(url) ? url : yield* url;
   const native = yield* Effect.acquireRelease(
     Effect.try({
       try: () => makeNative(resolvedUrl, options),

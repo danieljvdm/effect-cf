@@ -48,9 +48,9 @@ decoding are skipped.
   `HttpApiMiddleware.layerClient` and assert that it transforms the request.
 - Assert params, query, headers, payload, and expected errors at least once for
   every changed request shape.
-- For Atom clients, complete every applicable scenario routed through
-  `effect-atom-testing.md`; use a deterministic HTTP layer so request encoding,
-  invalidation, and lifecycle remain observable.
+- For Atom clients, complete every applicable scenario in the
+  `$effect-atom-state` skill's testing reference; use a deterministic HTTP
+  layer so request encoding, invalidation, and lifecycle remain observable.
 
 ## Completion matrix
 

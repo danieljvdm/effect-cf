@@ -10,6 +10,7 @@ import {
   Effect,
   Layer,
   Option,
+  Predicate,
   Result,
   Schema as S,
 } from "effect";
@@ -321,7 +322,7 @@ const byteLength = (value: AnalyticsEngineFieldValue) => {
     return 0;
   }
 
-  return typeof value === "string" ? textEncoder.encode(value).byteLength : value.byteLength;
+  return Predicate.isString(value) ? textEncoder.encode(value).byteLength : value.byteLength;
 };
 
 const lengthViolation = (
@@ -420,11 +421,15 @@ const schemaViolation = (
 
 const toAnalyticsEngineDataPoint = (
   dataPoint: S.Schema.Type<typeof AnalyticsEngineDataPointSchema>,
-): AnalyticsEngineDataPoint => ({
-  ...(dataPoint.indexes === undefined ? {} : { indexes: [...dataPoint.indexes] }),
-  ...(dataPoint.doubles === undefined ? {} : { doubles: [...dataPoint.doubles] }),
-  ...(dataPoint.blobs === undefined ? {} : { blobs: [...dataPoint.blobs] }),
-});
+): AnalyticsEngineDataPoint => {
+  const result: AnalyticsEngineDataPoint = {};
+
+  if (dataPoint.indexes !== undefined) result.indexes = [...dataPoint.indexes];
+  if (dataPoint.doubles !== undefined) result.doubles = [...dataPoint.doubles];
+  if (dataPoint.blobs !== undefined) result.blobs = [...dataPoint.blobs];
+
+  return result;
+};
 
 const validateDataPoint = (
   binding: string,
@@ -678,13 +683,10 @@ const makeQueryClientWith = (
 export const makeQueryClient = (definition: AnalyticsEngineQueryDefinition) =>
   Effect.map(HttpClient.HttpClient, (httpClient) => makeQueryClientWith(definition, httpClient));
 
-export const isAnalyticsEngineDataset = (value: unknown): value is AnalyticsEngineBinding => {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-
-  return typeof Reflect.get(value, "writeDataPoint") === "function";
-};
+export const isAnalyticsEngineDataset = <Candidate>(
+  value: Candidate,
+): value is Candidate & AnalyticsEngineBinding =>
+  Predicate.hasProperty(value, "writeDataPoint") && Predicate.isFunction(value.writeDataPoint);
 
 export const makeClient =
   (definition: AnalyticsEngineDefinition, defaults?: AnalyticsEngineWritePolicy) =>
@@ -793,6 +795,7 @@ export const Tag =
 
     const makeLayer = (definition: LayerOptions) => layer(tag, definition);
 
+    // SAFETY: these are exactly the members required by TagClass, attached to the matching service tag.
     return Object.assign(tag, {
       id,
       layer: makeLayer,
@@ -811,6 +814,7 @@ export const QueryTag =
     const makeLayerFetchConfig = (config?: Config.Config<AnalyticsEngineQueryDefinition>) =>
       layerFetchConfig(tag, config);
 
+    // SAFETY: these are exactly the members required by QueryTagClass, attached to the matching service tag.
     return Object.assign(tag, {
       id,
       layer: makeLayer,

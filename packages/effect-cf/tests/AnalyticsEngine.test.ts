@@ -1,8 +1,18 @@
 import { assert, expect, layer, test } from "@effect/vitest";
-import { Config, ConfigProvider, Effect, Layer, Option, Redacted, Schema as S } from "effect";
+import {
+  Config,
+  ConfigProvider,
+  Effect,
+  Layer,
+  Option,
+  Predicate,
+  Redacted,
+  Schema as S,
+} from "effect";
 import { type HttpClient, FetchHttpClient } from "effect/unstable/http";
 
 import { AnalyticsEngine, Binding, WorkerEnvironment } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
 class RequestAnalytics extends AnalyticsEngine.Tag<RequestAnalytics>()("test/RequestAnalytics") {}
 
@@ -26,7 +36,7 @@ const makeFakeAnalyticsEngineDataset = (
       ((dataPoint) => {
         points.push(dataPoint);
       }),
-  } as FakeAnalyticsEngineDataset;
+  } satisfies FakeAnalyticsEngineDataset;
 };
 
 const analyticsLayer = (
@@ -45,7 +55,9 @@ const queryLayerWithFetch = (
   request: typeof fetch,
 ) => queryLayer.pipe(Layer.provide(fetchLayer(request)));
 
-layer(analyticsLayer(makeFakeAnalyticsEngineDataset()))("AnalyticsEngine", (it) => {
+const rawDataset = makeFakeAnalyticsEngineDataset();
+
+layer(analyticsLayer(rawDataset))("AnalyticsEngine", (it) => {
   it.effect("writes data points to the native binding", () =>
     Effect.gen(function* () {
       const analytics = yield* RequestAnalytics;
@@ -62,7 +74,8 @@ layer(analyticsLayer(makeFakeAnalyticsEngineDataset()))("AnalyticsEngine", (it) 
         doubles: [1],
       });
 
-      assert.deepStrictEqual((raw as FakeAnalyticsEngineDataset).points, [
+      assert.strictEqual(raw, rawDataset);
+      assert.deepStrictEqual(rawDataset.points, [
         {
           indexes: ["example.com"],
           blobs: ["/home", "US", null],
@@ -332,7 +345,9 @@ test("AnalyticsEngine layer validates the binding shape", async () => {
           RequestAnalytics.layer({ binding: "REQUEST_ANALYTICS" }).pipe(
             Layer.provide(
               Layer.succeed(WorkerEnvironment, {
-                REQUEST_ANALYTICS: {} as AnalyticsEngine.AnalyticsEngineBinding,
+                REQUEST_ANALYTICS: makePartialTestDouble<AnalyticsEngine.AnalyticsEngineBinding>(
+                  {},
+                ),
               }),
             ),
           ),
@@ -376,13 +391,12 @@ test("AnalyticsEngine query client posts SQL with redacted authorization and dec
     readonly body: string | undefined;
   }> = [];
   const request: typeof fetch = async (input, init) => {
-    const url = typeof input === "string" || input instanceof URL ? input.toString() : input.url;
-    const body =
-      typeof init?.body === "string"
-        ? init.body
-        : init?.body instanceof Uint8Array
-          ? new TextDecoder().decode(init.body)
-          : undefined;
+    const url = Predicate.isString(input) || input instanceof URL ? input.toString() : input.url;
+    const body = Predicate.isString(init?.body)
+      ? init.body
+      : init?.body instanceof Uint8Array
+        ? new TextDecoder().decode(init.body)
+        : undefined;
 
     seen.push({
       url,

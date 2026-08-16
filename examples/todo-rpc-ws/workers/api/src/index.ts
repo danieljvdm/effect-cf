@@ -1,7 +1,7 @@
-import { Cause, Effect } from "effect";
+import { Cause, Effect, Schema } from "effect";
 import { Worker } from "effect-cf";
 import { TodoStore } from "@effect-cf/todo-rpc-ws-domain";
-const json = (value: unknown, init?: ResponseInit) => {
+const json = (value: Schema.Json, init?: ResponseInit) => {
   const headers = new Headers(init?.headers);
 
   headers.set("cache-control", "no-store");

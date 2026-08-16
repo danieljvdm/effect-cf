@@ -1,11 +1,25 @@
 import { assert, it } from "@effect/vitest";
 import type { Container as CloudflareContainer } from "@cloudflare/containers";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { expectTypeOf } from "vitest";
 
 import { Binding, ContainerNamespace, WorkerEnvironment, type WorkerEnv } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
 class TestContainers extends ContainerNamespace.Tag<TestContainers>()("TestContainers") {}
+
+type NativeContainerState = Awaited<ReturnType<ContainerNamespace.ContainerStub["getState"]>>;
+
+const malformedContainerState = (status: string): NativeContainerState => {
+  const fixture = {
+    lastChange: Number.NaN,
+    status: Schema.decodeUnknownSync(Schema.String)(status),
+  };
+
+  // SAFETY: This test deliberately violates the native state discriminant and finite timestamp
+  // after validating the fixture input as a string, so the adapter's schema rejection is observable.
+  return fixture as typeof fixture & NativeContainerState;
+};
 
 type Call =
   | { readonly operation: "allowHost"; readonly hostname: string }
@@ -106,7 +120,9 @@ const makeFake = (options?: {
       return stub;
     },
   };
-  const env = { CONTAINERS: namespace } as unknown as WorkerEnv;
+  const env = makePartialTestDouble<WorkerEnv & { readonly CONTAINERS: typeof namespace }>({
+    CONTAINERS: namespace,
+  });
   const live = TestContainers.layer({ binding: "CONTAINERS" }).pipe(
     Layer.provide(Layer.succeed(WorkerEnvironment, env)),
   );
@@ -225,7 +241,9 @@ it.effect("defers lookup and reports synchronous namespace lookup failures", () 
       throw cause;
     },
   };
-  const env = { CONTAINERS: namespace } as unknown as WorkerEnv;
+  const env = makePartialTestDouble<WorkerEnv & { readonly CONTAINERS: typeof namespace }>({
+    CONTAINERS: namespace,
+  });
   const live = TestContainers.layer({ binding: "CONTAINERS" }).pipe(
     Layer.provide(Layer.succeed(WorkerEnvironment, env)),
   );
@@ -243,8 +261,9 @@ it.effect("defers lookup and reports synchronous namespace lookup failures", () 
 it.effect("decodes state and reports malformed native state", () => {
   const fake = makeFake();
 
-  fake.stub.getState = async () =>
-    ({ lastChange: Number.NaN, status: "unknown" }) as unknown as ContainerNamespace.ContainerState;
+  fake.stub.getState = async () => {
+    return malformedContainerState("unknown");
+  };
 
   return Effect.gen(function* () {
     const error = yield* Effect.flip(TestContainers.byName("render-invalid").state);
@@ -305,9 +324,18 @@ it.effect("reports missing and invalid bindings through Binding errors", () =>
         Effect.provide(
           TestContainers.layer({ binding: "CONTAINERS" }).pipe(
             Layer.provide(
-              Layer.succeed(WorkerEnvironment, {
-                CONTAINERS: { fetch: () => Promise.resolve(new Response()) },
-              } as unknown as WorkerEnv),
+              Layer.succeed(
+                WorkerEnvironment,
+                makePartialTestDouble<
+                  WorkerEnv & {
+                    readonly CONTAINERS: ContainerNamespace.ContainerNamespaceResource;
+                  }
+                >({
+                  CONTAINERS: makePartialTestDouble<ContainerNamespace.ContainerNamespaceResource>(
+                    {},
+                  ),
+                }),
+              ),
             ),
           ),
         ),
@@ -326,11 +354,8 @@ it.effect("reports missing and invalid bindings through Binding errors", () =>
 it("is structurally compatible with native @cloudflare/containers namespaces", () => {
   type NativeNamespace = globalThis.DurableObjectNamespace<CloudflareContainer>;
   type NativeStub = ReturnType<NativeNamespace["getByName"]>;
-  const acceptNamespace = (_namespace: ContainerNamespace.ContainerNamespaceResource) => {};
-  const acceptStub = (_stub: ContainerNamespace.ContainerStub) => {};
-
-  acceptNamespace({} as NativeNamespace);
-  acceptStub({} as NativeStub);
+  expectTypeOf<NativeNamespace>().toExtend<ContainerNamespace.ContainerNamespaceResource>();
+  expectTypeOf<NativeStub>().toExtend<ContainerNamespace.ContainerStub>();
 });
 
 it("tracks the service requirement in the static API", () => {

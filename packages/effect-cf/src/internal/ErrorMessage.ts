@@ -3,12 +3,12 @@
  * for use in tagged error `message` getters.
  */
 export const causeMessage = (cause: unknown): string => {
-  if (typeof cause === "object" && cause !== null) {
-    const message = Reflect.get(cause, "message");
-
-    if (typeof message === "string" && message.length > 0) {
-      return message;
-    }
+  if (
+    Predicate.hasProperty(cause, "message") &&
+    Predicate.isString(cause.message) &&
+    cause.message.length > 0
+  ) {
+    return cause.message;
   }
 
   try {
@@ -22,3 +22,4 @@ export const causeMessage = (cause: unknown): string => {
 export const violationsMessage = (
   violations: ReadonlyArray<{ readonly path: string; readonly message: string }>,
 ): string => violations.map((violation) => `${violation.path}: ${violation.message}`).join("; ");
+import { Predicate } from "effect";

@@ -12,7 +12,7 @@ import type {
   R2UploadPartOptions as CloudflareR2UploadPartOptions,
   R2UploadedPart as CloudflareR2UploadedPart,
 } from "@cloudflare/workers-types";
-import { Context, Data, Effect, Option, type Layer } from "effect";
+import { Context, Data, Effect, Option, Predicate, Schema, type Layer } from "effect";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
@@ -190,11 +190,11 @@ const isR2ObjectBody = (
   value: CloudflareR2ObjectBody | CloudflareR2Object,
 ): value is CloudflareR2ObjectBody =>
   "body" in value &&
-  typeof (value as CloudflareR2ObjectBody).arrayBuffer === "function" &&
-  typeof (value as CloudflareR2ObjectBody).bytes === "function" &&
-  typeof (value as CloudflareR2ObjectBody).text === "function" &&
-  typeof (value as CloudflareR2ObjectBody).json === "function" &&
-  typeof (value as CloudflareR2ObjectBody).blob === "function";
+  Predicate.isFunction(value.arrayBuffer) &&
+  Predicate.isFunction(value.bytes) &&
+  Predicate.isFunction(value.text) &&
+  Predicate.isFunction(value.json) &&
+  Predicate.isFunction(value.blob);
 
 const wrapObjectBody = (binding: string, object: CloudflareR2ObjectBody): R2ObjectBodyClient => ({
   key: object.key,
@@ -244,23 +244,29 @@ const wrapGetResult = (
   return wrapObjectBody(binding, object);
 };
 
-export const isR2Bucket = (value: unknown): value is CloudflareR2Bucket => {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
+type R2BindingValue = Schema.Schema.Type<typeof Schema.Unknown>;
 
-  const resource = value as Record<string, unknown>;
+const R2BucketSchema = Schema.declare(
+  (value: R2BindingValue): value is CloudflareR2Bucket =>
+    Predicate.hasProperty(value, "head") &&
+    Predicate.isFunction(value.head) &&
+    Predicate.hasProperty(value, "get") &&
+    Predicate.isFunction(value.get) &&
+    Predicate.hasProperty(value, "put") &&
+    Predicate.isFunction(value.put) &&
+    Predicate.hasProperty(value, "createMultipartUpload") &&
+    Predicate.isFunction(value.createMultipartUpload) &&
+    Predicate.hasProperty(value, "resumeMultipartUpload") &&
+    Predicate.isFunction(value.resumeMultipartUpload) &&
+    Predicate.hasProperty(value, "delete") &&
+    Predicate.isFunction(value.delete) &&
+    Predicate.hasProperty(value, "list") &&
+    Predicate.isFunction(value.list),
+);
+const decodeR2Bucket = Schema.decodeUnknownOption(R2BucketSchema);
 
-  return (
-    typeof resource.head === "function" &&
-    typeof resource.get === "function" &&
-    typeof resource.put === "function" &&
-    typeof resource.createMultipartUpload === "function" &&
-    typeof resource.resumeMultipartUpload === "function" &&
-    typeof resource.delete === "function" &&
-    typeof resource.list === "function"
-  );
-};
+export const isR2Bucket = (value: R2BindingValue): value is CloudflareR2Bucket =>
+  Option.isSome(decodeR2Bucket(value));
 
 export const makeClient = (
   definition: R2Definition,
@@ -294,6 +300,7 @@ export const makeClient = (
   });
 
   return (bucket) => {
+    // SAFETY: the implementation preserves Cloudflare's get overload distinction for onlyIf options.
     const get = Effect.fn(
       "R2.get",
       spanOptions(definition.binding, "get"),
@@ -314,6 +321,7 @@ export const makeClient = (
         ),
       ),
       get,
+      // SAFETY: the implementation preserves Cloudflare's put overload distinction for onlyIf options.
       put: Effect.fn(
         "R2.put",
         spanOptions(definition.binding, "put"),
@@ -352,7 +360,7 @@ export const makeClient = (
         "R2.delete",
         spanOptions(definition.binding, "delete"),
       )((keys: string | ReadonlyArray<string>) => {
-        const nativeKeys = typeof keys === "string" ? keys : [...keys];
+        const nativeKeys = Predicate.isString(keys) ? keys : [...keys];
 
         return tryR2Promise(definition.binding, "delete", () => bucket.delete(nativeKeys));
       }),
@@ -381,6 +389,7 @@ export const Tag =
 
     const makeLayer = (definition: LayerOptions) => layer(tag, definition);
 
+    // SAFETY: Object.assign attaches exactly the static id/layer members declared by TagClass.
     return Object.assign(tag, {
       id,
       layer: makeLayer,

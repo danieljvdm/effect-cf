@@ -29,7 +29,7 @@ export type Handler<ROut, Self extends Definition.Any> = (
 >;
 
 export interface Options<ROut, Self extends Definition.Any> extends Omit<
-  WorkerEntrypoint.WorkerOptions<ROut, Record<never, never>>,
+  WorkerEntrypoint.WorkerOptions<ROut, never, never, Record<never, never>>,
   "queue" | "rpc"
 > {
   readonly queue: Handler<ROut, Self>;
@@ -75,7 +75,11 @@ export interface TagClass<
     QueueBinding.QueueOperationError,
     Self
   >;
-  readonly rawUnsafe: Effect.Effect<globalThis.Queue<S.Codec.Encoded<Message>>, never, Self>;
+  readonly rawUnsafe: Effect.Effect<
+    QueueBinding.QueueProducer<S.Codec.Encoded<Message>>,
+    never,
+    Self
+  >;
 }
 
 const makeDefinition = <Id extends string, Message extends RpcDefinition.ServiceFreeSchema>(
@@ -148,6 +152,7 @@ export const Tag =
 
     const rawUnsafe = Effect.flatMap(tag, (queue) => queue.rawUnsafe);
 
+    // SAFETY: the assigned definition helpers exactly implement TagClass for this queue schema.
     return Object.assign(tag, {
       id: queueDefinition.id,
       message: queueDefinition.message,

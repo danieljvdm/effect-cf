@@ -62,9 +62,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    load().catch((error: unknown) =>
-      setStatus(error instanceof Error ? error.message : String(error)),
-    );
+    load().catch((error) => setStatus(error instanceof Error ? error.message : String(error)));
   }, [load]);
   const run = async (label: string, effect: Effect.Effect<void, unknown, TodoRpcClient>) => {
     setIsBusy(true);

@@ -30,7 +30,7 @@
  * the edge does provide.
  */
 import type { Request as CloudflareRequest } from "@cloudflare/workers-types";
-import { Data, Effect, Option, Result, Schema as S } from "effect";
+import { Data, Effect, Option, Predicate, Result, Schema as S } from "effect";
 
 /**
  * Metadata Cloudflare's edge reports about the inbound client connection.
@@ -92,10 +92,16 @@ export interface Capabilities {
 }
 
 /** Feature-detects the WebTransport capabilities of the current runtime. */
-export const capabilities: Effect.Effect<Capabilities> = Effect.sync(() => ({
-  inboundSessions: false,
-  outboundSessions: typeof (globalThis as Record<string, unknown>)["WebTransport"] === "function",
-}));
+export const capabilities: Effect.Effect<Capabilities> = Effect.sync(() => {
+  const runtime = globalThis;
+
+  return {
+    inboundSessions: false,
+    outboundSessions:
+      Predicate.hasProperty(runtime, "WebTransport") &&
+      Predicate.isFunction(runtime["WebTransport"]),
+  };
+});
 
 /** WebTransport capability missing from the current Workers runtime. */
 export type WebTransportCapability = "inbound-sessions" | "outbound-sessions";

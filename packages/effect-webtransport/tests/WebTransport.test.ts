@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Deferred, Effect, Exit, Fiber, Option, Scope, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, Option, Schema, Scope, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
 import * as WebTransport from "../src/WebTransport";
@@ -27,16 +27,15 @@ const waitFor = (condition: () => boolean) =>
     assert.isTrue(condition(), "condition not reached");
   });
 
-const expectReason = (
-  error: unknown,
-  tag: WebTransport.WebTransportErrorReason["_tag"],
-): WebTransport.WebTransportErrorReason => {
-  assert.isTrue(WebTransport.WebTransportError.is(error), `not a WebTransportError: ${error}`);
-  const reason = (error as WebTransport.WebTransportError).reason;
+const expectReason = <S extends Schema.ConstraintDecoder<unknown, never>>(
+  error: WebTransport.WebTransportError,
+  schema: S,
+): S["Type"] => {
+  if (Schema.is(schema)(error.reason)) {
+    return error.reason;
+  }
 
-  assert.strictEqual(reason._tag, tag);
-
-  return reason;
+  return assert.fail(`unexpected WebTransport error reason: ${error.reason._tag}`);
 };
 
 describe("connect", () => {
@@ -68,9 +67,9 @@ describe("connect", () => {
         ),
         Effect.flip,
       );
-      const reason = expectReason(error, "ConnectError");
+      const reason = expectReason(error, WebTransport.ConnectError);
 
-      assert.strictEqual((reason as WebTransport.ConnectError).kind, "OpenFailed");
+      assert.strictEqual(reason.kind, "OpenFailed");
     }),
   );
 
@@ -81,9 +80,9 @@ describe("connect", () => {
         provideConstructor(fake),
         Effect.flip,
       );
-      const reason = expectReason(error, "ConnectError");
+      const reason = expectReason(error, WebTransport.ConnectError);
 
-      assert.strictEqual((reason as WebTransport.ConnectError).kind, "OpenFailed");
+      assert.strictEqual(reason.kind, "OpenFailed");
       assert.strictEqual(fake.closeCalls.length, 1);
     }),
   );
@@ -97,9 +96,9 @@ describe("connect", () => {
 
       yield* TestClock.adjust(1001);
       const error = yield* Fiber.join(fiber);
-      const reason = expectReason(error, "ConnectError");
+      const reason = expectReason(error, WebTransport.ConnectError);
 
-      assert.strictEqual((reason as WebTransport.ConnectError).kind, "Timeout");
+      assert.strictEqual(reason.kind, "Timeout");
       assert.strictEqual(fake.closeCalls.length, 1);
     }),
   );
@@ -143,9 +142,9 @@ describe("feature detection", () => {
         Effect.provide(WebTransport.layerConstructorGlobal),
         Effect.flip,
       );
-      const reason = expectReason(error, "UnsupportedError");
+      const reason = expectReason(error, WebTransport.UnsupportedError);
 
-      assert.strictEqual((reason as WebTransport.UnsupportedError).feature, "WebTransport");
+      assert.strictEqual(reason.feature, "WebTransport");
     }),
   );
 
@@ -154,15 +153,16 @@ describe("feature detection", () => {
       const fake = makeFakeWebTransport();
       const urls: Array<string> = [];
 
-      class StubWebTransport {
-        constructor(url: string) {
-          urls.push(url);
+      const StubWebTransport = function (url: string) {
+        urls.push(url);
 
-          // eslint-disable-next-line no-constructor-return
-          return fake.native as unknown as StubWebTransport;
-        }
-      }
-      (globalThis as Record<string, unknown>)["WebTransport"] = StubWebTransport;
+        return fake.native;
+      };
+
+      Object.defineProperty(globalThis, "WebTransport", {
+        configurable: true,
+        value: StubWebTransport,
+      });
       yield* Effect.gen(function* () {
         assert.isTrue(yield* WebTransport.isSupported);
         yield* Effect.scoped(WebTransport.connect("https://example.com/session")).pipe(
@@ -171,7 +171,7 @@ describe("feature detection", () => {
       }).pipe(
         Effect.ensuring(
           Effect.sync(() => {
-            delete (globalThis as Record<string, unknown>)["WebTransport"];
+            Reflect.deleteProperty(globalThis, "WebTransport");
           }),
         ),
       );
@@ -205,9 +205,9 @@ describe("streams", () => {
       const fake = makeFakeWebTransport({ failBidiOpen: new Error("too many streams") });
       const session = WebTransport.fromNative(fake.native);
       const error = yield* Effect.scoped(session.openBidirectionalStream()).pipe(Effect.flip);
-      const reason = expectReason(error, "StreamOpenError");
+      const reason = expectReason(error, WebTransport.StreamOpenError);
 
-      assert.strictEqual((reason as WebTransport.StreamOpenError).direction, "bidirectional");
+      assert.strictEqual(reason.direction, "bidirectional");
     }),
   );
 
@@ -216,12 +216,9 @@ describe("streams", () => {
       const fake = makeFakeWebTransport({ omitUnidirectional: true });
       const session = WebTransport.fromNative(fake.native);
       const error = yield* Effect.scoped(session.openUnidirectionalStream()).pipe(Effect.flip);
-      const reason = expectReason(error, "UnsupportedError");
+      const reason = expectReason(error, WebTransport.UnsupportedError);
 
-      assert.strictEqual(
-        (reason as WebTransport.UnsupportedError).feature,
-        "UnidirectionalStreams",
-      );
+      assert.strictEqual(reason.feature, "UnidirectionalStreams");
     }),
   );
 
@@ -329,9 +326,9 @@ describe("streams", () => {
         Effect.flip,
         Effect.ensuring(Effect.sync(() => reader.releaseLock())),
       );
-      const reason = expectReason(error, "ReadError");
+      const reason = expectReason(error, WebTransport.ReadError);
 
-      assert.strictEqual((reason as WebTransport.ReadError).source, "incomingStreams");
+      assert.strictEqual(reason.source, "incomingStreams");
     }),
   );
 
@@ -342,12 +339,9 @@ describe("streams", () => {
       const error = yield* Stream.runCollect(session.incomingUnidirectionalStreams).pipe(
         Effect.flip,
       );
-      const reason = expectReason(error, "UnsupportedError");
+      const reason = expectReason(error, WebTransport.UnsupportedError);
 
-      assert.strictEqual(
-        (reason as WebTransport.UnsupportedError).feature,
-        "UnidirectionalStreams",
-      );
+      assert.strictEqual(reason.feature, "UnidirectionalStreams");
     }),
   );
 
@@ -377,9 +371,9 @@ describe("streams", () => {
         Effect.flip,
         Effect.ensuring(Effect.sync(() => reader.releaseLock())),
       );
-      const reason = expectReason(error, "ReadError");
+      const reason = expectReason(error, WebTransport.ReadError);
 
-      assert.strictEqual((reason as WebTransport.ReadError).source, "incomingStreams");
+      assert.strictEqual(reason.source, "incomingStreams");
     }),
   );
 
@@ -405,7 +399,7 @@ describe("streams", () => {
         Effect.flip,
       );
 
-      expectReason(error, "ReadError");
+      expectReason(error, WebTransport.ReadError);
     }),
   );
 
@@ -417,9 +411,9 @@ describe("streams", () => {
         Effect.flip,
         Effect.ensuring(Effect.sync(() => reader.releaseLock())),
       );
-      const reason = expectReason(error, "ReadError");
+      const reason = expectReason(error, WebTransport.ReadError);
 
-      assert.strictEqual((reason as WebTransport.ReadError).source, "stream");
+      assert.strictEqual(reason.source, "stream");
     }),
   );
 });
@@ -444,10 +438,10 @@ describe("datagrams", () => {
 
       assert.strictEqual(yield* session.datagrams.maxDatagramSize, 2);
       const error = yield* session.datagrams.send(bytes(1, 2, 3)).pipe(Effect.flip);
-      const reason = expectReason(error, "DatagramTooLargeError");
+      const reason = expectReason(error, WebTransport.DatagramTooLargeError);
 
-      assert.strictEqual((reason as WebTransport.DatagramTooLargeError).size, 3);
-      assert.strictEqual((reason as WebTransport.DatagramTooLargeError).maxDatagramSize, 2);
+      assert.strictEqual(reason.size, 3);
+      assert.strictEqual(reason.maxDatagramSize, 2);
       assert.deepStrictEqual(fake.datagrams!.sent, []);
     }),
   );
@@ -479,7 +473,7 @@ describe("datagrams", () => {
       fake.datagrams!.end();
       const error = yield* session.datagrams.take.pipe(Effect.flip);
 
-      expectReason(error, "SessionClosedError");
+      expectReason(error, WebTransport.SessionClosedError);
     }),
   );
 
@@ -506,9 +500,9 @@ describe("datagrams", () => {
         Effect.flip,
         Effect.ensuring(Effect.sync(() => reader.releaseLock())),
       );
-      const reason = expectReason(error, "ReadError");
+      const reason = expectReason(error, WebTransport.ReadError);
 
-      assert.strictEqual((reason as WebTransport.ReadError).source, "datagram");
+      assert.strictEqual(reason.source, "datagram");
     }),
   );
 
@@ -523,9 +517,9 @@ describe("datagrams", () => {
         session.datagrams.maxDatagramSize,
         Stream.runCollect(session.datagrams.stream),
       ] as const) {
-        const reason = expectReason(yield* Effect.flip(operation), "UnsupportedError");
+        const reason = expectReason(yield* Effect.flip(operation), WebTransport.UnsupportedError);
 
-        assert.strictEqual((reason as WebTransport.UnsupportedError).feature, "Datagrams");
+        assert.strictEqual(reason.feature, "Datagrams");
       }
     }),
   );
@@ -553,7 +547,7 @@ describe("session closure", () => {
       fake.rejectClosed(new Error("connection lost"));
       const error = yield* session.closed.pipe(Effect.flip);
 
-      expectReason(error, "SessionClosedError");
+      expectReason(error, WebTransport.SessionClosedError);
     }),
   );
 
@@ -565,7 +559,7 @@ describe("session closure", () => {
       fake.resolveClosed("garbage");
       const error = yield* session.closed.pipe(Effect.flip);
 
-      expectReason(error, "SessionClosedError");
+      expectReason(error, WebTransport.SessionClosedError);
     }),
   );
 

@@ -88,6 +88,7 @@ export const fromDurableObjectState = (
   const scheduleWaitUntil = makeWaitUntilScheduler("DurableObjectState.waitUntil", (promise) =>
     state.waitUntil(promise),
   );
+  // SAFETY: the runtime Effect.isEffect branch implements both overloads of the service method.
   const waitUntil = (<A, E, R, R2 = never>(
     input: Promise<unknown> | Effect.Effect<A, E, R>,
     options?: WorkerContextWaitUntilOptions<E, R2>,

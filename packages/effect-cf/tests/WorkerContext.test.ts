@@ -2,6 +2,7 @@ import { expect, test } from "vite-plus/test";
 import { Cause, Context, Effect, Layer } from "effect";
 
 import { Worker } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
 class TestService extends Context.Service<
   TestService,
@@ -15,7 +16,7 @@ const makeExecutionContext = () => {
   const waitUntilPromises: Array<Promise<unknown>> = [];
   let passThroughCalls = 0;
 
-  const executionContext = {
+  const executionContext = makePartialTestDouble<globalThis.ExecutionContext>({
     props: undefined,
     waitUntil: (promise: Promise<unknown>) => {
       waitUntilPromises.push(promise);
@@ -23,7 +24,7 @@ const makeExecutionContext = () => {
     passThroughOnException: () => {
       passThroughCalls++;
     },
-  } as globalThis.ExecutionContext;
+  });
 
   return {
     executionContext,
@@ -35,7 +36,7 @@ const makeExecutionContext = () => {
 };
 
 test("WorkerContext.waitUntil preserves Effect context through the worker runtime", async () => {
-  const state = { completed: [] as Array<string>, failures: [] as Array<string> };
+  const state: TestService["Service"] = { completed: [], failures: [] };
   const { executionContext, waitUntilPromises } = makeExecutionContext();
   const Live = Worker.make(Layer.succeed(TestService, state), {
     fetch: Effect.gen(function* () {
@@ -54,7 +55,7 @@ test("WorkerContext.waitUntil preserves Effect context through the worker runtim
       return new Response("ok");
     }),
   });
-  const worker = new Live(executionContext, {} as Cloudflare.Env);
+  const worker = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
 
   const response = await worker.fetch!(new Request("https://example.com/"));
 
@@ -67,7 +68,7 @@ test("WorkerContext.waitUntil preserves Effect context through the worker runtim
 });
 
 test("WorkerContext.waitUntil routes failures to onFailure with preserved context", async () => {
-  const state = { completed: [] as Array<string>, failures: [] as Array<string> };
+  const state: TestService["Service"] = { completed: [], failures: [] };
   const Live = Worker.make(Layer.succeed(TestService, state), {
     fetch: Effect.gen(function* () {
       const ctx = yield* Worker.WorkerContext;
@@ -85,7 +86,7 @@ test("WorkerContext.waitUntil routes failures to onFailure with preserved contex
     }),
   });
   const { executionContext, waitUntilPromises } = makeExecutionContext();
-  const worker = new Live(executionContext, {} as Cloudflare.Env);
+  const worker = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
 
   await worker.fetch!(new Request("https://example.com/"));
 
@@ -96,7 +97,7 @@ test("WorkerContext.waitUntil routes failures to onFailure with preserved contex
 });
 
 test("WorkerContext.waitUntil can propagate failures to native waitUntil", async () => {
-  const state = { completed: [] as Array<string>, failures: [] as Array<string> };
+  const state: TestService["Service"] = { completed: [], failures: [] };
   const Live = Worker.make(Layer.succeed(TestService, state), {
     queue: () =>
       Effect.gen(function* () {
@@ -114,7 +115,7 @@ test("WorkerContext.waitUntil can propagate failures to native waitUntil", async
       }),
   });
   const { executionContext, waitUntilPromises } = makeExecutionContext();
-  const worker = new Live(executionContext, {} as Cloudflare.Env);
+  const worker = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
 
   await worker.queue(makeMessageBatch("test-queue"));
 
@@ -134,7 +135,7 @@ test("WorkerContext.waitUntilPropagating rejects native waitUntil promises", asy
       }),
   });
   const { executionContext, waitUntilPromises } = makeExecutionContext();
-  const worker = new Live(executionContext, {} as Cloudflare.Env);
+  const worker = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
 
   await worker.queue(makeMessageBatch("test-queue"));
 
@@ -153,7 +154,7 @@ test("WorkerContext.passThroughOnException delegates to the raw ExecutionContext
     }),
   });
   const context = makeExecutionContext();
-  const worker = new Live(context.executionContext, {} as Cloudflare.Env);
+  const worker = new Live(context.executionContext, makePartialTestDouble<Cloudflare.Env>({}));
 
   await worker.fetch!(new Request("https://example.com/"));
 
@@ -161,10 +162,10 @@ test("WorkerContext.passThroughOnException delegates to the raw ExecutionContext
 });
 
 const makeMessageBatch = (queue: string): globalThis.MessageBatch<unknown> =>
-  ({
+  makePartialTestDouble<globalThis.MessageBatch<unknown>>({
     queue,
     messages: [],
     metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
     ackAll: () => undefined,
     retryAll: () => undefined,
-  }) as globalThis.MessageBatch<unknown>;
+  });

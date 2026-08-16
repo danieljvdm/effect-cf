@@ -1,21 +1,52 @@
 import { env, exports } from "cloudflare:workers";
 import { listDurableObjectIds, runInDurableObject } from "cloudflare:test";
 import { assert, expect, layer, test } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Predicate } from "effect";
 
 import { WorkerEnvironment } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 import { TestCounterDefinition, TestCounterDurableObject } from "./worker-fixture";
 
 const TestCounters = TestCounterDefinition;
+
+interface EncodedWorkerEntrypoint {
+  parseNumber(value: string): Promise<string>;
+}
+
+interface EncodedCounterStub {
+  increment(value: string): Promise<string>;
+}
+
+type DecodedCounterStub = Effect.Success<ReturnType<typeof TestCounters.getByName>>;
+
+const encodedWorkerEntrypoint = (
+  worker: typeof exports.TestWorkerEntrypoint,
+): EncodedWorkerEntrypoint => {
+  if (!Predicate.hasProperty(worker, "parseNumber") || !Predicate.isFunction(worker.parseNumber)) {
+    throw new Error("Worker entrypoint must provide parseNumber");
+  }
+
+  // SAFETY: The raw Cloudflare export exposes the schema-encoded RPC method, while its generated
+  // ambient type describes the decoded client call. The function check protects the runtime seam.
+  return worker as typeof worker & EncodedWorkerEntrypoint;
+};
+
+const encodedCounterStub = (stub: DecodedCounterStub): EncodedCounterStub => {
+  if (!Predicate.hasProperty(stub, "increment") || !Predicate.isFunction(stub.increment)) {
+    throw new Error("Counter stub must provide increment");
+  }
+
+  // SAFETY: The raw Durable Object stub method consumes and returns schema-encoded strings; the
+  // generated decoded client type is intentionally bypassed only after checking the method exists.
+  return stub as typeof stub & EncodedCounterStub;
+};
 
 const testLayer = TestCounters.layer({ binding: "TEST_COUNTER_DO" }).pipe(
   Layer.provide(Layer.succeed(WorkerEnvironment, env)),
 );
 
 test("runs package WorkerEntrypoint RPC in the Workers runtime", async () => {
-  const worker = exports.TestWorkerEntrypoint as unknown as {
-    parseNumber(value: string): Promise<string>;
-  };
+  const worker = encodedWorkerEntrypoint(exports.TestWorkerEntrypoint);
 
   await expect(worker.parseNumber("41")).resolves.toBe("42");
 });
@@ -38,9 +69,8 @@ layer(testLayer)("Workers runtime Durable Object namespace", (it) => {
 
       assert.strictEqual(incremented, 5);
 
-      const rawEncoded = yield* Effect.promise(() =>
-        (stub as unknown as { increment(value: string): Promise<string> }).increment("2"),
-      );
+      const rawStub = encodedCounterStub(stub);
+      const rawEncoded = yield* Effect.promise(() => rawStub.increment("2"));
 
       assert.strictEqual(rawEncoded, "7");
 
@@ -55,7 +85,7 @@ layer(testLayer)("Workers runtime Durable Object namespace", (it) => {
 
       yield* Effect.promise(() =>
         runInDurableObject(
-          stub as unknown as DurableObjectStub<TestCounterDurableObject>,
+          makePartialTestDouble<DurableObjectStub<TestCounterDurableObject>>(stub),
           async (instance: TestCounterDurableObject, state) => {
             expect(instance).toBeInstanceOf(TestCounterDurableObject);
             expect(await state.storage.kv.get("counter")).toEqual({ count: 10 });

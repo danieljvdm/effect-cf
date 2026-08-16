@@ -1,10 +1,14 @@
 import { assert, describe, it, test } from "@effect/vitest";
-import { Effect, Option } from "effect";
+import { Effect, Option, Predicate } from "effect";
 
 import { WebTransport } from "../src/index";
 
-const request = (cf: unknown) =>
-  ({ cf }) as Pick<Parameters<typeof WebTransport.inboundTransport>[0], "cf">;
+type CfFixture = undefined | string | { readonly [key: string]: string | number };
+
+const request = (cf: CfFixture): Parameters<typeof WebTransport.inboundTransport>[0] => {
+  // SAFETY: This boundary test intentionally feeds controlled malformed `cf` fixtures to verify schema rejection.
+  return { cf } as Parameters<typeof WebTransport.inboundTransport>[0];
+};
 
 describe("inboundTransport", () => {
   test("decodes HTTP/3 metadata and ignores unrelated cf fields", () => {
@@ -51,11 +55,15 @@ describe("capabilities", () => {
   it.effect("reports the truthful capability set", () =>
     Effect.gen(function* () {
       const capabilities = yield* WebTransport.capabilities;
+      const webTransportConstructor = Object.getOwnPropertyDescriptor(
+        globalThis,
+        "WebTransport",
+      )?.value;
 
       assert.strictEqual(capabilities.inboundSessions, false);
       assert.strictEqual(
         capabilities.outboundSessions,
-        typeof (globalThis as Record<string, unknown>)["WebTransport"] === "function",
+        Predicate.isFunction(webTransportConstructor),
       );
     }),
   );

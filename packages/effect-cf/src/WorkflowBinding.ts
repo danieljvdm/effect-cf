@@ -3,8 +3,9 @@ import type {
   Workflow as CloudflareWorkflow,
   WorkflowInstance as CloudflareWorkflowInstance,
   WorkflowInstanceCreateOptions as CloudflareWorkflowInstanceCreateOptions,
+  WorkflowInstanceRestartOptions as CloudflareWorkflowInstanceRestartOptions,
 } from "@cloudflare/workers-types";
-import { type Context, Data, Effect, Option, Schema as S } from "effect";
+import { type Context, Data, Effect, Option, Predicate, Schema as S } from "effect";
 
 import * as Binding from "./Binding";
 import type * as RpcDefinition from "./RpcDefinition";
@@ -21,13 +22,7 @@ export type WorkflowInstanceCreateBatchOptions<Payload, EncodedPayload = unknown
   { readonly payload: Payload } & WorkflowInstanceCreateOptions<EncodedPayload>
 >;
 
-export interface WorkflowInstanceRestartOptions {
-  readonly from?: {
-    readonly name?: string;
-    readonly count?: number;
-    readonly type?: string;
-  };
-}
+export type WorkflowInstanceRestartOptions = CloudflareWorkflowInstanceRestartOptions;
 
 export type WorkflowInstanceStatusName = CloudflareInstanceStatus["status"];
 
@@ -129,19 +124,22 @@ const tryWorkflowPromise = <A>(
     catch: (cause) => workflowError(binding, operation, cause),
   });
 
-export const isWorkflow = <Payload>(value: unknown): value is CloudflareWorkflow<Payload> => {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
+type WorkflowBindingValue = S.Schema.Type<typeof S.Unknown>;
 
-  const resource = value as Record<string, unknown>;
+const WorkflowBindingSchema = S.declare(
+  (value: WorkflowBindingValue): value is CloudflareWorkflow<WorkflowBindingValue> =>
+    Predicate.hasProperty(value, "create") &&
+    Predicate.isFunction(value.create) &&
+    Predicate.hasProperty(value, "createBatch") &&
+    Predicate.isFunction(value.createBatch) &&
+    Predicate.hasProperty(value, "get") &&
+    Predicate.isFunction(value.get),
+);
+const decodeWorkflowBinding = S.decodeUnknownOption(WorkflowBindingSchema);
 
-  return (
-    typeof resource.create === "function" &&
-    typeof resource.createBatch === "function" &&
-    typeof resource.get === "function"
-  );
-};
+export const isWorkflow = <Payload>(
+  value: WorkflowBindingValue,
+): value is CloudflareWorkflow<Payload> => Option.isSome(decodeWorkflowBinding(value));
 
 export const makeClient = <
   Payload extends RpcDefinition.ServiceFreeSchema,
@@ -168,12 +166,7 @@ export const makeClient = <
       pause: operation("pause", () => raw.pause()),
       resume: operation("resume", () => raw.resume()),
       terminate: operation("terminate", () => raw.terminate()),
-      restart: (options) =>
-        operation("restart", () =>
-          (raw as { restart(options?: WorkflowInstanceRestartOptions): Promise<void> }).restart(
-            options,
-          ),
-        ),
+      restart: (options) => operation("restart", () => raw.restart(options)),
       status: operation("status", () => raw.status()).pipe(
         Effect.flatMap((status) =>
           Effect.gen(function* () {

@@ -27,7 +27,7 @@ import type {
   GitLogOptions as CloudflareGitLogOptions,
   GitUpdateRefOptions as CloudflareGitUpdateRefOptions,
 } from "@cloudflare/computer/git";
-import { Context, Effect, Layer, Schema, type Scope, Stream } from "effect";
+import { Context, Effect, Layer, Predicate, Schema, type Scope, Stream } from "effect";
 
 import * as ComputerArtifacts from "./ComputerArtifacts";
 import { DurableObjectState } from "./DurableObjectState";
@@ -369,7 +369,7 @@ export type ComputerWorkspaceThink = {
 };
 
 /** Effect service over every client surface exposed by Cloudflare Computer. */
-export interface ComputerWorkspaceShape {
+export interface ComputerWorkspaceService {
   readonly fs: ComputerWorkspaceFilesystem;
   readonly git: ComputerWorkspaceGit;
   readonly runtime: ComputerWorkspaceRuntime;
@@ -403,52 +403,95 @@ export interface ComputerWorkspaceShape {
   readonly disposeExec: ComputerWorkspaceRuntime["disposeExec"];
 }
 
+export type { ComputerWorkspaceService as "ComputerWorkspaceShape" };
+
+interface WorkspaceFsErrorProperties {
+  operation: string;
+  path: string;
+  message: string;
+  cause: unknown;
+  code?: string;
+}
+
+interface WorkspaceOperationErrorProperties {
+  operation: string;
+  message: string;
+  cause: unknown;
+  code?: string;
+}
+
 const errorMessage = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
 
 const errorCode = (cause: unknown): string | undefined => {
-  if (typeof cause !== "object" || cause === null) {
-    return undefined;
+  if (Predicate.hasProperty(cause, "code") && Predicate.isString(cause.code)) {
+    return cause.code;
   }
 
-  const code = Reflect.get(cause, "code");
-
-  return typeof code === "string" ? code : undefined;
+  return undefined;
 };
 
-const fsError = (operation: string, path: string, cause: unknown) =>
-  WorkspaceFsError.make({
+const fsError = (operation: string, path: string, cause: unknown) => {
+  const properties: WorkspaceFsErrorProperties = {
     operation,
     path,
     message: errorMessage(cause),
     cause,
-    ...(errorCode(cause) === undefined ? {} : { code: errorCode(cause) }),
-  });
+  };
+  const code = errorCode(cause);
 
-const gitError = (operation: string, cause: unknown) =>
-  WorkspaceGitError.make({
+  if (code !== undefined) {
+    properties.code = code;
+  }
+
+  return WorkspaceFsError.make(properties);
+};
+
+const gitError = (operation: string, cause: unknown) => {
+  const properties: WorkspaceOperationErrorProperties = {
     operation,
     message: errorMessage(cause),
     cause,
-    ...(errorCode(cause) === undefined ? {} : { code: errorCode(cause) }),
-  });
+  };
+  const code = errorCode(cause);
 
-const execError = (operation: string, cause: unknown) =>
-  WorkspaceExecError.make({
+  if (code !== undefined) {
+    properties.code = code;
+  }
+
+  return WorkspaceGitError.make(properties);
+};
+
+const execError = (operation: string, cause: unknown) => {
+  const properties: WorkspaceOperationErrorProperties = {
     operation,
     message: errorMessage(cause),
     cause,
-    ...(errorCode(cause) === undefined ? {} : { code: errorCode(cause) }),
-  });
+  };
+  const code = errorCode(cause);
 
-const assetsError = (operation: string, path: string, cause: unknown) =>
-  WorkspaceAssetsError.make({
+  if (code !== undefined) {
+    properties.code = code;
+  }
+
+  return WorkspaceExecError.make(properties);
+};
+
+const assetsError = (operation: string, path: string, cause: unknown) => {
+  const properties: WorkspaceFsErrorProperties = {
     operation,
     path,
     message: errorMessage(cause),
     cause,
-    ...(errorCode(cause) === undefined ? {} : { code: errorCode(cause) }),
-  });
+  };
+  const code = errorCode(cause);
+
+  if (code !== undefined) {
+    properties.code = code;
+  }
+
+  return WorkspaceAssetsError.make(properties);
+};
 
 const tryFs = <A>(operation: string, path: string, evaluate: () => Promise<A>) =>
   Effect.tryPromise({
@@ -479,6 +522,8 @@ const makeFilesystem = (fsClient: CloudflareWorkspaceFilesystem): ComputerWorksp
     );
   });
 
+  // SAFETY: the implementation branches on the declared encoding discriminant and returns the
+  // corresponding Cloudflare read result for both overloads.
   const readFile = readFileImplementation as WorkspaceReadFile;
 
   const stat = Effect.fn("ComputerWorkspace.fs.stat", {
@@ -640,14 +685,14 @@ const makeGit = (gitClient: CloudflareGitClient): ComputerWorkspaceGit => {
     attributes: { family: "git", operation: "log" },
   })(function* (options?: WorkspaceGitLogOptions) {
     const { maxCount, ...upstreamOptions } = options ?? {};
+    const logOptions: CloudflareGitLogOptions = { ...upstreamOptions };
+
+    if (logOptions.depth === undefined && maxCount !== undefined) {
+      logOptions.depth = maxCount;
+    }
+
     const commits = yield* Effect.tryPromise({
-      try: () =>
-        gitClient.log({
-          ...upstreamOptions,
-          ...(upstreamOptions.depth === undefined && maxCount !== undefined
-            ? { depth: maxCount }
-            : {}),
-        }),
+      try: () => gitClient.log(logOptions),
       catch: (cause) => gitError("log", cause),
     });
 
@@ -657,7 +702,7 @@ const makeGit = (gitClient: CloudflareGitClient): ComputerWorkspaceGit => {
   const revParseImplementation = Effect.fn("ComputerWorkspace.git.revParse", {
     attributes: { family: "git", operation: "revParse" },
   })(function* (input: string | Parameters<CloudflareGitClient["revParse"]>[0]) {
-    const options = typeof input === "string" ? { ref: input } : input;
+    const options = Predicate.isString(input) ? { ref: input } : input;
 
     return yield* Effect.tryPromise({
       try: () => gitClient.revParse(options),
@@ -665,19 +710,21 @@ const makeGit = (gitClient: CloudflareGitClient): ComputerWorkspaceGit => {
     });
   });
 
+  // SAFETY: the implementation normalizes the string overload to the exact options object accepted
+  // by Cloudflare and forwards the options overload unchanged.
   const revParse = revParseImplementation as ComputerWorkspaceGit["revParse"];
 
   return {
-    clone: method("clone", (options) => gitClient.clone(options as CloudflareGitCloneOptions)),
-    diff: method("diff", (options) => gitClient.diff(options as CloudflareGitDiffOptions)),
-    diffSummary: method("diffSummary", (options) =>
-      gitClient.diffSummary(options as CloudflareGitDiffOptions),
+    clone: method("clone", (options: CloudflareGitCloneOptions) => gitClient.clone(options)),
+    diff: method("diff", (options?: CloudflareGitDiffOptions) => gitClient.diff(options)),
+    diffSummary: method("diffSummary", (options?: CloudflareGitDiffOptions) =>
+      gitClient.diffSummary(options),
     ),
     init: method("init", (options) => gitClient.init(options)),
     status: method("status", (options) => gitClient.status(options)),
     add: method("add", (options) => gitClient.add(options)),
     rm: method("rm", (options) => gitClient.rm(options)),
-    commit: method("commit", (options) => gitClient.commit(options as CloudflareGitCommitOptions)),
+    commit: method("commit", (options: CloudflareGitCommitOptions) => gitClient.commit(options)),
     log,
     show: method("show", (options) => gitClient.show(options)),
     revParse,
@@ -692,7 +739,7 @@ const makeGit = (gitClient: CloudflareGitClient): ComputerWorkspaceGit => {
     tagDelete: method("tagDelete", (options) => gitClient.tagDelete(options)),
     tagList: method("tagList", (options) => gitClient.tagList(options)),
     checkout: method("checkout", (options) => gitClient.checkout(options)),
-    fetch: method("fetch", (options) => gitClient.fetch(options as CloudflareGitFetchOptions)),
+    fetch: method("fetch", (options?: CloudflareGitFetchOptions) => gitClient.fetch(options)),
     push: method("push", (options) => gitClient.push(options)),
     pull: method("pull", (options) => gitClient.pull(options)),
     merge: method("merge", (options) => gitClient.merge(options)),
@@ -701,8 +748,8 @@ const makeGit = (gitClient: CloudflareGitClient): ComputerWorkspaceGit => {
     remoteList: method("remoteList", (options) => gitClient.remoteList(options)),
     hashObject: method("hashObject", (options) => gitClient.hashObject(options)),
     catFile: method("catFile", (options) => gitClient.catFile(options)),
-    updateRef: method("updateRef", (options) =>
-      gitClient.updateRef(options as CloudflareGitUpdateRefOptions),
+    updateRef: method("updateRef", (options: CloudflareGitUpdateRefOptions) =>
+      gitClient.updateRef(options),
     ),
     configGet: method("configGet", (options) => gitClient.configGet(options)),
     configSet: method("configSet", (options) => gitClient.configSet(options)),
@@ -712,7 +759,7 @@ const makeGit = (gitClient: CloudflareGitClient): ComputerWorkspaceGit => {
     reset: method("reset", (options) => gitClient.reset(options)),
     clean: method("clean", (options) => gitClient.clean(options)),
     cli: method("cli", (input) => gitClient.cli(input)),
-  } as ComputerWorkspaceGit;
+  } satisfies ComputerWorkspaceGit;
 };
 
 const runtimeExecOptions = <Encoding extends WorkspaceExecEncoding>(
@@ -720,13 +767,19 @@ const runtimeExecOptions = <Encoding extends WorkspaceExecEncoding>(
 ): CloudflareRuntimeExecOptions => {
   const { encoding = "utf8", timeoutMillis, timeoutMs, ...rest } = options ?? {};
 
-  return {
-    ...rest,
-    ...(encoding === "utf8" ? { encoding: "utf8" as const } : {}),
-    ...(timeoutMs === undefined && timeoutMillis === undefined
-      ? {}
-      : { timeoutMs: timeoutMs ?? timeoutMillis }),
-  };
+  const runtimeOptions: CloudflareRuntimeExecOptions = { ...rest };
+
+  if (encoding === "utf8") {
+    runtimeOptions.encoding = "utf8";
+  }
+
+  const selectedTimeout = timeoutMs ?? timeoutMillis;
+
+  if (selectedTimeout !== undefined) {
+    runtimeOptions.timeoutMs = selectedTimeout;
+  }
+
+  return runtimeOptions;
 };
 
 const runtimeGetOptions = <Encoding extends WorkspaceExecEncoding>(
@@ -734,34 +787,47 @@ const runtimeGetOptions = <Encoding extends WorkspaceExecEncoding>(
 ): CloudflareRuntimeGetOptions => {
   const { encoding = "utf8", ...rest } = options ?? {};
 
-  return {
-    ...rest,
-    ...(encoding === "utf8" ? { encoding: "utf8" as const } : {}),
-  };
+  const runtimeOptions: CloudflareRuntimeGetOptions = { ...rest };
+
+  if (encoding === "utf8") {
+    runtimeOptions.encoding = "utf8";
+  }
+
+  return runtimeOptions;
 };
 
 const wrapRuntimeResult = <Encoding extends WorkspaceExecEncoding>(
   result: CloudflareWorkspaceRuntimeResult<CloudflareEncoding<Encoding>>,
-): WorkspaceExecResult<Encoding> => ({
-  status: result.status,
-  exitCode: result.exitCode,
-  stdout: result.stdout as WorkspaceExecChunk<Encoding>,
-  stderr: result.stderr as WorkspaceExecChunk<Encoding>,
-  ...(result.value === undefined ? {} : { value: result.value }),
-  pushed: result.pushed,
-  pulled: result.pulled,
-  skipped: result.skipped,
-  sync: result.sync,
-});
+): WorkspaceExecResult<Encoding> => {
+  // SAFETY: Cloudflare's result encoding generic determines stdout and stderr in the same way as
+  // WorkspaceExecChunk; CloudflareEncoding maps the public "binary" name to upstream undefined.
+  const stdout = result.stdout as WorkspaceExecChunk<Encoding>;
+  // SAFETY: the same encoding invariant applies independently to stderr.
+  const stderr = result.stderr as WorkspaceExecChunk<Encoding>;
+  const wrapped = {
+    status: result.status,
+    exitCode: result.exitCode,
+    stdout,
+    stderr,
+    pushed: result.pushed,
+    pulled: result.pulled,
+    skipped: result.skipped,
+    sync: result.sync,
+  };
 
-const wrapRuntimeEvent = <Encoding extends WorkspaceExecEncoding>(
-  event: CloudflareWorkspaceRuntimeEvent<CloudflareEncoding<Encoding>>,
-): WorkspaceExecEvent<Encoding> => {
+  return result.value === undefined ? wrapped : { ...wrapped, value: result.value };
+};
+
+type AnyWorkspaceExecEvent = WorkspaceExecEvent<"utf8"> | WorkspaceExecEvent<"binary">;
+
+const wrapRuntimeEvent = (
+  event: CloudflareWorkspaceRuntimeEvent<"utf8" | undefined>,
+): AnyWorkspaceExecEvent => {
   switch (event.name) {
     case "stdout": {
-      const chunk = event.value as unknown as string | Uint8Array;
+      const chunk = event.value;
 
-      return (typeof chunk === "string"
+      return Predicate.isString(chunk)
         ? { _tag: "Stdout", id: event.id, sequence: event.seq, chunk, text: chunk }
         : {
             _tag: "Stdout",
@@ -769,12 +835,12 @@ const wrapRuntimeEvent = <Encoding extends WorkspaceExecEncoding>(
             sequence: event.seq,
             chunk,
             bytes: chunk,
-          }) as unknown as WorkspaceExecEvent<Encoding>;
+          };
     }
     case "stderr": {
-      const chunk = event.value as unknown as string | Uint8Array;
+      const chunk = event.value;
 
-      return (typeof chunk === "string"
+      return Predicate.isString(chunk)
         ? { _tag: "Stderr", id: event.id, sequence: event.seq, chunk, text: chunk }
         : {
             _tag: "Stderr",
@@ -782,29 +848,35 @@ const wrapRuntimeEvent = <Encoding extends WorkspaceExecEncoding>(
             sequence: event.seq,
             chunk,
             bytes: chunk,
-          }) as unknown as WorkspaceExecEvent<Encoding>;
+          };
     }
     case "exit":
-      return {
-        _tag: "Exit",
+      const exitEvent = {
+        _tag: "Exit" as const,
         id: event.id,
         sequence: event.seq,
         exitCode: event.code,
-        ...(event.result === undefined ? {} : { value: event.result }),
       };
+
+      return event.result === undefined ? exitEvent : { ...exitEvent, value: event.result };
   }
 };
 
 const wrapRun = <Encoding extends WorkspaceExecEncoding>(
   handle: CloudflareWorkspaceRuntimeExecHandle<CloudflareEncoding<Encoding>>,
 ): WorkspaceExecRun<Encoding> => {
+  // SAFETY: wrapRuntimeEvent preserves Cloudflare's encoding-specific event arm; this adapter
+  // restores the correlation hidden when the implementation handles both upstream encodings.
+  const mapRuntimeEvent = wrapRuntimeEvent as (
+    event: CloudflareWorkspaceRuntimeEvent<CloudflareEncoding<Encoding>>,
+  ) => WorkspaceExecEvent<Encoding>;
   const events = Stream.fromReadableStream<
     CloudflareWorkspaceRuntimeEvent<CloudflareEncoding<Encoding>>,
     WorkspaceExecError
   >({
     evaluate: () => handle,
     onError: (cause) => execError("events", cause),
-  }).pipe(Stream.map(wrapRuntimeEvent<Encoding>));
+  }).pipe(Stream.map(mapRuntimeEvent));
 
   const result = Effect.tryPromise({
     try: () => handle.result(),
@@ -834,23 +906,29 @@ const makeRuntime = (client: CloudflareWorkspaceClient): ComputerWorkspaceRuntim
     optionsOrValue?: WorkspaceExecOptions<Encoding> | CloudflareShellValue,
     ...remainingValues: Array<CloudflareShellValue>
   ) {
-    const options =
-      typeof source === "string"
-        ? (optionsOrValue as WorkspaceExecOptions<Encoding> | undefined)
-        : undefined;
+    // SAFETY: the WorkspaceExec overload associates string sources with an options object; template
+    // invocations associate the second argument with a shell interpolation value.
+    const options = Predicate.isString(source)
+      ? (optionsOrValue as WorkspaceExecOptions<Encoding> | undefined)
+      : undefined;
 
     yield* Effect.annotateCurrentSpan({ backend: options?.backend, runId: options?.id });
     const handle = yield* Effect.acquireRelease(
       Effect.tryPromise({
         try: () => {
-          if (typeof source === "string") {
+          if (Predicate.isString(source)) {
             return client.runtime.exec(source, runtimeExecOptions(options));
           }
 
           const values =
             optionsOrValue === undefined
               ? remainingValues
-              : [optionsOrValue as CloudflareShellValue, ...remainingValues];
+              : [
+                  // SAFETY: this branch is reachable only for the tagged-template overload, whose
+                  // second argument is the first Cloudflare shell interpolation value.
+                  optionsOrValue as CloudflareShellValue,
+                  ...remainingValues,
+                ];
 
           return client.runtime.exec(source, ...values);
         },
@@ -859,10 +937,13 @@ const makeRuntime = (client: CloudflareWorkspaceClient): ComputerWorkspaceRuntim
       releaseRun,
     );
 
+    // SAFETY: runtimeExecOptions carries Encoding to Cloudflare's corresponding handle overload.
     return wrapRun<Encoding>(
       handle as CloudflareWorkspaceRuntimeExecHandle<CloudflareEncoding<Encoding>>,
     );
   });
+  // SAFETY: execImplementation implements each overload by preserving the source/encoding
+  // relationship and delegates tagged-template inputs to Cloudflare's tagged-template overload.
   const exec = execImplementation as WorkspaceExec;
 
   const getExecImplementation = Effect.fn("ComputerWorkspace.runtime.getExec", {
@@ -880,10 +961,13 @@ const makeRuntime = (client: CloudflareWorkspaceClient): ComputerWorkspaceRuntim
       releaseRun,
     );
 
+    // SAFETY: runtimeGetOptions carries Encoding to Cloudflare's corresponding handle overload.
     return wrapRun<Encoding>(
       handle as CloudflareWorkspaceRuntimeExecHandle<CloudflareEncoding<Encoding>>,
     );
   });
+  // SAFETY: getExecImplementation preserves the option encoding and therefore satisfies each
+  // WorkspaceGetExec overload.
   const getExec = getExecImplementation as WorkspaceGetExec;
 
   const killExec = Effect.fn("ComputerWorkspace.runtime.killExec", {
@@ -921,6 +1005,8 @@ const makeRuntime = (client: CloudflareWorkspaceClient): ComputerWorkspaceRuntim
       }),
     );
   });
+  // SAFETY: execCollectImplementation delegates to the checked exec overload implementation and
+  // returns the result associated with that same encoding.
   const execCollect = execCollectImplementation as WorkspaceExecCollect;
 
   return { exec, execCollect, getExec, killExec, disposeExec };
@@ -973,50 +1059,59 @@ const makeThink = (client: CloudflareWorkspaceClient): ComputerWorkspaceThink | 
       return yield* tryFs(`think.${operation}`, path, () => evaluate(...args));
     });
 
+  const readFile = client.readFile.bind(client);
+  const readFileBytes = client.readFileBytes.bind(client);
+  const writeFile = client.writeFile.bind(client);
+  const readDir = client.readDir.bind(client);
+  const rm = client.rm.bind(client);
+  const glob = client.glob.bind(client);
+  const mkdir = client.mkdir.bind(client);
+  const stat = client.stat.bind(client);
+
   return {
     readFile: method(
       "readFile",
-      (path) => path as string,
-      (path) => client.readFile!(path as string),
+      (path: string) => path,
+      (path: string) => readFile(path),
     ),
     readFileBytes: method(
       "readFileBytes",
-      (path) => path as string,
-      (path) => client.readFileBytes!(path as string),
+      (path: string) => path,
+      (path: string) => readFileBytes(path),
     ),
     writeFile: method(
       "writeFile",
       (path: string, _content: string) => path,
-      (path: string, content: string) => client.writeFile!(path, content),
+      (path: string, content: string) => writeFile(path, content),
     ),
     readDir: method(
       "readDir",
       (path: string, _options?: { readonly limit?: number; readonly offset?: number }) => path,
       (path: string, options?: { readonly limit?: number; readonly offset?: number }) =>
-        client.readDir!(path, options),
+        readDir(path, options),
     ),
     rm: method(
       "rm",
       (path: string, _options?: { readonly recursive?: boolean; readonly force?: boolean }) => path,
       (path: string, options?: { readonly recursive?: boolean; readonly force?: boolean }) =>
-        client.rm!(path, options),
+        rm(path, options),
     ),
     glob: method(
       "glob",
-      (pattern) => pattern as string,
-      (pattern) => client.glob!(pattern as string),
+      (pattern: string) => pattern,
+      (pattern: string) => glob(pattern),
     ),
     mkdir: method(
       "mkdir",
       (path: string, _options?: { readonly recursive?: boolean }) => path,
-      (path: string, options?: { readonly recursive?: boolean }) => client.mkdir!(path, options),
+      (path: string, options?: { readonly recursive?: boolean }) => mkdir(path, options),
     ),
     stat: method(
       "stat",
-      (path) => path as string,
-      (path) => client.stat!(path as string),
+      (path: string) => path,
+      (path: string) => stat(path),
     ),
-  } as ComputerWorkspaceThink;
+  } satisfies ComputerWorkspaceThink;
 };
 
 /**
@@ -1024,14 +1119,22 @@ const makeThink = (client: CloudflareWorkspaceClient): ComputerWorkspaceThink | 
  * {@link ComputerWorkspace.layer} in Durable Objects so the parent client and
  * every runtime handle are disposed by Effect `Scope`.
  */
-export const fromWorkspaceClient = (client: CloudflareWorkspaceClient): ComputerWorkspaceShape => {
+export const fromWorkspaceClient = (
+  client: CloudflareWorkspaceClient,
+): ComputerWorkspaceService => {
   const fs = makeFilesystem(client.fs);
+  // SAFETY: @cloudflare/computer currently publishes these WorkspaceClient properties as `any`,
+  // while its runtime exposes the concrete clients imported above.
   const git = makeGit(client.git as CloudflareGitClient);
   const runtime = makeRuntime(client);
   const artifacts = ComputerArtifacts.fromClient(
+    // SAFETY: the upstream WorkspaceClient declaration erases this concrete artifact client to
+    // `any`; Workspace always exposes its ArtifactClient here.
     client.artifacts as CloudflareComputerArtifactClient,
     { binding: "ComputerWorkspace.artifacts" },
   );
+  // SAFETY: the upstream WorkspaceClient declaration erases this optional concrete assets client
+  // to `any`; Workspace exposes AssetsClient | undefined here.
   const assets = makeAssets(client.assets as CloudflareComputerAssetsClient | undefined);
   const think = makeThink(client);
 
@@ -1067,9 +1170,10 @@ export const fromWorkspaceClient = (client: CloudflareWorkspaceClient): Computer
 };
 
 /** Effect service for the workspace owned by the enclosing Durable Object. */
-export class ComputerWorkspace extends Context.Service<ComputerWorkspace, ComputerWorkspaceShape>()(
-  "effect-cf/ComputerWorkspace",
-) {
+export class ComputerWorkspace extends Context.Service<
+  ComputerWorkspace,
+  ComputerWorkspaceService
+>()("effect-cf/ComputerWorkspace") {
   /**
    * Acquires the single workspace registered by `withComputerWorkspace` and
    * releases its RPC client when the layer scope closes.

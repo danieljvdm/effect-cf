@@ -1,4 +1,15 @@
-import { Clock, Context, Data, DateTime, Duration, Effect, Exit, Layer, Schema as S } from "effect";
+import {
+  Clock,
+  Context,
+  Data,
+  DateTime,
+  Duration,
+  Effect,
+  Exit,
+  Layer,
+  Predicate,
+  Schema as S,
+} from "effect";
 
 import { DurableObjectState } from "./DurableObjectState";
 import type { SqlStorageValue, StorageOperationError } from "./DurableObjectStorage";
@@ -442,10 +453,10 @@ const getFailureRetryDelay = (options: ProcessDueAlarmsOptions<unknown, unknown>
   );
 
 const getFailureActionMode = (action: ProcessDueAlarmsFailureAction) =>
-  typeof action === "string" ? action : action.mode;
+  Predicate.isString(action) ? action : action.mode;
 
 const getFailureActionRetryDelay = (action: ProcessDueAlarmsFailureAction) =>
-  typeof action === "string" || action.mode !== "retry" ? undefined : action.retryFailedAfter;
+  Predicate.isString(action) || action.mode !== "retry" ? undefined : action.retryFailedAfter;
 
 export const processDue = <R = never, E = never, OnFailureR = never, OnFailureE = never>(
   handle: ProcessDueAlarmsHandler<R, E>,
@@ -497,8 +508,7 @@ export type DefinedAlarmHandlers<Definitions extends AlarmDefinitions, R = never
 
 const isAlarmDefinitionConfig = (
   definition: AlarmDefinitionEntry,
-): definition is AlarmDefinitionConfig =>
-  typeof definition === "object" && definition !== null && "payload" in definition;
+): definition is AlarmDefinitionConfig => Predicate.isObject(definition) && "payload" in definition;
 
 const getAlarmDefinitionSchema = (definition: AlarmDefinitionEntry) =>
   isAlarmDefinitionConfig(definition) ? definition.payload : definition;
@@ -534,6 +544,7 @@ export const define = <const Definitions extends AlarmDefinitions>(definitions: 
           }
 
           const schema = getAlarmDefinitionSchema(definition);
+          // SAFETY: schema is selected from the same tagged definition used to select its handler.
           const payload = yield* (
             S.decodeUnknownEffect(schema)(event.payload) as Effect.Effect<
               AlarmDefinitionPayload<Definitions[keyof Definitions & string]>,
@@ -550,6 +561,7 @@ export const define = <const Definitions extends AlarmDefinitions>(definitions: 
           );
           const handler = handlers[event.tag];
 
+          // SAFETY: event.tag indexes the matching definition and handler, whose payload schema was decoded above.
           yield* handler({ ...event, payload } as never);
         }),
       {

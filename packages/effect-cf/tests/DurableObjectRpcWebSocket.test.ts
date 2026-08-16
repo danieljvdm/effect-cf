@@ -1,5 +1,5 @@
 import { assert, layer } from "@effect/vitest";
-import { Effect, Layer, Schema } from "effect";
+import { Effect, Layer, Predicate, Schema } from "effect";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
@@ -10,6 +10,7 @@ import {
   DurableObjectState,
   DurableObjectWebSocket,
 } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
 class PingResult extends Schema.Class<PingResult>("PingResult")({
   nonce: Schema.String,
@@ -166,7 +167,9 @@ interface FakeWebSocket extends WebSocket {
   readonly nextSend: Promise<void>;
 }
 
-function makeFakeWebSocket(initialAttachment: unknown = null): FakeWebSocket {
+type RpcAttachmentFixture = null | { readonly effectCloudflareRpcClientId: number };
+
+function makeFakeWebSocket(initialAttachment: RpcAttachmentFixture = null): FakeWebSocket {
   let attachment = initialAttachment;
   let resolveSend: () => void = () => {};
   const sent: Array<string | ArrayBuffer | ArrayBufferView> = [];
@@ -176,7 +179,7 @@ function makeFakeWebSocket(initialAttachment: unknown = null): FakeWebSocket {
     resolveSend = resolve;
   });
 
-  return {
+  return makePartialTestDouble<FakeWebSocket>({
     sent,
     closed,
     nextSend,
@@ -187,13 +190,13 @@ function makeFakeWebSocket(initialAttachment: unknown = null): FakeWebSocket {
     close(code?: number, reason?: string) {
       closed.push({ code, reason });
     },
-    serializeAttachment(value: unknown) {
+    serializeAttachment(value: RpcAttachmentFixture) {
       attachment = value;
     },
     deserializeAttachment() {
       return attachment;
     },
-  } as unknown as FakeWebSocket;
+  });
 }
 
 interface FakeDurableObjectState extends DurableObjectState.DurableObjectStateService {
@@ -211,9 +214,9 @@ function makeFakeDurableObjectState(options?: {
   const socketsByTag = options?.socketsByTag ?? new Map<string, Array<WebSocket>>();
 
   return {
-    raw: {} as globalThis.DurableObjectState,
-    id: {} as globalThis.DurableObjectId,
-    storage: {} as never,
+    raw: makePartialTestDouble<globalThis.DurableObjectState>({}),
+    id: makePartialTestDouble<globalThis.DurableObjectId>({}),
+    storage: makePartialTestDouble<DurableObjectState.DurableObjectStateService["storage"]>({}),
     waitUntil: () => Effect.void,
     blockConcurrencyWhile: (effect) => effect,
     blockConcurrencyWhileOrReset: (effect) => effect,
@@ -249,8 +252,10 @@ function makeFakeDurableObjectState(options?: {
 
 function decodeSent(socket: FakeWebSocket) {
   return socket.sent.map((message) => {
-    assert.strictEqual(typeof message, "string");
+    if (!Predicate.isString(message)) {
+      throw new Error("Expected the RPC transport to send a string frame");
+    }
 
-    return JSON.parse(message as string);
+    return JSON.parse(message);
   });
 }

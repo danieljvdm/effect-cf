@@ -6,36 +6,35 @@ import { assert, test } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 
 import { Workflow } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
-const executionContext = {
+const executionContext = makePartialTestDouble<ExecutionContext>({
   waitUntil() {},
   passThroughOnException() {},
-} as unknown as ExecutionContext;
+});
 
-const makeEvent = (payload: unknown) =>
-  ({
-    payload,
-    timestamp: new Date(),
-    instanceId: "wf_1",
-    workflowName: "TestWorkflow",
-  }) as Readonly<CloudflareWorkflowEvent<unknown>>;
+const makeEvent = (): Readonly<CloudflareWorkflowEvent<undefined>> => ({
+  payload: undefined,
+  timestamp: new Date(),
+  instanceId: "wf_1",
+  workflowName: "TestWorkflow",
+});
 
 test("failing steps surface WorkflowStepError with step, operation, and cause", async () => {
   const cause = new Error("step failed");
-  const step = {
+  const step = makePartialTestDouble<CloudflareWorkflowStep>({
     do: async () => {
       throw cause;
     },
     sleep: async () => undefined,
     sleepUntil: async () => undefined,
-    waitForEvent: async () => ({ payload: undefined, timestamp: new Date(), type: "event" }),
-  } as unknown as CloudflareWorkflowStep;
+  });
   const Live = Workflow.make(Layer.empty, {
     run: () => Effect.flip(Workflow.step("explode", Effect.void)),
   });
-  const workflow = new Live(executionContext, {} as Cloudflare.Env);
+  const workflow = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
 
-  const error = await workflow.run(makeEvent(undefined), step);
+  const error = await workflow.run(makeEvent(), step);
 
   assert.instanceOf(error, Workflow.WorkflowStepError);
   assert.strictEqual(error.step, "explode");
@@ -45,20 +44,18 @@ test("failing steps surface WorkflowStepError with step, operation, and cause", 
 
 test("failing sleeps surface WorkflowStepError with the sleep operation", async () => {
   const cause = new Error("sleep failed");
-  const step = {
-    do: async () => undefined,
+  const step = makePartialTestDouble<CloudflareWorkflowStep>({
     sleep: async () => {
       throw cause;
     },
     sleepUntil: async () => undefined,
-    waitForEvent: async () => ({ payload: undefined, timestamp: new Date(), type: "event" }),
-  } as unknown as CloudflareWorkflowStep;
+  });
   const Live = Workflow.make(Layer.empty, {
     run: () => Effect.flip(Workflow.sleep("pause", "5 seconds")),
   });
-  const workflow = new Live(executionContext, {} as Cloudflare.Env);
+  const workflow = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
 
-  const error = await workflow.run(makeEvent(undefined), step);
+  const error = await workflow.run(makeEvent(), step);
 
   assert.instanceOf(error, Workflow.WorkflowStepError);
   assert.strictEqual(error.step, "pause");

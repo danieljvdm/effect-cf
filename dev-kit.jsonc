@@ -16,19 +16,9 @@
     "effectTsgo": { "enabled": true },
     "vitePlus": {
       "hooks": { "enabled": true },
-      "quality": {
-        "workflow": {
-          "enabled": true,
-          // Examples and the worker test fixtures resolve the publishable
-          // packages through their published `dist` entrypoints.
-          "beforeChecks": [
-            {
-              "name": "Build packages",
-              "run": ["vp run effect-cf#build", "vp run effect-webtransport#build"],
-            },
-          ],
-        },
-      },
+      // This is a create-once scaffold; the repository-owned workflow keeps
+      // its package build steps before the checks.
+      "workflow": { "enabled": true },
     },
   },
   "targets": {

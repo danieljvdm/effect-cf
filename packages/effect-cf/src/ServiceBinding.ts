@@ -1,4 +1,4 @@
-import { Data, Effect, type Context, type Scope } from "effect";
+import { Data, Effect, Option, Predicate, Schema, type Context, type Scope } from "effect";
 
 import * as Binding from "./Binding";
 import * as CloudflareRpc from "./Rpc";
@@ -19,7 +19,7 @@ export interface ServiceFetcher {
 
 type RpcClient<Api> = {
   readonly [Key in keyof Api as Key extends string
-    ? Api[Key] extends (...args: Array<any>) => unknown
+    ? Api[Key] extends (...args: Array<any>) => any
       ? Key
       : never
     : never]: Api[Key];
@@ -232,10 +232,17 @@ export type ServiceBindingStaticClient<
   ) => Effect.Effect<Awaited<ServiceMethodSuccess<Api, Method>>, unknown, Scope.Scope | R>;
 };
 
+type ServiceBindingValue = Schema.Schema.Type<typeof Schema.Unknown>;
+
+const ServiceBindingSchema = Schema.declare(
+  (value: ServiceBindingValue): value is ServiceFetcher =>
+    Predicate.hasProperty(value, "fetch") && Predicate.isFunction(value.fetch),
+);
+const decodeServiceBinding = Schema.decodeUnknownOption(ServiceBindingSchema);
+
 export const isServiceBindingClient = <Api extends object>(
-  value: unknown,
-): value is ServiceBindingClient<Api> =>
-  typeof value === "object" && value !== null && typeof Reflect.get(value, "fetch") === "function";
+  value: ServiceBindingValue,
+): value is ServiceBindingClient<Api> => Option.isSome(decodeServiceBinding(value));
 
 export const makeClient = <
   Api extends object,
@@ -259,6 +266,7 @@ export const makeClient = <
       ...args: ServiceMethodArgs<Api, Method>
     ) {
       const methodName = String(method);
+      // SAFETY: definition-backed clients derive Method and Args from this exact RPC definition.
       const encodedArgs =
         definition.definition === undefined
           ? args
@@ -277,6 +285,7 @@ export const makeClient = <
               ),
             );
 
+      // SAFETY: encoding preserves the selected API method's positional argument contract.
       return yield* RpcInvocation.invokeRpcMethod(
         service,
         method,
@@ -295,9 +304,11 @@ export const makeClient = <
       value: Awaited<ServiceMethodCloudflareReturn<Api, Method>>,
     ) {
       if (definition.definition === undefined) {
+        // SAFETY: without a definition the resolved native RPC value is the API method's declared success.
         return value as ServiceMethodSuccess<Api, Method>;
       }
 
+      // SAFETY: definition-backed clients derive the method name from this exact RPC definition.
       const decoded = yield* RpcDefinition.decodeSuccess(
         definition.definition,
         methodName as RpcDefinition.Definition.MethodNames<NonNullable<Definition>>,
@@ -313,6 +324,7 @@ export const makeClient = <
         ),
       );
 
+      // SAFETY: decodeSuccess validates against the selected method's declared success schema.
       return decoded as ServiceMethodSuccess<Api, Method>;
     });
 
@@ -347,6 +359,7 @@ export const makeClient = <
 
     const directMethods = makeDirectMethods<never, Api, Definition>(definition.definition, call);
 
+    // SAFETY: Object.assign attaches the four client operations required by ServiceBindingEffectClient.
     return Object.assign(directMethods, {
       fetch,
       rpc,
@@ -457,6 +470,7 @@ export const Service =
       call,
     );
 
+    // SAFETY: Object.assign attaches the definition-derived service metadata and static operations.
     return Object.assign(tag, directMethods, {
       [TypeId]: TypeId,
       definition,
@@ -483,14 +497,18 @@ export const makeDirectMethods = <
   rpcDefinition: Definition | undefined,
   call: ServiceCall<R, Api>,
 ): DirectMethods<R, Definition> => {
-  const methods = {} as Record<string, unknown>;
+  type DynamicMethod = (...args: Array<any>) => Effect.Effect<any, ServiceBindingRpcError, R>;
+  const methods: Record<string, DynamicMethod> = {};
 
   if (rpcDefinition !== undefined) {
+    // SAFETY: rpcDefinition limits these names and tuples to the same definition used to construct call.
+    const invoke = call as (method: string, ...args: Array<any>) => ReturnType<DynamicMethod>;
+
     for (const methodName of Object.keys(rpcDefinition.methods)) {
-      methods[methodName] = (...args: Array<unknown>) =>
-        (call as (method: string, ...args: Array<unknown>) => unknown)(methodName, ...args);
+      methods[methodName] = (...args: Array<any>) => invoke(methodName, ...args);
     }
   }
 
+  // SAFETY: every declared definition method is populated above with a forwarding Effect function.
   return methods as DirectMethods<R, Definition>;
 };

@@ -46,6 +46,7 @@ interface Calls {
   readonly listTokens: Array<true>;
   readonly revokeToken: Array<string>;
   readonly fork: Array<readonly [Artifacts.RepoName, Artifacts.ArtifactsForkOptions | undefined]>;
+  readonly info: Array<true>;
   readonly log: Array<Artifacts.ArtifactsLogOptions | undefined>;
   readonly readCommit: Array<string>;
   readonly readTree: Array<string>;
@@ -61,9 +62,21 @@ const makeCalls = (): Calls => ({
   listTokens: [],
   revokeToken: [],
   fork: [],
+  info: [],
   log: [],
   readCommit: [],
   readTree: [],
+});
+
+const commitInfo = (hash: string): Artifacts.ArtifactsCommit => ({
+  hash,
+  treeHash: "tree-1",
+  message: "Initial commit",
+  author: { name: "Ada", email: "ada@example.com" },
+  committer: { name: "Grace", email: "grace@example.com" },
+  parents: [],
+  authoredAt: 1_776_211_200,
+  committedAt: 1_776_211_260,
 });
 
 const makeRepo = (calls: Calls): Artifacts.ArtifactsRepoBinding => ({
@@ -107,12 +120,12 @@ const makeRepo = (calls: Calls): Artifacts.ArtifactsRepoBinding => ({
   log: async (options) => {
     calls.log.push(options);
 
-    return { commits: ["commit-1"] };
+    return [commitInfo("commit-1")];
   },
   readCommit: async (hash) => {
     calls.readCommit.push(hash);
 
-    return { hash, tree: "tree-1" };
+    return commitInfo(hash);
   },
   readTree: async (hash) => {
     calls.readTree.push(hash);
@@ -120,6 +133,25 @@ const makeRepo = (calls: Calls): Artifacts.ArtifactsRepoBinding => ({
     return { hash, entries: [{ name: "README.md", type: "blob" }] };
   },
 });
+
+const makeRemoteRepo = (calls: Calls): Artifacts.ArtifactsRepoBinding => {
+  const local = makeRepo(calls);
+
+  return {
+    info: async () => {
+      calls.info.push(true);
+
+      return repoInfo;
+    },
+    createToken: local.createToken,
+    listTokens: local.listTokens,
+    revokeToken: local.revokeToken,
+    fork: local.fork,
+    log: local.log,
+    readCommit: local.readCommit,
+    readTree: local.readTree,
+  };
+};
 
 const makeArtifacts = (calls: Calls): Artifacts.ArtifactsBinding => {
   const repo = makeRepo(calls);
@@ -245,6 +277,7 @@ const artifactsLayer = (artifacts: Artifacts.ArtifactsBinding) =>
       Effect.gen(function* () {
         const artifacts = yield* TestArtifacts;
         const repo = yield* artifacts.get("starter-repo");
+        const info = yield* repo.info();
         const token = yield* repo.createToken("read", 3600);
         const tokens = yield* repo.listTokens;
         const revoked = yield* repo.revokeToken("token-1");
@@ -258,6 +291,7 @@ const artifactsLayer = (artifacts: Artifacts.ArtifactsBinding) =>
         const tree = yield* repo.readTree("tree-1");
 
         assert.strictEqual(repo.raw.name, "starter-repo");
+        assert.deepStrictEqual(info, repoInfo);
         assert.deepStrictEqual(token, {
           id: "token-1",
           plaintext: "art_v1_token?expires=1786752000",
@@ -268,8 +302,17 @@ const artifactsLayer = (artifacts: Artifacts.ArtifactsBinding) =>
         assert.strictEqual(tokens.tokens[0]?.state, "active");
         assert.strictEqual(revoked, true);
         assert.strictEqual(forked.name, "starter-repo-copy");
-        assert.deepStrictEqual(history, { commits: ["commit-1"] });
-        assert.deepStrictEqual(commit, { hash: "commit-1", tree: "tree-1" });
+        assert.deepStrictEqual(history, [commitInfo("commit-1")]);
+        assert.deepStrictEqual(commit, {
+          hash: "commit-1",
+          treeHash: "tree-1",
+          message: "Initial commit",
+          author: { name: "Ada", email: "ada@example.com" },
+          committer: { name: "Grace", email: "grace@example.com" },
+          parents: [],
+          authoredAt: 1_776_211_200,
+          committedAt: 1_776_211_260,
+        });
         assert.deepStrictEqual(tree, {
           hash: "tree-1",
           entries: [{ name: "README.md", type: "blob" }],
@@ -294,6 +337,30 @@ const artifactsLayer = (artifacts: Artifacts.ArtifactsBinding) =>
     );
   });
 }
+
+test("Artifacts supports method-only remote repository handles", async () => {
+  const calls = makeCalls();
+  const artifacts = {
+    ...makeArtifacts(calls),
+    get: async () => makeRemoteRepo(calls),
+  } satisfies Artifacts.ArtifactsBinding;
+
+  const [repo, refreshed] = await Effect.runPromise(
+    Effect.gen(function* () {
+      const client = yield* TestArtifacts;
+      const repo = yield* client.get("starter-repo");
+      const refreshed = yield* repo.info();
+
+      return [repo, refreshed] as const;
+    }).pipe(Effect.provide(artifactsLayer(artifacts))),
+  );
+
+  assert.strictEqual(repo.name, "starter-repo");
+  assert.strictEqual(repo.remote, repoInfo.remote);
+  assert.deepStrictEqual(refreshed, repoInfo);
+  assert.deepStrictEqual(calls.info, [true, true]);
+  assert.notProperty(repo.raw, "name");
+});
 
 test("Artifacts layer validates the namespace binding shape", async () => {
   await expect(

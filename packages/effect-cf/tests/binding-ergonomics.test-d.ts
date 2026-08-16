@@ -125,6 +125,9 @@ const artifactsProgram = Effect.gen(function* () {
   const repo = yield* artifacts.get("agent-workspace");
 
   expectTypeOf(repo).toEqualTypeOf<Artifacts.ArtifactsRepoClient>();
+  expectTypeOf(repo.info()).toEqualTypeOf<
+    Effect.Effect<Artifacts.ArtifactsRepoInfo, Artifacts.ArtifactsOperationError>
+  >();
   expectTypeOf(repo.createToken("read", 3600)).toEqualTypeOf<
     Effect.Effect<Artifacts.ArtifactsCreateTokenResult, Artifacts.ArtifactsOperationError>
   >();

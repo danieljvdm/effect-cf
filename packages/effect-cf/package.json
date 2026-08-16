@@ -27,6 +27,11 @@
       "import": "./dist/HyperdrivePg.mjs",
       "default": "./dist/HyperdrivePg.mjs"
     },
+    "./computer-workspace-host": {
+      "types": "./dist/ComputerWorkspaceHost.d.mts",
+      "import": "./dist/ComputerWorkspaceHost.mjs",
+      "default": "./dist/ComputerWorkspaceHost.mjs"
+    },
     "./vitest": {
       "types": "./dist/Vitest.d.mts",
       "import": "./dist/Vitest.mjs",
@@ -45,6 +50,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@cloudflare/computer": "0.2.0",
     "@cloudflare/containers": "catalog:",
     "@cloudflare/vitest-pool-workers": "catalog:",
     "@cloudflare/workers-types": "catalog:",
@@ -53,11 +59,13 @@
     "@effect/sql-pg": "catalog:",
     "@effect/sql-sqlite-do": "catalog:",
     "@effect/vitest": "catalog:",
+    "@platformatic/vfs": "^0.4.0",
     "effect": "catalog:",
     "vite-plus": "catalog:",
     "vitest": "catalog:"
   },
   "peerDependencies": {
+    "@cloudflare/computer": "^0.2.0",
     "@cloudflare/vitest-pool-workers": "^0.21.3",
     "@cloudflare/workers-types": "^4.20260611.1",
     "@effect/sql-d1": "^4.0.0-beta.107 <4.0.0-rc.0",
@@ -66,6 +74,9 @@
     "effect": "^4.0.0-beta.107 <4.0.0-rc.0"
   },
   "peerDependenciesMeta": {
+    "@cloudflare/computer": {
+      "optional": true
+    },
     "@cloudflare/vitest-pool-workers": {
       "optional": true
     },

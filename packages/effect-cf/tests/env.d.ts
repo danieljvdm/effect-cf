@@ -7,6 +7,7 @@ declare global {
   namespace Cloudflare {
     interface Env {
       TEST_COUNTER_DO?: DurableObjectNamespace<TestWorkerModule.TestCounterDurableObject>;
+      TEST_COMPUTER_DO?: DurableObjectNamespace<TestWorkerModule.TestComputerWorkspaceDurableObject>;
       TEST_KV?: KVNamespace;
       TEST_DB?: D1Database;
       TEST_SECRET?: SecretsStoreSecret;
@@ -35,7 +36,7 @@ declare global {
 
     interface GlobalProps {
       mainModule: typeof TestWorkerModule;
-      durableNamespaces: "TestCounterDurableObject";
+      durableNamespaces: "TestComputerWorkspaceDurableObject" | "TestCounterDurableObject";
     }
   }
 }

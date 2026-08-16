@@ -1,4 +1,5 @@
 import type {
+  ArtifactsCreateRepoResult as CloudflareArtifactsCreateRepoResult,
   ArtifactsCreateTokenResult as CloudflareArtifactsCreateTokenResult,
   ArtifactsErrorCode as CloudflareArtifactsErrorCode,
   ArtifactsRepoInfo as CloudflareArtifactsRepoInfo,
@@ -19,6 +20,7 @@ const expectedArtifactsRepo =
 
 /** Artifacts operation represented by {@link ArtifactsOperationError}. */
 export type ArtifactsOperation =
+  | "createClient"
   | "create"
   | "get"
   | "import"
@@ -26,11 +28,13 @@ export type ArtifactsOperation =
   | "delete"
   | "createToken"
   | "listTokens"
+  | "getToken"
   | "revokeToken"
   | "fork"
   | "log"
   | "readCommit"
-  | "readTree";
+  | "readTree"
+  | "cli";
 
 /** Documented string error codes returned by Cloudflare Artifacts. */
 export const artifactsErrorCodes = [
@@ -109,15 +113,7 @@ export type ArtifactsRepoStatus = "ready" | "importing" | "forking";
 export type ArtifactsRepoInfo = CloudflareArtifactsRepoInfo;
 
 /** Result of creating, importing, or forking a repository. */
-export interface ArtifactsCreateRepoResult {
-  readonly id: string;
-  readonly name: RepoName;
-  readonly description: string | null;
-  readonly defaultBranch: string;
-  readonly remote: string;
-  /** Initial plaintext Git token. The token itself encodes its expiry. */
-  readonly token: string;
-}
+export type ArtifactsCreateRepoResult = Readonly<CloudflareArtifactsCreateRepoResult>;
 
 /** Repository metadata returned by `list()`. */
 export interface ArtifactsRepoListEntry extends ArtifactsRepoInfo {

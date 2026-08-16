@@ -12,6 +12,7 @@ import {
   type WorkflowBinding,
   AiGateway,
   AnalyticsEngine,
+  Artifacts,
   BrowserRendering,
   DurableObject,
   Email,
@@ -75,6 +76,92 @@ expectTypeOf(AvatarQueue.send({ requestId: "r1", userId: "u1" })).toEqualTypeOf<
 
 void missingQueueLayer;
 void providedQueueProgram;
+
+export class ArtifactRepositories extends Artifacts.Tag<ArtifactRepositories>()(
+  "ArtifactRepositories",
+) {}
+
+export const ArtifactRepositoriesLayer = ArtifactRepositories.layer({
+  binding: "ARTIFACTS",
+});
+
+const artifactsProgram = Effect.gen(function* () {
+  const artifacts = yield* ArtifactRepositories;
+
+  expectTypeOf(
+    artifacts.create("agent-workspace", {
+      description: "Agent workspace",
+      readOnly: false,
+      setDefaultBranch: "main",
+    }),
+  ).toEqualTypeOf<
+    Effect.Effect<Artifacts.ArtifactsCreateRepoResult, Artifacts.ArtifactsOperationError>
+  >();
+
+  expectTypeOf(
+    artifacts.import({
+      source: {
+        url: "https://github.com/cloudflare/workers-sdk",
+        branch: "main",
+        depth: 1,
+      },
+      target: {
+        name: "workers-sdk",
+        opts: { description: "Workers SDK", readOnly: true },
+      },
+    }),
+  ).toEqualTypeOf<
+    Effect.Effect<Artifacts.ArtifactsCreateRepoResult, Artifacts.ArtifactsOperationError>
+  >();
+
+  expectTypeOf(artifacts.list({ limit: 20, cursor: "next" })).toEqualTypeOf<
+    Effect.Effect<Artifacts.ArtifactsRepoListResult, Artifacts.ArtifactsOperationError>
+  >();
+
+  expectTypeOf(artifacts.delete("agent-workspace")).toEqualTypeOf<
+    Effect.Effect<boolean, Artifacts.ArtifactsOperationError>
+  >();
+
+  const repo = yield* artifacts.get("agent-workspace");
+
+  expectTypeOf(repo).toEqualTypeOf<Artifacts.ArtifactsRepoClient>();
+  expectTypeOf(repo.createToken("read", 3600)).toEqualTypeOf<
+    Effect.Effect<Artifacts.ArtifactsCreateTokenResult, Artifacts.ArtifactsOperationError>
+  >();
+  expectTypeOf(repo.listTokens).toEqualTypeOf<
+    Effect.Effect<Artifacts.ArtifactsTokenListResult, Artifacts.ArtifactsOperationError>
+  >();
+  expectTypeOf(repo.revokeToken("token-id")).toEqualTypeOf<
+    Effect.Effect<boolean, Artifacts.ArtifactsOperationError>
+  >();
+  expectTypeOf(
+    repo.fork("agent-workspace-copy", {
+      description: "Review copy",
+      readOnly: true,
+      defaultBranchOnly: true,
+    }),
+  ).toEqualTypeOf<
+    Effect.Effect<Artifacts.ArtifactsCreateRepoResult, Artifacts.ArtifactsOperationError>
+  >();
+  expectTypeOf(repo.log({ ref: "main", limit: 10, offset: 0 })).toEqualTypeOf<
+    Effect.Effect<Artifacts.ArtifactsLogResult, Artifacts.ArtifactsOperationError>
+  >();
+  expectTypeOf(repo.readCommit("commit-sha")).toEqualTypeOf<
+    Effect.Effect<Artifacts.ArtifactsCommit, Artifacts.ArtifactsOperationError>
+  >();
+  expectTypeOf(repo.readTree("tree-sha")).toEqualTypeOf<
+    Effect.Effect<Artifacts.ArtifactsTree, Artifacts.ArtifactsOperationError>
+  >();
+  expectTypeOf(artifacts.rawUnsafe).toEqualTypeOf<Effect.Effect<Artifacts.ArtifactsBinding>>();
+
+  // @ts-expect-error token scopes are read or write.
+  yield* repo.createToken("admin", 3600);
+});
+
+expectTypeOf(Artifacts.artifactsErrorNumericCodes.INVALID_TTL).toEqualTypeOf<10103>();
+expectTypeOf(EffectCf.Artifacts).toEqualTypeOf<typeof Artifacts>();
+
+void artifactsProgram;
 
 export const ReportWorkflowPayload = Schema.Struct({
   reportId: Schema.String,

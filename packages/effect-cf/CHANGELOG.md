@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.27.0
+
+### Minor Changes
+
+- [#99](https://github.com/danieljvdm/effect-cf/pull/99) [`5195812`](https://github.com/danieljvdm/effect-cf/commit/519581205c3d3b63e977515f2a33db989a5c9875) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Keep the optional `@cloudflare/computer` integration out of the root bundle so Durable Object and other unrelated consumers can bundle `effect-cf` without installing or externalizing that peer. The synchronous root namespaces could not be preserved without making esbuild resolve the optional dependency before tree-shaking, so update `ComputerWorkspace` imports to `effect-cf/computer-workspace` and `ComputerArtifacts` imports to `effect-cf/computer-artifacts`; `effect-cf/computer-workspace-host` remains unchanged.
+
 ## 0.26.0
 
 ### Minor Changes

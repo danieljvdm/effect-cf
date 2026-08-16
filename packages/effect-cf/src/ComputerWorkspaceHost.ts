@@ -125,32 +125,45 @@ const toWorkspaceOptions = (config: ComputerWorkspaceHostConfig): WorkspaceOptio
     );
   }
 
-  return {
+  // SAFETY: Cloudflare's native DurableObjectStorage implements the narrower storage methods used
+  // by Computer; the union also accepts Computer's structural test/storage contract directly.
+  const options: WorkspaceOptions = {
     storage: config.storage as DurableObjectStorageLike,
     git: config.git ?? createGitClient(),
-    ...(config.gitIdentity === undefined ? {} : { defaultGitIdentity: config.gitIdentity }),
-    ...(backends.length === 0 ? {} : { backends }),
-    ...(config.sessionId === undefined ? {} : { sessionId: config.sessionId }),
-    ...(config.mounts === undefined ? {} : { mounts: config.mounts }),
-    ...(config.observer === undefined ? {} : { observer: config.observer }),
-    ...(config.retryScheduler === undefined ? {} : { retryScheduler: config.retryScheduler }),
-    ...(config.retry === undefined ? {} : { retry: config.retry }),
-    ...(config.assets === undefined ? {} : { assets: config.assets }),
-    ...(config.artifacts === undefined
-      ? {}
-      : {
-          artifacts: {
-            binding: config.artifacts.binding as unknown as NonNullable<
-              WorkspaceOptions["artifacts"]
-            >["binding"],
-            ...(config.artifacts.sessionId === undefined
-              ? {}
-              : { sessionId: config.artifacts.sessionId }),
-          },
-        }),
-    ...(config.now === undefined ? {} : { now: config.now }),
-    ...(config.useThink === undefined ? {} : { useThink: config.useThink }),
   };
+
+  if (config.gitIdentity !== undefined) options.defaultGitIdentity = config.gitIdentity;
+  if (backends.length !== 0) options.backends = backends;
+  if (config.sessionId !== undefined) options.sessionId = config.sessionId;
+  if (config.mounts !== undefined) options.mounts = config.mounts;
+  if (config.observer !== undefined) options.observer = config.observer;
+  if (config.retryScheduler !== undefined) options.retryScheduler = config.retryScheduler;
+  if (config.retry !== undefined) options.retry = config.retry;
+  if (config.assets !== undefined) options.assets = config.assets;
+
+  if (config.artifacts !== undefined) {
+    const erasedArtifactsBinding: unknown = config.artifacts.binding;
+    // SAFETY: the local binding intentionally models the same Cloudflare Artifacts RPC surface;
+    // its readonly result arrays are valid runtime inputs to Computer, whose dependency declaration
+    // unnecessarily requires mutable arrays.
+    const artifactsBinding = erasedArtifactsBinding as NonNullable<
+      WorkspaceOptions["artifacts"]
+    >["binding"];
+    const artifacts: NonNullable<WorkspaceOptions["artifacts"]> = {
+      binding: artifactsBinding,
+    };
+
+    if (config.artifacts.sessionId !== undefined) {
+      artifacts.sessionId = config.artifacts.sessionId;
+    }
+
+    options.artifacts = artifacts;
+  }
+
+  if (config.now !== undefined) options.now = config.now;
+  if (config.useThink !== undefined) options.useThink = config.useThink;
+
+  return options;
 };
 
 // Cloudflare constructs Durable Objects with `(state, env)`. Keeping the
@@ -185,11 +198,13 @@ export const withComputerWorkspace = <TBase extends DurableObjectConstructor>(
     env: ConstructorParameters<TBase>[1],
   ) => ComputerWorkspaceHostConfig,
 ): WithWorkspaceCtor<TBase> => {
-  const CapturedBase = class extends (Base as DurableObjectConstructor) {
+  const CapturedBase = class extends Base {
     readonly [HostArguments]: CapturedHostArguments;
 
     constructor(...args: Array<any>) {
       super(...args);
+      // SAFETY: Cloudflare constructs Durable Objects with DurableObjectState as constructor
+      // argument zero; the open base tuple retains arbitrary trailing constructor arguments.
       this[HostArguments] = {
         state: args[0] as globalThis.DurableObjectState,
         env: args[1],
@@ -197,20 +212,33 @@ export const withComputerWorkspace = <TBase extends DurableObjectConstructor>(
     }
   };
 
-  const WithWorkspace = withWorkspace(CapturedBase, (self) => {
+  const workspaceConstructor: unknown = withWorkspace(CapturedBase, (self) => {
+    // SAFETY: CapturedBase initializes this private symbol for every constructed instance before
+    // withWorkspace evaluates its options callback.
     const { env, state } = (self as HostArgumentsInstance)[HostArguments];
 
     return toWorkspaceOptions(
+      // SAFETY: CapturedBase is an identity subclass of Base, so its instance retains Base's full
+      // public instance contract. The captured environment is constructor argument one.
       config(self as InstanceType<TBase>, state, env as ConstructorParameters<TBase>[1]),
     );
-  }) as unknown as DurableObjectConstructor;
+  });
+  // SAFETY: withWorkspace returns a constructable identity subclass; this local constructor view
+  // intentionally hides its generic intersection so TypeScript can extend it.
+  const WithWorkspace = workspaceConstructor as DurableObjectConstructor;
 
   class WithComputerWorkspace extends WithWorkspace {
     constructor(...args: Array<any>) {
       super(...args);
+      // SAFETY: Cloudflare supplies DurableObjectState at constructor argument zero, and
+      // withWorkspace adds the WorkspaceHandle methods implemented by this instance.
       HostRegistry.register(args[0] as globalThis.DurableObjectState, this as WorkspaceHandle);
     }
   }
 
-  return WithComputerWorkspace as unknown as WithWorkspaceCtor<TBase>;
+  const erasedConstructor: unknown = WithComputerWorkspace;
+
+  // SAFETY: WithComputerWorkspace only adds registration to the constructor produced by
+  // withWorkspace, preserving Base's constructor and instance members plus the workspace host.
+  return erasedConstructor as WithWorkspaceCtor<TBase>;
 };

@@ -61,6 +61,7 @@ export const fromWebSocket = <Attachment = unknown>(
   const existing = wrappers.get(raw);
 
   if (existing !== undefined) {
+    // SAFETY: Attachment is phantom; a wrapper's runtime behavior is independent of that type.
     return existing as DurableWebSocket<Attachment>;
   }
 
@@ -89,6 +90,7 @@ export const fromWebSocket = <Attachment = unknown>(
 
   wrappers.set(raw, socket);
 
+  // SAFETY: Attachment is phantom; the newly created wrapper supports values through its generic serializer.
   return socket as DurableWebSocket<Attachment>;
 };
 
@@ -200,6 +202,7 @@ export const attachment = <const AttachmentSchema extends S.Codec<any, any, neve
       Effect.mapError(
         (cause) => new DurableWebSocketAttachmentError({ operation: "serialize", cause }),
       ),
+      // SAFETY: S.encodeEffect returns this codec's declared Encoded representation.
       Effect.flatMap((encoded) => socket.serializeAttachment(encoded as Encoded)),
     );
 
@@ -261,7 +264,7 @@ export interface DurableWebSocketHandlers<R = never, E = unknown> {
     reason: string,
     wasClean: boolean,
   ) => Effect.Effect<void, E, R>;
-  readonly error?: (socket: DurableWebSocket, error: unknown) => Effect.Effect<void, E, R>;
+  readonly error?: (socket: DurableWebSocket, cause: unknown) => Effect.Effect<void, E, R>;
 }
 
 /** Maps compact websocket lifecycle handler names to `DurableObject.make` options. */

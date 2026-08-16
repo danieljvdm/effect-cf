@@ -73,7 +73,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    load().catch((error: unknown) => {
+    load().catch((error) => {
       setStatus(error instanceof Error ? error.message : String(error));
     });
   }, [load]);

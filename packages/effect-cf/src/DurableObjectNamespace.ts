@@ -1,4 +1,4 @@
-import { Data, Effect, type Context, type Layer, type Scope } from "effect";
+import { Data, Effect, Predicate, type Context, type Layer, type Scope } from "effect";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
@@ -17,13 +17,18 @@ interface DurableObjectFetcher {
 
 type RpcClient<Api> = {
   readonly [Key in keyof Api as Key extends string
-    ? Api[Key] extends (...args: Array<any>) => unknown
+    ? Api[Key] extends (...args: Array<any>) => any
       ? Key
       : never
     : never]: Api[Key];
 };
 
 type ReservedMethodName = DurableObjectDefinition.ReservedMethodName | "fetch";
+type DynamicMethod = (...args: Array<any>) => any;
+interface DynamicMethods {
+  [method: string]: DynamicMethod;
+}
+type NamespaceCandidate = Parameters<typeof Predicate.isUnknown>[0];
 
 /**
  * Cloudflare Durable Object stub, optionally enriched with RPC methods.
@@ -373,14 +378,12 @@ export type DurableObjectNamespaceStaticClient<
   readonly rawUnsafe: () => Effect.Effect<DurableObjectNamespaceClient<Api>, never, R>;
 };
 
-const hasFunction = (value: object, key: string): boolean =>
-  typeof Reflect.get(value, key) === "function";
+const hasFunction = <Candidate>(value: Candidate, key: string): boolean =>
+  Predicate.hasProperty(value, key) && Predicate.isFunction(value[key]);
 
 export const isDurableObjectNamespaceClient = <Api extends object>(
-  value: unknown,
+  value: NamespaceCandidate,
 ): value is DurableObjectNamespaceClient<Api> =>
-  typeof value === "object" &&
-  value !== null &&
   hasFunction(value, "getByName") &&
   hasFunction(value, "get") &&
   hasFunction(value, "idFromName") &&
@@ -430,6 +433,7 @@ export const makeClient = <
       Method extends StubMethodKey<Api>,
     >(stub: StubClient, method: Method, ...args: StubMethodArgs<Api, Method>) {
       const methodName = String(method);
+      // SAFETY: the runtime definition and method name select the same method schemas as Method.
       const encodedArgs =
         definition.definition === undefined
           ? args
@@ -448,6 +452,7 @@ export const makeClient = <
               ),
             );
 
+      // SAFETY: encodedArgs preserves the selected method's positional argument contract.
       return yield* RpcInvocation.invokeRpcMethod(
         stub,
         method,
@@ -465,9 +470,11 @@ export const makeClient = <
       Method extends StubMethodKey<Api>,
     >(methodName: string, value: Awaited<StubMethodCloudflareReturn<Api, Method>>) {
       if (definition.definition === undefined) {
+        // SAFETY: without a schema codec, the native RPC result is already the declared success type.
         return value as StubMethodSuccess<Api, Method>;
       }
 
+      // SAFETY: methodName identifies Method in the same definition used to decode the result.
       const decoded = yield* RpcDefinition.decodeSuccess(
         definition.definition,
         methodName as RpcDefinition.Definition.MethodNames<NonNullable<Definition>>,
@@ -483,6 +490,7 @@ export const makeClient = <
         ),
       );
 
+      // SAFETY: the selected method's success schema decodes to its declared API success type.
       return decoded as StubMethodSuccess<Api, Method>;
     });
 
@@ -521,6 +529,7 @@ export const makeClient = <
       getByName,
     });
 
+    // SAFETY: the common namespace operations and generated direct methods implement the client contract.
     return Object.assign(directMethods, {
       newUniqueId,
       idFromName,
@@ -581,47 +590,51 @@ export const makeDirectMethods = <
     ) => Effect.Effect<DurableObjectStubClient<Api>, never, R>;
   },
 ): DirectMethods<R, Api, Definition> => {
-  const methods = {} as Record<string, unknown>;
+  const methods: DynamicMethods = {};
 
   if (rpcDefinition !== undefined) {
     for (const methodName of Object.keys(rpcDefinition.methods)) {
+      // SAFETY: methodName comes from rpcDefinition.methods and helpers.call dispatches that same key.
       methods[methodName] = (stub: DurableObjectStubClient<Api>, ...args: Array<unknown>) =>
         (
           helpers.call as (
             stub: DurableObjectStubClient<Api>,
             method: string,
             ...args: Array<unknown>
-          ) => unknown
+          ) => any
         )(stub, methodName, ...args);
     }
 
     const makeClient = (
       getStub: () => Effect.Effect<DurableObjectStubClient<Api>, never, R>,
     ): DurableObjectDirectClient<R, Api> => {
-      const client = {
+      const client: DynamicMethods = {
         fetch: (input: RequestInfo | URL, init?: RequestInit) =>
           Effect.gen(function* () {
             const stub = yield* getStub();
 
             return yield* helpers.fetch(stub, input, init);
           }),
-      } as Record<string, unknown>;
+      };
 
       for (const methodName of Object.keys(rpcDefinition.methods)) {
+        // SAFETY: methodName comes from rpcDefinition.methods and helpers.call dispatches that same key.
         client[methodName] = (...args: Array<unknown>) =>
           Effect.gen(function* () {
             const stub = yield* getStub();
 
+            // SAFETY: methodName and arguments come from the same generated RPC method entry.
             return yield* (
               helpers.call as (
                 stub: DurableObjectStubClient<Api>,
                 method: string,
                 ...args: Array<unknown>
-              ) => Effect.Effect<unknown, DurableObjectRpcError, R>
+              ) => Effect.Effect<any, DurableObjectRpcError, R>
             )(stub, methodName, ...args);
           });
       }
 
+      // SAFETY: client contains fetch plus every RPC method enumerated by rpcDefinition.
       return client as DurableObjectDirectClient<R, Api>;
     };
 
@@ -636,5 +649,6 @@ export const makeDirectMethods = <
     ) => makeClient(() => helpers.get(id, options));
   }
 
+  // SAFETY: methods is populated from the exact rpcDefinition keys, including its by-name/id clients.
   return methods as DirectMethods<R, Api, Definition>;
 };

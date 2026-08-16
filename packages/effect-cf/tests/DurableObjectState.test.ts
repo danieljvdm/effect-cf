@@ -1,7 +1,8 @@
 import { assert, it } from "@effect/vitest";
-import { Cause, Context, Effect } from "effect";
+import { Cause, Context, Effect, Exit } from "effect";
 
 import { DurableObjectState, DurableObjectWebSocket } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
 const FailureMessage = Context.Service<{ readonly message: string }>(
   "effect-cf/test/FailureMessage",
@@ -27,7 +28,10 @@ it.effect("blockConcurrencyWhile preserves typed failures without rejecting the 
     assert.strictEqual(tracker.calls, 1);
     assert.strictEqual(tracker.resolved.length, 1);
     assert.strictEqual(tracker.rejected.length, 0);
-    assert.strictEqual(tracker.resolved[0]?._tag, "Failure");
+    assert.isTrue(Exit.isExit(tracker.resolved[0]));
+    if (Exit.isExit(tracker.resolved[0])) {
+      assert.strictEqual(tracker.resolved[0]._tag, "Failure");
+    }
     assert.strictEqual(exit._tag, "Failure");
     if (exit._tag === "Failure") {
       assert.strictEqual(Cause.squash(exit.cause), "typed failure");
@@ -117,7 +121,7 @@ it.effect("wraps hibernation metadata and abort helpers", () =>
   Effect.gen(function* () {
     const { state, tracker } = makeRawDurableObjectState();
     const service = DurableObjectState.fromDurableObjectState(state);
-    const ws = {} as WebSocket;
+    const ws = makePartialTestDouble<WebSocket>({});
     const timestamp = new Date("2026-04-25T00:00:00.000Z");
 
     tracker.tags.set(ws, ["room:general", "user:1"]);
@@ -147,7 +151,7 @@ it.effect("wraps hibernation metadata and abort helpers", () =>
 
 interface BlockConcurrencyTracker {
   calls: number;
-  readonly resolved: Array<{ readonly _tag: string }>;
+  readonly resolved: Array<unknown>;
   readonly rejected: Array<unknown>;
   readonly tags: Map<WebSocket, Array<string>>;
   readonly autoResponseTimestamps: Map<WebSocket, Date>;
@@ -161,10 +165,12 @@ interface BlockConcurrencyTracker {
   readonly waitUntilPromises: Array<Promise<unknown>>;
 }
 
-function makeRawDurableObjectState(): {
+interface RawStateFixture {
   readonly state: globalThis.DurableObjectState;
   readonly tracker: BlockConcurrencyTracker;
-} {
+}
+
+function makeRawDurableObjectState(): RawStateFixture {
   const tracker: BlockConcurrencyTracker = {
     calls: 0,
     resolved: [],
@@ -178,8 +184,8 @@ function makeRawDurableObjectState(): {
     waitUntilPromises: [],
   };
 
-  const state = {
-    id: {} as globalThis.DurableObjectId,
+  const state = makePartialTestDouble<globalThis.DurableObjectState>({
+    id: makePartialTestDouble<globalThis.DurableObjectId>({}),
     storage: makeRawDurableObjectStorage(),
     waitUntil: (promise: Promise<unknown>) => {
       tracker.waitUntilPromises.push(promise);
@@ -190,7 +196,7 @@ function makeRawDurableObjectState(): {
       try {
         const value = await callback();
 
-        tracker.resolved.push(value as { readonly _tag: string });
+        tracker.resolved.push(value);
 
         return value;
       } catch (error) {
@@ -214,13 +220,13 @@ function makeRawDurableObjectState(): {
     abort: (reason?: string) => {
       tracker.abortReasons.push(reason);
     },
-  } as unknown as globalThis.DurableObjectState;
+  });
 
   return { state, tracker };
 }
 
 function makeRawDurableObjectStorage(): globalThis.DurableObjectStorage {
-  return {
+  const implementation = {
     get: async () => undefined,
     put: async () => undefined,
     delete: async () => false,
@@ -239,5 +245,9 @@ function makeRawDurableObjectStorage(): globalThis.DurableObjectStorage {
       delete: () => false,
       list: () => [][Symbol.iterator](),
     },
-  } as unknown as globalThis.DurableObjectStorage;
+  };
+
+  // SAFETY: This state test never reads or deletes persisted values; the adapter provides exactly
+  // the concrete storage operations reached by DurableObjectState.fromDurableObjectState.
+  return implementation as typeof implementation & globalThis.DurableObjectStorage;
 }

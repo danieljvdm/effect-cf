@@ -38,6 +38,7 @@ export class QueueMessageDecodeError extends Data.TaggedError("QueueMessageDecod
 type RuntimeContext<ROut> = ExecutionContext | WorkerContext | WorkerEnvironment | ROut;
 
 type QueueHandlerContext<ROut> = RuntimeContext<ROut> | Scope.Scope;
+type EncodedQueueBody = globalThis.Message<unknown>["body"];
 
 export type QueueHandler<ROut, Body = unknown> = (
   batch: QueueBatch<Body>,
@@ -71,7 +72,7 @@ export const fromMessageBatch = <Body>(
 
 export const decodeBatch = <Body>(
   batch: globalThis.MessageBatch<unknown>,
-  decodeBody: (body: unknown) => Effect.Effect<Body, unknown>,
+  decodeBody: (body: EncodedQueueBody) => Effect.Effect<Body, unknown>,
 ): Effect.Effect<QueueBatch<Body>, QueueMessageDecodeError> =>
   Effect.gen(function* () {
     const messages: Array<QueueMessage<Body>> = [];

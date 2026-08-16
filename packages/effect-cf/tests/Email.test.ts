@@ -2,6 +2,7 @@ import { assert, expect, layer, test } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 
 import { Binding, Email, WorkerEnvironment } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
 class TestEmail extends Email.Tag<TestEmail>()("test/TestEmail") {}
 
@@ -13,14 +14,19 @@ interface FakeEmailOptions {
   readonly send?: (message: Email.EmailMessageBuilder) => Promise<Email.EmailSendResult>;
 }
 
-const makeFakeEmail = (options: FakeEmailOptions = {}) =>
-  ({
+const makeFakeEmail = (options: FakeEmailOptions = {}): SendEmail => {
+  const implementation = {
     send:
       options.send ??
       (async () => ({
         messageId: "email-1",
       })),
-  }) as SendEmail;
+  };
+
+  // SAFETY: These tests exercise the builder-message overload exclusively; FakeEmailOptions fully
+  // types that payload and result while the native binding combines it with a raw EmailMessage overload.
+  return implementation as typeof implementation & SendEmail;
+};
 
 const emailLayer = (email: SendEmail) =>
   TestEmail.layer({ binding: "EMAIL" }).pipe(
@@ -77,7 +83,11 @@ test("Send Email layer validates the binding shape", async () => {
       }).pipe(
         Effect.provide(
           TestEmail.layer({ binding: "EMAIL" }).pipe(
-            Layer.provide(Layer.succeed(WorkerEnvironment, { EMAIL: {} as SendEmail })),
+            Layer.provide(
+              Layer.succeed(WorkerEnvironment, {
+                EMAIL: makePartialTestDouble<SendEmail>({}),
+              }),
+            ),
           ),
         ),
       ),

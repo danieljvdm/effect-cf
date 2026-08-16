@@ -2,6 +2,7 @@ import { assert, expect, layer, test } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 
 import { Artifacts, Binding, WorkerEnvironment } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
 class TestArtifacts extends Artifacts.Tag<TestArtifacts>()("test/TestArtifacts") {}
 
@@ -304,7 +305,7 @@ test("Artifacts layer validates the namespace binding shape", async () => {
           TestArtifacts.layer({ binding: "ARTIFACTS" }).pipe(
             Layer.provide(
               Layer.succeed(WorkerEnvironment, {
-                ARTIFACTS: {} as Artifacts.ArtifactsBinding,
+                ARTIFACTS: makePartialTestDouble<Artifacts.ArtifactsBinding>({}),
               }),
             ),
           ),
@@ -334,7 +335,7 @@ test("Artifacts get rejects incomplete repo handles", async () => {
   const calls = makeCalls();
   const artifacts = {
     ...makeArtifacts(calls),
-    get: async () => repoInfo as Artifacts.ArtifactsRepoBinding,
+    get: async () => makePartialTestDouble<Artifacts.ArtifactsRepoBinding>(repoInfo),
   } satisfies Artifacts.ArtifactsBinding;
 
   const error = await Effect.runPromise(

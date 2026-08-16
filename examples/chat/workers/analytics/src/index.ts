@@ -1,12 +1,12 @@
 import { AnalyticsWorker } from "@effect-cf/example-contracts/AnalyticsWorker";
 import { ApiWorker } from "@effect-cf/example-contracts/ApiWorker";
 import { ChatRoom } from "@effect-cf/example-contracts/ChatRoom";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Schema } from "effect";
 import { Worker } from "effect-cf";
 
 import * as Analytics from "./analytics";
 
-const json = (value: unknown, init?: ResponseInit) => {
+const json = (value: Schema.Json, init?: ResponseInit) => {
   const headers = new Headers(init?.headers);
 
   headers.set("cache-control", "no-store");
@@ -18,8 +18,10 @@ const layer = Layer.mergeAll(
   ApiWorker.layer({ binding: "API_WORKER" }),
   ChatRoom.layer({ binding: "CHAT_ROOM" }),
 );
+const eventLayer = Layer.effectContext(Effect.context<ApiWorker | ChatRoom>());
 
 export const AnalyticsWorkerLive = AnalyticsWorker.make(layer, {
+  eventLayer,
   rpc: {
     analyzeRoom: (roomId) => Analytics.analyzeRoom(roomId),
     recordMessage: (input) => Analytics.recordMessage(input),

@@ -6,6 +6,7 @@ import { OtlpExporter } from "effect/unstable/observability";
 import process from "node:process";
 
 import { CloudflareOtlp, DurableObject, Worker, WorkerDefinition } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
 const TelemetryWorker = WorkerDefinition.make("CloudflareOtlpTelemetryWorker", {
   run: WorkerDefinition.method({ success: S.String }),
@@ -19,27 +20,29 @@ const makeExecutionContext = (): globalThis.ExecutionContext => ({
 
 const makeWaitUntilExecutionContext = () => {
   const waitUntilPromises: Array<Promise<unknown>> = [];
-  const executionContext = {
+  const executionContext = makePartialTestDouble<globalThis.ExecutionContext>({
     props: undefined,
     waitUntil: (promise: Promise<unknown>) => {
       waitUntilPromises.push(promise);
     },
     passThroughOnException: () => undefined,
-  } as unknown as globalThis.ExecutionContext;
+  });
 
   return { executionContext, waitUntilPromises };
 };
 
 const makeWaitUntilDurableObjectState = () => {
   const waitUntilPromises: Array<Promise<unknown>> = [];
-  const state = {
-    id: { toString: () => "durable-object:telemetry-test" },
-    storage: {},
+  const state = makePartialTestDouble<globalThis.DurableObjectState>({
+    id: makePartialTestDouble<globalThis.DurableObjectId>({
+      toString: () => "durable-object:telemetry-test",
+    }),
+    storage: makePartialTestDouble<globalThis.DurableObjectStorage>({}),
     waitUntil: (promise: Promise<unknown>) => {
       waitUntilPromises.push(promise);
     },
     blockConcurrencyWhile: async <A>(callback: () => Promise<A>) => callback(),
-  } as unknown as globalThis.DurableObjectState;
+  });
 
   return { state, waitUntilPromises };
 };
@@ -58,73 +61,42 @@ const getTcpPort = (address: HttpServer.Address): number => {
   throw new Error(`Expected test HTTP server to bind to TCP, got ${address._tag}`);
 };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
+const OtlpAttribute = S.Struct({
+  key: S.String,
+  value: S.Struct({ stringValue: S.optional(S.String) }),
+});
 
-const getArray = (value: unknown, key: string): ReadonlyArray<unknown> => {
-  if (!isRecord(value)) {
-    throw new Error(`Expected object while reading ${key}`);
-  }
+const OtlpPayload = S.Struct({
+  resourceSpans: S.NonEmptyArray(
+    S.Struct({
+      resource: S.Struct({ attributes: S.Array(OtlpAttribute) }),
+      scopeSpans: S.NonEmptyArray(
+        S.Struct({
+          spans: S.NonEmptyArray(
+            S.Struct({
+              name: S.String,
+              attributes: S.Array(OtlpAttribute),
+            }),
+          ),
+        }),
+      ),
+    }),
+  ),
+});
 
-  const child = value[key];
-
-  if (!Array.isArray(child)) {
-    throw new Error(`Expected ${key} to be an array`);
-  }
-
-  return child;
-};
-
-const getRecord = (value: unknown, key: string): Record<string, unknown> => {
-  if (!isRecord(value)) {
-    throw new Error(`Expected object while reading ${key}`);
-  }
-
-  const child = value[key];
-
-  if (!isRecord(child)) {
-    throw new Error(`Expected ${key} to be an object`);
-  }
-
-  return child;
-};
-
-const getString = (value: unknown, key: string): string => {
-  if (!isRecord(value)) {
-    throw new Error(`Expected object while reading ${key}`);
-  }
-
-  const child = value[key];
-
-  if (typeof child !== "string") {
-    throw new Error(`Expected ${key} to be a string`);
-  }
-
-  return child;
-};
-
-const getAttribute = (
-  attributes: ReadonlyArray<unknown>,
-  key: string,
-): Record<string, unknown> | undefined =>
-  attributes.find(
-    (attribute): attribute is Record<string, unknown> =>
-      isRecord(attribute) && attribute.key === key,
-  );
+const decodeOtlpPayload = S.decodeUnknownSync(S.fromJsonString(OtlpPayload));
 
 const getStringAttribute = (
-  attributes: ReadonlyArray<unknown>,
+  attributes: ReadonlyArray<typeof OtlpAttribute.Type>,
   key: string,
 ): string | undefined => {
-  const attribute = getAttribute(attributes, key);
+  const attribute = attributes.find((attribute) => attribute.key === key);
 
   if (attribute === undefined) {
     return undefined;
   }
 
-  const value = attribute.value;
-
-  return isRecord(value) && typeof value.stringValue === "string" ? value.stringValue : undefined;
+  return attribute.value.stringValue;
 };
 
 interface CollectorRequest {
@@ -237,20 +209,17 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
       expect(request.headers["x-trace-key"]).toBe("trace-only");
       expect(request.headers["x-shared"]).toBeUndefined();
 
-      const payload: unknown = JSON.parse(request.body);
-      const resourceSpans = getArray(payload, "resourceSpans");
-      const firstResourceSpan = resourceSpans[0];
-      const resource = getRecord(firstResourceSpan, "resource");
-      const resourceAttributes = getArray(resource, "attributes");
-      const scopeSpans = getArray(firstResourceSpan, "scopeSpans");
-      const spans = getArray(scopeSpans[0], "spans");
+      const payload = decodeOtlpPayload(request.body);
+      const firstResourceSpan = payload.resourceSpans[0];
+      const resourceAttributes = firstResourceSpan.resource.attributes;
+      const spans = firstResourceSpan.scopeSpans[0].spans;
       const firstSpan = spans[0];
-      const spanAttributes = getArray(firstSpan, "attributes");
+      const spanAttributes = firstSpan.attributes;
 
       expect(getStringAttribute(resourceAttributes, "service.name")).toBe("effect-cf-test");
       expect(getStringAttribute(resourceAttributes, "cloudflare.resource_type")).toBe("worker");
       expect(getStringAttribute(resourceAttributes, "cloudflare.worker.name")).toBe("api-worker");
-      expect(spans.map((span) => getString(span, "name"))).toContain("test.fetch");
+      expect(spans.map((span) => span.name)).toContain("test.fetch");
       expect(getStringAttribute(spanAttributes, "route")).toBe("/");
     }),
   );
@@ -373,10 +342,8 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
       expect(response.status).toBe(200);
 
       const request = yield* collector.nextRequest;
-      const payload: unknown = JSON.parse(request.body);
-      const resourceSpans = getArray(payload, "resourceSpans");
-      const resource = getRecord(resourceSpans[0], "resource");
-      const resourceAttributes = getArray(resource, "attributes");
+      const payload = decodeOtlpPayload(request.body);
+      const resourceAttributes = payload.resourceSpans[0].resource.attributes;
 
       expect(getStringAttribute(resourceAttributes, "service.name")).toBe("explicit-service");
       expect(getStringAttribute(resourceAttributes, "service.version")).toBe("explicit-version");
@@ -412,10 +379,8 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
       expect(response.status).toBe(200);
 
       const request = yield* collector.nextRequest;
-      const payload: unknown = JSON.parse(request.body);
-      const resourceSpans = getArray(payload, "resourceSpans");
-      const resource = getRecord(resourceSpans[0], "resource");
-      const resourceAttributes = getArray(resource, "attributes");
+      const payload = decodeOtlpPayload(request.body);
+      const resourceAttributes = payload.resourceSpans[0].resource.attributes;
 
       expect(getStringAttribute(resourceAttributes, "service.name")).toBe("env-service");
       expect(getStringAttribute(resourceAttributes, "service.version")).toBe("1.2.3");

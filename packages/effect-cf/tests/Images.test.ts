@@ -2,6 +2,7 @@ import { assert, expect, layer, test } from "@effect/vitest";
 import { Effect, Layer, Option } from "effect";
 
 import { Binding, Images, WorkerEnvironment } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
 class TestImages extends Images.Tag<TestImages>()("test/TestImages") {}
 
@@ -19,29 +20,32 @@ interface FakeTransformerState {
 }
 
 const makeResult = (contentType = "image/webp") =>
-  ({
+  makePartialTestDouble<ImageTransformationResult>({
     response: () => new Response("image", { headers: { "content-type": contentType } }),
     contentType: () => contentType,
     image: () => stream(),
-  }) as ImageTransformationResult;
+  });
 
 const makeTransformer = (state: FakeTransformerState): ImageTransformer =>
-  ({
-    transform: (transform) => {
+  makePartialTestDouble<ImageTransformer>({
+    transform: (transform: Parameters<ImageTransformer["transform"]>[0]) => {
       state.transforms.push(transform);
 
       return makeTransformer(state);
     },
-    draw: (_image, options) => {
+    draw: (
+      _image: Parameters<ImageTransformer["draw"]>[0],
+      options: Parameters<ImageTransformer["draw"]>[1],
+    ) => {
       state.draws.push(options);
 
       return makeTransformer(state);
     },
     output: async () => makeResult(),
-  }) as ImageTransformer;
+  });
 
 const makeHandle = (id: string) =>
-  ({
+  makePartialTestDouble<ImageHandle>({
     details: async () => metadata(id),
     bytes: async () => stream(),
     update: async (options: ImageUpdateOptions) => ({
@@ -50,7 +54,7 @@ const makeHandle = (id: string) =>
       meta: options.metadata,
     }),
     delete: async () => true,
-  }) as ImageHandle;
+  });
 
 interface FakeImagesOptions {
   readonly state?: FakeTransformerState;
@@ -67,31 +71,34 @@ interface FakeImagesOptions {
 const makeFakeImages = (options: FakeImagesOptions = {}) => {
   const state = options.state ?? { transforms: [], draws: [] };
 
-  return {
+  const binding = {
     info: options.info ?? (async () => ({ format: "image/png", fileSize: 4, width: 1, height: 1 })),
     input: (image: Images.ImageInputValue, inputOptions: ImageInputOptions | undefined) => {
       options.input?.(image, inputOptions);
 
       return makeTransformer(state);
     },
-    ...(options.includeHosted === false
-      ? {}
-      : {
-          hosted:
-            options.hosted ??
-            ({
-              image: options.image ?? ((imageId) => makeHandle(imageId)),
-              upload: async (_image, uploadOptions) => ({
-                ...metadata(uploadOptions?.id ?? "uploaded"),
-                filename: uploadOptions?.filename,
-              }),
-              list: async () => ({
-                images: [metadata("image-1")],
-                listComplete: true,
-              }),
-            } satisfies HostedImagesBinding),
-        }),
-  } as unknown as ImagesBinding;
+  };
+
+  if (options.includeHosted !== false) {
+    Object.assign(binding, {
+      hosted:
+        options.hosted ??
+        ({
+          image: options.image ?? ((imageId) => makeHandle(imageId)),
+          upload: async (_image, uploadOptions) => ({
+            ...metadata(uploadOptions?.id ?? "uploaded"),
+            filename: uploadOptions?.filename,
+          }),
+          list: async () => ({
+            images: [metadata("image-1")],
+            listComplete: true,
+          }),
+        } satisfies HostedImagesBinding),
+    });
+  }
+
+  return makePartialTestDouble<ImagesBinding>(binding);
 };
 
 const imagesLayer = (images: ImagesBinding) =>
@@ -163,11 +170,11 @@ const imagesLayer = (images: ImagesBinding) =>
 {
   const images = makeFakeImages({
     image: (imageId) =>
-      ({
+      makePartialTestDouble<ImageHandle>({
         ...makeHandle(imageId),
         details: async () => null,
         bytes: async () => null,
-      }) as ImageHandle,
+      }),
   });
 
   layer(imagesLayer(images))("Hosted Images", (it) => {
@@ -193,12 +200,9 @@ const imagesLayer = (images: ImagesBinding) =>
 }
 
 {
-  const images = makeFakeImages({ includeHosted: false }) as unknown as Omit<
-    ImagesBinding,
-    "hosted"
-  >;
+  const images = makeFakeImages({ includeHosted: false });
 
-  layer(imagesLayer(images as ImagesBinding))("Images validation", (it) => {
+  layer(imagesLayer(images))("Images validation", (it) => {
     it.effect("accepts transformation bindings without hosted image operations", () =>
       Effect.gen(function* () {
         const images = yield* TestImages;
@@ -221,7 +225,11 @@ test("Images layer validates the binding shape", async () => {
       }).pipe(
         Effect.provide(
           TestImages.layer({ binding: "IMAGES" }).pipe(
-            Layer.provide(Layer.succeed(WorkerEnvironment, { IMAGES: {} as ImagesBinding })),
+            Layer.provide(
+              Layer.succeed(WorkerEnvironment, {
+                IMAGES: makePartialTestDouble<ImagesBinding>({}),
+              }),
+            ),
           ),
         ),
       ),

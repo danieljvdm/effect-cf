@@ -5,7 +5,7 @@ export interface FakeBidi {
   readonly written: Array<Uint8Array>;
   readonly push: (chunk: Uint8Array) => void;
   readonly end: () => void;
-  readonly fail: (error: unknown) => void;
+  readonly fail: (cause: unknown) => void;
   readonly writableClosed: () => boolean;
   readonly readableCancelled: () => boolean;
 }
@@ -143,8 +143,8 @@ export interface FakeWebTransportOptions {
 export interface FakeWebTransportHandle {
   readonly native: WebTransport.NativeWebTransport;
   readonly resolveReady: () => void;
-  readonly resolveClosed: (info: unknown) => void;
-  readonly rejectClosed: (error: unknown) => void;
+  readonly resolveClosed: (cause: unknown) => void;
+  readonly rejectClosed: (cause: unknown) => void;
   readonly closeCalls: Array<WebTransport.NativeCloseInfo | undefined>;
   readonly bidiCalls: Array<WebTransport.NativeSendStreamOptions | undefined>;
   readonly bidis: Array<FakeBidi>;
@@ -157,29 +157,21 @@ export interface FakeWebTransportHandle {
 }
 
 export const makeFakeWebTransport = (options?: FakeWebTransportOptions): FakeWebTransportHandle => {
-  let resolveReady!: () => void;
-  let rejectReady!: (error: unknown) => void;
-  const ready = new Promise<void>((resolve, reject) => {
-    resolveReady = resolve;
-    rejectReady = reject;
-  });
+  const readyDeferred = Promise.withResolvers<void>();
+  const ready = readyDeferred.promise;
 
   ready.catch(() => {});
   const readyMode = options?.ready ?? "resolved";
 
   if (readyMode === "resolved") {
-    resolveReady();
-  } else if (typeof readyMode === "object") {
-    rejectReady(readyMode.reject);
+    readyDeferred.resolve();
+  } else if (readyMode !== "pending") {
+    readyDeferred.reject(readyMode.reject);
   }
 
-  let resolveClosed!: (info: unknown) => void;
-  let rejectClosed!: (error: unknown) => void;
+  const closedDeferred = Promise.withResolvers<unknown>();
   let closedSettled = false;
-  const closed = new Promise<unknown>((resolve, reject) => {
-    resolveClosed = resolve;
-    rejectClosed = reject;
-  });
+  const closed = closedDeferred.promise;
 
   closed.catch(() => {});
 
@@ -210,7 +202,7 @@ export const makeFakeWebTransport = (options?: FakeWebTransportOptions): FakeWeb
       closeCalls.push(info);
       if (!closedSettled) {
         closedSettled = true;
-        resolveClosed({ closeCode: info?.closeCode ?? 0, reason: info?.reason ?? "" });
+        closedDeferred.resolve({ closeCode: info?.closeCode ?? 0, reason: info?.reason ?? "" });
       }
     },
     createBidirectionalStream: (streamOptions) => {
@@ -242,17 +234,17 @@ export const makeFakeWebTransport = (options?: FakeWebTransportOptions): FakeWeb
 
   return {
     native,
-    resolveReady,
-    resolveClosed: (info) => {
+    resolveReady: readyDeferred.resolve,
+    resolveClosed: (cause) => {
       if (!closedSettled) {
         closedSettled = true;
-        resolveClosed(info);
+        closedDeferred.resolve(cause);
       }
     },
-    rejectClosed: (error) => {
+    rejectClosed: (cause) => {
       if (!closedSettled) {
         closedSettled = true;
-        rejectClosed(error);
+        closedDeferred.reject(cause);
       }
     },
     closeCalls,

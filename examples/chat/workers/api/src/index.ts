@@ -1,13 +1,13 @@
 import { AnalyticsWorker } from "@effect-cf/example-contracts/AnalyticsWorker";
 import { ApiWorker } from "@effect-cf/example-contracts/ApiWorker";
 import { ChatRoom } from "@effect-cf/example-contracts/ChatRoom";
-import { Config, Effect, Layer, Redacted } from "effect";
+import { Config, Effect, Layer, Redacted, Schema } from "effect";
 import { Worker, WorkerConfig } from "effect-cf";
 
 import { UserCache } from "./bindings";
 import * as Users from "./users";
 
-const json = (value: unknown, init?: ResponseInit) => {
+const json = (value: Schema.Json, init?: ResponseInit) => {
   const headers = new Headers(init?.headers);
 
   headers.set("cache-control", "no-store");
@@ -28,6 +28,7 @@ const layer = Layer.mergeAll(
   ChatRoom.layer({ binding: "CHAT_ROOM" }),
   UserCache.layer({ binding: "USER_CACHE" }),
 );
+const eventLayer = Layer.effectContext(Effect.context<UserCache | AnalyticsWorker | ChatRoom>());
 
 const roomRoute = (pathname: string, suffix: string) => {
   const match = pathname.match(new RegExp(`^/rooms/([^/]+)${suffix}$`));
@@ -36,6 +37,7 @@ const roomRoute = (pathname: string, suffix: string) => {
 };
 
 export const ApiWorkerLive = ApiWorker.make(layer, {
+  eventLayer,
   rpc: {
     getUser: (userId) => Users.getUser(userId),
     listUsers: () => Users.listUsers,

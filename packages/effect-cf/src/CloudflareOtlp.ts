@@ -24,12 +24,15 @@ import {
   OtlpExporter,
   OtlpLogger,
   OtlpMetrics,
+  OtlpResource,
   OtlpSerialization,
   OtlpTracer,
 } from "effect/unstable/observability";
 
 import { DurableObjectState } from "./DurableObjectState";
 import { WorkerConfig, WorkerEnvironment } from "./Environment";
+
+type ResourceAttributes = NonNullable<Parameters<typeof OtlpResource.make>[0]["attributes"]>;
 
 /** Telemetry signal groups supported by the Cloudflare OTLP layers. */
 export type Signal = "logs" | "traces" | "metrics";
@@ -52,7 +55,7 @@ export interface ResourceOptions {
   /** Explicit service version. Takes precedence over OTEL environment variables. */
   readonly serviceVersion?: string;
   /** Additional resource attributes attached to exported telemetry. */
-  readonly attributes?: Record<string, unknown>;
+  readonly attributes?: ResourceAttributes;
 }
 
 /** Options shared by all Cloudflare OTLP telemetry layers. */
@@ -115,8 +118,8 @@ const cloudflareConfigProviderLayer = ConfigProvider.layerAdd(
 const selectedSignals = (signals: ReadonlyArray<Signal> | undefined): ReadonlySet<Signal> =>
   new Set(signals ?? allSignals);
 
-const withDefinedAttributes = (attributes: Record<string, unknown>): Record<string, unknown> => {
-  const out: Record<string, unknown> = {};
+const withDefinedAttributes = (attributes: ResourceAttributes): ResourceAttributes => {
+  const out: ResourceAttributes = {};
 
   for (const [key, value] of Object.entries(attributes)) {
     if (value !== undefined) {
@@ -129,7 +132,7 @@ const withDefinedAttributes = (attributes: Record<string, unknown>): Record<stri
 
 const makeResource = (
   options: LayerOptions,
-  runtimeAttributes: Record<string, unknown>,
+  runtimeAttributes: ResourceAttributes,
 ): ResourceOptions => ({
   serviceName: options.resource?.serviceName,
   serviceVersion: options.resource?.serviceVersion,
@@ -157,7 +160,7 @@ const mergeSignalLayers = (layers: ReadonlyArray<SignalLayer>): SignalLayer => {
 
 const makeLayer = (
   options: LayerOptions = {},
-  runtimeAttributes: Record<string, unknown> = {},
+  runtimeAttributes: ResourceAttributes = {},
 ): Layer.Layer<OtlpExporter.Flusher> => {
   const signals = selectedSignals(options.signals);
   const resource = makeResource(options, runtimeAttributes);

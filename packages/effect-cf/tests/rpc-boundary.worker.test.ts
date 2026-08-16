@@ -5,6 +5,7 @@ import { Effect, Layer, Predicate, Schema as S } from "effect";
 import { expect, test } from "vite-plus/test";
 
 import { DurableObject, DurableObjectNamespace, Rpc, ServiceBinding, Worker } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
 class Counter extends DurableObject.Tag<Counter>()("WorkerPoolCounter", {
   get: DurableObject.method({ success: S.Number }),
@@ -55,11 +56,11 @@ class AuditLog extends DurableObject.Tag<AuditLog>()("WorkerPoolAuditLog", {
 const MathService = MathWorker;
 const FormatService = FormatWorker;
 
-const durableObjectId = {
+const durableObjectId = makePartialTestDouble<DurableObjectId>({
   toString: () => "worker-pool-counter",
-} as unknown as DurableObjectId;
+});
 
-const makeNamespace = (stub: unknown) => {
+const makeNamespace = <Stub extends object>(stub: Stub) => {
   const namespace = {
     newUniqueId: () => durableObjectId,
     idFromName: () => durableObjectId,
@@ -82,13 +83,16 @@ test("namespace bindings resolve RPC calls inside the Workers runtime", async ()
     }),
   });
 
-  const instance = new WorkerClass(createExecutionContext(), {
-    COUNTERS: makeNamespace({
-      fetch: () => Promise.resolve(new Response(null, { status: 204 })),
-      id: durableObjectId,
-      get: () => Promise.resolve(37),
+  const instance = new WorkerClass(
+    createExecutionContext(),
+    makePartialTestDouble<Cloudflare.Env & { readonly COUNTERS: object }>({
+      COUNTERS: makeNamespace({
+        fetch: () => Promise.resolve(new Response(null, { status: 204 })),
+        id: durableObjectId,
+        get: () => Promise.resolve(37),
+      }),
     }),
-  } as unknown as Cloudflare.Env);
+  );
 
   const response = await instance.fetch(new Request("https://worker.test/counter"));
 
@@ -118,13 +122,16 @@ test("namespace RPC validation fails with package errors inside the Workers runt
     }),
   });
 
-  const instance = new WorkerClass(createExecutionContext(), {
-    COUNTERS: makeNamespace({
-      fetch: () => Promise.resolve(new Response(null, { status: 204 })),
-      id: durableObjectId,
-      get: 1,
+  const instance = new WorkerClass(
+    createExecutionContext(),
+    makePartialTestDouble<Cloudflare.Env & { readonly COUNTERS: object }>({
+      COUNTERS: makeNamespace({
+        fetch: () => Promise.resolve(new Response(null, { status: 204 })),
+        id: durableObjectId,
+        get: 1,
+      }),
     }),
-  } as unknown as Cloudflare.Env);
+  );
 
   const response = await instance.fetch(new Request("https://worker.test/counter"));
 
@@ -150,23 +157,29 @@ test("service binding RPC validation runs inside the Workers runtime", async () 
     }),
   });
 
-  const invalid = new WorkerClass(createExecutionContext(), {
-    ECHO: {
-      fetch: () => Promise.resolve(new Response(null, { status: 204 })),
-      echo: "not-callable",
-    },
-  } as unknown as Cloudflare.Env);
+  const invalid = new WorkerClass(
+    createExecutionContext(),
+    makePartialTestDouble<Cloudflare.Env & { readonly ECHO: object }>({
+      ECHO: {
+        fetch: () => Promise.resolve(new Response(null, { status: 204 })),
+        echo: "not-callable",
+      },
+    }),
+  );
   const invalidResponse = await invalid.fetch(new Request("https://worker.test/echo"));
 
   expect(invalidResponse.status).toBe(599);
   await expect(invalidResponse.text()).resolves.toBe("ServiceBindingRpcError");
 
-  const valid = new WorkerClass(createExecutionContext(), {
-    ECHO: {
-      fetch: () => Promise.resolve(new Response(null, { status: 204 })),
-      echo: (value: string) => Promise.resolve(value),
-    },
-  } as unknown as Cloudflare.Env);
+  const valid = new WorkerClass(
+    createExecutionContext(),
+    makePartialTestDouble<Cloudflare.Env & { readonly ECHO: object }>({
+      ECHO: {
+        fetch: () => Promise.resolve(new Response(null, { status: 204 })),
+        echo: (value: string) => Promise.resolve(value),
+      },
+    }),
+  );
   const validResponse = await valid.fetch(new Request("https://worker.test/echo"));
 
   expect(validResponse.status).toBe(200);
@@ -181,9 +194,7 @@ test("rpc decode failures keep their error tag across the Durable Object RPC bou
   }
 
   const stub = namespace.get(namespace.idFromName("rpc-boundary-decode-error"));
-  const cause = await Effect.runPromise(
-    Rpc.resolve(stub.increment(123 as never)).pipe(Effect.flip),
-  );
+  const cause = await Effect.runPromise(Rpc.resolve(stub.increment(123)).pipe(Effect.flip));
 
   expect(Predicate.isTagged(cause, "RpcArgumentDecodeError")).toBe(true);
   expect(cause).toMatchObject({
@@ -232,20 +243,29 @@ test("workers compose service bindings and Durable Object RPC contracts in the W
   );
 
   const context = createExecutionContext();
-  const instance = new ApiWorkerClass(context, {
-    MATH: new MathWorkerClass(context, {} as Cloudflare.Env),
-    FORMAT: new FormatWorkerClass(context, {} as Cloudflare.Env),
-    AUDIT_LOGS: makeNamespace({
-      fetch: () => Promise.resolve(new Response(null, { status: 204 })),
-      id: durableObjectId,
-      append: (room: string, total: number): Promise<AuditReceipt> =>
-        Promise.resolve({
-          room,
-          total,
-          sequence: ++sequence,
-        }),
+  const instance = new ApiWorkerClass(
+    context,
+    makePartialTestDouble<
+      Cloudflare.Env & {
+        readonly MATH: object;
+        readonly FORMAT: object;
+        readonly AUDIT_LOGS: object;
+      }
+    >({
+      MATH: new MathWorkerClass(context, makePartialTestDouble<Cloudflare.Env>({})),
+      FORMAT: new FormatWorkerClass(context, makePartialTestDouble<Cloudflare.Env>({})),
+      AUDIT_LOGS: makeNamespace({
+        fetch: () => Promise.resolve(new Response(null, { status: 204 })),
+        id: durableObjectId,
+        append: (room: string, total: number): Promise<AuditReceipt> =>
+          Promise.resolve({
+            room,
+            total,
+            sequence: ++sequence,
+          }),
+      }),
     }),
-  } as unknown as Cloudflare.Env);
+  );
 
   const response = await instance.fetch(new Request("https://worker.test/run?value=21"));
 

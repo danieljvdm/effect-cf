@@ -2,7 +2,7 @@ import type {
   KVNamespaceListOptions as CloudflareKVNamespaceListOptions,
   KVNamespacePutOptions as CloudflareKVNamespacePutOptions,
 } from "@cloudflare/workers-types";
-import { Context, Data, Effect, Option, Schema as S, type Layer } from "effect";
+import { Context, Data, Effect, Option, Predicate, Schema as S, type Layer } from "effect";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
@@ -144,21 +144,17 @@ const tryKvPromise = <A>(
     catch: (cause) => kvError(binding, operation, cause),
   });
 
-export const isKvNamespace = (value: unknown): value is KVNamespace => {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-
-  const resource = value as Record<string, unknown>;
-
-  return (
-    typeof resource.get === "function" &&
-    typeof resource.put === "function" &&
-    typeof resource.delete === "function" &&
-    typeof resource.getWithMetadata === "function" &&
-    typeof resource.list === "function"
-  );
-};
+export const isKvNamespace = <Candidate>(value: Candidate): value is Candidate & KVNamespace =>
+  Predicate.hasProperty(value, "get") &&
+  Predicate.isFunction(value.get) &&
+  Predicate.hasProperty(value, "put") &&
+  Predicate.isFunction(value.put) &&
+  Predicate.hasProperty(value, "delete") &&
+  Predicate.isFunction(value.delete) &&
+  Predicate.hasProperty(value, "getWithMetadata") &&
+  Predicate.isFunction(value.getWithMetadata) &&
+  Predicate.hasProperty(value, "list") &&
+  Predicate.isFunction(value.list);
 
 export const makeClient = <Key, Value, EncodedValue>(
   definition: KvDefinition<Key, Value, EncodedValue>,
@@ -232,7 +228,8 @@ export const makeClient = <Key, Value, EncodedValue>(
           key.metadata === undefined
             ? Option.none<Metadata>()
             : metadataSchema === undefined
-              ? Option.some(key.metadata as Metadata)
+              ? // SAFETY: without a metadata schema, KV's generic Metadata contract is passed through.
+                Option.some(key.metadata as Metadata)
               : Option.some(yield* S.decodeUnknownEffect(metadataSchema)(key.metadata));
 
         keys.push({
@@ -310,6 +307,7 @@ export const Tag =
 
     const makeLayer = (binding: LayerOptions) => kvDefinition.layer(tag, binding);
 
+    // SAFETY: the assigned schemas and layer exactly implement TagClass for this KV definition.
     return Object.assign(tag, {
       id: kvDefinition.id,
       keySchema: kvDefinition.key,

@@ -118,10 +118,6 @@ type WorkerFetchContext<ROut> =
 type WorkerRpcContext<ROut> = WorkerBaseContext<ROut> | Scope.Scope;
 
 type RuntimeContext<ROut> = WorkerBaseContext<ROut>;
-type RunOptions = {
-  readonly eventLayer?: boolean;
-};
-
 const RunSymbol = Symbol.for("effect-cf/Worker/run");
 const FetchSymbol = Symbol.for("effect-cf/Worker/fetch");
 
@@ -151,7 +147,7 @@ export type WorkerRpcHandler<ROut, A = unknown> = Effect.Effect<A, unknown, Work
  */
 export type WorkerRpc<ROut> = Record<string, (...args: Array<any>) => WorkerRpcHandler<ROut>>;
 
-export type WorkerRpcShape<Rpc extends WorkerRpc<ROut>, ROut> = {
+export type WorkerRpcContract<Rpc extends WorkerRpc<ROut>, ROut> = {
   readonly [Key in keyof Rpc]: Rpc[Key] extends (
     ...args: infer Args
   ) => Effect.Effect<infer A, unknown, WorkerRpcContext<ROut>>
@@ -167,7 +163,7 @@ export type RpcHandlers<ROut, Api> = {
         ? never
         : [Api[Key]] extends [never]
           ? never
-          : Api[Key] extends (...args: Array<any>) => Promise<unknown>
+          : Api[Key] extends (...args: Array<any>) => Promise<any>
             ? Key
             : never
       : never]: Api[Key] extends (...args: infer Args) => Promise<infer A>
@@ -209,11 +205,27 @@ export interface WorkerOptions<
   readonly rpc?: Rpc;
 }
 
+type WorkerOptionsWithEventLayer<
+  RRuntime,
+  REvent,
+  EventLayerError,
+  Rpc extends WorkerRpc<RRuntime | REvent> = Record<never, never>,
+> = Omit<WorkerOptions<RRuntime, REvent, EventLayerError, Rpc>, "eventLayer"> & {
+  readonly eventLayer: Layer.Layer<REvent, EventLayerError, WorkerBaseContext<RRuntime>>;
+};
+
 export type FetchWorkerOptions<RRuntime, REvent = never, EventLayerError = never> = Omit<
   WorkerOptions<RRuntime, REvent, EventLayerError, Record<never, never>>,
   "rpc"
 > & {
   readonly rpc?: never;
+};
+
+type FetchWorkerOptionsWithEventLayer<RRuntime, REvent, EventLayerError> = Omit<
+  FetchWorkerOptions<RRuntime, REvent, EventLayerError>,
+  "eventLayer"
+> & {
+  readonly eventLayer: Layer.Layer<REvent, EventLayerError, WorkerBaseContext<RRuntime>>;
 };
 
 /**
@@ -225,7 +237,8 @@ export type WorkerClass<Rpc extends WorkerRpc<ROut>, ROut> = new (
 ) => CloudflareWorkerEntrypoint<WorkerEnv> & {
   fetch(request: Request): Promise<Response>;
   queue(batch: globalThis.MessageBatch): Promise<void>;
-} & WorkerRpcShape<Rpc, ROut>;
+  [FetchSymbol](request: Request, requestContext: globalThis.ExecutionContext): Promise<Response>;
+} & WorkerRpcContract<Rpc, ROut>;
 
 /**
  * `ExportedHandler`-compatible fetch object produced by {@link makeFetchHandler}.
@@ -316,7 +329,17 @@ export function make<ROut, LayerError>(
 export function make<
   ROut,
   LayerError,
-  REvent = never,
+  REvent,
+  EventLayerError = never,
+  const Rpc extends WorkerRpc<ROut | REvent> = Record<never, never>,
+>(
+  layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+  options: WorkerOptionsWithEventLayer<ROut, REvent, EventLayerError, Rpc>,
+): WorkerClass<Rpc, ROut | REvent>;
+export function make<
+  ROut,
+  LayerError,
+  REvent extends never = never,
   EventLayerError = never,
   const Rpc extends WorkerRpc<ROut | REvent> = Record<never, never>,
 >(
@@ -333,9 +356,9 @@ export function make<
   layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
   optionsOrFetch: WorkerOptions<ROut, REvent, EventLayerError, Rpc> | WorkerHandler<ROut>,
 ): WorkerClass<Rpc, ROut | REvent> {
-  const options = isWorkerOptions(optionsOrFetch)
+  const options: WorkerOptions<ROut, REvent, EventLayerError, Rpc> = isWorkerOptions(optionsOrFetch)
     ? optionsOrFetch
-    : ({ fetch: optionsOrFetch } as WorkerOptions<ROut, REvent, EventLayerError, Rpc>);
+    : { fetch: optionsOrFetch };
 
   class EffectWorker extends CloudflareWorkerEntrypoint<WorkerEnv> {
     readonly runtime: ManagedRuntime.ManagedRuntime<RuntimeContext<ROut>, LayerError>;
@@ -359,13 +382,25 @@ export function make<
 
     [RunSymbol]<A, E>(
       effect: Effect.Effect<A, E, RuntimeContext<ROut> | REvent | Scope.Scope>,
-      runOptions: RunOptions = {},
     ): Promise<A> {
-      return Runtime.runEventPromise(
-        this.runtime,
-        effect,
-        runOptions.eventLayer === false ? undefined : options.eventLayer,
-      );
+      const eventLayer = options.eventLayer;
+
+      if (eventLayer === undefined) {
+        // SAFETY: the public make overloads permit an absent event layer only when REvent is never.
+        return Runtime.runEventPromise(
+          this.runtime,
+          effect as Effect.Effect<A, E, RuntimeContext<ROut> | Scope.Scope>,
+        );
+      }
+
+      return Runtime.runEventPromise<
+        A,
+        E,
+        RuntimeContext<ROut>,
+        REvent,
+        EventLayerError,
+        LayerError
+      >(this.runtime, effect, eventLayer);
     }
 
     fetch(request: Request): Promise<Response> {
@@ -390,6 +425,7 @@ export function make<
         Layer.succeed(WorkerContext, fromExecutionContext(ctx)),
       );
 
+      // SAFETY: requestServices provides the HTTP/request contexts introduced by renderFetchSuccess.
       return this[RunSymbol](
         renderFetchSuccess(fetchHandler).pipe(
           Effect.tap(() => scheduleTelemetryFlush),
@@ -438,7 +474,27 @@ interface FetchCapableInstance {
  * isolate is evicted; Cloudflare provides no shutdown hook. Use `eventLayer`
  * for resources that must be finalized per event.
  */
-export const makeFetchHandler = <
+export function makeFetchHandler<
+  ROut,
+  LayerError,
+  REvent,
+  EventLayerError = never,
+  Env extends WorkerEnv = WorkerEnv,
+>(
+  layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+  options: FetchWorkerOptionsWithEventLayer<ROut, REvent, EventLayerError>,
+): FetchHandler<Env>;
+export function makeFetchHandler<
+  ROut,
+  LayerError,
+  REvent extends never = never,
+  EventLayerError = never,
+  Env extends WorkerEnv = WorkerEnv,
+>(
+  layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+  options: FetchWorkerOptions<ROut, REvent, EventLayerError>,
+): FetchHandler<Env>;
+export function makeFetchHandler<
   ROut,
   LayerError,
   REvent = never,
@@ -447,8 +503,19 @@ export const makeFetchHandler = <
 >(
   layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
   options: FetchWorkerOptions<ROut, REvent, EventLayerError>,
-): FetchHandler<Env> => {
-  const WorkerClass = make(layer, options);
+): FetchHandler<Env> {
+  const WorkerClass =
+    options.eventLayer === undefined
+      ? make(
+          layer,
+          // SAFETY: the no-event public overload is the only one that permits an absent eventLayer.
+          options as FetchWorkerOptions<ROut, never, EventLayerError>,
+        )
+      : make(
+          layer,
+          // SAFETY: this branch has the eventLayer required by the event-dependent public overload.
+          options as FetchWorkerOptionsWithEventLayer<ROut, REvent, EventLayerError>,
+        );
   const instances = new WeakMap<WorkerEnv, FetchCapableInstance>();
 
   return {
@@ -456,14 +523,14 @@ export const makeFetchHandler = <
       let instance = instances.get(env);
 
       if (instance === undefined) {
-        instance = new WorkerClass(ctx, env) as unknown as FetchCapableInstance;
+        instance = new WorkerClass(ctx, env);
         instances.set(env, instance);
       }
 
       return instance[FetchSymbol](request, ctx);
     },
   };
-};
+}
 
 export type {
   Api,
@@ -481,3 +548,6 @@ export type {
 } from "./WorkerDefinition";
 
 export { implement, method, Tag } from "./WorkerDefinition";
+
+/** @deprecated Use {@link WorkerRpcContract}. */
+export { type WorkerRpcContract as "WorkerRpcShape" };

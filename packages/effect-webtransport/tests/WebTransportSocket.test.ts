@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Deferred, Effect, Fiber } from "effect";
+import { Deferred, Effect, Fiber, Schema } from "effect";
 import { Socket } from "effect/unstable/socket";
 
 import * as WebTransport from "../src/WebTransport";
@@ -23,6 +23,17 @@ const waitFor = (condition: () => boolean) =>
     }
     assert.isTrue(condition(), "condition not reached");
   });
+
+const expectSocketReason = <S extends Schema.ConstraintDecoder<unknown, never>>(
+  error: Socket.SocketError,
+  schema: S,
+): S["Type"] => {
+  if (Schema.is(schema)(error.reason)) {
+    return error.reason;
+  }
+
+  return assert.fail(`unexpected Socket error reason: ${error.reason._tag}`);
+};
 
 describe("WebTransportSocket", () => {
   it.effect("round-trips bytes through a bidirectional stream", () =>
@@ -143,8 +154,7 @@ describe("WebTransportSocket", () => {
       fake.bidis[0]!.end();
       const error = yield* Fiber.join(fiber);
 
-      assert.isTrue(Socket.SocketError.is(error));
-      assert.strictEqual((error as Socket.SocketError).reason._tag, "SocketCloseError");
+      expectSocketReason(error, Socket.SocketCloseError);
     }),
   );
 
@@ -154,11 +164,9 @@ describe("WebTransportSocket", () => {
       const socket = yield* WebTransportSocket.makeSocket().pipe(provideSession(fake));
       const error = yield* Effect.flip(socket.run(() => {}));
 
-      assert.isTrue(Socket.SocketError.is(error));
-      const reason = (error as Socket.SocketError).reason;
+      const reason = expectSocketReason(error, Socket.SocketOpenError);
 
-      assert.strictEqual(reason._tag, "SocketOpenError");
-      assert.isTrue(WebTransport.WebTransportError.is((reason as Socket.SocketOpenError).cause));
+      assert.isTrue(WebTransport.WebTransportError.is(reason.cause));
     }),
   );
 
@@ -173,8 +181,7 @@ describe("WebTransportSocket", () => {
         .run(() => {})
         .pipe(Effect.flip, Effect.ensuring(Effect.sync(() => reader.releaseLock())));
 
-      assert.isTrue(Socket.SocketError.is(error));
-      assert.strictEqual((error as Socket.SocketError).reason._tag, "SocketOpenError");
+      expectSocketReason(error, Socket.SocketOpenError);
     }),
   );
 
@@ -189,8 +196,7 @@ describe("WebTransportSocket", () => {
         .run(() => {})
         .pipe(Effect.flip, Effect.ensuring(Effect.sync(() => writer.releaseLock())));
 
-      assert.isTrue(Socket.SocketError.is(error));
-      assert.strictEqual((error as Socket.SocketError).reason._tag, "SocketOpenError");
+      expectSocketReason(error, Socket.SocketOpenError);
     }),
   );
 
@@ -204,8 +210,7 @@ describe("WebTransportSocket", () => {
       fake.bidis[0]!.fail(new Error("stream reset"));
       const error = yield* Fiber.join(fiber);
 
-      assert.isTrue(Socket.SocketError.is(error));
-      assert.strictEqual((error as Socket.SocketError).reason._tag, "SocketReadError");
+      expectSocketReason(error, Socket.SocketReadError);
     }),
   );
 });

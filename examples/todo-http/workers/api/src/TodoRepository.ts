@@ -9,7 +9,6 @@ import { Context, Effect, Layer } from "effect";
 import { type SqlError, SqlClient } from "effect/unstable/sql";
 
 interface TodoRow {
-  readonly [key: string]: unknown;
   readonly id: string;
   readonly title: string;
   readonly completed: number;
@@ -18,7 +17,6 @@ interface TodoRow {
 }
 
 interface StatsRow {
-  readonly [key: string]: unknown;
   readonly total: number;
   readonly completed: number;
 }

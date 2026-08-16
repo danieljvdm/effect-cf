@@ -153,9 +153,7 @@ it.effect("invokes a typed queue consumer and reports acknowledgements", () =>
 class TestValue extends Context.Service<TestValue, string>()("effect-cf/test/TestValue") {}
 
 it.effect("runs Effects inside Durable Objects with caller services and state", () => {
-  const namespace = env.TEST_COUNTER_DO as DurableObjectNamespace<
-    import("./worker-fixture").TestCounterDurableObject
-  >;
+  const namespace = env.TEST_COUNTER_DO!;
   const id = namespace.idFromName("effect-native-access");
   const stub = namespace.get(id);
 
@@ -219,7 +217,7 @@ it.effect("runs Effects inside Durable Objects with caller services and state", 
 });
 
 it.effect("introspects one Workflow instance with Effect-native modifiers", () => {
-  const workflow = env.TEST_WORKFLOW as Workflow<import("./worker-fixture").TestWorkflowPayload>;
+  const workflow = env.TEST_WORKFLOW!;
   const instanceId = crypto.randomUUID();
 
   return Effect.scoped(
@@ -260,7 +258,7 @@ it.effect("introspects one Workflow instance with Effect-native modifiers", () =
 });
 
 it.effect("introspects subsequently created Workflows with Effects", () => {
-  const workflow = env.TEST_WORKFLOW as Workflow<import("./worker-fixture").TestWorkflowPayload>;
+  const workflow = env.TEST_WORKFLOW!;
 
   return Effect.scoped(
     Effect.gen(function* () {
@@ -288,7 +286,7 @@ it.effect("introspects subsequently created Workflows with Effects", () => {
 
 it.effect("applies D1 migrations as an Effect", () =>
   Effect.gen(function* () {
-    const database = env.TEST_DB as D1Database;
+    const database = env.TEST_DB!;
 
     yield* PoolWorkers.applyD1Migrations(database, [
       {
@@ -310,7 +308,7 @@ it.effect("applies D1 migrations as an Effect", () =>
 
 it.effect("administers a Secrets Store binding with Effects", () =>
   Effect.gen(function* () {
-    const binding = env.TEST_SECRET as SecretsStoreSecret;
+    const binding = env.TEST_SECRET!;
     const admin = yield* PoolWorkers.adminSecretsStore(binding);
     const id = yield* admin.create("initial-value");
 

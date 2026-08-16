@@ -16,7 +16,7 @@ import type {
   ImageUploadOptions as CloudflareImageUploadOptions,
   Response as CloudflareResponse,
 } from "@cloudflare/workers-types";
-import { Context, Data, Effect, Function, Option, type Layer } from "effect";
+import { Context, Data, Effect, Function, Option, Predicate, type Layer } from "effect";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
@@ -224,21 +224,18 @@ const tryImagesSync = <A>(
 const maybe = <A>(value: A | null): Option.Option<A> =>
   value === null ? Option.none() : Option.some(value);
 
-const hasFunction = (value: object, key: string): boolean =>
-  typeof Reflect.get(value, key) === "function";
+const hasFunction = <Candidate>(value: Candidate, key: string): boolean =>
+  Predicate.hasProperty(value, key) && Predicate.isFunction(value[key]);
 
-const isHostedImagesBinding = (value: unknown): value is CloudflareHostedImagesBinding =>
-  typeof value === "object" &&
-  value !== null &&
-  hasFunction(value, "image") &&
-  hasFunction(value, "upload") &&
-  hasFunction(value, "list");
+const isHostedImagesBinding = <Candidate>(
+  value: Candidate,
+): value is Candidate & CloudflareHostedImagesBinding =>
+  hasFunction(value, "image") && hasFunction(value, "upload") && hasFunction(value, "list");
 
-export const isImagesBinding = (value: unknown): value is ImagesRuntimeBinding =>
-  typeof value === "object" &&
-  value !== null &&
-  hasFunction(value, "info") &&
-  hasFunction(value, "input");
+export const isImagesBinding = <Candidate>(
+  value: Candidate,
+): value is Candidate & ImagesRuntimeBinding =>
+  hasFunction(value, "info") && hasFunction(value, "input");
 
 const wrapResult = (
   binding: string,
@@ -342,6 +339,7 @@ export const Tag =
 
     const makeLayer = (definition: LayerOptions) => layer(tag, definition);
 
+    // SAFETY: these are exactly the members required by TagClass, attached to the matching service tag.
     return Object.assign(tag, {
       id,
       layer: makeLayer,

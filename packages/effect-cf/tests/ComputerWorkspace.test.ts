@@ -1,15 +1,17 @@
 import type {
+  ThinkWorkspaceCompatibility,
   WorkspaceClient,
   WorkspaceRuntimeEvent,
   WorkspaceRuntimeExecHandle,
 } from "@cloudflare/computer";
 import type { ArtifactClient } from "@cloudflare/computer/artifacts";
 import { assert, it } from "@effect/vitest";
-import { Effect, Stream } from "effect";
+import { Effect, Schema, Stream } from "effect";
 
 import { ComputerWorkspace } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
-const emptyArtifacts = {
+const emptyArtifacts = makePartialTestDouble<ArtifactClient>({
   sessionId: "test-session",
   create: () => Promise.reject(new Error("unused")),
   get: () => Promise.reject(new Error("unused")),
@@ -21,7 +23,7 @@ const emptyArtifacts = {
   getToken: () => Promise.reject(new Error("unused")),
   revokeToken: () => Promise.resolve(false),
   cli: () => Promise.resolve({ stdout: "", stderr: "", exitCode: 0 }),
-} as ArtifactClient;
+});
 
 const runtimeResult = {
   status: "completed" as const,
@@ -34,6 +36,11 @@ const runtimeResult = {
   skipped: [],
   sync: { status: "complete" as const, applied: 3, skipped: [] },
 };
+
+interface ReceiverSensitiveThinkClient extends ThinkWorkspaceCompatibility {
+  readonly root: string;
+  readonly writes: Array<string>;
+}
 
 const makeHandle = (id: string, disposed: Array<string>): WorkspaceRuntimeExecHandle<"utf8"> => {
   const events: Array<WorkspaceRuntimeEvent<"utf8">> = [
@@ -61,7 +68,7 @@ const makeHandle = (id: string, disposed: Array<string>): WorkspaceRuntimeExecHa
     },
   });
 
-  return stream as WorkspaceRuntimeExecHandle<"utf8">;
+  return makePartialTestDouble<WorkspaceRuntimeExecHandle<"utf8">>(stream);
 };
 
 it.effect("wraps text, binary streams, runtime metadata, and scoped run disposal", () =>
@@ -71,7 +78,7 @@ it.effect("wraps text, binary streams, runtime metadata, and scoped run disposal
     const disposedExecs: Array<string> = [];
     const execCalls: Array<ReadonlyArray<unknown>> = [];
     let nextRun = 0;
-    const client = {
+    const clientImplementation = {
       fs: {
         readFile: (_path: string, options?: "utf8" | { readonly encoding?: "utf8" }) =>
           options === "utf8" || options?.encoding === "utf8"
@@ -120,7 +127,10 @@ it.effect("wraps text, binary streams, runtime metadata, and scoped run disposal
         },
       },
       [Symbol.dispose]: () => {},
-    } as unknown as WorkspaceClient;
+    };
+    // SAFETY: This fixture implements the text/stream and utf8 runtime branches exercised below;
+    // Cloudflare's overloads additionally describe encodings that this focused adapter never calls.
+    const client = clientImplementation as typeof clientImplementation & WorkspaceClient;
     const workspace = ComputerWorkspace.fromWorkspaceClient(client);
 
     assert.strictEqual(yield* workspace.readFile("/hello.txt"), "hello");
@@ -141,7 +151,10 @@ it.effect("wraps text, binary streams, runtime metadata, and scoped run disposal
     const taggedResult = yield* workspace.execCollect`echo ${"tagged"}`;
 
     assert.deepStrictEqual(taggedResult, runtimeResult);
-    assert.deepStrictEqual(Array.from(execCalls[1]?.[0] as TemplateStringsArray), ["echo ", ""]);
+    assert.deepStrictEqual(
+      Schema.decodeUnknownSync(Schema.Array(Schema.String))(execCalls[1]?.[0]),
+      ["echo ", ""],
+    );
     assert.strictEqual(execCalls[1]?.[1], "tagged");
     assert.deepStrictEqual(disposed, ["exec-1", "exec-2"]);
 
@@ -177,10 +190,52 @@ it.effect("wraps text, binary streams, runtime metadata, and scoped run disposal
   }),
 );
 
+it.effect("preserves the workspace receiver for Think compatibility methods", () =>
+  Effect.gen(function* () {
+    const thinkClient: ReceiverSensitiveThinkClient = {
+      root: "/workspace",
+      writes: [],
+      readFile(path) {
+        return Promise.resolve(`${this.root}${path}`);
+      },
+      readFileBytes(path) {
+        return Promise.resolve(new TextEncoder().encode(`${this.root}${path}`));
+      },
+      writeFile(path, content) {
+        this.writes.push(`${this.root}${path}:${content}`);
+
+        return Promise.resolve();
+      },
+      readDir: () => Promise.resolve([]),
+      rm: () => Promise.resolve(),
+      glob: () => Promise.resolve([]),
+      mkdir: () => Promise.resolve(),
+      stat: () => Promise.resolve(null),
+    };
+    const client = makePartialTestDouble<WorkspaceClient>({
+      ...thinkClient,
+      fs: {},
+      git: {},
+      artifacts: emptyArtifacts,
+      assets: undefined,
+      runtime: {},
+      [Symbol.dispose]: () => {},
+    });
+    const think = ComputerWorkspace.fromWorkspaceClient(client).think;
+
+    assert.isDefined(think);
+    assert.strictEqual(yield* think.readFile("/notes.txt"), "/workspace/notes.txt");
+
+    yield* think.writeFile("/notes.txt", "saved");
+
+    assert.deepStrictEqual(thinkClient.writes, ["/workspace/notes.txt:saved"]);
+  }),
+);
+
 it.effect("maps filesystem failures to schema-serializable family errors", () =>
   Effect.gen(function* () {
     const cause = Object.assign(new Error("read-only mount"), { code: "EROFS" });
-    const client = {
+    const client = makePartialTestDouble<WorkspaceClient>({
       fs: {
         writeFile: () => Promise.reject(cause),
       },
@@ -189,7 +244,7 @@ it.effect("maps filesystem failures to schema-serializable family errors", () =>
       assets: undefined,
       runtime: {},
       [Symbol.dispose]: () => {},
-    } as unknown as WorkspaceClient;
+    });
     const workspace = ComputerWorkspace.fromWorkspaceClient(client);
     const error = yield* workspace.writeFile("/mounted/file", "nope").pipe(Effect.flip);
 

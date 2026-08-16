@@ -1,31 +1,51 @@
 import { assert, test } from "@effect/vitest";
-import type { WorkflowStep } from "cloudflare:workers";
-import { Effect, Layer, Option } from "effect";
+import type {
+  WorkflowStep,
+  WorkflowStepConfig,
+  WorkflowStepContext,
+  WorkflowStepEvent,
+  WorkflowStepRollbackOptions,
+  WorkflowSleepDuration,
+  WorkflowTimeoutDuration,
+} from "cloudflare:workers";
+import { Effect, Layer, Option, Predicate } from "effect";
 import { WorkerEnvironment } from "effect-cf";
 
-import { EmailQueue, EmailQueueConsumer, enqueueWelcomeEmail } from "../src/queue.ts";
-import { ReportWorkflow, ReportWorkflowEntrypoint, startReportWorkflow } from "../src/workflow.ts";
+import {
+  type EmailJob,
+  EmailQueue,
+  EmailQueueConsumer,
+  enqueueWelcomeEmail,
+} from "../src/queue.ts";
+import {
+  type ReportRequest,
+  type ReportResult,
+  ReportWorkflow,
+  ReportWorkflowEntrypoint,
+  startReportWorkflow,
+} from "../src/workflow.ts";
 
 const executionContext = {
-  waitUntil() {},
+  waitUntil(_promise: Promise<unknown>) {},
   passThroughOnException() {},
-} as unknown as ExecutionContext;
+  props: undefined,
+} satisfies ExecutionContext;
 
 test("Queue example sends typed jobs through a producer binding", async () => {
   await Effect.runPromise(
     Effect.gen(function* () {
-      const sent: Array<unknown> = [];
+      const sent: Array<EmailJob> = [];
       const env = {
         EMAIL_QUEUE: {
           metrics: async () => ({ backlogCount: 0, backlogBytes: 0 }),
-          send: async (message: unknown) => {
+          send: async (message: EmailJob) => {
             sent.push(message);
 
             return { metadata: { metrics: { backlogCount: 1, backlogBytes: 10 } } };
           },
           sendBatch: async () => ({ metadata: { metrics: { backlogCount: 1, backlogBytes: 10 } } }),
         },
-      } as unknown as Cloudflare.Env;
+      } satisfies Cloudflare.Env;
 
       yield* enqueueWelcomeEmail("dan@example.com").pipe(
         Effect.provide(
@@ -49,7 +69,7 @@ test("Queue example sends typed jobs through a producer binding", async () => {
 
 test("Queue example consumes typed jobs and acknowledges messages", async () => {
   const acked: Array<string> = [];
-  const worker = new EmailQueueConsumer(executionContext, {} as Cloudflare.Env);
+  const worker = new EmailQueueConsumer(executionContext, {} satisfies Cloudflare.Env);
 
   await worker.queue(
     makeMessageBatch("email-queue", [
@@ -72,7 +92,7 @@ test("Queue example consumes typed jobs and acknowledges messages", async () => 
 test("Workflow example starts an instance through a binding", async () => {
   await Effect.runPromise(
     Effect.gen(function* () {
-      let createOptions: unknown;
+      let createOptions: WorkflowInstanceCreateOptions<ReportRequest> | undefined;
       const instance = makeWorkflowInstance("report-1", {
         status: "complete",
         output: {
@@ -82,7 +102,7 @@ test("Workflow example starts an instance through a binding", async () => {
       });
       const env = {
         REPORT_WORKFLOW: {
-          create: async (options: unknown) => {
+          create: async (options: WorkflowInstanceCreateOptions<ReportRequest>) => {
             createOptions = options;
 
             return instance;
@@ -90,7 +110,7 @@ test("Workflow example starts an instance through a binding", async () => {
           createBatch: async () => [instance],
           get: async () => instance,
         },
-      } as unknown as Cloudflare.Env;
+      } satisfies Cloudflare.Env;
 
       const started = yield* startReportWorkflow({ reportId: "report-1", requestedBy: "dan" }).pipe(
         Effect.provide(
@@ -115,7 +135,7 @@ test("Workflow example starts an instance through a binding", async () => {
 
 test("Workflow example runs durable steps and returns typed output", async () => {
   const stepCalls: Array<string> = [];
-  const workflow = new ReportWorkflowEntrypoint(executionContext, {} as Cloudflare.Env);
+  const workflow = new ReportWorkflowEntrypoint(executionContext, {} satisfies Cloudflare.Env);
 
   const result = await workflow.run(
     {
@@ -136,54 +156,90 @@ test("Workflow example runs durable steps and returns typed output", async () =>
 
 const makeMessage = (
   id: string,
-  body: unknown,
+  body: EmailJob,
   acked: Array<string>,
-): globalThis.Message<unknown> =>
-  ({
-    id,
-    body,
-    timestamp: new Date(),
-    attempts: 1,
-    ack: () => {
-      acked.push(id);
-    },
-    retry: () => undefined,
-  }) as globalThis.Message<unknown>;
+): globalThis.Message<EmailJob> => ({
+  id,
+  body,
+  timestamp: new Date(),
+  attempts: 1,
+  ack: () => {
+    acked.push(id);
+  },
+  retry: () => undefined,
+});
 
 const makeMessageBatch = (
   queue: string,
-  messages: ReadonlyArray<globalThis.Message<unknown>>,
-): globalThis.MessageBatch<unknown> =>
-  ({
-    queue,
-    messages,
-    metadata: { metrics: { backlogCount: messages.length, backlogBytes: 0 } },
-    ackAll: () => undefined,
-    retryAll: () => undefined,
-  }) as globalThis.MessageBatch<unknown>;
+  messages: ReadonlyArray<globalThis.Message<EmailJob>>,
+): globalThis.MessageBatch<EmailJob> => ({
+  queue,
+  messages,
+  metadata: { metrics: { backlogCount: messages.length, backlogBytes: 0 } },
+  ackAll: () => undefined,
+  retryAll: () => undefined,
+});
 
-const makeWorkflowInstance = (id: string, status: InstanceStatus): WorkflowInstance =>
-  ({
-    id,
-    pause: async () => undefined,
-    resume: async () => undefined,
-    terminate: async () => undefined,
-    restart: async () => undefined,
-    status: async () => status,
-    sendEvent: async () => undefined,
-  }) as WorkflowInstance;
+interface ReportInstanceStatus extends Omit<InstanceStatus, "output"> {
+  readonly output?: ReportResult;
+}
 
-const makeWorkflowStep = (calls: Array<string>): WorkflowStep =>
-  ({
-    do: async (name: string, configOrCallback: unknown, maybeCallback?: unknown) => {
-      calls.push(name);
-      const callback = (maybeCallback ?? configOrCallback) as (
-        context: unknown,
-      ) => Promise<unknown>;
+const makeWorkflowInstance = (id: string, status: ReportInstanceStatus): WorkflowInstance => ({
+  id,
+  pause: async () => undefined,
+  resume: async () => undefined,
+  terminate: async () => undefined,
+  restart: async () => undefined,
+  status: async () => status,
+  sendEvent: async () => undefined,
+});
 
-      return callback({ step: { name, count: 1 }, attempt: 2, config: {} });
-    },
-    sleep: async () => undefined,
-    sleepUntil: async () => undefined,
-    waitForEvent: async () => ({ payload: undefined, timestamp: new Date(), type: "event" }),
-  }) as unknown as WorkflowStep;
+class TestWorkflowStep implements WorkflowStep {
+  constructor(private readonly calls: Array<string>) {}
+
+  do<T>(
+    name: string,
+    callback: (context: WorkflowStepContext) => Promise<T>,
+    rollbackOptions?: WorkflowStepRollbackOptions<T>,
+  ): Promise<T>;
+  do<T>(
+    name: string,
+    config: WorkflowStepConfig,
+    callback: (context: WorkflowStepContext) => Promise<T>,
+    rollbackOptions?: WorkflowStepRollbackOptions<T>,
+  ): Promise<T>;
+  async do<T>(
+    name: string,
+    configOrCallback: WorkflowStepConfig | ((context: WorkflowStepContext) => Promise<T>),
+    callbackOrRollbackOptions?:
+      | ((context: WorkflowStepContext) => Promise<T>)
+      | WorkflowStepRollbackOptions<T>,
+    _maybeRollbackOptions?: WorkflowStepRollbackOptions<T>,
+  ): Promise<T> {
+    this.calls.push(name);
+    const callback = Predicate.isFunction(configOrCallback)
+      ? configOrCallback
+      : Predicate.isFunction(callbackOrRollbackOptions)
+        ? callbackOrRollbackOptions
+        : undefined;
+
+    if (callback === undefined) {
+      throw new Error(`Workflow step ${name} has no callback`);
+    }
+
+    return callback({ step: { name, count: 1 }, attempt: 2, config: {} });
+  }
+
+  async sleep(_name: string, _duration: WorkflowSleepDuration): Promise<void> {}
+
+  async sleepUntil(_name: string, _timestamp: Date | number): Promise<void> {}
+
+  async waitForEvent<T>(
+    _name: string,
+    _options: { readonly type: string; readonly timeout?: WorkflowTimeoutDuration | number },
+  ): Promise<WorkflowStepEvent<T>> {
+    throw new Error("waitForEvent is not used by this fixture");
+  }
+}
+
+const makeWorkflowStep = (calls: Array<string>): WorkflowStep => new TestWorkflowStep(calls);

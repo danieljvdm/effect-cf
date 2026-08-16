@@ -85,6 +85,7 @@ export class WorkflowStepContext extends Context.Service<
 const fromWorkflowEvent = <Payload>(
   event: CloudflareWorkflowEvent<Payload>,
 ): WorkflowEventService<Payload> => ({
+  // SAFETY: raw intentionally erases only the payload type while retaining the same event object.
   raw: event as CloudflareWorkflowEvent<unknown>,
   payload: event.payload,
   timestamp: event.timestamp,
@@ -107,6 +108,7 @@ const fromWorkflowStep = (
                 Effect.scoped(
                   Effect.provideService(
                     Effect.provideContext(
+                      // SAFETY: WorkflowStepContext is provided immediately below; context supplies every other R service.
                       effect as Effect.Effect<A, E, Exclude<R, WorkflowStepContext>>,
                       context,
                     ),
@@ -115,6 +117,7 @@ const fromWorkflowStep = (
                   ),
                 ),
               );
+            // SAFETY: these overloads reproduce the Cloudflare WorkflowStep.do runtime signatures used here.
             const rawStep = step as {
               do(
                 name: string,
@@ -132,7 +135,7 @@ const fromWorkflowStep = (
           catch: (cause) => new WorkflowStepError({ step: name, operation: "do", cause }),
         }),
       ),
-    ) as Effect.Effect<A, WorkflowStepError, Exclude<R, WorkflowStepContext>>,
+    ),
   sleep: (name, duration) =>
     Effect.tryPromise({
       try: () => step.sleep(name, duration),
@@ -151,7 +154,10 @@ const fromWorkflowStep = (
     },
   ) =>
     Effect.tryPromise({
-      try: () => step.waitForEvent(name, options) as Promise<WorkflowStepEvent<Payload>>,
+      try: () => {
+        // SAFETY: Cloudflare returns an event whose payload is determined by the caller's event contract.
+        return step.waitForEvent(name, options) as Promise<WorkflowStepEvent<Payload>>;
+      },
       catch: (cause) => new WorkflowStepError({ step: name, operation: "waitForEvent", cause }),
     }),
 });
@@ -230,9 +236,7 @@ export const step = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
   config?: WorkflowStepConfig,
 ): Effect.Effect<A, WorkflowStepError, WorkflowStep | Exclude<R, WorkflowStepContext>> =>
-  Effect.flatMap(WorkflowStep, (workflowStep) =>
-    workflowStep.do(name, effect, config),
-  ) as Effect.Effect<A, WorkflowStepError, WorkflowStep | Exclude<R, WorkflowStepContext>>;
+  Effect.flatMap(WorkflowStep, (workflowStep) => workflowStep.do(name, effect, config));
 
 export const sleep = (
   name: string,

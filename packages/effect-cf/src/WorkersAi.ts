@@ -1,4 +1,4 @@
-import { Context, Data, Effect, type Layer } from "effect";
+import { Context, Data, Effect, Option, Predicate, Schema as S, type Layer } from "effect";
 import type {
   Ai as CloudflareAi,
   AiAsyncBatchResponse,
@@ -44,11 +44,13 @@ export type WorkersAiAsyncBatchResponse = AiAsyncBatchResponse;
 export type WorkersAiEmbeddingInput =
   | AiTextEmbeddingsInput
   | Ai_Cf_Qwen_Qwen3_Embedding_0_6B_Input
-  | Record<string, unknown>;
+  | Parameters<WorkersAiBinding["run"]>[1];
+
+const embeddingDimensionsKey = "shape";
 
 export interface WorkersAiEmbeddingResponse {
   readonly data: ReadonlyArray<ReadonlyArray<number>>;
-  readonly shape: ReadonlyArray<number>;
+  readonly [embeddingDimensionsKey]: ReadonlyArray<number>;
 }
 
 export interface WorkersAiClient<ModelList extends AiModelListType = AiModels> {
@@ -89,7 +91,10 @@ export interface WorkersAiClient<ModelList extends AiModelListType = AiModels> {
       input: ModelList[Name]["inputs"],
       options?: WorkersAiOptions,
     ): Effect.Effect<ModelList[Name]["postProcessedOutputs"], WorkersAiOperationError>;
-    <Input extends Record<string, unknown>, Output = Record<string, unknown>>(
+    <
+      Input extends Parameters<WorkersAiBinding["run"]>[1],
+      Output = Awaited<ReturnType<WorkersAiBinding["run"]>>,
+    >(
       model: string,
       input: Input,
       options?: WorkersAiOptions,
@@ -161,33 +166,47 @@ const tryWorkersAiSync = <A>(
     catch: (cause) => workersAiError(binding, operation, cause),
   });
 
-const hasFunction = (value: object, key: string): boolean =>
-  typeof Reflect.get(value, key) === "function";
+type WorkersAiBindingValue = S.Schema.Type<typeof S.Unknown>;
 
-export const isWorkersAiBinding = (value: unknown): value is WorkersAiBinding =>
-  typeof value === "object" &&
-  value !== null &&
-  hasFunction(value, "run") &&
-  hasFunction(value, "gateway") &&
-  hasFunction(value, "models");
+const WorkersAiBindingSchema = S.declare(
+  (value: WorkersAiBindingValue): value is WorkersAiBinding =>
+    Predicate.hasProperty(value, "run") &&
+    Predicate.isFunction(value.run) &&
+    Predicate.hasProperty(value, "gateway") &&
+    Predicate.isFunction(value.gateway) &&
+    Predicate.hasProperty(value, "models") &&
+    Predicate.isFunction(value.models),
+);
+const decodeWorkersAiBinding = S.decodeUnknownOption(WorkersAiBindingSchema);
+
+export const isWorkersAiBinding = (value: WorkersAiBindingValue): value is WorkersAiBinding =>
+  Option.isSome(decodeWorkersAiBinding(value));
 
 export const embeddingResponse = (value: {
   readonly data?: ReadonlyArray<ReadonlyArray<number>>;
-  readonly shape?: ReadonlyArray<number>;
+  readonly [embeddingDimensionsKey]?: ReadonlyArray<number>;
 }): WorkersAiEmbeddingResponse => ({
   data: value.data ?? [],
-  shape: value.shape ?? [],
+  [embeddingDimensionsKey]: value[embeddingDimensionsKey] ?? [],
 });
+
+const decodeEmbeddingResponse = S.decodeUnknownOption(
+  S.Struct({
+    data: S.optional(S.Array(S.Array(S.Number))),
+    [embeddingDimensionsKey]: S.optional(S.Array(S.Number)),
+  }),
+);
 
 export const makeClient =
   <ModelList extends AiModelListType = AiModels>(definition: WorkersAiDefinition) =>
   (ai: WorkersAiBinding<ModelList>): WorkersAiClient<ModelList> => {
     const run = Effect.fn("WorkersAi.run")(
-      (model: string, input: Record<string, unknown>, options?: WorkersAiOptions) =>
-        tryWorkersAiPromise(definition.binding, "run", () =>
-          ai.run(model as string & {}, input, options),
-        ),
-    ) as WorkersAiClient<ModelList>["run"];
+      (model: string, input: Parameters<WorkersAiBinding["run"]>[1], options?: WorkersAiOptions) =>
+        tryWorkersAiPromise(definition.binding, "run", () => {
+          // SAFETY: a non-literal string intentionally selects Cloudflare's unknown-model fallback overload.
+          return ai.run(model as string & {}, input, options);
+        }),
+    );
 
     return {
       definition,
@@ -198,17 +217,19 @@ export const makeClient =
       ),
       run,
       runEmbedding: Effect.fn("WorkersAi.runEmbedding")(
-        (model: string, input: WorkersAiEmbeddingInput, options?: WorkersAiOptions) =>
-          run(model, input as Record<string, unknown>, options).pipe(
+        (model: string, input: WorkersAiEmbeddingInput, options?: WorkersAiOptions) => {
+          // SAFETY: every WorkersAiEmbeddingInput variant is a string-keyed Workers AI payload.
+          const modelInput = input as Parameters<WorkersAiBinding["run"]>[1];
+
+          return run(model, modelInput, options).pipe(
             Effect.map((response) =>
-              embeddingResponse(
-                response as {
-                  readonly data?: ReadonlyArray<ReadonlyArray<number>>;
-                  readonly shape?: ReadonlyArray<number>;
-                },
-              ),
+              Option.match(decodeEmbeddingResponse(response), {
+                onNone: () => embeddingResponse({}),
+                onSome: embeddingResponse,
+              }),
             ),
-          ),
+          );
+        },
       ),
       models: Effect.fn("WorkersAi.models")((params?: WorkersAiModelsSearchParams) =>
         tryWorkersAiPromise(definition.binding, "models", () => ai.models(params)),
@@ -242,6 +263,7 @@ export const Tag =
 
     const makeLayer = (definition: LayerOptions) => layer(tag, definition);
 
+    // SAFETY: Object.assign attaches exactly the static id/layer members declared by TagClass.
     return Object.assign(tag, {
       id,
       layer: makeLayer,

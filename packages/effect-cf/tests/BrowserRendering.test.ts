@@ -40,8 +40,8 @@ layer(browserLayer({}))("Browser Rendering", (it) => {
       const browser = yield* rendering.launchWith(async () => makeFakeBrowser());
       const page = yield* browser.newPage;
       const content = yield* page.content;
-      const screenshot = yield* page.screenshot<Uint8Array>();
-      const pdf = yield* page.pdf<Uint8Array>();
+      const screenshot = yield* page.screenshot();
+      const pdf = yield* page.pdf();
       const version = yield* browser.version;
 
       yield* page.close();

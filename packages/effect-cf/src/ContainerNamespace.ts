@@ -1,4 +1,4 @@
-import { Context, Data, Effect, Schema as S, type Layer } from "effect";
+import { Context, Data, Effect, Predicate, Schema as S, type Layer } from "effect";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
@@ -344,10 +344,10 @@ const makeInstanceClient = <Stub extends ContainerStub>(
   };
 };
 
-export const isContainerNamespaceResource = (value: unknown): value is ContainerNamespaceResource =>
-  typeof value === "object" &&
-  value !== null &&
-  typeof Reflect.get(value, "getByName") === "function";
+export const isContainerNamespaceResource = <Candidate>(
+  value: Candidate,
+): value is Candidate & ContainerNamespaceResource =>
+  Predicate.hasProperty(value, "getByName") && Predicate.isFunction(value.getByName);
 
 export const makeClient =
   (definition: ContainerNamespaceDefinition) =>
@@ -363,7 +363,7 @@ export const makeClient =
           makeInstanceClient(
             definition,
             name,
-            // getByName has a single call signature, so its return type is
+            // SAFETY: getByName has a single call signature, so its return type is
             // exactly the namespace's stub type.
             namespace.getByName(name, options) as ContainerStubOf<Namespace>,
           ),
@@ -422,9 +422,7 @@ export const layer = <Self, Namespace extends ContainerNamespaceResource>(
   Binding.layer(
     tag,
     definition.binding,
-    // Runtime validation stays structural; the exact namespace type is
-    // asserted by the consumer's binding declaration, like env typing.
-    isContainerNamespaceResource as (value: unknown) => value is Namespace,
+    (value): value is Namespace => isContainerNamespaceResource(value),
     makeClient(definition),
     {
       expected: expectedContainerNamespace,
@@ -499,6 +497,7 @@ export const Tag =
 
     const rawUnsafe = Effect.flatMap(tag, (namespace) => namespace.rawUnsafe);
 
+    // SAFETY: the assigned namespace helpers exactly implement TagClass for this service tag.
     return Object.assign(tag, {
       id,
       layer: makeLayer,

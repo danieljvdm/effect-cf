@@ -1,5 +1,5 @@
 import { RpcStub, RpcTarget } from "cloudflare:workers";
-import { Effect, type Scope } from "effect";
+import { Effect, Predicate, Schema, type Scope } from "effect";
 
 import { decodeWireError } from "./RpcDefinition";
 
@@ -57,9 +57,7 @@ export type Stubify<T> = T extends Stubable
           ? ReadonlyArray<Stubify<Value>>
           : T extends BaseType
             ? T
-            : T extends {
-                  [key: string | number]: unknown;
-                }
+            : T extends Record<string | number, infer _Value>
               ? {
                   [Key in keyof T]: Stubify<T[Key]>;
                 }
@@ -76,7 +74,7 @@ export type Result<T> = T extends Stubable
 
 export type MethodKey<Api> = {
   [Key in keyof Api]-?: Key extends string
-    ? Api[Key] extends (...args: Array<any>) => unknown
+    ? Api[Key] extends (...args: Array<any>) => any
       ? Key
       : never
     : never;
@@ -84,7 +82,7 @@ export type MethodKey<Api> = {
 
 export type MethodArgs<Api, Method extends keyof Api> = Api[Method] extends (
   ...args: infer Args
-) => unknown
+) => any
   ? Args
   : never;
 
@@ -98,13 +96,12 @@ export type DisposableValue = {
   [Symbol.dispose](): void;
 };
 
-export const isDisposable = (value: unknown): value is DisposableValue =>
-  (typeof value === "object" || typeof value === "function") &&
-  value !== null &&
-  Symbol.dispose in value &&
-  typeof (value as { readonly [Symbol.dispose]?: unknown })[Symbol.dispose] === "function";
+type RpcBoundaryValue = Schema.Schema.Type<typeof Schema.Unknown>;
 
-export const dispose = (value: unknown): Effect.Effect<void> =>
+export const isDisposable = (value: RpcBoundaryValue): value is DisposableValue =>
+  Predicate.hasProperty(value, Symbol.dispose) && Predicate.isFunction(value[Symbol.dispose]);
+
+export const dispose = (value: RpcBoundaryValue): Effect.Effect<void> =>
   Effect.sync(() => {
     if (isDisposable(value)) {
       value[Symbol.dispose]();
@@ -112,18 +109,15 @@ export const dispose = (value: unknown): Effect.Effect<void> =>
   });
 
 export const resolve = <A>(value: A): Effect.Effect<Awaited<A>, unknown> =>
-  isPromiseLike(value)
+  Predicate.isPromiseLike(value)
     ? Effect.tryPromise({
-        try: () => value,
+        try: () => Promise.resolve(value),
         catch: (cause) => decodeWireError(cause),
       })
-    : Effect.sync(() => value as Awaited<A>);
+    : Effect.sync(() => {
+        // SAFETY: the predicate excluded PromiseLike values, so Awaited<A> is represented by A here.
+        return value as Awaited<A>;
+      });
 
 export const scoped = <A>(value: A): Effect.Effect<Awaited<A>, unknown, Scope.Scope> =>
   Effect.acquireRelease(resolve(value), (resolved) => dispose(resolved));
-
-const isPromiseLike = <A>(value: A): value is A & PromiseLike<Awaited<A>> =>
-  (typeof value === "object" || typeof value === "function") &&
-  value !== null &&
-  "then" in value &&
-  typeof (value as { readonly then?: unknown }).then === "function";

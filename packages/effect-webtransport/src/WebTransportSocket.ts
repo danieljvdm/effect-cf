@@ -20,7 +20,7 @@
  * writable stream's backpressure, and each finished run closes its stream
  * with a FIN.
  */
-import { Context, Deferred, Effect, Exit, FiberSet, Latch, Layer, Scope } from "effect";
+import { Context, Deferred, Effect, Exit, FiberSet, Latch, Layer, Predicate, Scope } from "effect";
 import { Socket } from "effect/unstable/socket";
 
 import * as WebTransport from "./WebTransport";
@@ -44,9 +44,9 @@ export interface MakeSocketOptions extends FromBidirectionalStreamOptions {
 /** Default close-code classifier: only a graceful end (code 1000) is clean. */
 export const defaultCloseCodeIsError = (code: number): boolean => code !== 1000;
 
-const toSocketOpenError = (error: unknown): Socket.SocketError =>
+const toSocketOpenError = (cause: unknown): Socket.SocketError =>
   new Socket.SocketError({
-    reason: new Socket.SocketOpenError({ kind: "Unknown", cause: error }),
+    reason: new Socket.SocketOpenError({ kind: "Unknown", cause }),
   });
 
 const encoder = new TextEncoder();
@@ -63,7 +63,7 @@ export const fromBidirectionalStream = <R>(
   acquire: Effect.Effect<WebTransport.NativeBidirectionalStream, WebTransport.WebTransportError, R>,
   options?: FromBidirectionalStreamOptions,
 ): Effect.Effect<Socket.Socket, never, Exclude<R, Scope.Scope>> =>
-  Effect.withFiber((fiber) => {
+  Effect.map(Effect.context<Exclude<R, Scope.Scope>>(), (acquireServices) => {
     const latch = Latch.makeUnsafe(false);
     let current:
       | {
@@ -71,7 +71,6 @@ export const fromBidirectionalStream = <R>(
           readonly fiberSet: FiberSet.FiberSet<any, any>;
         }
       | undefined;
-    const acquireServices = fiber.context as Context.Context<R>;
     const closeCodeIsError = options?.closeCodeIsError ?? defaultCloseCodeIsError;
 
     const runRaw = <_, E, R2>(
@@ -172,7 +171,7 @@ export const fromBidirectionalStream = <R>(
 
           return Effect.tryPromise({
             try: async () => {
-              const data = typeof chunk === "string" ? encoder.encode(chunk) : chunk;
+              const data = Predicate.isString(chunk) ? encoder.encode(chunk) : chunk;
 
               await writer.ready;
               await writer.write(data);
@@ -183,12 +182,10 @@ export const fromBidirectionalStream = <R>(
         }),
       );
 
-    return Effect.succeed(
-      Socket.make({
-        runRaw,
-        writer: Effect.succeed(write),
-      }),
-    );
+    return Socket.make({
+      runRaw,
+      writer: Effect.succeed(write),
+    });
   });
 
 /**

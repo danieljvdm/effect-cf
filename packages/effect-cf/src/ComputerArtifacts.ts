@@ -8,7 +8,7 @@ import type {
   ArtifactsCLIResult as CloudflareComputerArtifactsCliResult,
   RemoteAddFn as CloudflareComputerRemoteAdd,
 } from "@cloudflare/computer/artifacts";
-import { Effect } from "effect";
+import { Effect, Predicate } from "effect";
 
 import * as Artifacts from "./Artifacts";
 
@@ -37,6 +37,11 @@ export type ComputerArtifactsCliResult = Readonly<CloudflareComputerArtifactsCli
 export interface ComputerArtifactsClientOptions {
   /** Binding name attached to errors and tracing spans. Defaults to `ARTIFACTS`. */
   readonly binding?: string;
+}
+
+interface MutableArtifactsErrorDetails {
+  code?: Artifacts.ArtifactsOperationError["code"];
+  numericCode?: number;
 }
 
 /**
@@ -93,17 +98,18 @@ export interface ComputerArtifactsClient {
 const artifactsErrorDetails = (
   cause: unknown,
 ): Pick<Artifacts.ArtifactsOperationError, "code" | "numericCode"> => {
-  if (typeof cause !== "object" || cause === null) {
+  if (!Predicate.isObject(cause)) {
     return {};
   }
 
-  const code = Reflect.get(cause, "code");
-  const numericCode = Reflect.get(cause, "numericCode");
+  const code = Predicate.hasProperty(cause, "code") ? cause.code : undefined;
+  const numericCode = Predicate.hasProperty(cause, "numericCode") ? cause.numericCode : undefined;
+  const details: MutableArtifactsErrorDetails = {};
 
-  return {
-    ...(typeof code === "string" ? { code } : {}),
-    ...(typeof numericCode === "number" ? { numericCode } : {}),
-  };
+  if (Predicate.isString(code)) details.code = code;
+  if (Predicate.isNumber(numericCode)) details.numericCode = numericCode;
+
+  return details;
 };
 
 const operationError = (binding: string, operation: Artifacts.ArtifactsOperation, cause: unknown) =>
@@ -244,8 +250,10 @@ export const makeClient = Effect.fn("ComputerArtifacts.makeClient")(function* (
   });
   const client = yield* Effect.try({
     try: () =>
+      // SAFETY: both packages describe the same Cloudflare Artifacts binding runtime object.
       computerArtifacts.createArtifact(
-        bindingValue as unknown as Parameters<typeof computerArtifacts.createArtifact>[0],
+        bindingValue as Artifacts.ArtifactsBinding &
+          Parameters<typeof computerArtifacts.createArtifact>[0],
         sessionId,
       ),
     catch: (cause) => operationError(binding, "createClient", cause),

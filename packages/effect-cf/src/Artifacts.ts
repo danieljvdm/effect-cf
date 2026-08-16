@@ -6,7 +6,7 @@ import type {
   ArtifactsTokenInfo as CloudflareArtifactsTokenInfo,
   ArtifactsTokenListResult as CloudflareArtifactsTokenListResult,
 } from "@cloudflare/workers-types";
-import { Context, Data, Effect, type Layer } from "effect";
+import { Context, Data, Effect, type Layer, Predicate } from "effect";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
@@ -142,8 +142,8 @@ export type ArtifactsTokenListResult = CloudflareArtifactsTokenListResult;
  * Cloudflare currently documents this generated type by name but does not
  * publish its fields in the binding reference or Workers type declarations.
  */
-export interface ArtifactsLogResult {
-  readonly [field: string]: unknown;
+export interface ArtifactsLogResult<Field = unknown> {
+  readonly [field: string]: Field;
 }
 
 /**
@@ -152,8 +152,8 @@ export interface ArtifactsLogResult {
  * Cloudflare currently documents this generated type by name but does not
  * publish its fields in the binding reference or Workers type declarations.
  */
-export interface ArtifactsCommit {
-  readonly [field: string]: unknown;
+export interface ArtifactsCommit<Field = unknown> {
+  readonly [field: string]: Field;
 }
 
 /**
@@ -162,8 +162,8 @@ export interface ArtifactsCommit {
  * Cloudflare currently documents this generated type by name but does not
  * publish its fields in the binding reference or Workers type declarations.
  */
-export interface ArtifactsTree {
-  readonly [field: string]: unknown;
+export interface ArtifactsTree<Field = unknown> {
+  readonly [field: string]: Field;
 }
 
 /** Options for `Artifacts.create()`. */
@@ -319,6 +319,11 @@ export type LayerOptions = {
   readonly binding: string;
 };
 
+interface MutableArtifactsErrorDetails {
+  code?: ArtifactsOperationError["code"];
+  numericCode?: number;
+}
+
 export interface TagClass<Self, Id extends string> extends Context.ServiceClass<
   Self,
   Id,
@@ -337,17 +342,18 @@ export interface TagClass<Self, Id extends string> extends Context.ServiceClass<
 const artifactsErrorDetails = (
   cause: unknown,
 ): Pick<ArtifactsOperationError, "code" | "numericCode"> => {
-  if (typeof cause !== "object" || cause === null) {
+  if (!Predicate.isObject(cause)) {
     return {};
   }
 
-  const code = Reflect.get(cause, "code");
-  const numericCode = Reflect.get(cause, "numericCode");
+  const code = Predicate.hasProperty(cause, "code") ? cause.code : undefined;
+  const numericCode = Predicate.hasProperty(cause, "numericCode") ? cause.numericCode : undefined;
+  const details: MutableArtifactsErrorDetails = {};
 
-  return {
-    ...(typeof code === "string" ? { code } : {}),
-    ...(typeof numericCode === "number" ? { numericCode } : {}),
-  };
+  if (Predicate.isString(code)) details.code = code;
+  if (Predicate.isNumber(numericCode)) details.numericCode = numericCode;
+
+  return details;
 };
 
 const artifactsError = (binding: string, operation: ArtifactsOperation, cause: unknown) =>
@@ -372,13 +378,13 @@ const spanOptions = (binding: string, operation: ArtifactsOperation) => ({
   attributes: { binding, operation },
 });
 
-const hasFunction = (value: object, key: string): boolean =>
-  typeof Reflect.get(value, key) === "function";
+const hasFunction = <Candidate>(value: Candidate, key: string): boolean =>
+  Predicate.hasProperty(value, key) && Predicate.isFunction(value[key]);
 
 /** Tests whether a value exposes the complete documented Artifacts repo handle API. */
-export const isArtifactsRepoBinding = (value: unknown): value is ArtifactsRepoBinding =>
-  typeof value === "object" &&
-  value !== null &&
+export const isArtifactsRepoBinding = <Candidate>(
+  value: Candidate,
+): value is Candidate & ArtifactsRepoBinding =>
   hasFunction(value, "createToken") &&
   hasFunction(value, "listTokens") &&
   hasFunction(value, "revokeToken") &&
@@ -388,9 +394,9 @@ export const isArtifactsRepoBinding = (value: unknown): value is ArtifactsRepoBi
   hasFunction(value, "readTree");
 
 /** Tests whether a value exposes the complete documented Artifacts namespace API. */
-export const isArtifactsBinding = (value: unknown): value is ArtifactsBinding =>
-  typeof value === "object" &&
-  value !== null &&
+export const isArtifactsBinding = <Candidate>(
+  value: Candidate,
+): value is Candidate & ArtifactsBinding =>
   hasFunction(value, "create") &&
   hasFunction(value, "get") &&
   hasFunction(value, "import") &&
@@ -512,6 +518,7 @@ export const Tag =
 
     const makeLayer = (definition: LayerOptions) => layer(tag, definition);
 
+    // SAFETY: these are exactly the members required by TagClass, attached to the matching service tag.
     return Object.assign(tag, {
       id,
       layer: makeLayer,

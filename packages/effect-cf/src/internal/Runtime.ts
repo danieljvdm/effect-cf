@@ -26,27 +26,38 @@ export const makeEntrypointRuntime = <ROut, LayerError, Services>(
   return ManagedRuntime.make(provideEntrypointServices(layer, entrypointServices));
 };
 
-/**
- * Runs a Cloudflare event effect on an entrypoint runtime.
- *
- * When an event layer is given it is built inside the event's Effect scope
- * (finalized when the event effect completes). The casts widen away the
- * `REvent` requirement satisfied by the event layer; TypeScript cannot reduce
- * `Exclude<...>` over the generic union.
- */
-export const runEventPromise = <A, E, R, REvent, EventLayerError, LayerError>(
+/** Runs an event effect whose requirements are already available in the runtime. */
+export function runEventPromise<A, E, R, LayerError>(
   runtime: ManagedRuntime.ManagedRuntime<R, LayerError>,
-  effect: Effect.Effect<A, E, R | REvent | Scope.Scope>,
-  eventLayer: Layer.Layer<REvent, EventLayerError, R> | undefined,
-): Promise<A> => {
-  const withEventLayer =
-    eventLayer === undefined
-      ? (effect as Effect.Effect<A, E, R | Scope.Scope>)
-      : (effect.pipe(Effect.provide(eventLayer, { local: true })) as Effect.Effect<
-          A,
-          E | EventLayerError,
-          R | Scope.Scope
-        >);
+  effect: Effect.Effect<A, E, NoInfer<R> | Scope.Scope>,
+  eventLayer?: undefined,
+): Promise<A>;
+/** Builds and provides an event layer inside the event effect's scope. */
+export function runEventPromise<A, E, R, REvent, EventLayerError, LayerError>(
+  runtime: ManagedRuntime.ManagedRuntime<R, LayerError>,
+  effect: Effect.Effect<A, E, NoInfer<R> | REvent | Scope.Scope>,
+  eventLayer: Layer.Layer<REvent, EventLayerError, NoInfer<R>>,
+): Promise<A>;
+export function runEventPromise<A, E, R, REvent, EventLayerError, LayerError>(
+  ...args:
+    | readonly [
+        runtime: ManagedRuntime.ManagedRuntime<R, LayerError>,
+        effect: Effect.Effect<A, E, R | Scope.Scope>,
+        eventLayer?: undefined,
+      ]
+    | readonly [
+        runtime: ManagedRuntime.ManagedRuntime<R, LayerError>,
+        effect: Effect.Effect<A, E, R | REvent | Scope.Scope>,
+        eventLayer: Layer.Layer<REvent, EventLayerError, R>,
+      ]
+): Promise<A> {
+  const [runtime, effect, eventLayer] = args;
 
-  return runtime.runPromise(Effect.scoped(withEventLayer));
-};
+  if (eventLayer === undefined) {
+    return runtime.runPromise(Effect.scoped(effect));
+  }
+
+  return runtime.runPromise(
+    Effect.scoped(effect.pipe(Effect.provide(eventLayer, { local: true }))),
+  );
+}

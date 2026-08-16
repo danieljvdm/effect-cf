@@ -1,6 +1,6 @@
 ---
 name: build-effect-apis
-description: Build and consume contract-first Effect HTTP APIs. Use when defining shared HttpApiEndpoint/HttpApiGroup contracts, implementing HttpApiBuilder or HttpApiServer handlers and middleware, deriving HttpApiClient or Effect Atom clients, or integrating those APIs with TanStack Start and Cloudflare Workers/effect-cf.
+description: Build contract-first Effect HTTP APIs. Use when defining shared HttpApiEndpoint/HttpApiGroup contracts, implementing HttpApiBuilder or HttpApiServer handlers and middleware, assembling server runtimes and OpenAPI docs, or serving on Cloudflare Workers/effect-cf. For consuming an API from client state, use $effect-atom-state.
 ---
 
 # Build Effect APIs
@@ -9,12 +9,11 @@ Treat the shared `HttpApi` value as the **contract spine**: schemas, server,
 OpenAPI, and clients all derive from it. Keep transport contracts isomorphic;
 keep runtime behavior in handlers, services, layers, and client state modules.
 
-Effect HTTP and reactivity APIs are version-sensitive. Read the target
-repository's manifests and lockfile, inspect its existing imports, and confirm
-exact signatures from the installed package declarations before editing. In
-current Effect v4 betas the server module is `HttpApiBuilder`; a request that
-mentions `HttpApiServer` may refer to the same server-building responsibility
-from another version.
+Effect HTTP APIs are version-sensitive. Read the target repository's manifests
+and lockfile, inspect its existing imports, and confirm exact signatures from
+the installed package declarations before editing. In current Effect v4 betas
+the server module is `HttpApiBuilder`; a request that mentions `HttpApiServer`
+may refer to the same server-building responsibility from another version.
 
 ## Build the contract spine
 
@@ -31,35 +30,21 @@ from another version.
    decoded boundary adapters into application services and assemble all
    requirements at the runtime edge. Finish when each endpoint identifier has
    exactly one handler and every declared middleware has a provided layer.
-4. Choose the consumer branch:
-   - For React server state, read
-     [effect-atom-client.md](references/effect-atom-client.md) and
-     [effect-atom-lifecycle.md](references/effect-atom-lifecycle.md), then
-     derive one `AtomHttpApi.Service`, stable query atoms or families, mutation
-     atoms, and one reactivity-key vocabulary.
-   - For non-React Effect code, use the direct `HttpApiClient` branch in
-     [effect-atom-client.md](references/effect-atom-client.md).
-
-   Finish when consumers call the shared contract rather than redefining wire
-   types or using ad hoc `fetch` for declared endpoints.
-
+4. Route consumer changes through the `$effect-atom-state` skill: deriving
+   `AtomHttpApi` or direct `HttpApiClient` clients, query and mutation atoms,
+   reactivity keys, and React integration all live there. Finish when consumers
+   call the shared contract rather than redefining wire types or using ad hoc
+   `fetch` for declared endpoints.
 5. Read [verification.md](references/verification.md). Run the repository's
    format, lint, typecheck, and test commands. Finish when changed schemas
-   round-trip, middleware failures use declared error channels, server and
-   client agree on every request shape, and changed atom lifecycles have
-   deterministic coverage.
+   round-trip, middleware failures use declared error channels, and server and
+   client agree on every request shape.
 
 ## Optional branches
 
 - Read [runtime-assembly.md](references/runtime-assembly.md) when wiring a
   conventional Node/Bun server, generated API docs, process entrypoint, or
   serverless web handler.
-- Read [effect-atom-testing.md](references/effect-atom-testing.md) when changing
-  Atom cache retention, SWR, polling, invalidation, cancellation, aggregation,
-  provider placement, SSR, or hydration behavior.
-- Read [tanstack-start.md](references/tanstack-start.md) when the client is
-  TanStack Start, SSR, hydration, `ClientOnly`, loaders, server functions, or a
-  proxied separate API.
 - Read [cloudflare-workers.md](references/cloudflare-workers.md) when the server
   runs on Cloudflare Workers or uses `effect-cf`, bindings, Durable Objects,
   Queues, WebSockets, streaming, or raw byte routes.
@@ -94,6 +79,3 @@ but the boundary and type reasoning remain the source of truth.
 - Let handlers own transport-to-application mapping and boundary invariants.
 - Let application services own orchestration, persistence, retries, and
   transactions.
-- Let client data modules own API services, query identity, cache policy,
-  invalidation keys, and mutation atoms; let UI action owners own navigation,
-  toasts, optimistic presentation, and form reset.

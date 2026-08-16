@@ -24,7 +24,7 @@ import {
   runInDurableObject as runInDurableObjectPromise,
   waitOnExecutionContext,
 } from "cloudflare:test";
-import { ConfigProvider, Effect, Exit, Layer } from "effect";
+import { ConfigProvider, Effect, Exit, Layer, Schema } from "effect";
 
 import {
   DurableObjectState,
@@ -148,6 +148,7 @@ export const pages = Effect.fn("effect-cf/vitest/pages")(function* <
 >(handler: Function, init: PagesEventContextInit<Function>) {
   return yield* Effect.acquireUseRelease(
     Effect.sync(() =>
+      // SAFETY: PagesEventContextInit computes the same conditional initializer accepted by this Function.
       createPagesEventContext<Function>(
         init as Parameters<typeof createPagesEventContext<Function>>[0],
       ),
@@ -362,7 +363,10 @@ export interface WorkflowMockEvent {
 export interface WorkflowInstanceModifier {
   readonly disableSleeps: (steps?: ReadonlyArray<WorkflowStepTarget>) => Effect.Effect<void>;
   readonly disableRetryDelays: (steps?: ReadonlyArray<WorkflowStepTarget>) => Effect.Effect<void>;
-  readonly mockStepResult: (step: WorkflowStepTarget, result: unknown) => Effect.Effect<void>;
+  readonly mockStepResult: (
+    step: WorkflowStepTarget,
+    result: WorkflowMockResult,
+  ) => Effect.Effect<void>;
   readonly mockStepError: (
     step: WorkflowStepTarget,
     error: Error,
@@ -372,6 +376,8 @@ export interface WorkflowInstanceModifier {
   readonly mockEvent: (event: WorkflowMockEvent) => Effect.Effect<void>;
   readonly forceEventTimeout: (step: WorkflowStepTarget) => Effect.Effect<void>;
 }
+
+type WorkflowMockResult = Schema.Schema.Type<typeof Schema.Unknown>;
 
 /** Effect-native introspector for one Workflow instance. */
 export interface WorkflowInstanceIntrospector {
@@ -413,7 +419,7 @@ const wrapWorkflowModifier = (
 });
 
 const runWorkflowModifier = Effect.fnUntraced(function* <A, E, R>(
-  register: (use: (modifier: NativeWorkflowInstanceModifier) => Promise<void>) => Promise<unknown>,
+  register: (use: (modifier: NativeWorkflowInstanceModifier) => Promise<void>) => Promise<any>,
   use: (modifier: WorkflowInstanceModifier) => Effect.Effect<A, E, R>,
 ): Effect.fn.Return<A, E, R> {
   const context = yield* Effect.context<R>();

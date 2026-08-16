@@ -187,6 +187,7 @@ export const Tag =
 
     const rawUnsafe = Effect.flatMap(tag, (workflow) => workflow.rawUnsafe);
 
+    // SAFETY: Object.assign attaches the definition-derived static helpers declared by TagClass.
     return Object.assign(tag, {
       id: workflowDefinition.id,
       payload: workflowDefinition.payload,
@@ -216,15 +217,16 @@ const wrapHandler = <ROut, const Self extends Definition.Any>(
   return Effect.fnUntraced(function* (payload: S.Codec.Encoded<Self["payload"]>) {
     const decodedPayload = yield* decodePayload(payload);
     const event = yield* WorkflowEntrypoint.WorkflowEvent;
+    // SAFETY: replacing the encoded event payload with its schema-decoded value establishes this service type.
     const decodedEvent = {
       ...event,
       payload: decodedPayload,
     } as WorkflowEntrypoint.WorkflowEventService<S.Schema.Type<Self["payload"]>>;
-    const result = yield* handler(decodedPayload as S.Schema.Type<Self["payload"]>).pipe(
+    const result = yield* handler(decodedPayload).pipe(
       Effect.provideService(WorkflowEntrypoint.WorkflowEvent, decodedEvent),
     );
 
-    return yield* encodeResult(result as S.Schema.Type<Self["result"]>);
+    return yield* encodeResult(result);
   });
 };
 

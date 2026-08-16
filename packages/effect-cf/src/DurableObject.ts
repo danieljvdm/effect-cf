@@ -52,7 +52,7 @@ export type DurableObjectRpc<ROut> = Record<
   (...args: Array<any>) => DurableObjectHandler<ROut>
 >;
 
-export type DurableObjectRpcShape<Rpc extends DurableObjectRpc<ROut>, ROut> = {
+export type DurableObjectRpcApi<Rpc extends DurableObjectRpc<ROut>, ROut> = {
   readonly [Key in keyof Rpc]: Rpc[Key] extends (
     ...args: infer Args
   ) => Effect.Effect<infer A, unknown, HandlerContext<ROut>>
@@ -66,7 +66,7 @@ export type RpcHandlers<ROut, Api> = {
     : Key extends string
       ? [Api[Key]] extends [never]
         ? never
-        : Api[Key] extends (...args: Array<any>) => Promise<unknown>
+        : Api[Key] extends (...args: Array<any>) => Promise<any>
           ? Key
           : never
       : never]: Api[Key] extends (...args: infer Args) => Promise<infer A>
@@ -142,7 +142,7 @@ export interface DurableObjectOptions<
   ) => Effect.Effect<void, unknown, HandlerContext<RRuntime | REvent>>;
   readonly webSocketError?: (
     socket: DurableWebSocket,
-    error: unknown,
+    cause: unknown,
   ) => Effect.Effect<void, unknown, HandlerContext<RRuntime | REvent>>;
 }
 
@@ -152,7 +152,7 @@ export interface DurableObjectOptions<
 export type DurableObjectClass<Rpc extends DurableObjectRpc<ROut>, ROut> = new (
   state: globalThis.DurableObjectState,
   env: WorkerEnv,
-) => CloudflareDurableObject<WorkerEnv> & DurableObjectRpcShape<Rpc, ROut>;
+) => CloudflareDurableObject<WorkerEnv> & DurableObjectRpcApi<Rpc, ROut>;
 
 /**
  * Creates a Durable Object class backed by a single managed Effect runtime.
@@ -190,11 +190,24 @@ export const make = <
       effect: Effect.Effect<A, E, HandlerContext<ROut | REvent>>,
       runOptions: RunOptions = {},
     ): Promise<A> {
-      return Runtime.runEventPromise(
-        this.runtime,
-        effect,
-        runOptions.eventLayer === false ? undefined : options.eventLayer,
-      );
+      const eventLayer = runOptions.eventLayer === false ? undefined : options.eventLayer;
+
+      if (eventLayer === undefined) {
+        // SAFETY: event-layer bypass is used only for initialize; otherwise an absent layer means REvent is never.
+        return Runtime.runEventPromise(
+          this.runtime,
+          effect as Effect.Effect<A, E, HandlerContext<ROut>>,
+        );
+      }
+
+      return Runtime.runEventPromise<
+        A,
+        E,
+        RuntimeContext<ROut>,
+        REvent,
+        EventLayerError,
+        LayerError
+      >(this.runtime, effect, eventLayer);
     }
 
     fetch(request: Request): Promise<Response> {
@@ -242,9 +255,9 @@ export const make = <
       }
     }
 
-    webSocketError(socket: WebSocket, error: unknown): Promise<void> | void {
+    webSocketError(socket: WebSocket, cause: unknown): Promise<void> | void {
       if (options.webSocketError !== undefined) {
-        return this[RunSymbol](options.webSocketError(fromWebSocket(socket), error));
+        return this[RunSymbol](options.webSocketError(fromWebSocket(socket), cause));
       }
     }
   }
@@ -280,3 +293,6 @@ export type {
 } from "./DurableObjectDefinition";
 
 export { implement, method, Tag } from "./DurableObjectDefinition";
+
+// Preserve the original public type export while using a domain-role name internally.
+export type { DurableObjectRpcApi as "DurableObjectRpcShape" };

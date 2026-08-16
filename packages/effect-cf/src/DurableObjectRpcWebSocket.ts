@@ -32,7 +32,7 @@ export interface DurableObjectRpcWebSocketService {
     message: NativeWebSocketMessage,
   ) => Effect.Effect<void>;
   readonly close: (socket: DurableWebSocket) => Effect.Effect<void>;
-  readonly error: (socket: DurableWebSocket, error: unknown) => Effect.Effect<void>;
+  readonly error: (socket: DurableWebSocket, cause: unknown) => Effect.Effect<void>;
 }
 
 interface RpcConnection {
@@ -192,6 +192,7 @@ export const layer = (
             }
 
             for (const current of decoded) {
+              // SAFETY: this parser was created by the configured RPC serialization service.
               yield* run(connection.id, current as RpcMessage.FromClientEncoded);
             }
           }).pipe(
@@ -204,9 +205,9 @@ export const layer = (
             }),
           ),
         close: unregister,
-        error: (socket, error) =>
+        error: (socket, cause) =>
           Effect.gen(function* () {
-            yield* Effect.logDebug("Durable Object RPC websocket error", error);
+            yield* Effect.logDebug("Durable Object RPC websocket error", cause);
             yield* unregister(socket);
           }),
       });
@@ -219,16 +220,15 @@ export const layer = (
   );
 
 const normalizeMessage = (message: NativeWebSocketMessage) =>
-  typeof message === "string" ? message : new Uint8Array(message);
+  Predicate.isString(message) ? message : new Uint8Array(message);
 
 const readAttachment = (socket: WebSocket, key: string): number | undefined => {
   const value = socket.deserializeAttachment();
 
   if (
-    value !== null &&
-    typeof value === "object" &&
-    key in value &&
-    typeof value[key] === "number"
+    Predicate.isObjectOrArray(value) &&
+    Predicate.hasProperty(value, key) &&
+    Predicate.isNumber(value[key])
   ) {
     return value[key];
   }
@@ -238,8 +238,7 @@ const readAttachment = (socket: WebSocket, key: string): number | undefined => {
 
 const writeAttachment = (socket: WebSocket, key: string, clientId: number) => {
   const current = socket.deserializeAttachment();
-  const attachment =
-    current !== null && typeof current === "object" && !Array.isArray(current) ? current : {};
+  const attachment = Predicate.isObject(current) ? current : {};
 
   socket.serializeAttachment({
     ...attachment,

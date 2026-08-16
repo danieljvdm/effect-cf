@@ -26,6 +26,13 @@ applications that import `ComputerWorkspace`, `ComputerArtifacts`, or
 bun add "@cloudflare/computer@^0.2.0"
 ```
 
+Workspace Git operations additionally require `@platformatic/vfs`,
+`@cloudflare/computer/git`'s own optional peer:
+
+```bash
+bun add "@platformatic/vfs@^0.4.0"
+```
+
 ## Goal
 
 Cloudflare APIs return promises and expose platform-specific bindings. `effect-cf` wraps those boundaries as `Context`, `Layer`, and `Effect` values so application code stays inside one managed Effect runtime.

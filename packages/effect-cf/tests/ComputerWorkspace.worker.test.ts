@@ -23,8 +23,9 @@ test("SQLite-backed workspaces persist filesystem and local Git operations", asy
   expect(result.branch).toBe("main");
   expect(result.branches).toContain("feature");
   expect(result.tags).toContain("v1");
-  expect(result.logMessage).toBe("initial commit");
-  expect(result.shownMessage).toBe("initial commit");
+  // Git preserves the canonical trailing newline on commit messages.
+  expect(result.logMessage).toBe("initial commit\n");
+  expect(result.shownMessage).toBe("initial commit\n");
   expect(result.files).toContain("README.md");
   expect(result.treePaths).toContain("README.md");
   expect(result.statusPaths).toContain("README.md");

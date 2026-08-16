@@ -1,5 +1,15 @@
 # effect-cf
 
+## 0.26.0
+
+### Minor Changes
+
+- [#97](https://github.com/danieljvdm/effect-cf/pull/97) [`b7bc27e`](https://github.com/danieljvdm/effect-cf/commit/b7bc27eb03130578e13a593d9efc45bb8d3d5269) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add first-class Cloudflare Artifacts binding support through the new `Artifacts` module. Namespace lifecycle operations, repository token and fork operations, and Git commit-history, commit, and tree reads are available as typed Effects with validated bindings, structured options and results, tracing spans, and Cloudflare error identifiers.
+
+- [#98](https://github.com/danieljvdm/effect-cf/pull/98) [`5b9a05e`](https://github.com/danieljvdm/effect-cf/commit/5b9a05e976f653eb9a9d2003fdd57379d906c871) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add Effect-native Cloudflare Computer workspaces, scoped execution handles, a Durable Object host mixin, and session-isolated Artifacts clients.
+
+- [#94](https://github.com/danieljvdm/effect-cf/pull/94) [`8a7ec63`](https://github.com/danieljvdm/effect-cf/commit/8a7ec630ecb2ddc2b55348cb6c701f5a9ce42d3b) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add the `WebTransport` module: a truthful WebTransport/HTTP-3 boundary for Workers. `inboundTransport` decodes the HTTP protocol metadata Cloudflare's edge attaches to requests (`httpProtocol`, `clientQuicRtt`, `clientTcpRtt`) with `isHttp3` on top; `capabilities` feature-detects what the runtime provides; and `inboundSessionsUnsupported` is an explicit typed boundary for the inbound WebTransport session API that workerd does not have (cloudflare/workerd#6451).
+
 ## 0.25.3
 
 ### Patch Changes

@@ -8,7 +8,7 @@ import type { ArtifactClient } from "@cloudflare/computer/artifacts";
 import { assert, it } from "@effect/vitest";
 import { Effect, Schema, Stream } from "effect";
 
-import { ComputerWorkspace } from "../src/index";
+import * as ComputerWorkspace from "../src/ComputerWorkspace";
 import { makePartialTestDouble } from "./TestDoubles";
 
 const emptyArtifacts = makePartialTestDouble<ArtifactClient>({

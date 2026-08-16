@@ -19,8 +19,8 @@ npm install effect-cf "effect@^4.0.0-beta.105"
 ```
 
 The Computer workspace integration is an optional peer. Install it only in
-applications that import `ComputerWorkspace`, `ComputerArtifacts`, or
-`effect-cf/computer-workspace-host`:
+applications that import `effect-cf/computer-workspace`,
+`effect-cf/computer-artifacts`, or `effect-cf/computer-workspace-host`:
 
 ```bash
 bun add "@cloudflare/computer@^0.2.0"
@@ -51,8 +51,8 @@ Runtime creation belongs at Cloudflare entrypoints, not inside binding helpers.
 - `D1` - typed D1 database binding helper with an `@effect/sql-d1` backed SQL layer
 - `R2` - typed R2 bucket binding helper with Effect-wrapped object and multipart operations
 - `Artifacts` - typed Cloudflare Artifacts namespace and repository helpers, including repository lifecycle, tokens, and Git object reads
-- `ComputerWorkspace` - scoped Effect wrappers for the complete Cloudflare Computer filesystem, Git, runtime, Assets, Artifacts, and Think-compatible client surfaces
-- `ComputerArtifacts` - session-isolated Artifacts repositories backed by `@cloudflare/computer/artifacts`
+- `effect-cf/computer-workspace` - scoped Effect wrappers for the complete Cloudflare Computer filesystem, Git, runtime, Assets, Artifacts, and Think-compatible client surfaces
+- `effect-cf/computer-artifacts` - session-isolated Artifacts repositories backed by `@cloudflare/computer/artifacts`
 - `effect-cf/computer-workspace-host` - optional Durable Object host mixin, worker-shell backend wiring, and `WorkspaceServiceProxy`
 - `Hyperdrive` - typed Hyperdrive binding helper for connection strings and optional Postgres SQL integration
 - `Images` - typed Cloudflare Images binding helper with transformation APIs and optional hosted image operations
@@ -473,7 +473,8 @@ scope closes. The host mixin is a separate optional-dependency entrypoint:
 ```ts
 import shellCurl from "@cloudflare/computer/shell/curl";
 import { Effect, Schema as S } from "effect";
-import { ComputerWorkspace, DurableObjectDefinition } from "effect-cf";
+import { DurableObjectDefinition } from "effect-cf";
+import * as ComputerWorkspace from "effect-cf/computer-workspace";
 import { withComputerWorkspace, WorkspaceServiceProxy } from "effect-cf/computer-workspace-host";
 
 export { WorkspaceServiceProxy };
@@ -561,7 +562,8 @@ Workers can use that session isolation without a Durable Object or workspace:
 
 ```ts
 import { Effect } from "effect";
-import { Artifacts, ComputerArtifacts } from "effect-cf";
+import { Artifacts } from "effect-cf";
+import * as ComputerArtifacts from "effect-cf/computer-artifacts";
 
 export const createSessionRepo = (binding: Artifacts.ArtifactsBinding, sessionId: string) =>
   Effect.gen(function* () {

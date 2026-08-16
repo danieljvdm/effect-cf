@@ -7,7 +7,8 @@ import type { GitClient } from "@cloudflare/computer/git";
 import { expectTypeOf } from "vitest";
 import { Effect, type Scope } from "effect";
 
-import { ComputerArtifacts, ComputerWorkspace } from "../src/index";
+import * as ComputerArtifacts from "effect-cf/computer-artifacts";
+import * as ComputerWorkspace from "effect-cf/computer-workspace";
 import {
   type ComputerWorkspaceHostConfig,
   withComputerWorkspace,

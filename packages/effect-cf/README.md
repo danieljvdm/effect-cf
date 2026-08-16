@@ -18,6 +18,14 @@ pnpm add effect-cf "effect@^4.0.0-beta.105"
 npm install effect-cf "effect@^4.0.0-beta.105"
 ```
 
+The Computer workspace integration is an optional peer. Install it only in
+applications that import `ComputerWorkspace`, `ComputerArtifacts`, or
+`effect-cf/computer-workspace-host`:
+
+```bash
+bun add "@cloudflare/computer@^0.2.0"
+```
+
 ## Goal
 
 Cloudflare APIs return promises and expose platform-specific bindings. `effect-cf` wraps those boundaries as `Context`, `Layer`, and `Effect` values so application code stays inside one managed Effect runtime.
@@ -36,6 +44,9 @@ Runtime creation belongs at Cloudflare entrypoints, not inside binding helpers.
 - `D1` - typed D1 database binding helper with an `@effect/sql-d1` backed SQL layer
 - `R2` - typed R2 bucket binding helper with Effect-wrapped object and multipart operations
 - `Artifacts` - typed Cloudflare Artifacts namespace and repository helpers, including repository lifecycle, tokens, and Git object reads
+- `ComputerWorkspace` - scoped Effect wrappers for the complete Cloudflare Computer filesystem, Git, runtime, Assets, Artifacts, and Think-compatible client surfaces
+- `ComputerArtifacts` - session-isolated Artifacts repositories backed by `@cloudflare/computer/artifacts`
+- `effect-cf/computer-workspace-host` - optional Durable Object host mixin, worker-shell backend wiring, and `WorkspaceServiceProxy`
 - `Hyperdrive` - typed Hyperdrive binding helper for connection strings and optional Postgres SQL integration
 - `Images` - typed Cloudflare Images binding helper with transformation APIs and optional hosted image operations
 - `Email` - typed Cloudflare Email Service binding helper for `send_email` bindings, with limit validation and typed error codes
@@ -444,6 +455,122 @@ export const createWorkspace = Effect.gen(function* () {
 ```
 
 `create`, `import`, and `fork` return an initial plaintext token. Treat returned tokens as secrets and avoid logging or persisting them unnecessarily.
+
+## Computer Workspace Example
+
+`ComputerWorkspace` exposes the complete `@cloudflare/computer`
+`WorkspaceClient` as Effects. The workspace client and every runtime execution
+handle are owned by an Effect `Scope`, so RPC stubs are disposed when their
+scope closes. The host mixin is a separate optional-dependency entrypoint:
+
+```ts
+import shellCurl from "@cloudflare/computer/shell/curl";
+import { Effect, Schema as S } from "effect";
+import { ComputerWorkspace, DurableObjectDefinition } from "effect-cf";
+import { withComputerWorkspace, WorkspaceServiceProxy } from "effect-cf/computer-workspace-host";
+
+export { WorkspaceServiceProxy };
+
+const ResearchWorkspace = DurableObjectDefinition.make("ResearchWorkspace", {
+  inspect: DurableObjectDefinition.method({ success: S.String }),
+});
+
+const ResearchWorkspaceLive = ResearchWorkspace.make(ComputerWorkspace.ComputerWorkspace.layer, {
+  rpc: {
+    inspect: () =>
+      Effect.gen(function* () {
+        const workspace = yield* ComputerWorkspace.ComputerWorkspace;
+
+        // Keep reads bounded when returning their contents over RPC.
+        const readme = yield* workspace.readFile("/repo/README.md", {
+          byteLength: 256 * 1024,
+        });
+        const commits = yield* workspace.git.log({ maxCount: 20 });
+        const run = yield* workspace.execCollect("git status --short", {
+          cwd: "/repo",
+          timeoutMillis: 30_000,
+        });
+
+        return `${commits.length}:${run.exitCode}:${readme.length}`;
+      }),
+  },
+});
+
+const HostedResearchWorkspace = withComputerWorkspace(ResearchWorkspaceLive, (_, state, env) => ({
+  storage: state.storage,
+  sessionId: state.id.toString(),
+  gitIdentity: { name: "Research Agent", email: "agent@example.test" },
+  artifacts: { binding: env.ARTIFACTS },
+  shell: {
+    loader: env.WORKER_LOADER,
+    hostBinding: "RESEARCH_WORKSPACE",
+    hostId: state.id.toString(),
+    executionContext: state,
+    commands: [shellCurl],
+    egress: { mode: "none" },
+  },
+}));
+
+export class ResearchWorkspaceDurableObject extends HostedResearchWorkspace {}
+```
+
+Serialize checkout mutations such as `clone`, `fetch`, and reset/checkout
+sequences with an Effect `Semaphore` when several RPC methods can update the
+same working tree concurrently. Reads can remain concurrent.
+
+The corresponding Wrangler configuration needs SQLite-backed Durable Object
+storage. Worker-shell execution additionally requires the `experimental` flag,
+a Worker Loader binding, the loopback namespace binding named by `hostBinding`,
+and the exact `WorkspaceServiceProxy` export shown above:
+
+```jsonc
+{
+  "compatibility_flags": ["nodejs_compat", "experimental"],
+  "worker_loaders": [{ "binding": "WORKER_LOADER" }],
+  "artifacts": [{ "binding": "ARTIFACTS", "namespace": "default" }],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RESEARCH_WORKSPACE",
+        "class_name": "ResearchWorkspaceDurableObject",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["ResearchWorkspaceDurableObject"],
+    },
+  ],
+}
+```
+
+Omit `shell` and the Worker Loader configuration when only the SQLite
+filesystem and Git client are needed. Supplying `artifacts` also installs the
+session-scoped client at `workspace.artifacts` and makes the in-shell
+`artifacts` command use the same upstream repository-prefixing convention.
+
+Workers can use that session isolation without a Durable Object or workspace:
+
+```ts
+import { Effect } from "effect";
+import { Artifacts, ComputerArtifacts } from "effect-cf";
+
+export const createSessionRepo = (binding: Artifacts.ArtifactsBinding, sessionId: string) =>
+  Effect.gen(function* () {
+    const artifacts = yield* ComputerArtifacts.makeClient(binding, sessionId);
+    const created = yield* artifacts.create("build-cache", {
+      description: "CI artifacts",
+    });
+    const token = yield* artifacts.createToken("build-cache", "read", 3600);
+
+    return { remote: created.remote, token: token.plaintext };
+  });
+```
+
+Repository prefixing, list filtering, and the argv API are delegated directly
+to `@cloudflare/computer/artifacts`, keeping this API and the in-shell command
+in agreement.
 
 ## Hyperdrive Example
 

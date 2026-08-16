@@ -38,12 +38,16 @@
         "name": "TEST_COUNTER_DO",
         "class_name": "TestCounterDurableObject",
       },
+      {
+        "name": "TEST_COMPUTER_DO",
+        "class_name": "TestComputerWorkspaceDurableObject",
+      },
     ],
   },
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["TestCounterDurableObject"],
+      "new_sqlite_classes": ["TestCounterDurableObject", "TestComputerWorkspaceDurableObject"],
     },
   ],
 }

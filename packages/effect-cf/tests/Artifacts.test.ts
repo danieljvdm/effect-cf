@@ -28,6 +28,7 @@ const createResult = (
   defaultBranch: "main",
   remote: `https://git.cloudflare.com/default/${name}`,
   token: `${name}-token?expires=1786752000`,
+  tokenExpiresAt: "2026-08-16T00:00:00.000Z",
 });
 
 interface Calls {

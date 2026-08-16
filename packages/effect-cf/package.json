@@ -27,6 +27,16 @@
       "import": "./dist/HyperdrivePg.mjs",
       "default": "./dist/HyperdrivePg.mjs"
     },
+    "./computer-artifacts": {
+      "types": "./dist/ComputerArtifacts.d.mts",
+      "import": "./dist/ComputerArtifacts.mjs",
+      "default": "./dist/ComputerArtifacts.mjs"
+    },
+    "./computer-workspace": {
+      "types": "./dist/ComputerWorkspace.d.mts",
+      "import": "./dist/ComputerWorkspace.mjs",
+      "default": "./dist/ComputerWorkspace.mjs"
+    },
     "./computer-workspace-host": {
       "types": "./dist/ComputerWorkspaceHost.d.mts",
       "import": "./dist/ComputerWorkspaceHost.mjs",
@@ -61,6 +71,7 @@
     "@effect/vitest": "catalog:",
     "@platformatic/vfs": "^0.4.0",
     "effect": "catalog:",
+    "esbuild": "^0.28.1",
     "vite-plus": "catalog:",
     "vitest": "catalog:"
   },

@@ -7,7 +7,7 @@ import type { ArtifactClient } from "@cloudflare/computer/artifacts";
 import { assert, it } from "@effect/vitest";
 import { Effect, Stream } from "effect";
 
-import { ComputerWorkspace } from "../src/index";
+import * as ComputerWorkspace from "../src/ComputerWorkspace";
 
 const emptyArtifacts = {
   sessionId: "test-session",

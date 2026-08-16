@@ -53,7 +53,14 @@ export default defineConfig({
     ],
   },
   pack: {
-    entry: ["src/index.ts", "src/ComputerWorkspaceHost.ts", "src/HyperdrivePg.ts", "src/Vitest.ts"],
+    entry: [
+      "src/index.ts",
+      "src/ComputerArtifacts.ts",
+      "src/ComputerWorkspace.ts",
+      "src/ComputerWorkspaceHost.ts",
+      "src/HyperdrivePg.ts",
+      "src/Vitest.ts",
+    ],
     deps: {
       neverBundle: ["cloudflare:test", "cloudflare:workers"],
     },

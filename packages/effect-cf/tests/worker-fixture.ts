@@ -1,7 +1,7 @@
 import { Effect, Layer, Option, Schema as S } from "effect";
 
+import * as ComputerWorkspace from "../src/ComputerWorkspace";
 import {
-  ComputerWorkspace,
   DurableObjectDefinition,
   DurableObjectState,
   Worker,

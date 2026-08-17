@@ -1,17 +1,17 @@
 {
   "version": 1,
-  "toolVersion": "0.13.0",
-  "manifestDigest": "sha256:a7d718ff59f40a508a5d15198ff9dcc6ea3a096139b237d57525499bcd3d0388",
+  "toolVersion": "0.18.0",
+  "manifestDigest": "sha256:9faf88d655bdfd690457d8bf51fd83292faf110b365260c2b1e8842f01bad179",
   "setup": {
     "effectSource": {
       "packageName": "effect",
-      "packageVersion": "4.0.0-beta.105",
+      "packageVersion": "4.0.0-beta.107",
       "path": ".repos/effect",
       "repository": "https://github.com/Effect-TS/effect.git",
-      "tag": "effect@4.0.0-beta.105"
+      "tag": "effect@4.0.0-beta.107"
     },
     "effectTsgo": {
-      "effectTsgoVersion": "0.33.0",
+      "effectTsgoVersion": "0.36.4",
       "typescriptPackage": "typescript",
       "typescriptVersion": "7.0.2"
     }
@@ -24,7 +24,7 @@
       "target": "agents",
       "mode": "copy",
       "kind": "directory",
-      "digest": "sha256:eeb369f5bb47886f5a4869540f3f5664fbb28b03a6cc5f6ea287db8ca3a6545d"
+      "digest": "sha256:27c7d684334598d0da9858c5e8bd6bd274db20bf33269b0b9286a50d1613e649"
     },
     {
       "resourceId": "skill:build-effect-clis@agents",
@@ -33,7 +33,7 @@
       "target": "agents",
       "mode": "copy",
       "kind": "directory",
-      "digest": "sha256:0a4ba7f621f4fe472528931b55f987d93fc5e300cce7378accfbea84e2363337"
+      "digest": "sha256:7b301376e71dcc3c040bd31cbac72296ee8c9896fd355f365ec0fff4a1fa7b6c"
     },
     {
       "resourceId": "skill:cloudflare@agents",
@@ -56,7 +56,7 @@
       "target": "agents",
       "mode": "copy",
       "kind": "directory",
-      "digest": "sha256:fa8a565be13a542e52e91640ebf658e69d1cb5452f5261c4fd37dfca071a716c"
+      "digest": "sha256:883d50fb8cc9c71f6c35d9c077f0f1eaec4422df3d24c854087d0aaa10b5a922"
     },
     {
       "resourceId": "skill:effect-architecture-audit@agents",
@@ -68,18 +68,27 @@
       "digest": "sha256:e1ce793618ab672bb4213e415e0e02860acbb0ae81e06f421d857ac94231610e"
     },
     {
+      "resourceId": "skill:effect-atom-state@agents",
+      "path": ".agents/skills/effect-atom-state",
+      "skill": "effect-atom-state",
+      "target": "agents",
+      "mode": "copy",
+      "kind": "directory",
+      "digest": "sha256:417939e6f21850b6b73b0f5b67d1e594ba830de43a086eaa3fc7a6947cbde9eb"
+    },
+    {
       "resourceId": "skill:@effect-cf/repo#pr-hygiene@agents",
       "path": ".agents/skills/effect-cf-repo-pr-hygiene",
       "skill": "effect-cf-repo-pr-hygiene",
       "target": "agents",
       "mode": "copy",
       "kind": "directory",
-      "digest": "sha256:b56eae01cbd217c62597f883f22213b810374605301c143d9d7b7864af4e0cb4",
+      "digest": "sha256:29213ca0b1179936b79a7293465fb36438c4d725e9d8c2630b431174af567899",
       "catalog": {
         "package": "@effect-cf/repo",
         "version": "0.0.0",
         "skill": "pr-hygiene",
-        "digest": "sha256:9b80526abdf0d3dbd96044578872c6b07cc1b9b9c70727c75eb8220886865166"
+        "digest": "sha256:b3d50061943c0affefb82ecb9472f6d10104e7b72650d137d5a24e4a54b8028c"
       }
     },
     {
@@ -90,6 +99,29 @@
       "mode": "copy",
       "kind": "directory",
       "digest": "sha256:c9b42fee517f1077152ccf7231adf5912c048179368bc78837edea2a61815286"
+    },
+    {
+      "resourceId": "skill:open-pull-request@agents",
+      "path": ".agents/skills/open-pull-request",
+      "skill": "open-pull-request",
+      "target": "agents",
+      "mode": "copy",
+      "kind": "directory",
+      "digest": "sha256:14596520a07ccfdb3743dfa826d8b3de8605f3e8205dcdcce70396acab9ed6b1"
+    },
+    {
+      "resourceId": "skill:tdd@agents",
+      "path": ".agents/skills/tdd",
+      "skill": "tdd",
+      "target": "agents",
+      "mode": "copy",
+      "kind": "directory",
+      "digest": "sha256:ea2d26eda005b10a2de4bdb7de44d33072f2a8e82dbf670952ce30a9c2d7c475",
+      "catalog": {
+        "source": "mattpocock-skills",
+        "repository": "https://github.com/mattpocock/skills.git",
+        "resolved": "2ab958093e83e0ec752e6c1c5932da465bf23e0c"
+      }
     },
     {
       "resourceId": "skill:testing@agents",
@@ -151,6 +183,15 @@
       "digest": "sha256:0e75224a7745f66915cd7033b4ebffc57f5b21929c970de3b9b779b120fc4d7e"
     },
     {
+      "resourceId": "skill:effect-atom-state@claude",
+      "path": ".claude/skills/effect-atom-state",
+      "skill": "effect-atom-state",
+      "target": "claude",
+      "mode": "symlink",
+      "kind": "symlink",
+      "digest": "sha256:e231bd47f19be3e4c17f0f1d4442db233256ddcf3562aa59a5e5b12d4660f879"
+    },
+    {
       "resourceId": "skill:@effect-cf/repo#pr-hygiene@claude",
       "path": ".claude/skills/effect-cf-repo-pr-hygiene",
       "skill": "effect-cf-repo-pr-hygiene",
@@ -162,7 +203,7 @@
         "package": "@effect-cf/repo",
         "version": "0.0.0",
         "skill": "pr-hygiene",
-        "digest": "sha256:9b80526abdf0d3dbd96044578872c6b07cc1b9b9c70727c75eb8220886865166"
+        "digest": "sha256:b3d50061943c0affefb82ecb9472f6d10104e7b72650d137d5a24e4a54b8028c"
       }
     },
     {
@@ -175,6 +216,29 @@
       "digest": "sha256:057d09728194631224706ae6afbf877107388501832bf0f3e2c6516c7d55f242"
     },
     {
+      "resourceId": "skill:open-pull-request@claude",
+      "path": ".claude/skills/open-pull-request",
+      "skill": "open-pull-request",
+      "target": "claude",
+      "mode": "symlink",
+      "kind": "symlink",
+      "digest": "sha256:7fb29cd1804361f3d09fa0925109d56daa20bc8b038a8d0ee23c85052f11708e"
+    },
+    {
+      "resourceId": "skill:tdd@claude",
+      "path": ".claude/skills/tdd",
+      "skill": "tdd",
+      "target": "claude",
+      "mode": "symlink",
+      "kind": "symlink",
+      "digest": "sha256:398300a0bb92f35b234df99037308cbda7d5e10fe9b082902faf7bf8f5a47984",
+      "catalog": {
+        "source": "mattpocock-skills",
+        "repository": "https://github.com/mattpocock/skills.git",
+        "resolved": "2ab958093e83e0ec752e6c1c5932da465bf23e0c"
+      }
+    },
+    {
       "resourceId": "skill:testing@claude",
       "path": ".claude/skills/testing",
       "skill": "testing",
@@ -182,14 +246,6 @@
       "mode": "symlink",
       "kind": "symlink",
       "digest": "sha256:82fb62fd2299e2171e4a204cf80a604732080f812d215b85e667b19d344b0536"
-    },
-    {
-      "resourceId": "setup:vite-plus-github-actions",
-      "path": ".github/workflows/check.yml",
-      "sourcePath": "templates/vite-plus/github-actions-check.yml",
-      "mode": "copy",
-      "kind": "file",
-      "digest": "sha256:27d06667f945e3457d4c028feea48fe828d43e31b4f042acfed2ed1448b3d1c5"
     },
     {
       "resourceId": "setup:agent-instructions",

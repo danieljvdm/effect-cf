@@ -40,8 +40,8 @@ layer(browserLayer({}))("Browser Rendering", (it) => {
       const browser = yield* rendering.launchWith(async () => makeFakeBrowser());
       const page = yield* browser.newPage;
       const content = yield* page.content;
-      const screenshot = yield* page.screenshot<Uint8Array>();
-      const pdf = yield* page.pdf<Uint8Array>();
+      const screenshot = yield* page.screenshot();
+      const pdf = yield* page.pdf();
       const version = yield* browser.version;
 
       yield* page.close();
@@ -61,7 +61,7 @@ test("Browser Rendering layer validates the binding shape", async () => {
       Effect.gen(function* () {
         const rendering = yield* TestBrowser;
 
-        yield* rendering.unsafeRaw;
+        yield* rendering.rawUnsafe;
       }).pipe(
         Effect.provide(
           TestBrowser.layer({ binding: "MYBROWSER" }).pipe(

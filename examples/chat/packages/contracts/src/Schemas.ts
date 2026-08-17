@@ -54,61 +54,79 @@ export const ChatArtifact = S.Struct({
 
 export type ChatArtifact = S.Schema.Type<typeof ChatArtifact>;
 
-export interface ChatPeer {
-  readonly id: string;
-  readonly userId: string;
-  readonly connectedAt: string;
-  readonly lastSeenAt: string;
-  readonly restored: boolean;
-}
+export const ChatPeer = S.Struct({
+  id: S.String,
+  userId: S.String,
+  connectedAt: S.String,
+  lastSeenAt: S.String,
+  restored: S.Boolean,
+});
 
-export interface ChatReadyEvent {
-  readonly type: "ready";
-  readonly roomId: string;
-  readonly self: ChatPeer;
-  readonly peers: ReadonlyArray<ChatPeer>;
-  readonly snapshot: ChatSnapshot;
-  readonly hibernation: {
-    readonly restoredConnections: number;
-    readonly autoResponse: "ping:pong";
-  };
-}
+export type ChatPeer = S.Schema.Type<typeof ChatPeer>;
 
-export interface ChatMessageEvent {
-  readonly type: "message";
-  readonly message: ChatMessage;
-}
+export const ChatReadyEvent = S.Struct({
+  type: S.Literal("ready"),
+  roomId: S.String,
+  self: ChatPeer,
+  peers: S.Array(ChatPeer),
+  snapshot: ChatSnapshot,
+  hibernation: S.Struct({
+    restoredConnections: S.Number,
+    autoResponse: S.Literal("ping:pong"),
+  }),
+});
 
-export interface ChatPresenceEvent {
-  readonly type: "presence";
-  readonly roomId: string;
-  readonly peers: ReadonlyArray<ChatPeer>;
-  readonly connectionCount: number;
-}
+export type ChatReadyEvent = S.Schema.Type<typeof ChatReadyEvent>;
 
-export interface ChatHeartbeatEvent {
-  readonly type: "heartbeat";
-  readonly at: string;
-  readonly connectionCount: number;
-}
+export const ChatMessageEvent = S.Struct({
+  type: S.Literal("message"),
+  message: ChatMessage,
+});
 
-export interface ChatErrorEvent {
-  readonly type: "error";
-  readonly message: string;
-}
+export type ChatMessageEvent = S.Schema.Type<typeof ChatMessageEvent>;
 
-export type ChatServerEvent =
-  | ChatReadyEvent
-  | ChatMessageEvent
-  | ChatPresenceEvent
-  | ChatHeartbeatEvent
-  | ChatErrorEvent;
+export const ChatPresenceEvent = S.Struct({
+  type: S.Literal("presence"),
+  roomId: S.String,
+  peers: S.Array(ChatPeer),
+  connectionCount: S.Number,
+});
 
-export type ChatClientEvent =
-  | {
-      readonly type: "message";
-      readonly text: string;
-    }
-  | {
-      readonly type: "heartbeat";
-    };
+export type ChatPresenceEvent = S.Schema.Type<typeof ChatPresenceEvent>;
+
+export const ChatHeartbeatEvent = S.Struct({
+  type: S.Literal("heartbeat"),
+  at: S.String,
+  connectionCount: S.Number,
+});
+
+export type ChatHeartbeatEvent = S.Schema.Type<typeof ChatHeartbeatEvent>;
+
+export const ChatErrorEvent = S.Struct({
+  type: S.Literal("error"),
+  message: S.String,
+});
+
+export type ChatErrorEvent = S.Schema.Type<typeof ChatErrorEvent>;
+
+export const ChatServerEvent = S.Union([
+  ChatReadyEvent,
+  ChatMessageEvent,
+  ChatPresenceEvent,
+  ChatHeartbeatEvent,
+  ChatErrorEvent,
+]);
+
+export type ChatServerEvent = S.Schema.Type<typeof ChatServerEvent>;
+
+export const ChatClientEvent = S.Union([
+  S.Struct({
+    type: S.Literal("message"),
+    text: S.String,
+  }),
+  S.Struct({
+    type: S.Literal("heartbeat"),
+  }),
+]);
+
+export type ChatClientEvent = S.Schema.Type<typeof ChatClientEvent>;

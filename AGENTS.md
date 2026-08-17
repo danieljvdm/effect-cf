@@ -40,9 +40,10 @@ Do not use `bun run`, `npm run`, `pnpm run`, or `yarn run` in this repository. D
 
 # Package Layout
 
-- `packages/effect-cf` is the publishable package.
+- `packages/effect-cf` and `packages/effect-webtransport` are the publishable packages.
+- `packages/effect-cf` holds Cloudflare-specific primitives; `packages/effect-webtransport` is a platform-generic Effect WebTransport library with no Cloudflare dependency.
 - `examples/` contains consumer and example applications.
-- Reusable package code belongs under `packages/effect-cf/src` and must be exported from `packages/effect-cf/src/index.ts`.
+- Reusable package code belongs under a package's `src/` and must be exported from that package's `src/index.ts`.
 - Worker projects use `@cloudflare/workers-types` directly for Cloudflare runtime types.
 - Effect source code can be referenced at `.repos/effect` for patterns and API style when changing Effect-heavy code. Do not edit it; Dev Kit owns and version-matches that checkout.
 

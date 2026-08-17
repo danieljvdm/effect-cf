@@ -10,6 +10,7 @@ import {
   Effect,
   Layer,
   Option,
+  Predicate,
   Result,
   Schema as S,
 } from "effect";
@@ -23,6 +24,7 @@ import {
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
+import * as ErrorMessage from "./internal/ErrorMessage";
 
 const expectedAnalyticsEngineDataset = "Analytics Engine dataset binding with writeDataPoint()";
 const defaultQueryApiBaseUrl = "https://api.cloudflare.com/client/v4";
@@ -70,7 +72,11 @@ export class AnalyticsEngineOperationError extends Data.TaggedError(
   readonly binding: string;
   readonly operation: string;
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Analytics Engine ${this.operation} failed for binding "${this.binding}": ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 export interface AnalyticsEngineWriteViolation {
   readonly path: string;
@@ -87,7 +93,11 @@ export class AnalyticsEngineWriteValidationError extends Data.TaggedError(
   readonly operation: string;
   readonly violations: ReadonlyArray<AnalyticsEngineWriteViolation>;
   readonly cause?: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Analytics Engine ${this.operation} for binding "${this.binding}" failed validation: ${ErrorMessage.violationsMessage(this.violations)}`;
+  }
+}
 
 /** Error raised when an Analytics Engine SQL API query fails. */
 export class AnalyticsEngineQueryError extends Data.TaggedError("AnalyticsEngineQueryError")<{
@@ -123,15 +133,7 @@ export interface AnalyticsEngineWriteOptions {
   readonly onInvalid?: AnalyticsEngineInvalidWritePolicy;
 }
 
-export interface AnalyticsEngineWriteBatchOptions extends AnalyticsEngineWriteOptions {
-  /**
-   * Maximum points per native batch call. Values are clamped to Cloudflare's
-   * per-invocation limit.
-   */
-  readonly batchSize?: number;
-}
-
-export type AnalyticsEngineWritePolicy = AnalyticsEngineWriteBatchOptions;
+export type AnalyticsEngineWritePolicy = AnalyticsEngineWriteOptions;
 
 export interface AnalyticsEngineQueryResult<Row = AnalyticsEngineQueryRow> {
   readonly meta: ReadonlyArray<AnalyticsEngineQueryColumn>;
@@ -158,19 +160,11 @@ export interface AnalyticsEngineClient {
     dataPoint?: AnalyticsEngineDataPoint,
     options?: AnalyticsEngineWriteOptions,
   ) => Effect.Effect<void, AnalyticsEngineWriteError>;
-  readonly write: (
-    dataPoint?: AnalyticsEngineDataPoint,
-    options?: AnalyticsEngineWriteOptions,
-  ) => Effect.Effect<void, AnalyticsEngineWriteError>;
   readonly writeDataPoints: (
     dataPoints: ReadonlyArray<AnalyticsEngineDataPoint>,
-    options?: AnalyticsEngineWriteBatchOptions,
+    options?: AnalyticsEngineWriteOptions,
   ) => Effect.Effect<void, AnalyticsEngineWriteError>;
-  readonly writeBatch: (
-    dataPoints: ReadonlyArray<AnalyticsEngineDataPoint>,
-    options?: AnalyticsEngineWriteBatchOptions,
-  ) => Effect.Effect<void, AnalyticsEngineWriteError>;
-  readonly unsafeRaw: Effect.Effect<AnalyticsEngineBinding>;
+  readonly rawUnsafe: Effect.Effect<AnalyticsEngineBinding>;
   readonly definition: AnalyticsEngineDefinition;
 }
 
@@ -257,11 +251,11 @@ export interface QueryTagClass<Self, Id extends string> extends Context.ServiceC
   readonly layer: (
     definition: AnalyticsEngineQueryDefinition,
   ) => Layer.Layer<Self, never, HttpClient.HttpClient>;
-  readonly fetchLayer: (definition: AnalyticsEngineQueryDefinition) => Layer.Layer<Self>;
+  readonly layerFetch: (definition: AnalyticsEngineQueryDefinition) => Layer.Layer<Self>;
   readonly layerConfig: (
     config?: Config.Config<AnalyticsEngineQueryDefinition>,
   ) => Layer.Layer<Self, Config.ConfigError, HttpClient.HttpClient>;
-  readonly fetchLayerConfig: (
+  readonly layerFetchConfig: (
     config?: Config.Config<AnalyticsEngineQueryDefinition>,
   ) => Layer.Layer<Self, Config.ConfigError>;
 }
@@ -311,20 +305,11 @@ const tryAnalyticsEngineSync = <A>(
     catch: (cause) => analyticsEngineError(binding, operation, cause),
   });
 
-const normalizeBatchSize = (batchSize: number | undefined) => {
-  if (batchSize === undefined || !Number.isFinite(batchSize) || batchSize <= 0) {
-    return writeLimits.maxDataPointsPerInvocation;
-  }
-
-  return Math.min(Math.floor(batchSize), writeLimits.maxDataPointsPerInvocation);
-};
-
 const resolveWritePolicy = (
   defaults: AnalyticsEngineWritePolicy | undefined,
-  options: AnalyticsEngineWriteBatchOptions | undefined,
+  options: AnalyticsEngineWriteOptions | undefined,
 ) => ({
   onInvalid: options?.onInvalid ?? defaults?.onInvalid ?? "error",
-  batchSize: normalizeBatchSize(options?.batchSize ?? defaults?.batchSize),
 });
 
 const fieldPath = (prefix: string, field: string) => (prefix === "" ? field : `${prefix}.${field}`);
@@ -337,7 +322,7 @@ const byteLength = (value: AnalyticsEngineFieldValue) => {
     return 0;
   }
 
-  return typeof value === "string" ? textEncoder.encode(value).byteLength : value.byteLength;
+  return Predicate.isString(value) ? textEncoder.encode(value).byteLength : value.byteLength;
 };
 
 const lengthViolation = (
@@ -436,11 +421,15 @@ const schemaViolation = (
 
 const toAnalyticsEngineDataPoint = (
   dataPoint: S.Schema.Type<typeof AnalyticsEngineDataPointSchema>,
-): AnalyticsEngineDataPoint => ({
-  ...(dataPoint.indexes === undefined ? {} : { indexes: [...dataPoint.indexes] }),
-  ...(dataPoint.doubles === undefined ? {} : { doubles: [...dataPoint.doubles] }),
-  ...(dataPoint.blobs === undefined ? {} : { blobs: [...dataPoint.blobs] }),
-});
+): AnalyticsEngineDataPoint => {
+  const result: AnalyticsEngineDataPoint = {};
+
+  if (dataPoint.indexes !== undefined) result.indexes = [...dataPoint.indexes];
+  if (dataPoint.doubles !== undefined) result.doubles = [...dataPoint.doubles];
+  if (dataPoint.blobs !== undefined) result.blobs = [...dataPoint.blobs];
+
+  return result;
+};
 
 const validateDataPoint = (
   binding: string,
@@ -535,23 +524,10 @@ const writeChunks = (
   operation: string,
   dataset: AnalyticsEngineBinding,
   dataPoints: ReadonlyArray<AnalyticsEngineDataPoint>,
-  batchSize: number,
 ): Effect.Effect<void, AnalyticsEngineOperationError> =>
   Effect.gen(function* () {
-    const writeDataPoints = Reflect.get(dataset, "writeDataPoints");
-
-    for (let index = 0; index < dataPoints.length; index += batchSize) {
-      const chunk = dataPoints.slice(index, index + batchSize);
-
-      if (typeof writeDataPoints === "function") {
-        yield* tryAnalyticsEngineSync(binding, operation, () =>
-          writeDataPoints.call(dataset, chunk),
-        );
-      } else {
-        for (const point of chunk) {
-          yield* tryAnalyticsEngineSync(binding, operation, () => dataset.writeDataPoint(point));
-        }
-      }
+    for (const point of dataPoints) {
+      yield* tryAnalyticsEngineSync(binding, operation, () => dataset.writeDataPoint(point));
     }
   });
 
@@ -633,26 +609,30 @@ const makeQueryClientWith = (
   definition: AnalyticsEngineQueryDefinition,
   httpClient: HttpClient.HttpClient,
 ): AnalyticsEngineQueryClient => {
-  const raw = (sql: string, options?: AnalyticsEngineQueryOptions) =>
-    executeQueryRequest(definition, httpClient, sql, options);
-  const query = (sql: string, options?: AnalyticsEngineQueryOptions) =>
-    Effect.gen(function* () {
-      const response = yield* raw(sql, options);
-      const json = yield* response.json.pipe(
-        Effect.catch((cause) =>
-          Effect.fail(
-            analyticsEngineQueryError(
-              definition,
-              "json",
-              "Failed to read Analytics Engine SQL API JSON response body",
-              { cause },
-            ),
+  const raw = Effect.fn("AnalyticsEngine.raw")(
+    (sql: string, options?: AnalyticsEngineQueryOptions) =>
+      executeQueryRequest(definition, httpClient, sql, options),
+  );
+  const query = Effect.fn("AnalyticsEngine.query")(function* (
+    sql: string,
+    options?: AnalyticsEngineQueryOptions,
+  ) {
+    const response = yield* raw(sql, options);
+    const json = yield* response.json.pipe(
+      Effect.catch((cause) =>
+        Effect.fail(
+          analyticsEngineQueryError(
+            definition,
+            "json",
+            "Failed to read Analytics Engine SQL API JSON response body",
+            { cause },
           ),
         ),
-      );
+      ),
+    );
 
-      return yield* decodeQueryResponse(json);
-    });
+    return yield* decodeQueryResponse(json);
+  });
   const queryResult = <Row>(
     row: S.Codec<Row, unknown>,
     sql: string,
@@ -672,7 +652,7 @@ const makeQueryClientWith = (
         data,
         rows: result.rows,
       } satisfies AnalyticsEngineQueryResult<Row>;
-    });
+    }).pipe(Effect.withSpan("AnalyticsEngine.queryResult"));
 
   return {
     definition,
@@ -680,35 +660,38 @@ const makeQueryClientWith = (
     query,
     queryResult,
     queryRows: (row, sql, options) =>
-      queryResult(row, sql, options).pipe(Effect.map((result) => result.data)),
+      queryResult(row, sql, options).pipe(
+        Effect.map((result) => result.data),
+        Effect.withSpan("AnalyticsEngine.queryRows"),
+      ),
     queryOne: (row, sql, options) =>
       queryResult(row, sql, options).pipe(
         Effect.map((result) =>
           result.data[0] === undefined ? Option.none() : Option.some(result.data[0]),
         ),
+        Effect.withSpan("AnalyticsEngine.queryOne"),
       ),
-    queryText: (sql, options) =>
-      raw(sql, options).pipe(
-        Effect.flatMap((response) => responseText(definition, response, "text")),
-      ),
+    queryText: Effect.fn("AnalyticsEngine.queryText")(
+      (sql: string, options?: AnalyticsEngineQueryOptions) =>
+        raw(sql, options).pipe(
+          Effect.flatMap((response) => responseText(definition, response, "text")),
+        ),
+    ),
   };
 };
 
 export const makeQueryClient = (definition: AnalyticsEngineQueryDefinition) =>
   Effect.map(HttpClient.HttpClient, (httpClient) => makeQueryClientWith(definition, httpClient));
 
-export const isAnalyticsEngineDataset = (value: unknown): value is AnalyticsEngineBinding => {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-
-  return typeof Reflect.get(value, "writeDataPoint") === "function";
-};
+export const isAnalyticsEngineDataset = <Candidate>(
+  value: Candidate,
+): value is Candidate & AnalyticsEngineBinding =>
+  Predicate.hasProperty(value, "writeDataPoint") && Predicate.isFunction(value.writeDataPoint);
 
 export const makeClient =
   (definition: AnalyticsEngineDefinition, defaults?: AnalyticsEngineWritePolicy) =>
   (dataset: AnalyticsEngineBinding): AnalyticsEngineClient => {
-    const writeDataPoint = (
+    const writeDataPoint = Effect.fn("AnalyticsEngine.writeDataPoint")((
       dataPoint?: AnalyticsEngineDataPoint,
       options?: AnalyticsEngineWriteOptions,
     ) => {
@@ -724,39 +707,28 @@ export const makeClient =
             ),
         }),
       );
-    };
+    });
 
-    const writeDataPoints = (
+    const writeDataPoints = Effect.fn("AnalyticsEngine.writeDataPoints")(function* (
       dataPoints: ReadonlyArray<AnalyticsEngineDataPoint>,
-      options?: AnalyticsEngineWriteBatchOptions,
-    ) => {
+      options?: AnalyticsEngineWriteOptions,
+    ) {
       const policy = resolveWritePolicy(defaults, options);
+      const validPoints = yield* validateDataPoints(
+        definition.binding,
+        "writeDataPoints",
+        dataPoints,
+        policy,
+      );
 
-      return Effect.gen(function* () {
-        const validPoints = yield* validateDataPoints(
-          definition.binding,
-          "writeDataPoints",
-          dataPoints,
-          policy,
-        );
-
-        yield* writeChunks(
-          definition.binding,
-          "writeDataPoints",
-          dataset,
-          validPoints,
-          policy.batchSize,
-        );
-      });
-    };
+      yield* writeChunks(definition.binding, "writeDataPoints", dataset, validPoints);
+    });
 
     return {
       definition,
       writeDataPoint,
-      write: writeDataPoint,
       writeDataPoints,
-      writeBatch: writeDataPoints,
-      unsafeRaw: Effect.succeed(dataset),
+      rawUnsafe: Effect.succeed(dataset),
     };
   };
 
@@ -774,7 +746,7 @@ export const queryLayer = <Self>(
   definition: AnalyticsEngineQueryDefinition,
 ) => Layer.effect(tag, makeQueryClient(definition));
 
-export const queryFetchLayer = <Self>(
+export const layerFetch = <Self>(
   tag: Context.Service<Self, AnalyticsEngineQueryClient>,
   definition: AnalyticsEngineQueryDefinition,
 ) => queryLayer(tag, definition).pipe(Layer.provide(FetchHttpClient.layer));
@@ -792,7 +764,7 @@ export const queryLayerConfig = <Self>(
     }),
   );
 
-export const queryFetchLayerConfig = <Self>(
+export const layerFetchConfig = <Self>(
   tag: Context.Service<Self, AnalyticsEngineQueryClient>,
   config: Config.Config<AnalyticsEngineQueryDefinition> = queryConfig(),
 ) => queryLayerConfig(tag, config).pipe(Layer.provide(FetchHttpClient.layer));
@@ -823,6 +795,7 @@ export const Tag =
 
     const makeLayer = (definition: LayerOptions) => layer(tag, definition);
 
+    // SAFETY: these are exactly the members required by TagClass, attached to the matching service tag.
     return Object.assign(tag, {
       id,
       layer: makeLayer,
@@ -834,18 +807,19 @@ export const QueryTag =
   <Id extends string>(id: Id) => {
     const tag = Context.Service<Self, AnalyticsEngineQueryClient>()(id);
     const makeLayer = (definition: AnalyticsEngineQueryDefinition) => queryLayer(tag, definition);
-    const makeFetchLayer = (definition: AnalyticsEngineQueryDefinition) =>
-      queryFetchLayer(tag, definition);
+    const makeLayerFetch = (definition: AnalyticsEngineQueryDefinition) =>
+      layerFetch(tag, definition);
     const makeLayerConfig = (config?: Config.Config<AnalyticsEngineQueryDefinition>) =>
       queryLayerConfig(tag, config);
-    const makeFetchLayerConfig = (config?: Config.Config<AnalyticsEngineQueryDefinition>) =>
-      queryFetchLayerConfig(tag, config);
+    const makeLayerFetchConfig = (config?: Config.Config<AnalyticsEngineQueryDefinition>) =>
+      layerFetchConfig(tag, config);
 
+    // SAFETY: these are exactly the members required by QueryTagClass, attached to the matching service tag.
     return Object.assign(tag, {
       id,
       layer: makeLayer,
-      fetchLayer: makeFetchLayer,
+      layerFetch: makeLayerFetch,
       layerConfig: makeLayerConfig,
-      fetchLayerConfig: makeFetchLayerConfig,
+      layerFetchConfig: makeLayerFetchConfig,
     }) as QueryTagClass<Self, Id>;
   };

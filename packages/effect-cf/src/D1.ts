@@ -1,9 +1,13 @@
 import { D1Client } from "@effect/sql-d1";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Predicate, type Config } from "effect";
+import type { SqlClient } from "effect/unstable/sql";
 
 import * as Binding from "./Binding";
+import type { WorkerEnvironment } from "./Environment";
 
-const TypeId = "effect-cf/D1" as const;
+const TypeId = "~effect-cf/D1" as const;
+
+export type TypeId = typeof TypeId;
 const expectedD1Database = "D1 database binding with prepare(), batch(), and exec()";
 
 /** Typed D1 binding definition. */
@@ -24,19 +28,13 @@ export interface D1Service<Id extends string> {
   };
 }
 
-const isD1Database = (value: unknown): value is D1Database => {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-
-  const resource = value as Record<string, unknown>;
-
-  return (
-    typeof resource.prepare === "function" &&
-    typeof resource.batch === "function" &&
-    typeof resource.exec === "function"
-  );
-};
+const isD1Database = <Candidate>(value: Candidate): value is Candidate & D1Database =>
+  Predicate.hasProperty(value, "prepare") &&
+  Predicate.isFunction(value.prepare) &&
+  Predicate.hasProperty(value, "batch") &&
+  Predicate.isFunction(value.batch) &&
+  Predicate.hasProperty(value, "exec") &&
+  Predicate.isFunction(value.exec);
 
 /**
  * Creates a typed D1 service tag plus Effect helpers.
@@ -66,7 +64,13 @@ export const Service =
       expected: expectedD1Database,
     });
 
-    const sqlLayer = (options?: D1SqlLayerOptions) =>
+    const sqlLayer = (
+      options?: D1SqlLayerOptions,
+    ): Layer.Layer<
+      D1Client.D1Client | SqlClient.SqlClient,
+      Config.ConfigError | Binding.BindingNotFoundError | Binding.BindingValidationError,
+      WorkerEnvironment
+    > =>
       Layer.unwrap(
         Effect.gen(function* () {
           const db = yield* tag;

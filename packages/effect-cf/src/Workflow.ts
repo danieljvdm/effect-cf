@@ -1,3 +1,7 @@
+/**
+ * Effect wrapper for Cloudflare Workflows entrypoints and bindings; distinct
+ * from Effect's runtime-agnostic `effect/unstable/workflow` cluster module.
+ */
 import {
   WorkflowEntrypoint as CloudflareWorkflowEntrypoint,
   type WorkflowEvent as CloudflareWorkflowEvent,
@@ -8,13 +12,25 @@ import {
   type WorkflowStepEvent,
   type WorkflowTimeoutDuration,
 } from "cloudflare:workers";
-import { ConfigProvider, Context, Effect, Layer, ManagedRuntime, type Scope } from "effect";
+import { NonRetryableError as CloudflareNonRetryableError } from "cloudflare:workflows";
+import {
+  Cause,
+  Context,
+  Data,
+  Effect,
+  Layer,
+  type ManagedRuntime,
+  Option,
+  type Scope,
+} from "effect";
 
-import { WorkerConfig, WorkerEnvironment, type WorkerEnv } from "./Environment";
+import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 import { ExecutionContext, WorkerContext } from "./Worker";
 import * as WorkflowDefinition from "./WorkflowDefinition";
 import * as Entrypoint from "./internal/Entrypoint";
-import { fromExecutionContext, type RunWaitUntilEffect } from "./internal/WorkerContext";
+import * as ErrorMessage from "./internal/ErrorMessage";
+import * as Runtime from "./internal/Runtime";
+import { fromExecutionContext } from "./internal/WorkerContext";
 
 export interface WorkflowEventService<Payload = unknown> {
   readonly raw: CloudflareWorkflowEvent<unknown>;
@@ -30,22 +46,57 @@ export class WorkflowEvent extends Context.Service<WorkflowEvent, WorkflowEventS
 
 type RunWorkflowStepEffect = <A, E>(effect: Effect.Effect<A, E, never>) => Promise<A>;
 
+/** Failure raised when a Cloudflare Workflow step operation rejects. */
+export class WorkflowStepError extends Data.TaggedError("WorkflowStepError")<{
+  readonly step?: string;
+  readonly operation: string;
+  readonly cause: unknown;
+}> {
+  override get message(): string {
+    const step = this.step === undefined ? "" : ` in step "${this.step}"`;
+
+    return `Workflow ${this.operation} failed${step}: ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
+
+/**
+ * Typed step failure that Cloudflare must treat as terminal instead of retrying.
+ *
+ * The workflow boundary converts this value into Cloudflare's native
+ * `NonRetryableError` while preserving the original cause and its message.
+ */
+export class WorkflowStepNonRetryableError extends Data.TaggedError(
+  "WorkflowStepNonRetryableError",
+)<{
+  readonly cause: unknown;
+}> {
+  override get message(): string {
+    return `Workflow step failed without retry: ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
+
 export interface WorkflowStepService {
   readonly raw: CloudflareWorkflowStep;
   do<A, E, R>(
     name: string,
     effect: Effect.Effect<A, E, R>,
     config?: WorkflowStepConfig,
-  ): Effect.Effect<A, unknown, Exclude<R, WorkflowStepContext>>;
-  readonly sleep: (name: string, duration: WorkflowSleepDuration) => Effect.Effect<void, unknown>;
-  readonly sleepUntil: (name: string, timestamp: Date | number) => Effect.Effect<void, unknown>;
+  ): Effect.Effect<A, WorkflowStepError, Exclude<R, WorkflowStepContext>>;
+  readonly sleep: (
+    name: string,
+    duration: WorkflowSleepDuration,
+  ) => Effect.Effect<void, WorkflowStepError>;
+  readonly sleepUntil: (
+    name: string,
+    timestamp: Date | number,
+  ) => Effect.Effect<void, WorkflowStepError>;
   readonly waitForEvent: <Payload>(
     name: string,
     options: {
       readonly type: string;
       readonly timeout?: WorkflowTimeoutDuration | number;
     },
-  ) => Effect.Effect<WorkflowStepEvent<Payload>, unknown>;
+  ) => Effect.Effect<WorkflowStepEvent<Payload>, WorkflowStepError>;
 }
 
 export class WorkflowStep extends Context.Service<WorkflowStep, WorkflowStepService>()(
@@ -60,12 +111,34 @@ export class WorkflowStepContext extends Context.Service<
 const fromWorkflowEvent = <Payload>(
   event: CloudflareWorkflowEvent<Payload>,
 ): WorkflowEventService<Payload> => ({
+  // SAFETY: raw intentionally erases only the payload type while retaining the same event object.
   raw: event as CloudflareWorkflowEvent<unknown>,
   payload: event.payload,
   timestamp: event.timestamp,
   instanceId: event.instanceId,
   workflowName: event.workflowName,
 });
+
+const toCloudflareNonRetryableError = (
+  error: WorkflowStepNonRetryableError,
+): CloudflareNonRetryableError => {
+  const cloudflareError = new CloudflareNonRetryableError(error.message);
+
+  cloudflareError.cause = error.cause;
+
+  return cloudflareError;
+};
+
+const exposeCloudflareNonRetryableError = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> =>
+  Effect.catchCause(effect, (cause) => {
+    const error = Cause.findErrorOption(cause);
+
+    return Option.isSome(error) && error.value instanceof WorkflowStepNonRetryableError
+      ? Effect.die(toCloudflareNonRetryableError(error.value))
+      : Effect.failCause(cause);
+  });
 
 const fromWorkflowStep = (
   step: CloudflareWorkflowStep,
@@ -79,20 +152,22 @@ const fromWorkflowStep = (
           try: () => {
             const run = (stepContext: CloudflareWorkflowStepContext) =>
               runPromise(
-                Effect.scoped(
-                  Effect.provideService(
-                    Effect.provideContext(
-                      // `WorkflowStepContext` is provided immediately below, so it
-                      // is excluded from the context supplied here.
-                      // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off
-                      effect as Effect.Effect<A, E, Exclude<R, WorkflowStepContext>>,
-                      context,
+                exposeCloudflareNonRetryableError(
+                  Effect.scoped(
+                    Effect.provideService(
+                      Effect.provideContext(
+                        // SAFETY: WorkflowStepContext is provided immediately below; context supplies every other R service.
+                        // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off
+                        effect as Effect.Effect<A, E, Exclude<R, WorkflowStepContext>>,
+                        context,
+                      ),
+                      WorkflowStepContext,
+                      stepContext,
                     ),
-                    WorkflowStepContext,
-                    stepContext,
                   ),
                 ),
               );
+            // SAFETY: these overloads reproduce the Cloudflare WorkflowStep.do runtime signatures used here.
             const rawStep = step as {
               do(
                 name: string,
@@ -107,19 +182,19 @@ const fromWorkflowStep = (
 
             return config === undefined ? rawStep.do(name, run) : rawStep.do(name, config, run);
           },
-          catch: (cause) => cause,
+          catch: (cause) => new WorkflowStepError({ step: name, operation: "do", cause }),
         }),
       ),
-    ) as Effect.Effect<A, unknown, Exclude<R, WorkflowStepContext>>,
+    ),
   sleep: (name, duration) =>
     Effect.tryPromise({
       try: () => step.sleep(name, duration),
-      catch: (cause) => cause,
+      catch: (cause) => new WorkflowStepError({ step: name, operation: "sleep", cause }),
     }),
   sleepUntil: (name, timestamp) =>
     Effect.tryPromise({
       try: () => step.sleepUntil(name, timestamp),
-      catch: (cause) => cause,
+      catch: (cause) => new WorkflowStepError({ step: name, operation: "sleepUntil", cause }),
     }),
   waitForEvent: <Payload>(
     name: string,
@@ -129,8 +204,11 @@ const fromWorkflowStep = (
     },
   ) =>
     Effect.tryPromise({
-      try: () => step.waitForEvent(name, options) as Promise<WorkflowStepEvent<Payload>>,
-      catch: (cause) => cause,
+      try: () => {
+        // SAFETY: Cloudflare returns an event whose payload is determined by the caller's event contract.
+        return step.waitForEvent(name, options) as Promise<WorkflowStepEvent<Payload>>;
+      },
+      catch: (cause) => new WorkflowStepError({ step: name, operation: "waitForEvent", cause }),
     }),
 });
 
@@ -170,28 +248,18 @@ export const make = <ROut, LayerError, Payload = unknown, Result = unknown>(
     constructor(ctx: globalThis.ExecutionContext, env: WorkerEnv) {
       super(ctx, env);
 
-      let runWaitUntilEffect: RunWaitUntilEffect = () =>
-        Promise.reject(new Error("WorkerContext runtime is not initialized"));
-
-      const services = Layer.mergeAll(
-        Layer.succeed(ExecutionContext, ctx),
-        ConfigProvider.layer(Effect.succeed(WorkerConfig.providerFromEnv(env))),
-        Layer.succeed(
-          WorkerContext,
-          fromExecutionContext(ctx, (effect) => runWaitUntilEffect(effect)),
-        ),
-        Layer.succeed(WorkerEnvironment, env),
-      ) as Layer.Layer<ExecutionContext | WorkerContext | WorkerEnvironment, never, never>;
-
-      const runtimeLayer = Entrypoint.provideEntrypointServices<
+      this.runtime = Runtime.makeEntrypointRuntime<
         ROut,
         LayerError,
-        ExecutionContext | WorkerContext | WorkerEnvironment
-      >(layer, services);
-
-      this.runtime = ManagedRuntime.make(runtimeLayer);
-      runWaitUntilEffect = <A, E>(effect: Effect.Effect<A, E, never>) =>
-        this.runtime.runPromiseExit(effect as Effect.Effect<A, E, RuntimeContext<ROut>>);
+        ExecutionContext | WorkerContext
+      >(
+        layer,
+        env,
+        Layer.mergeAll(
+          Layer.succeed(ExecutionContext, ctx),
+          Layer.succeed(WorkerContext, fromExecutionContext(ctx)),
+        ),
+      );
     }
 
     run(
@@ -202,21 +270,11 @@ export const make = <ROut, LayerError, Payload = unknown, Result = unknown>(
         Layer.succeed(WorkflowEvent, fromWorkflowEvent(event)),
         Layer.succeed(
           WorkflowStep,
-          fromWorkflowStep(
-            step,
-            (effect) =>
-              this.runtime.runPromise(
-                effect as Effect.Effect<unknown, unknown, RuntimeContext<ROut>>,
-              ) as never,
-          ),
+          fromWorkflowStep(step, (effect) => this.runtime.runPromise(effect)),
         ),
       );
 
-      return this.runtime.runPromise(
-        Effect.scoped(
-          options.run(event.payload).pipe(Effect.provide(workflowServices)),
-        ) as Effect.Effect<Result, unknown, RuntimeContext<ROut>>,
-      );
+      return Runtime.runEventPromise(this.runtime, options.run(event.payload), workflowServices);
     }
   }
 
@@ -227,21 +285,19 @@ export const step = <A, E, R>(
   name: string,
   effect: Effect.Effect<A, E, R>,
   config?: WorkflowStepConfig,
-): Effect.Effect<A, unknown, WorkflowStep | Exclude<R, WorkflowStepContext>> =>
-  Effect.flatMap(WorkflowStep, (workflowStep) =>
-    workflowStep.do(name, effect, config),
-  ) as Effect.Effect<A, unknown, WorkflowStep | Exclude<R, WorkflowStepContext>>;
+): Effect.Effect<A, WorkflowStepError, WorkflowStep | Exclude<R, WorkflowStepContext>> =>
+  Effect.flatMap(WorkflowStep, (workflowStep) => workflowStep.do(name, effect, config));
 
 export const sleep = (
   name: string,
   duration: WorkflowSleepDuration,
-): Effect.Effect<void, unknown, WorkflowStep> =>
+): Effect.Effect<void, WorkflowStepError, WorkflowStep> =>
   Effect.flatMap(WorkflowStep, (workflowStep) => workflowStep.sleep(name, duration));
 
 export const sleepUntil = (
   name: string,
   timestamp: Date | number,
-): Effect.Effect<void, unknown, WorkflowStep> =>
+): Effect.Effect<void, WorkflowStepError, WorkflowStep> =>
   Effect.flatMap(WorkflowStep, (workflowStep) => workflowStep.sleepUntil(name, timestamp));
 
 export const waitForEvent = <Payload>(
@@ -250,7 +306,7 @@ export const waitForEvent = <Payload>(
     readonly type: string;
     readonly timeout?: WorkflowTimeoutDuration | number;
   },
-): Effect.Effect<WorkflowStepEvent<Payload>, unknown, WorkflowStep> =>
+): Effect.Effect<WorkflowStepEvent<Payload>, WorkflowStepError, WorkflowStep> =>
   Effect.flatMap(WorkflowStep, (workflowStep) => workflowStep.waitForEvent<Payload>(name, options));
 
 export type Definition<

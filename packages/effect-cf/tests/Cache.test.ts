@@ -1,7 +1,8 @@
 import { assert, expect, layer, test } from "@effect/vitest";
-import { Effect, Option } from "effect";
+import { Effect, Option, Predicate } from "effect";
 
 import { Cache } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
 interface MatchCall {
   readonly request: Cache.CacheRequest;
@@ -21,20 +22,20 @@ interface FakeCacheOptions {
 }
 
 const makeFakeCache = (options: FakeCacheOptions = {}) =>
-  ({
+  makePartialTestDouble<globalThis.Cache>({
     match: options.match ?? (async () => undefined),
     put: options.put ?? (async () => undefined),
     delete: options.delete ?? (async () => false),
-  }) as globalThis.Cache;
+  });
 
 const makeFakeStorage = (
   defaultCache: globalThis.Cache,
   open: (name: string) => Promise<globalThis.Cache> = async () => makeFakeCache(),
 ) =>
-  ({
+  makePartialTestDouble<globalThis.CacheStorage>({
     default: defaultCache,
     open,
-  }) as globalThis.CacheStorage;
+  });
 
 {
   const calls: Array<MatchCall> = [];
@@ -42,8 +43,11 @@ const makeFakeStorage = (
   const cache = makeFakeCache({
     match: async (request, options) => {
       calls.push({ request, options });
-      const url =
-        typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
+      const url = Predicate.isString(request)
+        ? request
+        : request instanceof URL
+          ? request.href
+          : request.url;
 
       return url.endsWith("/hit") ? response : undefined;
     },
@@ -100,8 +104,8 @@ const makeFakeStorage = (
         const deleted = yield* service.default.delete("https://example.com/item", {
           ignoreMethod: true,
         });
-        const rawCache = yield* service.default.unsafeRaw;
-        const rawStorage = yield* service.unsafeRaw;
+        const rawCache = yield* service.default.rawUnsafe;
+        const rawStorage = yield* service.rawUnsafe;
 
         assert.strictEqual(deleted, true);
         assert.deepStrictEqual(putCalls, [{ request: "https://example.com/item", response }]);
@@ -130,7 +134,7 @@ test("CacheStorage opens named caches", async () => {
     Effect.gen(function* () {
       const service = yield* Cache.CacheStorage;
       const cache = yield* service.open("api-cache");
-      const raw = yield* cache.unsafeRaw;
+      const raw = yield* cache.rawUnsafe;
 
       assert.strictEqual(cache.name, "api-cache");
       assert.strictEqual(raw, namedCache);

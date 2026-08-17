@@ -1,7 +1,8 @@
 import { assert, expect, layer, test } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Fiber, Layer } from "effect";
 
 import { AiGateway, Binding, WorkerEnvironment } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
 class DefaultGateway extends AiGateway.Tag<DefaultGateway>()("test/DefaultGateway") {}
 
@@ -12,7 +13,7 @@ interface FakeGatewayOptions {
 }
 
 const makeFakeGateway = (options: FakeGatewayOptions = {}) =>
-  ({
+  makePartialTestDouble<AiGateway.AiGatewayBinding>({
     run: options.run ?? (async () => new Response("ok")),
     getUrl: async (provider?: string) =>
       provider === undefined
@@ -20,7 +21,7 @@ const makeFakeGateway = (options: FakeGatewayOptions = {}) =>
         : `https://gateway.ai.cloudflare.com/v1/account/default/${provider}`,
     patchLog: async () => undefined,
     getLog: async () =>
-      ({
+      makePartialTestDouble<AiGatewayLog>({
         id: "log-1",
         provider: "workers-ai",
         model: "@cf/test/model",
@@ -34,16 +35,16 @@ const makeFakeGateway = (options: FakeGatewayOptions = {}) =>
         response_size: 1,
         response_head_complete: true,
         created_at: new Date("2026-01-01T00:00:00.000Z"),
-      }) as AiGatewayLog,
-  }) as AiGateway.AiGatewayBinding;
+      }),
+  });
 
 const makeFakeAi = (gateway: AiGateway.AiGatewayBinding) =>
-  ({
+  makePartialTestDouble<Ai>({
     aiGatewayLogId: null,
     gateway: () => gateway,
     models: async () => [],
-    run: async () => ({}),
-  }) as unknown as Ai;
+    run: () => Promise.reject(new Error("unused run")),
+  });
 
 const gatewayLayer = (gateway: AiGateway.AiGatewayBinding) =>
   DefaultGateway.layer({ binding: "AI", gatewayId: "default" }).pipe(
@@ -78,12 +79,73 @@ test("AI Gateway layer validates the AI binding shape", async () => {
       }).pipe(
         Effect.provide(
           DefaultGateway.layer({ binding: "AI", gatewayId: "default" }).pipe(
-            Layer.provide(Layer.succeed(WorkerEnvironment, { AI: {} as Ai })),
+            Layer.provide(Layer.succeed(WorkerEnvironment, { AI: makePartialTestDouble<Ai>({}) })),
           ),
         ),
       ),
     ),
   ).rejects.toBeInstanceOf(Binding.BindingValidationError);
+});
+
+test("AI Gateway HTTP client aborts in-flight requests on interruption", async () => {
+  let capturedSignal: AbortSignal | null | undefined;
+  let started = () => {};
+  const requestStarted = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const request: typeof fetch = (_input, init) => {
+    capturedSignal = init?.signal;
+    started();
+
+    return new Promise<Response>(() => {});
+  };
+  const client = AiGateway.makeHttpClient({ accountId: "account", gatewayId: "default" }, request);
+
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const fiber = yield* Effect.forkChild(client.fetch({}));
+
+      yield* Effect.promise(() => requestStarted);
+      yield* Fiber.interrupt(fiber);
+    }),
+  );
+
+  expect(capturedSignal).toBeDefined();
+  expect(capturedSignal?.aborted).toBe(true);
+});
+
+test("AI Gateway binding fetch aborts in-flight requests on interruption", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedSignal: AbortSignal | null | undefined;
+  let started = () => {};
+  const requestStarted = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+
+  globalThis.fetch = (_input, init) => {
+    capturedSignal = init?.signal;
+    started();
+
+    return new Promise<Response>(() => {});
+  };
+
+  try {
+    const client = AiGateway.makeClient({ binding: "AI", gatewayId: "default" }, makeFakeGateway());
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const fiber = yield* Effect.forkChild(client.fetch({}));
+
+        yield* Effect.promise(() => requestStarted);
+        yield* Fiber.interrupt(fiber);
+      }),
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  expect(capturedSignal).toBeDefined();
+  expect(capturedSignal?.aborted).toBe(true);
 });
 
 test("AI Gateway wraps operation failures", async () => {

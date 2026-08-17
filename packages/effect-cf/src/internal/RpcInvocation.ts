@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Predicate, Schema } from "effect";
 
 import type * as CloudflareRpc from "../Rpc";
 
@@ -6,7 +6,7 @@ type AnyArgs = Array<any>;
 
 export type AsyncMethodKey<Api> = {
   [Key in keyof Api]-?: Key extends string
-    ? Api[Key] extends (...args: AnyArgs) => Promise<unknown>
+    ? Api[Key] extends (...args: AnyArgs) => Promise<any>
       ? Key
       : never
     : never;
@@ -14,7 +14,7 @@ export type AsyncMethodKey<Api> = {
 
 export type AsyncMethodArgs<Api, Method extends keyof Api> = Api[Method] extends (
   ...args: infer Args
-) => Promise<unknown>
+) => Promise<any>
   ? Args
   : never;
 
@@ -28,11 +28,24 @@ export type AsyncMethodCloudflareReturn<Api, Method extends keyof Api> = Cloudfl
   AsyncMethodSuccess<Api, Method>
 >;
 
-const isPropertyTarget = (value: unknown): value is object =>
-  (typeof value === "object" || typeof value === "function") && value !== null;
+type RpcTargetValue = Schema.Schema.Type<typeof Schema.Unknown>;
+type RpcMethodOwner<Method extends PropertyKey> = {
+  readonly [Key in Method]?: RpcTargetValue;
+};
+
+const invokeWithReceiver = <Method extends PropertyKey, Args extends AnyArgs, Return>(
+  value: (...args: Args) => Return,
+  receiver: RpcMethodOwner<Method>,
+  args: Args,
+): Return => {
+  const result: RpcTargetValue = Function.prototype.apply.call(value, receiver, args);
+
+  // SAFETY: the native apply intrinsic returns value's declared Return while avoiding proxy property reads.
+  return result as Return;
+};
 
 export const lookupRpcMethod = <Api, Method extends AsyncMethodKey<Api>, Error>(
-  target: unknown,
+  target: RpcTargetValue,
   method: Method,
   makeError: (cause: unknown) => Error,
 ): Effect.Effect<
@@ -41,34 +54,47 @@ export const lookupRpcMethod = <Api, Method extends AsyncMethodKey<Api>, Error>(
 > =>
   Effect.try({
     try: () => {
-      if (!isPropertyTarget(target)) {
+      if (!Predicate.isObjectKeyword(target)) {
         throw new TypeError(`RPC target is not object-like`);
       }
 
-      const value = Reflect.get(target, method);
+      // SAFETY: this assertion enables one proxy property read; the result is validated before invocation.
+      const receiver = target as RpcMethodOwner<Method>;
+      const value = receiver[method];
 
-      if (typeof value !== "function") {
+      if (!Predicate.isFunction(value)) {
         throw new TypeError(`RPC method "${String(method)}" is not callable`);
       }
 
-      return ((...args: AsyncMethodArgs<Api, Method>) => Reflect.apply(value, target, args)) as (
+      // SAFETY: the runtime check proves callability; Api and Method supply this binding's call contract.
+      const callable = value as (
         ...args: AsyncMethodArgs<Api, Method>
       ) => AsyncMethodCloudflareReturn<Api, Method>;
+
+      return (...args: AsyncMethodArgs<Api, Method>): AsyncMethodCloudflareReturn<Api, Method> =>
+        invokeWithReceiver<
+          Method,
+          AsyncMethodArgs<Api, Method>,
+          AsyncMethodCloudflareReturn<Api, Method>
+        >(callable, receiver, args);
     },
     catch: makeError,
   });
 
-export const invokeRpcMethod = <Api, Method extends AsyncMethodKey<Api>, Error>(
-  target: unknown,
+export const invokeRpcMethod = Effect.fnUntraced(function* <
+  Api,
+  Method extends AsyncMethodKey<Api>,
+  Error,
+>(
+  target: RpcTargetValue,
   method: Method,
   args: AsyncMethodArgs<Api, Method>,
   makeError: (cause: unknown) => Error,
-): Effect.Effect<AsyncMethodCloudflareReturn<Api, Method>, Error> =>
-  Effect.gen(function* () {
-    const fn = yield* lookupRpcMethod<Api, Method, Error>(target, method, makeError);
+): Effect.fn.Return<AsyncMethodCloudflareReturn<Api, Method>, Error> {
+  const fn = yield* lookupRpcMethod<Api, Method, Error>(target, method, makeError);
 
-    return yield* Effect.try({
-      try: () => fn(...args),
-      catch: makeError,
-    });
+  return yield* Effect.try({
+    try: () => fn(...args),
+    catch: makeError,
   });
+});

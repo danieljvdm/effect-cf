@@ -48,3 +48,6 @@ Session.vim
 # dev-kit managed paths
 .repos/
 .dev-kit/
+
+# Local Git worktrees
+.worktrees/

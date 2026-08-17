@@ -3,11 +3,13 @@ import type {
   Workflow as CloudflareWorkflow,
   WorkflowInstance as CloudflareWorkflowInstance,
   WorkflowInstanceCreateOptions as CloudflareWorkflowInstanceCreateOptions,
+  WorkflowInstanceRestartOptions as CloudflareWorkflowInstanceRestartOptions,
 } from "@cloudflare/workers-types";
-import { type Context, Data, Effect, Option, Schema as S } from "effect";
+import { type Context, Data, Effect, Option, Predicate, Schema as S } from "effect";
 
 import * as Binding from "./Binding";
 import type * as RpcDefinition from "./RpcDefinition";
+import * as ErrorMessage from "./internal/ErrorMessage";
 
 const expectedWorkflow = "Workflow binding with create(), createBatch(), and get()";
 
@@ -20,13 +22,7 @@ export type WorkflowInstanceCreateBatchOptions<Payload, EncodedPayload = unknown
   { readonly payload: Payload } & WorkflowInstanceCreateOptions<EncodedPayload>
 >;
 
-export interface WorkflowInstanceRestartOptions {
-  readonly from?: {
-    readonly name?: string;
-    readonly count?: number;
-    readonly type?: string;
-  };
-}
+export type WorkflowInstanceRestartOptions = CloudflareWorkflowInstanceRestartOptions;
 
 export type WorkflowInstanceStatusName = CloudflareInstanceStatus["status"];
 
@@ -92,20 +88,28 @@ export interface WorkflowBindingClient<
   readonly get: (
     instanceId: string,
   ) => Effect.Effect<WorkflowInstance<S.Schema.Type<Result>>, WorkflowOperationError>;
-  readonly unsafeRaw: Effect.Effect<CloudflareWorkflow<S.Codec.Encoded<Payload>>>;
+  readonly rawUnsafe: Effect.Effect<CloudflareWorkflow<S.Codec.Encoded<Payload>>>;
 }
 
 export class WorkflowOperationError extends Data.TaggedError("WorkflowOperationError")<{
   readonly binding: string;
   readonly operation: string;
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Workflow ${this.operation} failed for binding "${this.binding}": ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 export class WorkflowResultDecodeError extends Data.TaggedError("WorkflowResultDecodeError")<{
   readonly binding: string;
   readonly instanceId: string;
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Workflow result decode failed for binding "${this.binding}" instance "${this.instanceId}": ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 const workflowError = (binding: string, operation: string, cause: unknown) =>
   new WorkflowOperationError({ binding, operation, cause });
@@ -120,19 +124,22 @@ const tryWorkflowPromise = <A>(
     catch: (cause) => workflowError(binding, operation, cause),
   });
 
-export const isWorkflow = <Payload>(value: unknown): value is CloudflareWorkflow<Payload> => {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
+type WorkflowBindingValue = S.Schema.Type<typeof S.Unknown>;
 
-  const resource = value as Record<string, unknown>;
+const WorkflowBindingSchema = S.declare(
+  (value: WorkflowBindingValue): value is CloudflareWorkflow<WorkflowBindingValue> =>
+    Predicate.hasProperty(value, "create") &&
+    Predicate.isFunction(value.create) &&
+    Predicate.hasProperty(value, "createBatch") &&
+    Predicate.isFunction(value.createBatch) &&
+    Predicate.hasProperty(value, "get") &&
+    Predicate.isFunction(value.get),
+);
+const decodeWorkflowBinding = S.decodeUnknownOption(WorkflowBindingSchema);
 
-  return (
-    typeof resource.create === "function" &&
-    typeof resource.createBatch === "function" &&
-    typeof resource.get === "function"
-  );
-};
+export const isWorkflow = <Payload>(
+  value: WorkflowBindingValue,
+): value is CloudflareWorkflow<Payload> => Option.isSome(decodeWorkflowBinding(value));
 
 export const makeClient = <
   Payload extends RpcDefinition.ServiceFreeSchema,
@@ -159,17 +166,16 @@ export const makeClient = <
       pause: operation("pause", () => raw.pause()),
       resume: operation("resume", () => raw.resume()),
       terminate: operation("terminate", () => raw.terminate()),
-      restart: (options) =>
-        operation("restart", () =>
-          (raw as { restart(options?: WorkflowInstanceRestartOptions): Promise<void> }).restart(
-            options,
-          ),
-        ),
+      restart: (options) => operation("restart", () => raw.restart(options)),
       status: operation("status", () => raw.status()).pipe(
         Effect.flatMap((status) =>
           Effect.gen(function* () {
+            // Cloudflare reports `output: null` as a no-output sentinel while an
+            // instance is not complete; only a complete instance may carry a real
+            // null result (e.g. Schema.Null).
             const output =
-              status.output === undefined
+              status.output === undefined ||
+              (status.output === null && status.status !== "complete")
                 ? Option.none<ResultValue>()
                 : Option.some(
                     yield* decodeResult(status.output).pipe(
@@ -200,10 +206,9 @@ export const makeClient = <
   };
 
   return (workflow) => ({
-    create: Effect.fnUntraced(function* (
-      payload: PayloadValue,
-      options?: WorkflowInstanceCreateOptions<EncodedPayload>,
-    ) {
+    create: Effect.fn("WorkflowBinding.create", {
+      attributes: { binding: definition.binding, operation: "create" },
+    })(function* (payload: PayloadValue, options?: WorkflowInstanceCreateOptions<EncodedPayload>) {
       const encoded = yield* encodePayload(payload);
       const raw = yield* tryWorkflowPromise(definition.binding, "create", () =>
         workflow.create({ ...options, params: encoded }),
@@ -211,9 +216,9 @@ export const makeClient = <
 
       return wrapInstance(raw);
     }),
-    createBatch: Effect.fnUntraced(function* (
-      batch: WorkflowInstanceCreateBatchOptions<PayloadValue, EncodedPayload>,
-    ) {
+    createBatch: Effect.fn("WorkflowBinding.createBatch", {
+      attributes: { binding: definition.binding, operation: "createBatch" },
+    })(function* (batch: WorkflowInstanceCreateBatchOptions<PayloadValue, EncodedPayload>) {
       const encodedBatch: Array<CloudflareWorkflowInstanceCreateOptions<EncodedPayload>> = [];
 
       for (const item of batch) {
@@ -235,7 +240,7 @@ export const makeClient = <
       tryWorkflowPromise(definition.binding, "get", () => workflow.get(instanceId)).pipe(
         Effect.map(wrapInstance),
       ),
-    unsafeRaw: Effect.succeed(workflow),
+    rawUnsafe: Effect.succeed(workflow),
   });
 };
 

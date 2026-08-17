@@ -46,15 +46,20 @@ jobs:
           git fetch origin "$BASE_REF" --depth=1
           changed_files="$(git diff --name-only "origin/$BASE_REF"...HEAD)"
 
+          needs_changeset=false
           has_changeset=false
           while IFS= read -r file; do
+            if [[ "$file" == packages/effect-cf/src/* || "$file" == packages/effect-cf/package.json ||
+                  "$file" == packages/effect-webtransport/src/* || "$file" == packages/effect-webtransport/package.json ]]; then
+              needs_changeset=true
+            fi
             if [[ "$file" == .changeset/*.md && "$file" != ".changeset/README.md" ]]; then
               has_changeset=true
-              break
             fi
           done <<<"$changed_files"
 
-          if [[ "$has_changeset" != true ]]; then
-            echo "Every PR must include a changeset file under .changeset/. Use an empty changeset for non-release changes."
+          if [[ "$needs_changeset" == true && "$has_changeset" != true ]]; then
+            echo "PRs that change a publishable package's src or package.json must include a changeset under .changeset/."
+            echo "Internal-only PRs need no changeset. Never add an empty changeset: a pending changeset on main silently blocks the next release publish."
             exit 1
           fi

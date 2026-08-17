@@ -1,8 +1,18 @@
 import { assert, expect, layer, test } from "@effect/vitest";
-import { Config, ConfigProvider, Effect, Layer, Option, Redacted, Schema as S } from "effect";
+import {
+  Config,
+  ConfigProvider,
+  Effect,
+  Layer,
+  Option,
+  Predicate,
+  Redacted,
+  Schema as S,
+} from "effect";
 import { type HttpClient, FetchHttpClient } from "effect/unstable/http";
 
 import { AnalyticsEngine, Binding, WorkerEnvironment } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
 class RequestAnalytics extends AnalyticsEngine.Tag<RequestAnalytics>()("test/RequestAnalytics") {}
 
@@ -12,39 +22,21 @@ class RequestAnalyticsQuery extends AnalyticsEngine.QueryTag<RequestAnalyticsQue
 
 interface FakeAnalyticsEngineDataset extends AnalyticsEngine.AnalyticsEngineBinding {
   readonly points: Array<AnalyticsEngine.AnalyticsEngineDataPoint | undefined>;
-  readonly batches: Array<Array<AnalyticsEngine.AnalyticsEngineDataPoint>>;
-  readonly writeDataPoints?: (
-    dataPoints: ReadonlyArray<AnalyticsEngine.AnalyticsEngineDataPoint>,
-  ) => void;
 }
 
 const makeFakeAnalyticsEngineDataset = (
   writeDataPoint?: (dataPoint?: AnalyticsEngine.AnalyticsEngineDataPoint) => void,
-  options?: {
-    readonly nativeWriteDataPoints?: boolean;
-  },
 ): FakeAnalyticsEngineDataset => {
   const points: Array<AnalyticsEngine.AnalyticsEngineDataPoint | undefined> = [];
-  const batches: Array<Array<AnalyticsEngine.AnalyticsEngineDataPoint>> = [];
 
   return {
     points,
-    batches,
     writeDataPoint:
       writeDataPoint ??
       ((dataPoint) => {
         points.push(dataPoint);
       }),
-    ...(options?.nativeWriteDataPoints === true
-      ? {
-          writeDataPoints: (
-            dataPoints: ReadonlyArray<AnalyticsEngine.AnalyticsEngineDataPoint>,
-          ) => {
-            batches.push([...dataPoints]);
-          },
-        }
-      : {}),
-  } as FakeAnalyticsEngineDataset;
+  } satisfies FakeAnalyticsEngineDataset;
 };
 
 const analyticsLayer = (
@@ -63,20 +55,27 @@ const queryLayerWithFetch = (
   request: typeof fetch,
 ) => queryLayer.pipe(Layer.provide(fetchLayer(request)));
 
-layer(analyticsLayer(makeFakeAnalyticsEngineDataset()))("AnalyticsEngine", (it) => {
+const rawDataset = makeFakeAnalyticsEngineDataset();
+
+layer(analyticsLayer(rawDataset))("AnalyticsEngine", (it) => {
   it.effect("writes data points to the native binding", () =>
     Effect.gen(function* () {
       const analytics = yield* RequestAnalytics;
-      const raw = yield* analytics.unsafeRaw;
+      const raw = yield* analytics.rawUnsafe;
 
       yield* analytics.writeDataPoint({
         indexes: ["example.com"],
         blobs: ["/home", "US", null],
         doubles: [1, 42],
       });
-      yield* analytics.write({ indexes: ["example.com"], blobs: ["/pricing"], doubles: [1] });
+      yield* analytics.writeDataPoint({
+        indexes: ["example.com"],
+        blobs: ["/pricing"],
+        doubles: [1],
+      });
 
-      assert.deepStrictEqual((raw as FakeAnalyticsEngineDataset).points, [
+      assert.strictEqual(raw, rawDataset);
+      assert.deepStrictEqual(rawDataset.points, [
         {
           indexes: ["example.com"],
           blobs: ["/home", "US", null],
@@ -257,24 +256,25 @@ test("AnalyticsEngine hard-error policy can override a drop layer policy", async
   assert.deepStrictEqual(dataset.points, []);
 });
 
-test("AnalyticsEngine batches writeDataPoints through the native batch API when available", async () => {
-  const dataset = makeFakeAnalyticsEngineDataset(undefined, { nativeWriteDataPoints: true });
+test("AnalyticsEngine writes every point in a batch through the native binding", async () => {
+  const dataset = makeFakeAnalyticsEngineDataset();
 
   await Effect.runPromise(
     Effect.gen(function* () {
       const analytics = yield* RequestAnalytics;
 
-      yield* analytics.writeDataPoints(
-        [{ indexes: ["one"] }, { indexes: ["two"] }, { indexes: ["three"] }],
-        { batchSize: 2 },
-      );
+      yield* analytics.writeDataPoints([
+        { indexes: ["one"] },
+        { indexes: ["two"] },
+        { indexes: ["three"] },
+      ]);
     }).pipe(Effect.provide(analyticsLayer(dataset))),
   );
 
-  assert.deepStrictEqual(dataset.points, []);
-  assert.deepStrictEqual(dataset.batches, [
-    [{ indexes: ["one"] }, { indexes: ["two"] }],
-    [{ indexes: ["three"] }],
+  assert.deepStrictEqual(dataset.points, [
+    { indexes: ["one"] },
+    { indexes: ["two"] },
+    { indexes: ["three"] },
   ]);
 });
 
@@ -290,7 +290,7 @@ test("AnalyticsEngine enforces the per-invocation data point limit", async () =>
       Effect.gen(function* () {
         const analytics = yield* RequestAnalytics;
 
-        yield* analytics.writeBatch(dataPoints);
+        yield* analytics.writeDataPoints(dataPoints);
       }).pipe(Effect.provide(analyticsLayer(dataset))),
     ),
   ).rejects.toMatchObject({
@@ -321,7 +321,7 @@ test("AnalyticsEngine drops over-limit and invalid batch points when configured"
     Effect.gen(function* () {
       const analytics = yield* RequestAnalytics;
 
-      yield* analytics.writeBatch(dataPoints, { onInvalid: "drop" });
+      yield* analytics.writeDataPoints(dataPoints, { onInvalid: "drop" });
     }).pipe(Effect.provide(analyticsLayer(dataset))),
   );
 
@@ -345,7 +345,9 @@ test("AnalyticsEngine layer validates the binding shape", async () => {
           RequestAnalytics.layer({ binding: "REQUEST_ANALYTICS" }).pipe(
             Layer.provide(
               Layer.succeed(WorkerEnvironment, {
-                REQUEST_ANALYTICS: {} as AnalyticsEngine.AnalyticsEngineBinding,
+                REQUEST_ANALYTICS: makePartialTestDouble<AnalyticsEngine.AnalyticsEngineBinding>(
+                  {},
+                ),
               }),
             ),
           ),
@@ -389,13 +391,12 @@ test("AnalyticsEngine query client posts SQL with redacted authorization and dec
     readonly body: string | undefined;
   }> = [];
   const request: typeof fetch = async (input, init) => {
-    const url = typeof input === "string" || input instanceof URL ? input.toString() : input.url;
-    const body =
-      typeof init?.body === "string"
-        ? init.body
-        : init?.body instanceof Uint8Array
-          ? new TextDecoder().decode(init.body)
-          : undefined;
+    const url = Predicate.isString(input) || input instanceof URL ? input.toString() : input.url;
+    const body = Predicate.isString(init?.body)
+      ? init.body
+      : init?.body instanceof Uint8Array
+        ? new TextDecoder().decode(init.body)
+        : undefined;
 
     seen.push({
       url,

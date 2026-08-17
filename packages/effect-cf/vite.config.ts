@@ -27,6 +27,8 @@ export default defineConfig({
         test: {
           name: "node",
           alias: {
+            "cloudflare:workflows": new URL("./tests/cloudflare-workflows.ts", import.meta.url)
+              .pathname,
             "cloudflare:workers": new URL("./tests/cloudflare-workers.ts", import.meta.url)
               .pathname,
           },
@@ -53,9 +55,16 @@ export default defineConfig({
     ],
   },
   pack: {
-    entry: ["src/index.ts", "src/HyperdrivePg.ts"],
+    entry: [
+      "src/index.ts",
+      "src/ComputerArtifacts.ts",
+      "src/ComputerWorkspace.ts",
+      "src/ComputerWorkspaceHost.ts",
+      "src/HyperdrivePg.ts",
+      "src/Vitest.ts",
+    ],
     deps: {
-      neverBundle: ["cloudflare:workers"],
+      neverBundle: ["cloudflare:test", "cloudflare:workers", "cloudflare:workflows"],
     },
     dts: {
       tsgo: true,

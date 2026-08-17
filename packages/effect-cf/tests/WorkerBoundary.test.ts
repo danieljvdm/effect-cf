@@ -1,8 +1,28 @@
-import { Clock, Config, ConfigProvider, Context, Effect, Layer, Stream } from "effect";
-import { HttpServerResponse } from "effect/unstable/http";
+import {
+  Cause,
+  Clock,
+  Config,
+  ConfigProvider,
+  Context,
+  Data,
+  Effect,
+  Layer,
+  Logger,
+  Schema as S,
+  Stream,
+} from "effect";
+import { HttpEffect, HttpServerResponse } from "effect/unstable/http";
+import { OtlpExporter } from "effect/unstable/observability";
 import { expect, test } from "vite-plus/test";
 
-import { DurableObject, Worker, WorkerConfig } from "../src/index";
+import {
+  DurableObject,
+  DurableObjectDefinition,
+  Worker,
+  WorkerConfig,
+  WorkerDefinition,
+} from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
 class RenderValue extends Context.Service<RenderValue, string>()(
   "effect-cf/test/WorkerBoundary/RenderValue",
@@ -12,20 +32,77 @@ class EventValue extends Context.Service<EventValue, string>()(
   "effect-cf/test/WorkerBoundary/EventValue",
 ) {}
 
+class BoomError extends Data.TaggedError("BoomError") {}
+
+interface HeadersWithSetCookie extends Headers {
+  getSetCookie(): Array<string>;
+}
+
+const TelemetryWorker = WorkerDefinition.make("TelemetryWorker", {
+  succeed: WorkerDefinition.method({ success: S.String }),
+  fail: WorkerDefinition.method({ success: S.String }),
+});
+
+const TelemetryDurableObject = DurableObjectDefinition.make("TelemetryDurableObject", {
+  succeed: DurableObjectDefinition.method({ success: S.String }),
+});
+
 const makeExecutionContext = () =>
-  ({
+  makePartialTestDouble<globalThis.ExecutionContext>({
     props: undefined,
     waitUntil: () => undefined,
     passThroughOnException: () => undefined,
-  }) as unknown as globalThis.ExecutionContext;
+  });
 
-const makeDurableObjectState = () =>
-  ({
-    id: { toString: () => "durable-object:test" },
-    storage: {},
-    waitUntil: () => undefined,
+const makeWaitUntilContext = () => {
+  const waitUntilPromises: Array<Promise<unknown>> = [];
+
+  const executionContext = makePartialTestDouble<globalThis.ExecutionContext>({
+    props: undefined,
+    waitUntil: (promise: Promise<unknown>) => {
+      waitUntilPromises.push(promise);
+    },
+    passThroughOnException: () => undefined,
+  });
+
+  return { executionContext, waitUntilPromises };
+};
+
+const makeDurableObjectState = (waitUntil: (promise: Promise<unknown>) => void = () => undefined) =>
+  makePartialTestDouble<globalThis.DurableObjectState>({
+    id: makePartialTestDouble<globalThis.DurableObjectId>({
+      toString: () => "durable-object:test",
+    }),
+    storage: makePartialTestDouble<globalThis.DurableObjectStorage>({}),
+    waitUntil,
     blockConcurrencyWhile: async <T>(callback: () => Promise<T>) => callback(),
-  }) as unknown as globalThis.DurableObjectState;
+  });
+
+const makeFlusherProbeLayer = (flushes: Array<string>) =>
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const flusher = yield* OtlpExporter.Flusher;
+
+      yield* flusher.register(
+        Effect.sync(() => {
+          flushes.push("flush");
+        }),
+      );
+    }),
+  ).pipe(Layer.provideMerge(OtlpExporter.layerFlusher));
+
+interface CapturedLog {
+  readonly cause: Cause.Cause<unknown>;
+  readonly level: string;
+  readonly message: unknown;
+}
+
+const makeCapturedLoggerLayer = (logs: Array<CapturedLog>) =>
+  Logger.layer([
+    Logger.make(({ cause, logLevel, message }) => {
+      logs.push({ cause, level: logLevel, message });
+    }),
+  ]);
 
 test("Worker.makeFetchHandler returns an ExportedHandler-compatible fetch object", async () => {
   const handler = Worker.makeFetchHandler(Layer.empty, {
@@ -40,12 +117,213 @@ test("Worker.makeFetchHandler returns an ExportedHandler-compatible fetch object
 
   const response = await handler.fetch(
     new Request("https://worker.test/"),
-    {} as Cloudflare.Env,
+    makePartialTestDouble<Cloudflare.Env>({}),
     makeExecutionContext(),
   );
 
   expect(response.status).toBe(200);
   await expect(response.text()).resolves.toBe("ok");
+});
+
+test("Worker.makeFetchHandler builds the runtime once per env and rebinds request context", async () => {
+  let builds = 0;
+  const countingLayer = Layer.effectDiscard(
+    Effect.sync(() => {
+      builds++;
+    }),
+  );
+
+  const handler = Worker.makeFetchHandler(countingLayer, {
+    fetch: Effect.gen(function* () {
+      const ctx = yield* Worker.WorkerContext;
+
+      yield* ctx.waitUntil(Effect.void);
+
+      return new Response("ok");
+    }),
+  });
+
+  const env = makePartialTestDouble<Cloudflare.Env>({});
+  const first = makeWaitUntilContext();
+  const second = makeWaitUntilContext();
+
+  await handler.fetch(new Request("https://worker.test/one"), env, first.executionContext);
+  await handler.fetch(new Request("https://worker.test/two"), env, second.executionContext);
+
+  expect(builds).toBe(1);
+  expect(first.waitUntilPromises).toHaveLength(1);
+  expect(second.waitUntilPromises).toHaveLength(1);
+});
+
+test("Worker.fetch flushes runtime OTLP telemetry through waitUntil", async () => {
+  const flushes: Array<string> = [];
+  const flusherProbe = Layer.effectDiscard(
+    Effect.gen(function* () {
+      const flusher = yield* OtlpExporter.Flusher;
+
+      yield* flusher.register(
+        Effect.sync(() => {
+          flushes.push("flush");
+        }),
+      );
+    }),
+  ).pipe(Layer.provideMerge(OtlpExporter.layerFlusher));
+
+  const Live = Worker.make(flusherProbe, {
+    fetch: Effect.succeed(new Response("ok")),
+  });
+  const { executionContext, waitUntilPromises } = makeWaitUntilContext();
+  const worker = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
+
+  const response = await worker.fetch(new Request("https://worker.test/"));
+
+  expect(response.status).toBe(200);
+  expect(waitUntilPromises).toHaveLength(1);
+
+  await Promise.all(waitUntilPromises);
+
+  expect(flushes).toEqual(["flush"]);
+});
+
+test("WorkerDefinition RPC schedules event-scoped OTLP telemetry after success", async () => {
+  const flushes: Array<string> = [];
+  const Live = TelemetryWorker.make(Layer.empty, {
+    eventLayer: makeFlusherProbeLayer(flushes),
+    rpc: {
+      succeed: () => Effect.succeed("result"),
+      fail: () => Effect.succeed("unused"),
+    },
+  });
+  const { executionContext, waitUntilPromises } = makeWaitUntilContext();
+  const worker = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
+
+  await expect(worker.succeed()).resolves.toBe("result");
+  expect(waitUntilPromises).toHaveLength(1);
+
+  await Promise.all(waitUntilPromises);
+
+  expect(flushes).toEqual(["flush"]);
+});
+
+test("WorkerDefinition RPC preserves handler failure and still schedules telemetry", async () => {
+  const flushes: Array<string> = [];
+  const handlerFailure = new BoomError();
+  const Live = TelemetryWorker.make(Layer.empty, {
+    eventLayer: makeFlusherProbeLayer(flushes),
+    rpc: {
+      succeed: () => Effect.succeed("unused"),
+      fail: () => Effect.fail(handlerFailure),
+    },
+  });
+  const { executionContext, waitUntilPromises } = makeWaitUntilContext();
+  const worker = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
+
+  await expect(worker.fail()).rejects.toBe(handlerFailure);
+  expect(waitUntilPromises).toHaveLength(1);
+
+  await Promise.all(waitUntilPromises);
+
+  expect(flushes).toEqual(["flush"]);
+});
+
+test("WorkerDefinition RPC does not schedule background work without a flusher", async () => {
+  const Live = TelemetryWorker.make(Layer.empty, {
+    rpc: {
+      succeed: () => Effect.succeed("result"),
+      fail: () => Effect.succeed("unused"),
+    },
+  });
+  const { executionContext, waitUntilPromises } = makeWaitUntilContext();
+  const worker = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
+
+  await expect(worker.succeed()).resolves.toBe("result");
+  expect(waitUntilPromises).toHaveLength(0);
+});
+
+test("WorkerDefinition RPC silently absorbs telemetry flush failure", async () => {
+  const secret = "Bearer sensitive-exporter-credential";
+  const flushFailure = Object.assign(new Error(`foreign exporter failure: ${secret}`), {
+    headers: { authorization: secret },
+    payload: { secret },
+  });
+  const logs: Array<CapturedLog> = [];
+  let flushAttempts = 0;
+  const failingFlusher = Layer.succeed(OtlpExporter.Flusher, {
+    flush: Effect.sync(() => {
+      flushAttempts++;
+      throw flushFailure;
+    }),
+    register: () => Effect.void,
+  });
+  const Live = TelemetryWorker.make(Layer.mergeAll(failingFlusher, makeCapturedLoggerLayer(logs)), {
+    rpc: {
+      succeed: () => Effect.succeed("result"),
+      fail: () => Effect.succeed("unused"),
+    },
+  });
+  const { executionContext, waitUntilPromises } = makeWaitUntilContext();
+  const worker = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
+
+  await expect(worker.succeed()).resolves.toBe("result");
+  expect(waitUntilPromises).toHaveLength(1);
+  await expect(Promise.all(waitUntilPromises)).resolves.toEqual([undefined]);
+  expect(flushAttempts).toBe(1);
+  expect(logs).toEqual([]);
+});
+
+test("WorkerDefinition RPC does not log telemetry scheduling failures", async () => {
+  const handlerFailure = new BoomError();
+  const secret = "Bearer sensitive-platform-credential";
+  const schedulingFailure = Object.assign(new Error(`foreign waitUntil failure: ${secret}`), {
+    headers: { authorization: secret },
+    payload: { secret },
+  });
+  const logs: Array<CapturedLog> = [];
+  let schedulingAttempts = 0;
+  const Live = TelemetryWorker.make(
+    Layer.mergeAll(OtlpExporter.layerFlusher, makeCapturedLoggerLayer(logs)),
+    {
+      rpc: {
+        succeed: () => Effect.succeed("unused"),
+        fail: () => Effect.fail(handlerFailure),
+      },
+    },
+  );
+  const executionContext = makePartialTestDouble<globalThis.ExecutionContext>({
+    props: undefined,
+    waitUntil: () => {
+      schedulingAttempts++;
+      throw schedulingFailure;
+    },
+    passThroughOnException: () => undefined,
+  });
+  const worker = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
+
+  await expect(worker.fail()).rejects.toBe(handlerFailure);
+  expect(schedulingAttempts).toBe(1);
+  expect(logs).toEqual([]);
+});
+
+test("DurableObjectDefinition RPC uses DurableObjectState.waitUntil for telemetry", async () => {
+  const flushes: Array<string> = [];
+  const waitUntilPromises: Array<Promise<unknown>> = [];
+  const Live = TelemetryDurableObject.make(Layer.empty, {
+    eventLayer: makeFlusherProbeLayer(flushes),
+    rpc: {
+      succeed: () => Effect.succeed("result"),
+    },
+  });
+  const durableObject = new Live(
+    makeDurableObjectState((promise) => waitUntilPromises.push(promise)),
+    makePartialTestDouble<Cloudflare.Env>({}),
+  );
+
+  await expect(durableObject.succeed()).resolves.toBe("result");
+  expect(waitUntilPromises).toHaveLength(1);
+
+  await Promise.all(waitUntilPromises);
+
+  expect(flushes).toEqual(["flush"]);
 });
 
 test("Worker.make accepts a fetch Effect shorthand", async () => {
@@ -57,7 +335,7 @@ test("Worker.make accepts a fetch Effect shorthand", async () => {
       return new Response(value);
     }),
   );
-  const worker = new Live(makeExecutionContext(), {} as Cloudflare.Env);
+  const worker = new Live(makeExecutionContext(), makePartialTestDouble<Cloudflare.Env>({}));
 
   const response = await worker.fetch(new Request("https://worker.test/"));
 
@@ -88,7 +366,8 @@ test("Worker.fetch renders Effect HttpServerResponse values", async () => {
       if (path === "/context-stream") {
         const stream = RenderValue.pipe(Stream.fromEffect, Stream.encodeText);
 
-        // The handler runs with `RenderValue` already in context.
+        // SAFETY: This fixture deliberately leaves RenderValue in the stream environment to prove
+        // Worker.fetch supplies handler services while HttpServerResponse consumes the stream.
         // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off
         return HttpServerResponse.stream(stream as Stream.Stream<Uint8Array, never, never>);
       }
@@ -99,7 +378,7 @@ test("Worker.fetch renders Effect HttpServerResponse values", async () => {
       });
     }),
   });
-  const worker = new Live(makeExecutionContext(), {} as Cloudflare.Env);
+  const worker = new Live(makeExecutionContext(), makePartialTestDouble<Cloudflare.Env>({}));
 
   const textResponse = await worker.fetch(new Request("https://worker.test/text"));
 
@@ -111,9 +390,9 @@ test("Worker.fetch renders Effect HttpServerResponse values", async () => {
 
   expect(jsonResponse.status).toBe(201);
   expect(jsonResponse.headers.get("x-test")).toBe("ok");
-  expect(
-    (jsonResponse.headers as Headers & { getSetCookie(): Array<string> }).getSetCookie(),
-  ).toEqual(["session=123"]);
+  expect(makePartialTestDouble<HeadersWithSetCookie>(jsonResponse.headers).getSetCookie()).toEqual([
+    "session=123",
+  ]);
   await expect(jsonResponse.json()).resolves.toEqual({ ok: true });
 
   const emptyResponse = await worker.fetch(new Request("https://worker.test/empty"));
@@ -132,18 +411,137 @@ test("Worker.fetch renders Effect HttpServerResponse values", async () => {
   await expect(contextStreamResponse.text()).resolves.toBe("from-context");
 });
 
-test("Worker.renderHttpResponse converts HttpServerResponse values explicitly", async () => {
+test("Worker.fetch runs pre-response handlers on HttpServerResponse results", async () => {
   const Live = Worker.make(Layer.empty, {
-    fetch: Worker.renderHttpResponse(
-      Effect.succeed(HttpServerResponse.text("from-explicit-adapter")),
-    ),
+    fetch: Effect.gen(function* () {
+      yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+        Effect.succeed(
+          response.pipe(
+            HttpServerResponse.setHeader("cache-control", "no-store"),
+            HttpServerResponse.setCookieUnsafe("challenge", "abc"),
+          ),
+        ),
+      );
+
+      return HttpServerResponse.text("signed-in", { status: 202 });
+    }),
   });
-  const worker = new Live(makeExecutionContext(), {} as Cloudflare.Env);
+  const worker = new Live(makeExecutionContext(), makePartialTestDouble<Cloudflare.Env>({}));
+
+  const response = await worker.fetch(new Request("https://worker.test/auth"));
+
+  expect(response.status).toBe(202);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(makePartialTestDouble<HeadersWithSetCookie>(response.headers).getSetCookie()).toEqual([
+    "challenge=abc",
+  ]);
+  await expect(response.text()).resolves.toBe("signed-in");
+});
+
+test("Worker.fetch bypasses pre-response handlers for native Response results", async () => {
+  const Live = Worker.make(Layer.empty, {
+    fetch: Effect.gen(function* () {
+      yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+        Effect.succeed(HttpServerResponse.setCookieUnsafe(response, "challenge", "abc")),
+      );
+
+      return new Response("already-handled", {
+        headers: { "set-cookie": "challenge=from-app" },
+      });
+    }),
+  });
+  const worker = new Live(makeExecutionContext(), makePartialTestDouble<Cloudflare.Env>({}));
+
+  const response = await worker.fetch(new Request("https://worker.test/"));
+
+  expect(makePartialTestDouble<HeadersWithSetCookie>(response.headers).getSetCookie()).toEqual([
+    "challenge=from-app",
+  ]);
+  await expect(response.text()).resolves.toBe("already-handled");
+});
+
+test("Worker.fetch suppresses HttpServerResponse bodies for HEAD requests", async () => {
+  const Live = Worker.make(Layer.empty, {
+    fetch: Effect.succeed(HttpServerResponse.text("body", { headers: { "x-test": "yes" } })),
+  });
+  const worker = new Live(makeExecutionContext(), makePartialTestDouble<Cloudflare.Env>({}));
+
+  const response = await worker.fetch(new Request("https://worker.test/", { method: "HEAD" }));
+
+  expect(response.status).toBe(200);
+  expect(response.headers.get("x-test")).toBe("yes");
+  expect(response.body).toBeNull();
+});
+
+test("Worker.fetch keeps request-scoped resources alive while streaming bodies", async () => {
+  const events: Array<string> = [];
+
+  const Live = Worker.make(Layer.empty, {
+    fetch: Effect.gen(function* () {
+      yield* Effect.acquireRelease(
+        Effect.sync(() => events.push("acquire")),
+        () => Effect.sync(() => events.push("release")),
+      );
+
+      return HttpServerResponse.stream(
+        Stream.make("chunk-1", "chunk-2").pipe(
+          Stream.tap((chunk) =>
+            Effect.sync(() =>
+              events.push(events.includes("release") ? `${chunk}-after-release` : chunk),
+            ),
+          ),
+          Stream.encodeText,
+        ),
+      );
+    }),
+  });
+  const worker = new Live(makeExecutionContext(), makePartialTestDouble<Cloudflare.Env>({}));
+
+  const response = await worker.fetch(new Request("https://worker.test/stream"));
+
+  await expect(response.text()).resolves.toBe("chunk-1chunk-2");
+  await expect.poll(() => events).toEqual(["acquire", "chunk-1", "chunk-2", "release"]);
+});
+
+test("Worker.fetch renders handler failures as HTTP error responses", async () => {
+  const Live = Worker.make(Layer.empty, {
+    fetch: Effect.fail(new BoomError()),
+  });
+  const worker = new Live(makeExecutionContext(), makePartialTestDouble<Cloudflare.Env>({}));
+
+  const response = await worker.fetch(new Request("https://worker.test/"));
+
+  expect(response.status).toBe(500);
+});
+
+test("Worker.fetch applies pre-response handlers to rendered error responses", async () => {
+  const Live = Worker.make(Layer.empty, {
+    fetch: Effect.gen(function* () {
+      yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+        Effect.succeed(HttpServerResponse.setHeader(response, "cache-control", "no-store")),
+      );
+
+      return yield* new BoomError();
+    }),
+  });
+  const worker = new Live(makeExecutionContext(), makePartialTestDouble<Cloudflare.Env>({}));
+
+  const response = await worker.fetch(new Request("https://worker.test/auth"));
+
+  expect(response.status).toBe(500);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+});
+
+test("Worker.fetch accepts HttpServerResponse values returned directly", async () => {
+  const Live = Worker.make(Layer.empty, {
+    fetch: Effect.succeed(HttpServerResponse.text("from-direct-response")),
+  });
+  const worker = new Live(makeExecutionContext(), makePartialTestDouble<Cloudflare.Env>({}));
 
   const response = await worker.fetch(new Request("https://worker.test/"));
 
   expect(response.status).toBe(200);
-  await expect(response.text()).resolves.toBe("from-explicit-adapter");
+  await expect(response.text()).resolves.toBe("from-direct-response");
 });
 
 test("Worker fetch handlers read Effect config from env by default", async () => {
@@ -156,7 +554,7 @@ test("Worker fetch handlers read Effect config from env by default", async () =>
   });
   const worker = new Live(makeExecutionContext(), {
     APP_NAME: "effect-cf",
-  } as Cloudflare.Env);
+  });
 
   const response = await worker.fetch(new Request("https://worker.test/"));
 
@@ -173,7 +571,7 @@ test("Durable Object fetch handlers read Effect config from env by default", asy
   });
   const durableObject = new Live(makeDurableObjectState(), {
     APP_NAME: "effect-cf",
-  } as Cloudflare.Env);
+  });
 
   const response = await durableObject.fetch!(new Request("https://worker.test/"));
 
@@ -184,8 +582,7 @@ test("WorkerConfig.layerWith derives Effect config from non-scalar env bindings"
   const Live = Worker.make(
     WorkerConfig.layerWith((env) =>
       ConfigProvider.fromUnknown({
-        DATABASE_URL: (env as unknown as { HYPERDRIVE: { connectionString: string } }).HYPERDRIVE
-          .connectionString,
+        DATABASE_URL: env.HYPERDRIVE!.connectionString,
       }),
     ),
     {
@@ -197,8 +594,10 @@ test("WorkerConfig.layerWith derives Effect config from non-scalar env bindings"
     },
   );
   const worker = new Live(makeExecutionContext(), {
-    HYPERDRIVE: { connectionString: "postgres://hyperdrive.test/app" },
-  } as unknown as Cloudflare.Env);
+    HYPERDRIVE: makePartialTestDouble<Hyperdrive>({
+      connectionString: "postgres://hyperdrive.test/app",
+    }),
+  });
 
   const response = await worker.fetch(new Request("https://worker.test/"));
 
@@ -219,12 +618,22 @@ test("Worker handlers use an epoch nanosecond clock derived from wall time", asy
         return Response.json({ nanos: nanos.toString() });
       }),
     });
-    const worker = new WorkerClass(makeExecutionContext(), {} as Cloudflare.Env);
+    const worker = new WorkerClass(
+      makeExecutionContext(),
+      makePartialTestDouble<Cloudflare.Env>({}),
+    );
 
     const response = await worker.fetch(new Request("https://worker.test/clock"));
-    const body = (await response.json()) as { readonly nanos: string };
+    const body = S.decodeUnknownSync(S.Struct({ nanos: S.String }))(await response.json());
 
-    expect(BigInt(body.nanos)).toBe(BigInt(fixedMillis) * BigInt(1_000_000));
+    // The default clock anchors epoch nanoseconds to a monotonic source and
+    // re-anchors once wall-clock skew exceeds one second, so nanoseconds stay
+    // within that threshold of `Date.now()`.
+    const wallNanos = BigInt(fixedMillis) * BigInt(1_000_000);
+    const skew = BigInt(body.nanos) - wallNanos;
+    const absoluteSkew = skew < BigInt(0) ? -skew : skew;
+
+    expect(absoluteSkew).toBeLessThan(BigInt(1_000_000_000));
   } finally {
     Date.now = originalDateNow;
   }
@@ -264,7 +673,7 @@ test("Worker eventLayer applies to fetch, queue, and RPC events", async () => {
       read: () => EventValue,
     },
   });
-  const worker = new WorkerClass(makeExecutionContext(), {} as Cloudflare.Env);
+  const worker = new WorkerClass(makeExecutionContext(), makePartialTestDouble<Cloudflare.Env>({}));
 
   const response = await worker.fetch(new Request("https://worker.test/"));
 
@@ -284,10 +693,10 @@ test("Worker eventLayer applies to fetch, queue, and RPC events", async () => {
 });
 
 const makeMessageBatch = (queue: string): globalThis.MessageBatch<unknown> =>
-  ({
+  makePartialTestDouble<globalThis.MessageBatch<unknown>>({
     queue,
     messages: [],
     metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
     ackAll: () => undefined,
     retryAll: () => undefined,
-  }) as globalThis.MessageBatch<unknown>;
+  });

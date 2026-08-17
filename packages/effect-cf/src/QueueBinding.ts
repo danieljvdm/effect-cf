@@ -7,7 +7,7 @@ import type {
   QueueSendOptions as CloudflareQueueSendOptions,
   QueueSendResponse as CloudflareQueueSendResponse,
 } from "@cloudflare/workers-types";
-import { type Context, Data, Effect, Schema as S } from "effect";
+import { type Context, Data, Effect, Predicate, Schema as S } from "effect";
 
 import * as Binding from "./Binding";
 import type * as RpcDefinition from "./RpcDefinition";
@@ -23,6 +23,8 @@ export type QueueProducer<Body> = Pick<CloudflareQueue<Body>, "send"> &
   Partial<Pick<CloudflareQueue<Body>, "sendBatch" | "metrics">>;
 
 const expectedQueueProducer = "Queue producer binding with send(); optional sendBatch()/metrics()";
+
+type QueueCandidate = Parameters<typeof Predicate.isUnknown>[0];
 
 export interface QueueBindingDefinition<Message extends RpcDefinition.ServiceFreeSchema> {
   /** Binding name as configured in `wrangler.jsonc`. */
@@ -41,7 +43,7 @@ export interface QueueBindingClient<Message extends RpcDefinition.ServiceFreeSch
     options?: QueueSendBatchOptions,
   ) => Effect.Effect<void, QueueOperationError | S.SchemaError>;
   readonly metrics: () => Effect.Effect<QueueMetrics, QueueOperationError>;
-  readonly unsafeRaw: Effect.Effect<CloudflareQueue<S.Codec.Encoded<Message>>>;
+  readonly rawUnsafe: Effect.Effect<QueueProducer<S.Codec.Encoded<Message>>>;
 }
 
 export class QueueOperationError extends Data.TaggedError("QueueOperationError")<{
@@ -67,15 +69,8 @@ const tryQueuePromise = <A>(
       }),
   });
 
-export const isQueue = <Body>(value: unknown): value is QueueProducer<Body> => {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-
-  const resource = value as Record<string, unknown>;
-
-  return typeof resource.send === "function";
-};
+export const isQueue = <Body>(value: QueueCandidate): value is QueueProducer<Body> =>
+  Predicate.hasProperty(value, "send") && Predicate.isFunction(value.send);
 
 export const makeClient = <Message extends RpcDefinition.ServiceFreeSchema>(
   definition: QueueBindingDefinition<Message>,
@@ -86,15 +81,16 @@ export const makeClient = <Message extends RpcDefinition.ServiceFreeSchema>(
   const encodeMessage = S.encodeEffect(definition.message);
 
   return (queue) => ({
-    send: Effect.fnUntraced(function* (message: Body, options?: QueueSendOptions) {
+    send: Effect.fn("QueueBinding.send", {
+      attributes: { binding: definition.binding, operation: "send" },
+    })(function* (message: Body, options?: QueueSendOptions) {
       const encoded = yield* encodeMessage(message);
 
       yield* tryQueuePromise(definition.binding, "send", () => queue.send(encoded, options));
     }),
-    sendBatch: Effect.fnUntraced(function* (
-      messages: Iterable<MessageSendRequest<Body>>,
-      options?: QueueSendBatchOptions,
-    ) {
+    sendBatch: Effect.fn("QueueBinding.sendBatch", {
+      attributes: { binding: definition.binding, operation: "sendBatch" },
+    })(function* (messages: Iterable<MessageSendRequest<Body>>, options?: QueueSendBatchOptions) {
       const encodedMessages: Array<MessageSendRequest<EncodedBody>> = [];
 
       for (const message of messages) {
@@ -106,22 +102,18 @@ export const makeClient = <Message extends RpcDefinition.ServiceFreeSchema>(
 
       const sendBatch = queue.sendBatch;
 
-      if (sendBatch !== undefined) {
-        yield* tryQueuePromise(definition.binding, "sendBatch", () =>
-          sendBatch.call(queue, encodedMessages, options),
-        );
-
-        return;
+      if (sendBatch === undefined) {
+        return yield* new QueueOperationError({
+          binding: definition.binding,
+          operation: "sendBatch",
+          cause: new Error(`Queue binding "${definition.binding}" does not provide sendBatch()`),
+          message: `Cloudflare queue binding "${definition.binding}" does not provide sendBatch()`,
+        });
       }
 
-      yield* tryQueuePromise(definition.binding, "sendBatch", async () => {
-        for (const message of encodedMessages) {
-          await queue.send(message.body, {
-            contentType: message.contentType,
-            delaySeconds: message.delaySeconds ?? options?.delaySeconds,
-          });
-        }
-      });
+      yield* tryQueuePromise(definition.binding, "sendBatch", () =>
+        sendBatch.call(queue, encodedMessages, options),
+      );
     }),
     metrics: () => {
       const metrics = queue.metrics;
@@ -139,7 +131,7 @@ export const makeClient = <Message extends RpcDefinition.ServiceFreeSchema>(
 
       return tryQueuePromise(definition.binding, "metrics", () => metrics.call(queue));
     },
-    unsafeRaw: Effect.succeed(queue as CloudflareQueue<EncodedBody>),
+    rawUnsafe: Effect.succeed(queue),
   });
 };
 

@@ -12,20 +12,43 @@ import type {
   R2UploadPartOptions as CloudflareR2UploadPartOptions,
   R2UploadedPart as CloudflareR2UploadedPart,
 } from "@cloudflare/workers-types";
-import { Context, Data, Effect, Option, type Layer } from "effect";
+import { Context, Data, Effect, Option, Predicate, Schema, type Layer } from "effect";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
+import * as ErrorMessage from "./internal/ErrorMessage";
 
 const expectedR2Bucket =
   "R2 bucket binding with head(), get(), put(), createMultipartUpload(), resumeMultipartUpload(), delete(), and list()";
 
+/** R2 operation represented by {@link R2OperationError}. */
+export type R2Operation =
+  | "head"
+  | "get"
+  | "put"
+  | "delete"
+  | "list"
+  | "createMultipartUpload"
+  | "resumeMultipartUpload"
+  | "uploadPart"
+  | "abortMultipartUpload"
+  | "completeMultipartUpload"
+  | "arrayBuffer"
+  | "bytes"
+  | "text"
+  | "json"
+  | "blob";
+
 /** Error raised when an R2 operation fails. */
 export class R2OperationError extends Data.TaggedError("R2OperationError")<{
   readonly binding: string;
-  readonly operation: string;
+  readonly operation: R2Operation;
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `R2 ${this.operation} failed for binding "${this.binding}": ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 /** Typed R2 bucket binding definition. */
 export interface R2Definition {
@@ -104,7 +127,7 @@ export interface R2Client {
   ) => Effect.Effect<R2MultipartUploadClient, R2OperationError>;
   readonly delete: (keys: string | ReadonlyArray<string>) => Effect.Effect<void, R2OperationError>;
   readonly list: (options?: R2ListOptions) => Effect.Effect<CloudflareR2Objects, R2OperationError>;
-  readonly unsafeRaw: Effect.Effect<CloudflareR2Bucket>;
+  readonly rawUnsafe: Effect.Effect<CloudflareR2Bucket>;
   readonly definition: R2Definition;
 }
 
@@ -136,12 +159,12 @@ export interface TagClass<Self, Id extends string> extends Context.ServiceClass<
   >;
 }
 
-const r2Error = (binding: string, operation: string, cause: unknown) =>
+const r2Error = (binding: string, operation: R2Operation, cause: unknown) =>
   new R2OperationError({ binding, operation, cause });
 
 const tryR2Promise = <A>(
   binding: string,
-  operation: string,
+  operation: R2Operation,
   evaluate: () => Promise<A>,
 ): Effect.Effect<A, R2OperationError> =>
   Effect.tryPromise({
@@ -151,7 +174,7 @@ const tryR2Promise = <A>(
 
 const tryR2Sync = <A>(
   binding: string,
-  operation: string,
+  operation: R2Operation,
   evaluate: () => A,
 ): Effect.Effect<A, R2OperationError> =>
   Effect.try({
@@ -159,18 +182,19 @@ const tryR2Sync = <A>(
     catch: (cause) => r2Error(binding, operation, cause),
   });
 
-const maybe = <A>(value: A | null): Option.Option<A> =>
-  value === null ? Option.none() : Option.some(value);
+const spanOptions = (binding: string, operation: R2Operation) => ({
+  attributes: { binding, operation },
+});
 
 const isR2ObjectBody = (
   value: CloudflareR2ObjectBody | CloudflareR2Object,
 ): value is CloudflareR2ObjectBody =>
   "body" in value &&
-  typeof (value as CloudflareR2ObjectBody).arrayBuffer === "function" &&
-  typeof (value as CloudflareR2ObjectBody).bytes === "function" &&
-  typeof (value as CloudflareR2ObjectBody).text === "function" &&
-  typeof (value as CloudflareR2ObjectBody).json === "function" &&
-  typeof (value as CloudflareR2ObjectBody).blob === "function";
+  Predicate.isFunction(value.arrayBuffer) &&
+  Predicate.isFunction(value.bytes) &&
+  Predicate.isFunction(value.text) &&
+  Predicate.isFunction(value.json) &&
+  Predicate.isFunction(value.blob);
 
 const wrapObjectBody = (binding: string, object: CloudflareR2ObjectBody): R2ObjectBodyClient => ({
   key: object.key,
@@ -191,11 +215,22 @@ const wrapObjectBody = (binding: string, object: CloudflareR2ObjectBody): R2Obje
   get bodyUsed() {
     return object.bodyUsed;
   },
-  arrayBuffer: tryR2Promise(binding, "arrayBuffer", () => object.arrayBuffer()),
-  bytes: tryR2Promise(binding, "bytes", () => object.bytes()),
-  text: tryR2Promise(binding, "text", () => object.text()),
-  json: <T = unknown>() => tryR2Promise(binding, "json", () => object.json<T>()),
-  blob: tryR2Promise(binding, "blob", () => object.blob()),
+  arrayBuffer: tryR2Promise(binding, "arrayBuffer", () => object.arrayBuffer()).pipe(
+    Effect.withSpan("R2.arrayBuffer", spanOptions(binding, "arrayBuffer")),
+  ),
+  bytes: tryR2Promise(binding, "bytes", () => object.bytes()).pipe(
+    Effect.withSpan("R2.bytes", spanOptions(binding, "bytes")),
+  ),
+  text: tryR2Promise(binding, "text", () => object.text()).pipe(
+    Effect.withSpan("R2.text", spanOptions(binding, "text")),
+  ),
+  json: <T = unknown>() =>
+    tryR2Promise(binding, "json", () => object.json<T>()).pipe(
+      Effect.withSpan("R2.json", spanOptions(binding, "json")),
+    ),
+  blob: tryR2Promise(binding, "blob", () => object.blob()).pipe(
+    Effect.withSpan("R2.blob", spanOptions(binding, "blob")),
+  ),
 });
 
 const wrapGetResult = (
@@ -209,23 +244,29 @@ const wrapGetResult = (
   return wrapObjectBody(binding, object);
 };
 
-export const isR2Bucket = (value: unknown): value is CloudflareR2Bucket => {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
+type R2BindingValue = Schema.Schema.Type<typeof Schema.Unknown>;
 
-  const resource = value as Record<string, unknown>;
+const R2BucketSchema = Schema.declare(
+  (value: R2BindingValue): value is CloudflareR2Bucket =>
+    Predicate.hasProperty(value, "head") &&
+    Predicate.isFunction(value.head) &&
+    Predicate.hasProperty(value, "get") &&
+    Predicate.isFunction(value.get) &&
+    Predicate.hasProperty(value, "put") &&
+    Predicate.isFunction(value.put) &&
+    Predicate.hasProperty(value, "createMultipartUpload") &&
+    Predicate.isFunction(value.createMultipartUpload) &&
+    Predicate.hasProperty(value, "resumeMultipartUpload") &&
+    Predicate.isFunction(value.resumeMultipartUpload) &&
+    Predicate.hasProperty(value, "delete") &&
+    Predicate.isFunction(value.delete) &&
+    Predicate.hasProperty(value, "list") &&
+    Predicate.isFunction(value.list),
+);
+const decodeR2Bucket = Schema.decodeUnknownOption(R2BucketSchema);
 
-  return (
-    typeof resource.head === "function" &&
-    typeof resource.get === "function" &&
-    typeof resource.put === "function" &&
-    typeof resource.createMultipartUpload === "function" &&
-    typeof resource.resumeMultipartUpload === "function" &&
-    typeof resource.delete === "function" &&
-    typeof resource.list === "function"
-  );
-};
+export const isR2Bucket = (value: R2BindingValue): value is CloudflareR2Bucket =>
+  Option.isSome(decodeR2Bucket(value));
 
 export const makeClient = (
   definition: R2Definition,
@@ -234,29 +275,57 @@ export const makeClient = (
     raw: upload,
     key: upload.key,
     uploadId: upload.uploadId,
-    uploadPart: (partNumber, value, options) =>
+    uploadPart: Effect.fn(
+      "R2.uploadPart",
+      spanOptions(definition.binding, "uploadPart"),
+    )((partNumber: number, value: R2UploadPartValue, options?: R2UploadPartOptions) =>
       tryR2Promise(definition.binding, "uploadPart", () =>
         upload.uploadPart(partNumber, value, options),
       ),
-    abort: tryR2Promise(definition.binding, "abortMultipartUpload", () => upload.abort()),
-    complete: (uploadedParts) =>
+    ),
+    abort: tryR2Promise(definition.binding, "abortMultipartUpload", () => upload.abort()).pipe(
+      Effect.withSpan(
+        "R2.abortMultipartUpload",
+        spanOptions(definition.binding, "abortMultipartUpload"),
+      ),
+    ),
+    complete: Effect.fn(
+      "R2.completeMultipartUpload",
+      spanOptions(definition.binding, "completeMultipartUpload"),
+    )((uploadedParts: ReadonlyArray<CloudflareR2UploadedPart>) =>
       tryR2Promise(definition.binding, "completeMultipartUpload", () =>
         upload.complete([...uploadedParts]),
       ),
+    ),
   });
 
   return (bucket) => {
-    const get = ((key: string, options?: R2GetOptions) =>
+    // SAFETY: the implementation preserves Cloudflare's get overload distinction for onlyIf options.
+    const get = Effect.fn(
+      "R2.get",
+      spanOptions(definition.binding, "get"),
+    )((key: string, options?: R2GetOptions) =>
       tryR2Promise(definition.binding, "get", () => bucket.get(key, options)).pipe(
-        Effect.map((object) => maybe(wrapGetResult(definition.binding, object))),
-      )) as R2Client["get"];
+        Effect.map((object) => Option.fromNullOr(wrapGetResult(definition.binding, object))),
+      ),
+    ) as R2Client["get"];
 
     return {
       definition,
-      head: (key) =>
-        tryR2Promise(definition.binding, "head", () => bucket.head(key)).pipe(Effect.map(maybe)),
+      head: Effect.fn(
+        "R2.head",
+        spanOptions(definition.binding, "head"),
+      )((key: string) =>
+        tryR2Promise(definition.binding, "head", () => bucket.head(key)).pipe(
+          Effect.map(Option.fromNullOr),
+        ),
+      ),
       get,
-      put: ((key: string, value: R2PutValue, options?: R2PutOptions) =>
+      // SAFETY: the implementation preserves Cloudflare's put overload distinction for onlyIf options.
+      put: Effect.fn(
+        "R2.put",
+        spanOptions(definition.binding, "put"),
+      )((key: string, value: R2PutValue, options?: R2PutOptions) =>
         tryR2Promise(definition.binding, "put", () => bucket.put(key, value, options)).pipe(
           Effect.map((object) => {
             if (object === null) {
@@ -269,22 +338,39 @@ export const makeClient = (
 
             return object;
           }),
-        )) as R2Client["put"],
-      createMultipartUpload: (key, options) =>
+        ),
+      ) as R2Client["put"],
+      createMultipartUpload: Effect.fn(
+        "R2.createMultipartUpload",
+        spanOptions(definition.binding, "createMultipartUpload"),
+      )((key: string, options?: R2MultipartOptions) =>
         tryR2Promise(definition.binding, "createMultipartUpload", () =>
           bucket.createMultipartUpload(key, options),
         ).pipe(Effect.map(wrapUpload)),
-      resumeMultipartUpload: (key, uploadId) =>
+      ),
+      resumeMultipartUpload: Effect.fn(
+        "R2.resumeMultipartUpload",
+        spanOptions(definition.binding, "resumeMultipartUpload"),
+      )((key: string, uploadId: string) =>
         tryR2Sync(definition.binding, "resumeMultipartUpload", () =>
           wrapUpload(bucket.resumeMultipartUpload(key, uploadId)),
         ),
-      delete: (keys) => {
-        const nativeKeys = typeof keys === "string" ? keys : [...keys];
+      ),
+      delete: Effect.fn(
+        "R2.delete",
+        spanOptions(definition.binding, "delete"),
+      )((keys: string | ReadonlyArray<string>) => {
+        const nativeKeys = Predicate.isString(keys) ? keys : [...keys];
 
         return tryR2Promise(definition.binding, "delete", () => bucket.delete(nativeKeys));
-      },
-      list: (options) => tryR2Promise(definition.binding, "list", () => bucket.list(options)),
-      unsafeRaw: Effect.succeed(bucket),
+      }),
+      list: Effect.fn(
+        "R2.list",
+        spanOptions(definition.binding, "list"),
+      )((options?: R2ListOptions) =>
+        tryR2Promise(definition.binding, "list", () => bucket.list(options)),
+      ),
+      rawUnsafe: Effect.succeed(bucket),
     };
   };
 };
@@ -303,6 +389,7 @@ export const Tag =
 
     const makeLayer = (definition: LayerOptions) => layer(tag, definition);
 
+    // SAFETY: Object.assign attaches exactly the static id/layer members declared by TagClass.
     return Object.assign(tag, {
       id,
       layer: makeLayer,

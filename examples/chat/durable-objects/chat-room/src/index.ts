@@ -1,11 +1,12 @@
-import type {
-  AppendMessageRequest,
+import {
   ChatClientEvent,
-  ChatMessage,
-  ChatServerEvent,
+  type AppendMessageRequest,
+  type ChatClientEvent as ChatClientEventType,
+  type ChatMessage,
+  type ChatServerEvent,
 } from "@effect-cf/example-contracts/Schemas";
 import { ChatRoom } from "@effect-cf/example-contracts/ChatRoom";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option, Predicate, Schema } from "effect";
 import { DurableObjectState, DurableObjectWebSocket, Worker } from "effect-cf";
 
 import { ChatRepository } from "./ChatRepository";
@@ -28,26 +29,14 @@ const encode = (event: ChatServerEvent) => JSON.stringify(event);
 const send = (socket: DurableObjectWebSocket.DurableWebSocket, event: ChatServerEvent) =>
   socket.send(encode(event)).pipe(Effect.ignore);
 
-const parseClientEvent = (message: string): ChatClientEvent | undefined => {
+const decodeClientEvent = Schema.decodeUnknownOption(ChatClientEvent);
+
+const parseClientEvent = (message: string): ChatClientEventType | undefined => {
   try {
-    const value: unknown = JSON.parse(message);
-
-    if (typeof value !== "object" || value === null || !("type" in value)) {
-      return undefined;
-    }
-
-    if (value.type === "heartbeat") {
-      return { type: "heartbeat" };
-    }
-
-    if (value.type === "message" && "text" in value && typeof value.text === "string") {
-      return { type: "message", text: value.text };
-    }
+    return Option.getOrUndefined(decodeClientEvent(JSON.parse(message)));
   } catch {
     return { type: "message", text: message };
   }
-
-  return undefined;
 };
 
 const broadcastPresence = (roomId: string) =>
@@ -160,7 +149,7 @@ const ChatRoomLive = ChatRoom.make(layer, {
         return;
       }
 
-      if (typeof message !== "string") {
+      if (!Predicate.isString(message)) {
         return;
       }
 

@@ -2,29 +2,51 @@ import { assert, expect, layer, test } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 
 import { Binding, WorkerEnvironment, WorkersAi } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
 class TestAi extends WorkersAi.Tag<TestAi>()("test/TestAi") {}
 
-interface FakeAiOptions {
-  readonly run?: (
-    model: string,
-    input: Record<string, unknown>,
-    options: AiOptions | undefined,
-  ) => Promise<unknown>;
+const embeddingDimensionsKey = "shape";
+
+type UnknownModelInput = Parameters<WorkersAi.WorkersAiBinding["run"]>[1];
+type UnknownModelOutput = Awaited<ReturnType<WorkersAi.WorkersAiBinding["run"]>>;
+
+interface FakeAiRun {
+  (
+    model: "@cf/qwen/qwen3-embedding-0.6b",
+    input: Ai_Cf_Qwen_Qwen3_Embedding_0_6B_Input,
+    options?: AiOptions,
+  ): Promise<Ai_Cf_Qwen_Qwen3_Embedding_0_6B_Output>;
+  (model: string, input: UnknownModelInput, options?: AiOptions): Promise<UnknownModelOutput>;
 }
 
-const makeFakeAi = (options: FakeAiOptions = {}) =>
-  ({
+interface FakeAiOptions {
+  readonly run?: FakeAiRun;
+}
+
+const makeFakeAiRun = (run: FakeAiRun): Ai["run"] => {
+  // SAFETY: FakeAiRun exactly models the embedding-model call and unknown-model fallback exercised
+  // by this suite, including their distinct input and output records.
+  return run as FakeAiRun & Ai["run"];
+};
+
+const makeFakeAi = (options: FakeAiOptions = {}) => {
+  const run: FakeAiRun =
+    options.run ??
+    (async () => ({
+      data: [[0.1, 0.2]],
+      [embeddingDimensionsKey]: [1, 2],
+    }));
+
+  return makePartialTestDouble<Ai>({
     aiGatewayLogId: "log-1",
-    gateway: () => ({}),
+    gateway: () => {
+      throw new Error("unused gateway");
+    },
     models: async () => [],
-    run:
-      options.run ??
-      (async () => ({
-        data: [[0.1, 0.2]],
-        shape: [1, 2],
-      })),
-  }) as unknown as Ai;
+    run: makeFakeAiRun(run),
+  });
+};
 
 const aiLayer = (ai: Ai) =>
   TestAi.layer({ binding: "AI" }).pipe(Layer.provide(Layer.succeed(WorkerEnvironment, { AI: ai })));
@@ -39,7 +61,7 @@ layer(aiLayer(makeFakeAi()))("Workers AI", (it) => {
       const logId = yield* ai.aiGatewayLogId;
 
       assert.deepStrictEqual(embedding.data, [[0.1, 0.2]]);
-      assert.deepStrictEqual(embedding.shape, [1, 2]);
+      assert.deepStrictEqual(embedding[embeddingDimensionsKey], [1, 2]);
       assert.strictEqual(logId, "log-1");
     }),
   );
@@ -55,7 +77,7 @@ test("Workers AI layer validates the binding shape", async () => {
       }).pipe(
         Effect.provide(
           TestAi.layer({ binding: "AI" }).pipe(
-            Layer.provide(Layer.succeed(WorkerEnvironment, { AI: {} as Ai })),
+            Layer.provide(Layer.succeed(WorkerEnvironment, { AI: makePartialTestDouble<Ai>({}) })),
           ),
         ),
       ),

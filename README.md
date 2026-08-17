@@ -1,21 +1,23 @@
 # effect-cf
 
-Effect-native primitives for Cloudflare Workers, Durable Objects, bindings, Cache, KV, Email, Analytics Engine, and Durable Object storage.
+Effect-native primitives for Cloudflare Workers, Durable Objects, bindings, Cache, KV, R2, Artifacts, Email, Analytics Engine, and Durable Object storage.
+
+This monorepo also publishes [`effect-webtransport`](packages/effect-webtransport), a platform-generic Effect WebTransport library (sessions, streams, datagrams, `Socket`/RPC adapters, and WebSocket fallback selection). `effect-cf`'s `WebTransport` module documents the Cloudflare boundary: Workers cannot accept inbound WebTransport sessions today, so the module exposes typed capabilities and decoded HTTP/3 request metadata instead.
 
 ## Install
 
-`effect-cf` currently targets Effect 4 beta.
+`effect-cf` targets Effect `^4.0.0-beta.105`.
 
 ```bash
-bun add effect-cf "effect@^4.0.0-beta.65"
+bun add effect-cf "effect@^4.0.0-beta.105"
 ```
 
 ```bash
-pnpm add effect-cf "effect@^4.0.0-beta.65"
+pnpm add effect-cf "effect@^4.0.0-beta.105"
 ```
 
 ```bash
-npm install effect-cf "effect@^4.0.0-beta.65"
+npm install effect-cf "effect@^4.0.0-beta.105"
 ```
 
 ## Design
@@ -189,12 +191,12 @@ const program = Effect.gen(function* () {
     doubles: [1],
   });
 
-  yield* analytics.writeBatch(
+  yield* analytics.writeDataPoints(
     [
       { indexes: ["example.com"], blobs: ["/pricing", "US"], doubles: [1] },
       { indexes: ["example.com"], blobs: ["/docs", "CA"], doubles: [1] },
     ],
-    { onInvalid: "drop", batchSize: 100 },
+    { onInvalid: "drop" },
   );
 });
 ```

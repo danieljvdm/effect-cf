@@ -1,4 +1,4 @@
-import { Context, Data, Effect, type Layer } from "effect";
+import { Context, Data, Effect, Option, Predicate, Schema, type Layer } from "effect";
 import type {
   Vectorize as CloudflareVectorize,
   VectorizeAsyncMutation as CloudflareVectorizeAsyncMutation,
@@ -17,16 +17,31 @@ import type {
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
+import * as ErrorMessage from "./internal/ErrorMessage";
 
 const expectedVectorizeBinding =
   "Vectorize index binding with describe(), query(), insert(), upsert(), deleteByIds(), and getByIds()";
 
+/** Vectorize operation represented by {@link VectorizeOperationError}. */
+export type VectorizeOperation =
+  | "describe"
+  | "query"
+  | "queryById"
+  | "insert"
+  | "upsert"
+  | "deleteByIds"
+  | "getByIds";
+
 /** Error raised when a Vectorize operation fails. */
 export class VectorizeOperationError extends Data.TaggedError("VectorizeOperationError")<{
   readonly binding: string;
-  readonly operation: string;
+  readonly operation: VectorizeOperation;
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Vectorize ${this.operation} failed for binding "${this.binding}": ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 /** Typed Vectorize binding definition. */
 export interface VectorizeDefinition {
@@ -93,7 +108,7 @@ export interface VectorizeClient {
   readonly getByIds: (
     ids: ReadonlyArray<string>,
   ) => Effect.Effect<ReadonlyArray<VectorizeVector>, VectorizeOperationError>;
-  readonly unsafeRaw: Effect.Effect<VectorizeBinding>;
+  readonly rawUnsafe: Effect.Effect<VectorizeBinding>;
   readonly definition: VectorizeDefinition;
 }
 
@@ -125,12 +140,12 @@ export interface TagClass<Self, Id extends string> extends Context.ServiceClass<
   >;
 }
 
-const vectorizeError = (binding: string, operation: string, cause: unknown) =>
+const vectorizeError = (binding: string, operation: VectorizeOperation, cause: unknown) =>
   new VectorizeOperationError({ binding, operation, cause });
 
 const tryVectorizePromise = <A>(
   binding: string,
-  operation: string,
+  operation: VectorizeOperation,
   evaluate: () => Promise<A>,
 ): Effect.Effect<A, VectorizeOperationError> =>
   Effect.tryPromise({
@@ -138,38 +153,81 @@ const tryVectorizePromise = <A>(
     catch: (cause) => vectorizeError(binding, operation, cause),
   });
 
-const hasFunction = (value: object, key: string): boolean =>
-  typeof Reflect.get(value, key) === "function";
+const spanOptions = (binding: string, operation: VectorizeOperation) => ({
+  attributes: { binding, operation },
+});
 
-export const isVectorizeBinding = (value: unknown): value is VectorizeBinding =>
-  typeof value === "object" &&
-  value !== null &&
-  hasFunction(value, "describe") &&
-  hasFunction(value, "query") &&
-  hasFunction(value, "insert") &&
-  hasFunction(value, "upsert") &&
-  hasFunction(value, "deleteByIds") &&
-  hasFunction(value, "getByIds");
+type VectorizeBindingValue = Schema.Schema.Type<typeof Schema.Unknown>;
+
+const invokeVectorizeMethod = <Args extends Array<any>, Return>(
+  method: (...args: Args) => Return,
+  receiver: VectorizeRuntimeBinding,
+  args: Args,
+): Return => {
+  const result: VectorizeBindingValue = Function.prototype.apply.call(method, receiver, args);
+
+  // SAFETY: the native apply intrinsic returns method's declared Return without reading proxy properties.
+  return result as Return;
+};
+
+const VectorizeBindingSchema = Schema.declare(
+  (value: VectorizeBindingValue): value is VectorizeBinding =>
+    Predicate.hasProperty(value, "describe") &&
+    Predicate.isFunction(value.describe) &&
+    Predicate.hasProperty(value, "query") &&
+    Predicate.isFunction(value.query) &&
+    Predicate.hasProperty(value, "insert") &&
+    Predicate.isFunction(value.insert) &&
+    Predicate.hasProperty(value, "upsert") &&
+    Predicate.isFunction(value.upsert) &&
+    Predicate.hasProperty(value, "deleteByIds") &&
+    Predicate.isFunction(value.deleteByIds) &&
+    Predicate.hasProperty(value, "getByIds") &&
+    Predicate.isFunction(value.getByIds),
+);
+const decodeVectorizeBinding = Schema.decodeUnknownOption(VectorizeBindingSchema);
+
+export const isVectorizeBinding = (value: VectorizeBindingValue): value is VectorizeBinding =>
+  Option.isSome(decodeVectorizeBinding(value));
 
 export const makeClient =
   (definition: VectorizeDefinition) =>
   (index: VectorizeBinding): VectorizeClient => {
+    // SAFETY: isVectorizeBinding validates every required runtime method before makeClient is called.
     const runtime = index as VectorizeRuntimeBinding;
-    const deleteByIds = (ids: ReadonlyArray<string>) =>
-      tryVectorizePromise(definition.binding, "deleteByIds", () => runtime.deleteByIds([...ids]));
+    const deleteByIds = Effect.fn(
+      "Vectorize.deleteByIds",
+      spanOptions(definition.binding, "deleteByIds"),
+    )((ids: ReadonlyArray<string>) =>
+      tryVectorizePromise(definition.binding, "deleteByIds", () => runtime.deleteByIds([...ids])),
+    );
 
     return {
       definition,
-      describe: tryVectorizePromise(definition.binding, "describe", () => runtime.describe()),
-      query: (vector, options) =>
-        tryVectorizePromise(definition.binding, "query", () =>
-          runtime.query(vector as Float32Array | Float64Array | number[], options),
-        ),
-      queryById: (vectorId, options) =>
+      describe: tryVectorizePromise(definition.binding, "describe", () => runtime.describe()).pipe(
+        Effect.withSpan("Vectorize.describe", spanOptions(definition.binding, "describe")),
+      ),
+      query: Effect.fn(
+        "Vectorize.query",
+        spanOptions(definition.binding, "query"),
+      )((vector: VectorizeValues, options?: VectorizeQueryOptions) =>
+        tryVectorizePromise(definition.binding, "query", () => {
+          // SAFETY: Cloudflare accepts these vector containers without mutating the readonly array variant.
+          return runtime.query(vector as Float32Array | Float64Array | number[], options);
+        }),
+      ),
+      queryById: Effect.fn(
+        "Vectorize.queryById",
+        spanOptions(definition.binding, "queryById"),
+      )((vectorId: string, options?: VectorizeQueryOptions) =>
         runtime.queryById !== undefined
-          ? tryVectorizePromise(definition.binding, "queryById", () =>
-              runtime.queryById!(vectorId, options),
-            )
+          ? tryVectorizePromise(definition.binding, "queryById", () => {
+              const queryById = runtime.queryById;
+
+              return queryById === undefined
+                ? Promise.reject(new TypeError("Vectorize binding does not expose queryById()"))
+                : invokeVectorizeMethod(queryById, runtime, [vectorId, options]);
+            })
           : Effect.fail(
               vectorizeError(
                 definition.binding,
@@ -177,15 +235,28 @@ export const makeClient =
                 new TypeError("Vectorize binding does not expose queryById()"),
               ),
             ),
-      insert: (vectors) =>
+      ),
+      insert: Effect.fn(
+        "Vectorize.insert",
+        spanOptions(definition.binding, "insert"),
+      )((vectors: ReadonlyArray<VectorizeVector>) =>
         tryVectorizePromise(definition.binding, "insert", () => runtime.insert([...vectors])),
-      upsert: (vectors) =>
+      ),
+      upsert: Effect.fn(
+        "Vectorize.upsert",
+        spanOptions(definition.binding, "upsert"),
+      )((vectors: ReadonlyArray<VectorizeVector>) =>
         tryVectorizePromise(definition.binding, "upsert", () => runtime.upsert([...vectors])),
+      ),
       deleteByIds,
       delete: deleteByIds,
-      getByIds: (ids) =>
+      getByIds: Effect.fn(
+        "Vectorize.getByIds",
+        spanOptions(definition.binding, "getByIds"),
+      )((ids: ReadonlyArray<string>) =>
         tryVectorizePromise(definition.binding, "getByIds", () => runtime.getByIds([...ids])),
-      unsafeRaw: Effect.succeed(index),
+      ),
+      rawUnsafe: Effect.succeed(index),
     };
   };
 
@@ -206,6 +277,7 @@ export const Tag =
 
     const makeLayer = (definition: LayerOptions) => layer(tag, definition);
 
+    // SAFETY: Object.assign attaches exactly the static id/layer members declared by TagClass.
     return Object.assign(tag, {
       id,
       layer: makeLayer,

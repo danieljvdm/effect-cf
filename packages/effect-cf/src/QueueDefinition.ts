@@ -29,7 +29,7 @@ export type Handler<ROut, Self extends Definition.Any> = (
 >;
 
 export interface Options<ROut, Self extends Definition.Any> extends Omit<
-  WorkerEntrypoint.WorkerOptions<ROut, Record<never, never>>,
+  WorkerEntrypoint.WorkerOptions<ROut, never, never, Record<never, never>>,
   "queue" | "rpc"
 > {
   readonly queue: Handler<ROut, Self>;
@@ -44,7 +44,11 @@ export interface TagClass<
   Self,
   Id extends string,
   Message extends RpcDefinition.ServiceFreeSchema,
-> extends Context.ServiceClass<Self, Id, QueueBinding.QueueBindingClient<Message>> {
+> extends Context.ServiceClass<
+  Self,
+  `effect-cf/Queue/${Id}`,
+  QueueBinding.QueueBindingClient<Message>
+> {
   readonly id: Id;
   readonly message: Message;
   readonly make: <ROut, LayerError>(
@@ -71,7 +75,11 @@ export interface TagClass<
     QueueBinding.QueueOperationError,
     Self
   >;
-  readonly unsafeRaw: () => Effect.Effect<globalThis.Queue<S.Codec.Encoded<Message>>, never, Self>;
+  readonly rawUnsafe: Effect.Effect<
+    QueueBinding.QueueProducer<S.Codec.Encoded<Message>>,
+    never,
+    Self
+  >;
 }
 
 const makeDefinition = <Id extends string, Message extends RpcDefinition.ServiceFreeSchema>(
@@ -108,7 +116,9 @@ export const Tag =
     definition: { readonly message: Message },
   ) => {
     const queueDefinition = makeDefinition(id, definition);
-    const tag = Context.Service<Self, QueueBinding.QueueBindingClient<Message>>()(id);
+    const tag = Context.Service<Self, QueueBinding.QueueBindingClient<Message>>()(
+      `effect-cf/Queue/${id}` as const,
+    );
 
     const layer = (binding: LayerOptions) =>
       QueueBinding.layer(tag, {
@@ -140,12 +150,9 @@ export const Tag =
       return yield* queue.metrics();
     });
 
-    const unsafeRaw = Effect.fnUntraced(function* () {
-      const queue = yield* tag;
+    const rawUnsafe = Effect.flatMap(tag, (queue) => queue.rawUnsafe);
 
-      return yield* queue.unsafeRaw;
-    });
-
+    // SAFETY: the assigned definition helpers exactly implement TagClass for this queue schema.
     return Object.assign(tag, {
       id: queueDefinition.id,
       message: queueDefinition.message,
@@ -154,7 +161,7 @@ export const Tag =
       send,
       sendBatch,
       metrics,
-      unsafeRaw,
+      rawUnsafe,
     }) as TagClass<Self, Id, Message>;
   };
 
@@ -166,12 +173,11 @@ const wrapHandler = <ROut, const Self extends Definition.Any>(
 ): QueueEntrypoint.QueueHandler<ROut> => {
   const decodeBody = S.decodeUnknownEffect(definition.message);
 
-  return (batch) =>
-    Effect.gen(function* () {
-      const decoded = yield* QueueEntrypoint.decodeBatch(batch.raw, decodeBody);
+  return Effect.fnUntraced(function* (batch: QueueEntrypoint.QueueBatch<unknown>) {
+    const decoded = yield* QueueEntrypoint.decodeBatch(batch.raw, decodeBody);
 
-      yield* handler(decoded);
-    });
+    yield* handler(decoded);
+  });
 };
 
 export const implement = <ROut, const Self extends Definition.Any>(

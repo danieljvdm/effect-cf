@@ -70,7 +70,17 @@ Durable Object namespace:
 }
 ```
 
-Use the namespace or named instance `unsafeRaw` Effect only for a native SDK
-operation that effect-cf does not expose. Container responses are not
-status-checked or transformed, so HTTP errors and WebSocket upgrade responses
-retain native Cloudflare behavior.
+Named instances also expose `waitForPort` (returning the native retry count),
+`stop` with a named or numeric signal, and the runtime host-policy operations
+(`setAllowedHosts`, `setDeniedHosts`, `allowHost`, `denyHost`,
+`removeAllowedHost`, `removeDeniedHost`). These forward the native remote
+calls; the Container entrypoint still owns hostname policy and outbound
+handlers.
+
+Use the namespace or named instance `rawUnsafe` Effect only for a native SDK
+operation that effect-cf does not expose. Passing the exact namespace type as
+the second `ContainerNamespace.Tag` type parameter (for example
+`DurableObjectNamespace<RendererContainer>`) makes `rawUnsafe` preserve that
+exact namespace and stub type, including extra subclass methods. Container
+responses are not status-checked or transformed, so HTTP errors and WebSocket
+upgrade responses retain native Cloudflare behavior.

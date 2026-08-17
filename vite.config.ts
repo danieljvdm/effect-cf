@@ -2,12 +2,19 @@ import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
 import { createRecommendedVitePlusConfig } from "@danieljvdm/dev-kit/vite-plus";
 import { defineConfig } from "vite-plus";
 
-const testExcludes = ["**/node_modules/**", "**/dist/**", "**/.git/**", ".repos/**"];
+const testExcludes = [
+  "**/node_modules/**",
+  "**/dist/**",
+  "**/.git/**",
+  ".repos/**",
+  ".worktrees/**",
+];
 
 // Every workspace package exposes a pure `typecheck` script backed by the
 // Effect-patched TypeScript-Go compiler.
 const typecheckPackages = [
   "packages/effect-cf",
+  "packages/effect-webtransport",
   "examples/chat/durable-objects/chat-room",
   "examples/chat/packages/contracts",
   "examples/chat/web",
@@ -46,6 +53,10 @@ export default defineConfig({
         test: {
           name: "node",
           alias: {
+            "cloudflare:workflows": new URL(
+              "./packages/effect-cf/tests/cloudflare-workflows.ts",
+              import.meta.url,
+            ).pathname,
             "cloudflare:workers": new URL(
               "./packages/effect-cf/tests/cloudflare-workers.ts",
               import.meta.url,
@@ -94,9 +105,16 @@ export default defineConfig({
     cache: true,
     tasks: {
       ...recommended.run.tasks,
-      // Examples consume `effect-cf` through its published `dist` entrypoints.
-      check: { command: recommended.run.tasks.check, dependsOn: ["effect-cf#build"] },
-      typecheck: { ...recommended.run.tasks.typecheck, dependsOn: ["effect-cf#build"] },
+      // Examples consume the publishable packages through their published
+      // `dist` entrypoints.
+      check: {
+        command: recommended.run.tasks.check,
+        dependsOn: ["effect-cf#build", "effect-webtransport#build"],
+      },
+      typecheck: {
+        ...recommended.run.tasks.typecheck,
+        dependsOn: ["effect-cf#build", "effect-webtransport#build"],
+      },
     },
   },
 });

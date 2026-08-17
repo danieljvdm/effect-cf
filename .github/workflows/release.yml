@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          # Let changesets/action configure git credentials with github.token.
+          # Let changesets/action configure git credentials with the app token.
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # setup-bun action v2.2.0
       - uses: voidzero-dev/setup-vp@143f5f385f39b1b753ffed1a01ad443811855c8b # v1.16.1
@@ -37,14 +37,27 @@ jobs:
       # environment resolves a different TypeScript than Vite+ does, which
       # emits different declarations and needs an undeclared dependency.
       - run: vp run effect-cf#build
+      - run: vp run effect-webtransport#build
       - name: Upgrade npm for trusted publishing
         run: npm install -g npm@latest
+      - name: Create GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
       - name: Create Release Pull Request or Publish
         uses: changesets/action@v1
         with:
           version: vp run changeset:version
-          publish: vp run changeset:publish
-          github-token: ${{ github.token }}
+          # Attempt npm publish only when merging a Version Packages PR. On
+          # other pushes the publish path is a no-op that depends on an npm
+          # registry read, which can serve stale version lists and fail the
+          # run with "cannot publish over previously published versions".
+          publish: ${{ startsWith(github.event.head_commit.message, 'Version Packages') && 'vp run changeset:publish' || '' }}
+          github-token: ${{ steps.app-token.outputs.token }}
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           NPM_CONFIG_PROVENANCE: true

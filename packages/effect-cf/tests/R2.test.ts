@@ -1,12 +1,13 @@
 import { assert, expect, layer, test } from "@effect/vitest";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Layer, Option, Schema } from "effect";
 
 import { R2, WorkerEnvironment } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
 class TestBucket extends R2.Tag<TestBucket>()("test/TestBucket") {}
 
 const makeR2Object = (key: string, size = 0) =>
-  ({
+  makePartialTestDouble<R2Object>({
     key,
     version: "v1",
     size,
@@ -16,10 +17,15 @@ const makeR2Object = (key: string, size = 0) =>
     uploaded: new Date("2026-01-01T00:00:00.000Z"),
     storageClass: "Standard",
     writeHttpMetadata() {},
-  }) as unknown as R2Object;
+  });
 
-const makeR2ObjectBody = (key: string, text: string) =>
-  ({
+const R2JsonFixtureSchema = Schema.Struct({ value: Schema.String });
+
+type R2JsonFixture = Schema.Schema.Type<typeof R2JsonFixtureSchema>;
+
+const makeR2ObjectBody = (key: string, jsonValue: R2JsonFixture): R2ObjectBody => {
+  const text = JSON.stringify(jsonValue);
+  const implementation = {
     key,
     version: "v1",
     size: text.length,
@@ -34,9 +40,14 @@ const makeR2ObjectBody = (key: string, text: string) =>
     arrayBuffer: async () => new TextEncoder().encode(text).buffer,
     bytes: async () => new TextEncoder().encode(text),
     text: async () => text,
-    json: async <T>() => JSON.parse(text) as T,
+    json: async () => jsonValue,
     blob: async () => new Blob([text]),
-  }) as unknown as R2ObjectBody;
+  };
+
+  // SAFETY: R2's native json() method exposes a caller-selected generic. This fixture instead owns
+  // a concrete schema-derived JSON value, and the test decodes the unknown public result below.
+  return implementation as typeof implementation & R2ObjectBody;
+};
 
 interface FakeR2Options {
   readonly head?: (key: string) => Promise<R2Object | null>;
@@ -50,16 +61,16 @@ interface FakeR2Options {
 }
 
 const makeUpload = (key: string, uploadId: string) =>
-  ({
+  makePartialTestDouble<R2MultipartUpload>({
     key,
     uploadId,
     uploadPart: async (partNumber: number) => ({ partNumber, etag: `part-${partNumber}` }),
     abort: async () => undefined,
     complete: async () => makeR2Object(key),
-  }) as unknown as R2MultipartUpload;
+  });
 
-const makeFakeR2 = (options: FakeR2Options = {}) =>
-  ({
+const makeFakeR2 = (options: FakeR2Options = {}): R2Bucket => {
+  const implementation = {
     head: options.head ?? (async () => null),
     get: options.get ?? (async () => null),
     put: options.put ?? (async (key) => makeR2Object(key)),
@@ -73,7 +84,12 @@ const makeFakeR2 = (options: FakeR2Options = {}) =>
         delimitedPrefixes: [],
         truncated: false,
       })),
-  }) as unknown as R2Bucket;
+  };
+
+  // SAFETY: FakeR2Options models the get/put branches exercised by these tests, including null only
+  // for conditional puts; the native overload set cannot express that option-dependent fixture.
+  return implementation as typeof implementation & R2Bucket;
+};
 
 const bucketLayer = (bucket: R2Bucket) =>
   TestBucket.layer({ binding: "TEST_BUCKET" }).pipe(
@@ -88,7 +104,7 @@ const bucketLayer = (bucket: R2Bucket) =>
 
       return makeR2Object(key, 4);
     },
-    get: async (key) => makeR2ObjectBody(key, `{"value":"data"}`),
+    get: async (key) => makeR2ObjectBody(key, { value: "data" }),
   });
 
   layer(bucketLayer(bucket))("R2 object operations", (it) => {
@@ -99,7 +115,9 @@ const bucketLayer = (bucket: R2Bucket) =>
         const put = yield* r2.put("avatars/u1.png", "data");
         const object = yield* r2.get("avatars/u1.png");
         const jsonObject = yield* r2.get("avatars/u1.png");
-        const decoded = yield* Option.getOrThrow(jsonObject).json<{ readonly value: string }>();
+        const decoded = Schema.decodeUnknownSync(R2JsonFixtureSchema)(
+          yield* Option.getOrThrow(jsonObject).json(),
+        );
 
         assert.strictEqual(put.key, "avatars/u1.png");
         assert.strictEqual(seen[0]?.key, "avatars/u1.png");
@@ -198,7 +216,11 @@ test("R2 layer validates the binding shape", async () => {
       }).pipe(
         Effect.provide(
           TestBucket.layer({ binding: "TEST_BUCKET" }).pipe(
-            Layer.provide(Layer.succeed(WorkerEnvironment, { TEST_BUCKET: {} as R2Bucket })),
+            Layer.provide(
+              Layer.succeed(WorkerEnvironment, {
+                TEST_BUCKET: makePartialTestDouble<R2Bucket>({}),
+              }),
+            ),
           ),
         ),
       ),

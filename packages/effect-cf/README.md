@@ -1,21 +1,36 @@
 # effect-cf
 
-Effect-native Cloudflare primitives for Workers, Durable Objects, Containers, bindings, Cache, KV, D1, Queues, Email, Analytics Engine, Workflows, and Durable Object storage.
+Effect-native Cloudflare primitives for Workers, Durable Objects, Containers, bindings, Cache, KV, D1, R2, Artifacts, Queues, Email, Analytics Engine, Workflows, and Durable Object storage.
 
 ## Install
 
-`effect-cf` currently targets Effect 4 beta.
+`effect-cf` targets Effect `^4.0.0-beta.105`.
 
 ```bash
-bun add effect-cf "effect@^4.0.0-beta.65"
+bun add effect-cf "effect@^4.0.0-beta.105"
 ```
 
 ```bash
-pnpm add effect-cf "effect@^4.0.0-beta.65"
+pnpm add effect-cf "effect@^4.0.0-beta.105"
 ```
 
 ```bash
-npm install effect-cf "effect@^4.0.0-beta.65"
+npm install effect-cf "effect@^4.0.0-beta.105"
+```
+
+The Computer workspace integration is an optional peer. Install it only in
+applications that import `effect-cf/computer-workspace`,
+`effect-cf/computer-artifacts`, or `effect-cf/computer-workspace-host`:
+
+```bash
+bun add "@cloudflare/computer@^0.2.0"
+```
+
+Workspace Git operations additionally require `@platformatic/vfs`,
+`@cloudflare/computer/git`'s own optional peer:
+
+```bash
+bun add "@platformatic/vfs@^0.4.0"
 ```
 
 ## Goal
@@ -35,6 +50,10 @@ Runtime creation belongs at Cloudflare entrypoints, not inside binding helpers.
 - `Kv` - typed KV namespace helper
 - `D1` - typed D1 database binding helper with an `@effect/sql-d1` backed SQL layer
 - `R2` - typed R2 bucket binding helper with Effect-wrapped object and multipart operations
+- `Artifacts` - typed Cloudflare Artifacts namespace and repository helpers, including repository lifecycle, tokens, and Git object reads
+- `effect-cf/computer-workspace` - scoped Effect wrappers for the complete Cloudflare Computer filesystem, Git, runtime, Assets, Artifacts, and Think-compatible client surfaces
+- `effect-cf/computer-artifacts` - session-isolated Artifacts repositories backed by `@cloudflare/computer/artifacts`
+- `effect-cf/computer-workspace-host` - optional Durable Object host mixin, worker-shell backend wiring, and `WorkspaceServiceProxy`
 - `Hyperdrive` - typed Hyperdrive binding helper for connection strings and optional Postgres SQL integration
 - `Images` - typed Cloudflare Images binding helper with transformation APIs and optional hosted image operations
 - `Email` - typed Cloudflare Email Service binding helper for `send_email` bindings, with limit validation and typed error codes
@@ -42,7 +61,159 @@ Runtime creation belongs at Cloudflare entrypoints, not inside binding helpers.
 - `Queue` - typed Queue producer/consumer tags plus client and error types
 - `Workflow` - typed Workflow entrypoints, steps, starter clients, and instance types
 - `Rpc` - Cloudflare RPC type helpers and scoped disposal utilities
+- `WebTransport` - truthful WebTransport/HTTP-3 boundary: typed runtime capabilities and decoded inbound protocol metadata
 - `WorkerConfig` - Effect `Config` helpers backed by Cloudflare `env`
+- `effect-cf/vitest` - Effect-native runners and scoped test helpers for Cloudflare's Vitest Workers pool
+
+## Vitest Workers Pool
+
+Install and configure a `^0.21.3` release of
+[`@cloudflare/vitest-pool-workers`](https://github.com/cloudflare/workers-sdk/tree/main/packages/vitest-pool-workers#readme),
+then import the test-only helpers from `effect-cf/vitest`. The `fetch` runner
+constructs the Worker with the current test environment and waits for all
+`waitUntil` work before completing the Effect.
+
+```ts
+import { assert, it } from "@effect/vitest";
+import { Config, Effect } from "effect";
+import * as PoolWorkers from "effect-cf/vitest";
+
+import WorkerEntrypoint from "../src/index";
+
+it.effect("serves a request", () =>
+  Effect.gen(function* () {
+    const response = yield* PoolWorkers.fetch(
+      WorkerEntrypoint,
+      new Request("https://worker.test/health"),
+    );
+
+    assert.strictEqual(response.status, 200);
+  }),
+);
+
+it.effect("reads Wrangler vars", () =>
+  Config.string("APP_NAME").pipe(
+    Effect.tap((appName) => assert.strictEqual(appName, "test-app")),
+    Effect.provide(PoolWorkers.layer),
+  ),
+);
+```
+
+Queue consumers can be invoked with typed message bodies while retaining the
+pool's acknowledgement and retry result:
+
+```ts
+it.effect("acknowledges a job", () =>
+  Effect.gen(function* () {
+    const { result } = yield* PoolWorkers.queue(MyQueueConsumer, "jobs", [
+      {
+        id: "job-1",
+        timestamp: new Date(),
+        attempts: 1,
+        body: { accountId: "account-1" },
+      },
+    ]);
+
+    assert.deepStrictEqual(result.explicitAcks, ["job-1"]);
+  }),
+);
+```
+
+Scheduled handlers and Pages Functions use the same lifecycle behavior: their
+Effects complete only after the event's `waitUntil` work has settled. Pages
+tests must configure the `ASSETS` binding required by Pool Workers.
+
+```ts
+it.effect("runs the cron handler", () =>
+  PoolWorkers.scheduled(worker.scheduled, {
+    cron: "30 * * * *",
+    scheduledTime: new Date("2030-01-01T00:00:00Z"),
+  }),
+);
+
+it.effect("runs a Pages Function", () =>
+  Effect.gen(function* () {
+    const response = yield* PoolWorkers.pages(onRequest, {
+      request: new Request("https://pages.test/users/dan"),
+      params: { user: "dan" },
+      data: { authenticated: true },
+    });
+
+    assert.strictEqual(response.status, 200);
+  }),
+);
+```
+
+`runInDurableObject` carries the test's Effect context into the Durable Object
+I/O context and provides the same wrapped `DurableObjectState` service used by
+production handlers. Typed failures remain in the Effect error channel.
+
+```ts
+it.effect("seeds a Durable Object", () =>
+  Effect.gen(function* () {
+    const stub = env.COUNTERS.getByName("home");
+
+    yield* PoolWorkers.runInDurableObject(stub, () =>
+      Effect.gen(function* () {
+        const state = yield* DurableObjectState;
+        yield* state.storage.put("count", 41);
+      }),
+    );
+
+    assert.strictEqual(yield* PoolWorkers.runDurableObjectAlarm(stub), true);
+
+    // Recreate in-memory state while preserving Durable Object storage.
+    yield* PoolWorkers.evictDurableObject(stub);
+  }),
+);
+```
+
+The subpath also exposes Effects for `listDurableObjectIds`, `reset`,
+`abortAllDurableObjects`, `evictAllDurableObjects`, and `applyD1Migrations`.
+`adminSecretsStore` returns an Effect-native admin client whose `create`,
+`update`, `duplicate`, `delete`, `list`, and `get` operations are Effects.
+
+`withExecutionContext` supports lower-level tests that need a native
+`ExecutionContext`. Workflow introspectors and all of their modifiers and query
+operations are Effect-native. They are disposed with the current Effect scope,
+and modifier callbacks carry the caller's Effect context and typed failures.
+
+```ts
+it.effect("controls a Workflow instance", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const instanceId = crypto.randomUUID();
+      const instance = yield* PoolWorkers.introspectWorkflowInstance(
+        env.REPORT_WORKFLOW,
+        instanceId,
+      );
+
+      yield* instance.modify((modifier) =>
+        Effect.gen(function* () {
+          yield* modifier.disableSleeps();
+          yield* modifier.mockStepResult({ name: "render-report" }, "reports/test.json");
+        }),
+      );
+      yield* Effect.promise(() =>
+        env.REPORT_WORKFLOW.create({
+          id: instanceId,
+          params: { reportId: "test", requestedBy: "dan@example.com" },
+        }),
+      );
+
+      yield* instance.waitForStatus("complete");
+      assert.deepStrictEqual(yield* instance.getOutput, {
+        objectKey: "reports/test.json",
+        notified: true,
+      });
+    }),
+  ),
+);
+```
+
+Use `introspectWorkflow` when the instance ID is not known before creation. Its
+`modifyAll` and `get` operations are Effects, and each instance returned by
+`get` uses the same Effect-native interface shown above.
 
 ## Worker Example
 
@@ -87,6 +258,12 @@ export const readCounter = Effect.gen(function* () {
 
 Define Wrangler bindings and migrations in the consuming application. Durable Object namespace bindings are provided with `YourObject.layer({ binding })`, and consumers use `const namespace = yield* YourObject`.
 
+`DurableObjectState.waitUntil` accepts either a raw Promise or an Effect. The
+Effect form runs in the background with the caller's Effect context and the
+same failure modes as `WorkerContext.waitUntil`, so Durable Objects can
+schedule background Effects (for example a pump consuming an outbound
+WebSocket) without capturing a Context and calling `Effect.runPromiseWith`.
+
 ## Container Example
 
 Container entrypoints remain owned by `@cloudflare/containers`; `effect-cf`
@@ -118,11 +295,29 @@ export default Worker.make(RenderersLive, {
 ```
 
 The instance client exposes `state`, `fetch`, `start`,
-`startAndWaitForPorts`, `stop`, `destroy`, and the Effect-valued native
-`unsafeRaw` stub.
+`startAndWaitForPorts`, `waitForPort`, `stop` (named or numeric signals),
+`destroy`, the runtime host-policy operations (`setAllowedHosts`,
+`setDeniedHosts`, `allowHost`, `denyHost`, `removeAllowedHost`,
+`removeDeniedHost`), and the Effect-valued native `rawUnsafe` stub.
+Host-policy operations only forward the native remote calls; applications
+continue to own hostname policy and outbound handlers.
 Responses are returned unchanged, including non-2xx and WebSocket upgrade
 responses. If the Container uses outbound interception, also export
 `ContainerProxy` from `@cloudflare/containers`.
+
+`ContainerNamespace.Tag` accepts an optional second type parameter carrying
+the exact native namespace type. `rawUnsafe` on the namespace and on named
+instances then preserves that exact type, including extra subclass methods,
+instead of the minimal structural shape:
+
+```ts
+class Sandboxes extends ContainerNamespace.Tag<Sandboxes, DurableObjectNamespace<CodexSandbox>>()(
+  "Sandboxes",
+) {}
+
+// Effect<DurableObjectStub<CodexSandbox>, ContainerOperationError, Sandboxes>
+const stub = Sandboxes.byName("codex").rawUnsafe;
+```
 
 See [`examples/containers/README.md`](../../examples/containers/README.md) for
 the corresponding Wrangler configuration and entrypoint responsibilities.
@@ -161,6 +356,12 @@ export const enqueueAvatar = (userId: string, imageKey: string) =>
 Producers should usually use `const queue = yield* AvatarQueue` and then call `queue.send(...)`, `queue.sendBatch(...)`, or `queue.metrics()`. The static `AvatarQueue.send(...)` helpers remain available for concise one-off calls.
 
 Queue handlers run inline failures through Cloudflare's normal retry path. If background work scheduled with `WorkerContext.waitUntil(...)` should also make the batch retry, use `WorkerContext.waitUntilPropagating(...)` or `waitUntil(..., { mode: "propagate" })`; the default `waitUntil` mode observes and logs failures without rejecting the native `waitUntil` promise.
+
+effect-cf automatically schedules best-effort OTLP flushes only for Worker
+fetch/RPC and Durable Object alarm/RPC handlers. Those internal flushes are
+capped at two seconds. Queue handlers do not flush telemetry automatically;
+applications that explicitly flush in a queue handler own that flush's timeout
+and failure policy.
 
 ## Cache Example
 
@@ -223,6 +424,168 @@ export const readArtifact = (key: string) =>
 ```
 
 Use `createMultipartUpload(...)` or `resumeMultipartUpload(...)` for large objects; returned upload handles wrap `uploadPart`, `complete`, and `abort` in Effect.
+
+## Artifacts Example
+
+Artifacts tags expose every namespace and repository-handle binding operation as an Effect. Configure the binding under Wrangler's `artifacts` field:
+
+```jsonc
+{
+  "artifacts": [
+    {
+      "binding": "ARTIFACTS",
+      "namespace": "default",
+      // Optional in local development:
+      "remote": true,
+    },
+  ],
+}
+```
+
+```ts
+import { Effect } from "effect";
+import { Artifacts } from "effect-cf";
+
+class Repositories extends Artifacts.Tag<Repositories>()("Repositories") {}
+
+export const RepositoriesLayer = Repositories.layer({ binding: "ARTIFACTS" });
+
+export const createWorkspace = Effect.gen(function* () {
+  const artifacts = yield* Repositories;
+  const created = yield* artifacts.create("agent-workspace", {
+    description: "Versioned agent workspace",
+    setDefaultBranch: "main",
+  });
+  const repo = yield* artifacts.get(created.name);
+  const readToken = yield* repo.createToken("read", 3600);
+
+  return {
+    remote: created.remote,
+    token: readToken.plaintext,
+    history: yield* repo.log({ ref: "main", limit: 10 }),
+  };
+});
+```
+
+`create`, `import`, and `fork` return an initial plaintext token. Treat returned tokens as secrets and avoid logging or persisting them unnecessarily.
+
+## Computer Workspace Example
+
+`ComputerWorkspace` exposes the complete `@cloudflare/computer`
+`WorkspaceClient` as Effects. The workspace client and every runtime execution
+handle are owned by an Effect `Scope`, so RPC stubs are disposed when their
+scope closes. The host mixin is a separate optional-dependency entrypoint:
+
+```ts
+import shellCurl from "@cloudflare/computer/shell/curl";
+import { Effect, Schema as S } from "effect";
+import { DurableObjectDefinition } from "effect-cf";
+import * as ComputerWorkspace from "effect-cf/computer-workspace";
+import { withComputerWorkspace, WorkspaceServiceProxy } from "effect-cf/computer-workspace-host";
+
+export { WorkspaceServiceProxy };
+
+const ResearchWorkspace = DurableObjectDefinition.make("ResearchWorkspace", {
+  inspect: DurableObjectDefinition.method({ success: S.String }),
+});
+
+const ResearchWorkspaceLive = ResearchWorkspace.make(ComputerWorkspace.ComputerWorkspace.layer, {
+  rpc: {
+    inspect: () =>
+      Effect.gen(function* () {
+        const workspace = yield* ComputerWorkspace.ComputerWorkspace;
+
+        // Keep reads bounded when returning their contents over RPC.
+        const readme = yield* workspace.readFile("/repo/README.md", {
+          byteLength: 256 * 1024,
+        });
+        const commits = yield* workspace.git.log({ maxCount: 20 });
+        const run = yield* workspace.execCollect("git status --short", {
+          cwd: "/repo",
+          timeoutMillis: 30_000,
+        });
+
+        return `${commits.length}:${run.exitCode}:${readme.length}`;
+      }),
+  },
+});
+
+const HostedResearchWorkspace = withComputerWorkspace(ResearchWorkspaceLive, (_, state, env) => ({
+  storage: state.storage,
+  sessionId: state.id.toString(),
+  gitIdentity: { name: "Research Agent", email: "agent@example.test" },
+  artifacts: { binding: env.ARTIFACTS },
+  shell: {
+    loader: env.WORKER_LOADER,
+    hostBinding: "RESEARCH_WORKSPACE",
+    hostId: state.id.toString(),
+    executionContext: state,
+    commands: [shellCurl],
+    egress: { mode: "none" },
+  },
+}));
+
+export class ResearchWorkspaceDurableObject extends HostedResearchWorkspace {}
+```
+
+Serialize checkout mutations such as `clone`, `fetch`, and reset/checkout
+sequences with an Effect `Semaphore` when several RPC methods can update the
+same working tree concurrently. Reads can remain concurrent.
+
+The corresponding Wrangler configuration needs SQLite-backed Durable Object
+storage. Worker-shell execution additionally requires the `experimental` flag,
+a Worker Loader binding, the loopback namespace binding named by `hostBinding`,
+and the exact `WorkspaceServiceProxy` export shown above:
+
+```jsonc
+{
+  "compatibility_flags": ["nodejs_compat", "experimental"],
+  "worker_loaders": [{ "binding": "WORKER_LOADER" }],
+  "artifacts": [{ "binding": "ARTIFACTS", "namespace": "default" }],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RESEARCH_WORKSPACE",
+        "class_name": "ResearchWorkspaceDurableObject",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["ResearchWorkspaceDurableObject"],
+    },
+  ],
+}
+```
+
+Omit `shell` and the Worker Loader configuration when only the SQLite
+filesystem and Git client are needed. Supplying `artifacts` also installs the
+session-scoped client at `workspace.artifacts` and makes the in-shell
+`artifacts` command use the same upstream repository-prefixing convention.
+
+Workers can use that session isolation without a Durable Object or workspace:
+
+```ts
+import { Effect } from "effect";
+import { Artifacts } from "effect-cf";
+import * as ComputerArtifacts from "effect-cf/computer-artifacts";
+
+export const createSessionRepo = (binding: Artifacts.ArtifactsBinding, sessionId: string) =>
+  Effect.gen(function* () {
+    const artifacts = yield* ComputerArtifacts.makeClient(binding, sessionId);
+    const created = yield* artifacts.create("build-cache", {
+      description: "CI artifacts",
+    });
+    const token = yield* artifacts.createToken("build-cache", "read", 3600);
+
+    return { remote: created.remote, token: token.plaintext };
+  });
+```
+
+Repository prefixing, list filtering, and the argv API are delegated directly
+to `@cloudflare/computer/artifacts`, keeping this API and the in-shell command
+in agreement.
 
 ## Hyperdrive Example
 
@@ -316,7 +679,7 @@ Onboard the sending domain under **Compute > Email Service > Email Sending**, th
 }
 ```
 
-Messages that violate a documented limit fail with `EmailValidationError` carrying every violation, without calling the binding. Use `layer({ binding, send: { validate: false } })` to skip validation and let Cloudflare reject the message instead. Raw RFC 5322 `EmailMessage` values are always passed through untouched, so the legacy `cloudflare:email` API keeps working.
+Messages that violate a documented limit fail with `EmailValidationError` carrying every violation, without calling the binding. Use `layer({ binding, send: { validate: false } })` to skip validation and let Cloudflare reject the message instead.
 
 Cloudflare's total message size limit is exposed as `Email.sendLimits.maxMessageBytes` but is not enforced, because the encoded MIME size is only known once Cloudflare composes the message. Oversized messages fail at the binding with `E_CONTENT_TOO_LARGE`.
 
@@ -336,7 +699,6 @@ export const RequestAnalyticsLayer = RequestAnalytics.layer({
   binding: "REQUEST_ANALYTICS",
   write: {
     onInvalid: "error",
-    batchSize: 100,
   },
 });
 
@@ -351,7 +713,7 @@ export const recordPageView = (request: Request) =>
       doubles: [1],
     });
 
-    yield* analytics.writeBatch(
+    yield* analytics.writeDataPoints(
       [
         {
           indexes: [url.hostname],
@@ -366,7 +728,7 @@ export const recordPageView = (request: Request) =>
 
 Define the dataset binding in the consuming Worker's `wrangler.jsonc` with `analytics_engine_datasets`, then provide `RequestAnalytics.layer({ binding: "REQUEST_ANALYTICS" })` from the Worker layer. Invalid writes fail with `AnalyticsEngineWriteValidationError` by default. Use `write: { onInvalid: "drop" }` on the layer or `{ onInvalid: "drop" }` per call when dropping invalid points is preferable.
 
-Analytics Engine query tags wrap Cloudflare's HTTP SQL API. Configuration can stay in Effect `Config`, including a redacted API token, the outbound transport is an Effect `HttpClient` dependency, and rows can be decoded with Effect schemas at the query boundary. Use `fetchLayerConfig(...)` as shorthand when the platform fetch-backed client is enough.
+Analytics Engine query tags wrap Cloudflare's HTTP SQL API. Configuration can stay in Effect `Config`, including a redacted API token, the outbound transport is an Effect `HttpClient` dependency, and rows can be decoded with Effect schemas at the query boundary. Use `layerFetchConfig(...)` as shorthand when the platform fetch-backed client is enough.
 
 ```ts
 import { Effect, Layer, Schema as S } from "effect";
@@ -523,6 +885,36 @@ if (Worker.isWebSocketUpgrade(request)) {
 ```
 
 Use `DurableObjectRpcWebSocket.layer(...)` for Effect RPC-over-WebSocket transports. It owns protocol parsing and RPC client bookkeeping; use `DurableWebSocket` for general application sockets, rooms, presence, and broadcast flows.
+
+## WebTransport and HTTP/3
+
+Cloudflare Workers cannot accept inbound WebTransport sessions today: workerd contains no QUIC/HTTP-3 stack, there is no `WebSocketPair`-style session API, and the maintainers state the feature "is not currently on our priority list" ([cloudflare/workerd#6451](https://github.com/cloudflare/workerd/issues/6451), [discussion #6454](https://github.com/cloudflare/workerd/discussions/6454)). Inbound HTTP/3 is a zone-level setting — the edge terminates QUIC and the Worker still receives an ordinary `fetch` Request. Workers and Durable Objects can accept inbound WebSocket connections; Durable Objects additionally support the hibernation WebSocket API.
+
+The `WebTransport` module gives that boundary a typed shape rather than pretending otherwise:
+
+```ts
+import { Effect, Option } from "effect";
+import { WebTransport } from "effect-cf";
+
+const fetch = Effect.fn("fetch")(function* (request: Request) {
+  // Decoded metadata about the browser→edge hop (HTTP/3 does not reach you).
+  const transport = WebTransport.inboundTransport(request);
+  const viaHttp3 = Option.match(transport, {
+    onNone: () => false,
+    onSome: WebTransport.isHttp3,
+  });
+
+  // Feature-detected runtime capabilities: { inboundSessions: false, ... }.
+  const capabilities = yield* WebTransport.capabilities;
+
+  // Explicit typed boundary where a future inbound session API would slot in.
+  // yield* WebTransport.inboundSessionsUnsupported;
+
+  return Response.json({ viaHttp3, capabilities });
+});
+```
+
+For clients that prefer WebTransport where it exists and fall back to Cloudflare-supported WebSockets, see the companion [`effect-webtransport`](../effect-webtransport) package's `Fallback` module — `examples/todo-rpc-ws` wires it up end to end.
 
 ## License
 

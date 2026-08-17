@@ -12,6 +12,7 @@ import {
   type WorkflowBinding,
   AiGateway,
   AnalyticsEngine,
+  Artifacts,
   BrowserRendering,
   DurableObject,
   Email,
@@ -75,6 +76,95 @@ expectTypeOf(AvatarQueue.send({ requestId: "r1", userId: "u1" })).toEqualTypeOf<
 
 void missingQueueLayer;
 void providedQueueProgram;
+
+export class ArtifactRepositories extends Artifacts.Tag<ArtifactRepositories>()(
+  "ArtifactRepositories",
+) {}
+
+export const ArtifactRepositoriesLayer = ArtifactRepositories.layer({
+  binding: "ARTIFACTS",
+});
+
+const artifactsProgram = Effect.gen(function* () {
+  const artifacts = yield* ArtifactRepositories;
+
+  expectTypeOf(
+    artifacts.create("agent-workspace", {
+      description: "Agent workspace",
+      readOnly: false,
+      setDefaultBranch: "main",
+    }),
+  ).toEqualTypeOf<
+    Effect.Effect<Artifacts.ArtifactsCreateRepoResult, Artifacts.ArtifactsOperationError>
+  >();
+
+  expectTypeOf(
+    artifacts.import({
+      source: {
+        url: "https://github.com/cloudflare/workers-sdk",
+        branch: "main",
+        depth: 1,
+      },
+      target: {
+        name: "workers-sdk",
+        opts: { description: "Workers SDK", readOnly: true },
+      },
+    }),
+  ).toEqualTypeOf<
+    Effect.Effect<Artifacts.ArtifactsCreateRepoResult, Artifacts.ArtifactsOperationError>
+  >();
+
+  expectTypeOf(artifacts.list({ limit: 20, cursor: "next" })).toEqualTypeOf<
+    Effect.Effect<Artifacts.ArtifactsRepoListResult, Artifacts.ArtifactsOperationError>
+  >();
+
+  expectTypeOf(artifacts.delete("agent-workspace")).toEqualTypeOf<
+    Effect.Effect<boolean, Artifacts.ArtifactsOperationError>
+  >();
+
+  const repo = yield* artifacts.get("agent-workspace");
+
+  expectTypeOf(repo).toEqualTypeOf<Artifacts.ArtifactsRepoClient>();
+  expectTypeOf(repo.info()).toEqualTypeOf<
+    Effect.Effect<Artifacts.ArtifactsRepoInfo, Artifacts.ArtifactsOperationError>
+  >();
+  expectTypeOf(repo.createToken("read", 3600)).toEqualTypeOf<
+    Effect.Effect<Artifacts.ArtifactsCreateTokenResult, Artifacts.ArtifactsOperationError>
+  >();
+  expectTypeOf(repo.listTokens).toEqualTypeOf<
+    Effect.Effect<Artifacts.ArtifactsTokenListResult, Artifacts.ArtifactsOperationError>
+  >();
+  expectTypeOf(repo.revokeToken("token-id")).toEqualTypeOf<
+    Effect.Effect<boolean, Artifacts.ArtifactsOperationError>
+  >();
+  expectTypeOf(
+    repo.fork("agent-workspace-copy", {
+      description: "Review copy",
+      readOnly: true,
+      defaultBranchOnly: true,
+    }),
+  ).toEqualTypeOf<
+    Effect.Effect<Artifacts.ArtifactsCreateRepoResult, Artifacts.ArtifactsOperationError>
+  >();
+  expectTypeOf(repo.log({ ref: "main", limit: 10, offset: 0 })).toEqualTypeOf<
+    Effect.Effect<Artifacts.ArtifactsLogResult, Artifacts.ArtifactsOperationError>
+  >();
+  expectTypeOf(repo.readCommit("commit-sha")).toEqualTypeOf<
+    Effect.Effect<Artifacts.ArtifactsCommit, Artifacts.ArtifactsOperationError>
+  >();
+  expectTypeOf(repo.readTree("tree-sha")).toEqualTypeOf<
+    Effect.Effect<Artifacts.ArtifactsTree, Artifacts.ArtifactsOperationError>
+  >();
+  expectTypeOf(artifacts.rawUnsafe).toEqualTypeOf<Effect.Effect<Artifacts.ArtifactsBinding>>();
+
+  // @ts-expect-error token scopes are read or write.
+  yield* repo.createToken("admin", 3600);
+});
+
+expectTypeOf(Artifacts.artifactsErrorNumericCodes.INVALID_TTL).toEqualTypeOf<10103>();
+expectTypeOf(EffectCf.Artifacts).toEqualTypeOf<typeof Artifacts>();
+
+void artifactsProgram;
 
 export const ReportWorkflowPayload = Schema.Struct({
   reportId: Schema.String,
@@ -155,7 +245,7 @@ const hyperdriveProgram = Effect.gen(function* () {
   const hyperdrive = yield* AppHyperdrive;
 
   expectTypeOf(hyperdrive.connectionString).toEqualTypeOf<string>();
-  expectTypeOf(hyperdrive.unsafeRaw).toEqualTypeOf<Effect.Effect<globalThis.Hyperdrive>>();
+  expectTypeOf(hyperdrive.rawUnsafe).toEqualTypeOf<Effect.Effect<globalThis.Hyperdrive>>();
 });
 
 expectTypeOf(HyperdrivePg.layer(AppHyperdrive, { binding: "HYPERDRIVE" })).toEqualTypeOf<
@@ -252,11 +342,6 @@ const emailProgram = Effect.gen(function* () {
     ],
   });
 
-  yield* email.send({
-    from: "team@example.com",
-    to: "user@example.com",
-  } satisfies Email.EmailMessage);
-
   // @ts-expect-error builder messages require a subject.
   yield* email.send({
     from: "team@example.com",
@@ -288,7 +373,7 @@ const workersAiProgram = Effect.gen(function* () {
     Effect.Effect<WorkersAi.WorkersAiEmbeddingResponse, WorkersAi.WorkersAiOperationError>
   >();
 
-  expectTypeOf(ai.unsafeRaw).toEqualTypeOf<Effect.Effect<WorkersAi.WorkersAiBinding<AiModels>>>();
+  expectTypeOf(ai.rawUnsafe).toEqualTypeOf<Effect.Effect<WorkersAi.WorkersAiBinding<AiModels>>>();
 });
 
 export class RecipeVectors extends Vectorize.Tag<RecipeVectors>()("RecipeVectors") {}
@@ -324,7 +409,7 @@ export class RequestAnalytics extends AnalyticsEngine.Tag<RequestAnalytics>()("R
 
 export const RequestAnalyticsLayer = RequestAnalytics.layer({
   binding: "REQUEST_ANALYTICS",
-  write: { onInvalid: "drop", batchSize: 100 },
+  write: { onInvalid: "drop" },
 });
 
 export class RequestAnalyticsQuery extends AnalyticsEngine.QueryTag<RequestAnalyticsQuery>()(
@@ -336,7 +421,7 @@ export const RequestAnalyticsQueryLayer = RequestAnalyticsQuery.layer({
   apiToken: Redacted.make("secret-token"),
 });
 
-export const RequestAnalyticsQueryFetchLayer = RequestAnalyticsQuery.fetchLayer({
+export const RequestAnalyticsQueryFetchLayer = RequestAnalyticsQuery.layerFetch({
   accountId: "account-1",
   apiToken: Redacted.make("secret-token"),
 });
@@ -348,7 +433,7 @@ export const RequestAnalyticsQueryConfigLayer = RequestAnalyticsQuery.layerConfi
   }),
 );
 
-export const RequestAnalyticsQueryFetchConfigLayer = RequestAnalyticsQuery.fetchLayerConfig(
+export const RequestAnalyticsQueryFetchConfigLayer = RequestAnalyticsQuery.layerFetchConfig(
   AnalyticsEngine.queryConfig({
     accountId: Config.string("ACCOUNT_ID"),
     apiToken: Config.redacted("API_TOKEN"),
@@ -367,7 +452,7 @@ const analyticsEngineProgram = Effect.gen(function* () {
   ).toEqualTypeOf<Effect.Effect<void, AnalyticsEngine.AnalyticsEngineWriteError>>();
 
   expectTypeOf(
-    analytics.write({ indexes: ["example.com"], blobs: ["/pricing"], doubles: [1] }),
+    analytics.writeDataPoint({ indexes: ["example.com"], blobs: ["/pricing"], doubles: [1] }),
   ).toEqualTypeOf<Effect.Effect<void, AnalyticsEngine.AnalyticsEngineWriteError>>();
 
   expectTypeOf(
@@ -376,15 +461,15 @@ const analyticsEngineProgram = Effect.gen(function* () {
         { indexes: ["example.com"], blobs: ["/pricing"], doubles: [1] },
         { indexes: ["example.com"], blobs: ["/home"], doubles: [1] },
       ],
-      { onInvalid: "error", batchSize: 2 },
+      { onInvalid: "error" },
     ),
   ).toEqualTypeOf<Effect.Effect<void, AnalyticsEngine.AnalyticsEngineWriteError>>();
 
   expectTypeOf(
-    analytics.writeBatch([{ indexes: ["example.com"], blobs: ["/pricing"], doubles: [1] }]),
+    analytics.writeDataPoints([{ indexes: ["example.com"], blobs: ["/pricing"], doubles: [1] }]),
   ).toEqualTypeOf<Effect.Effect<void, AnalyticsEngine.AnalyticsEngineWriteError>>();
 
-  expectTypeOf(analytics.unsafeRaw).toEqualTypeOf<
+  expectTypeOf(analytics.rawUnsafe).toEqualTypeOf<
     Effect.Effect<AnalyticsEngine.AnalyticsEngineBinding>
   >();
 

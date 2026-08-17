@@ -1,19 +1,24 @@
 /// <reference types="@cloudflare/vitest-pool-workers/types" />
 
+import type * as EffectArtifacts from "../src/Artifacts";
 import type * as TestWorkerModule from "./worker-fixture";
 
 declare global {
   namespace Cloudflare {
     interface Env {
       TEST_COUNTER_DO?: DurableObjectNamespace<TestWorkerModule.TestCounterDurableObject>;
+      TEST_COMPUTER_DO?: DurableObjectNamespace<TestWorkerModule.TestComputerWorkspaceDurableObject>;
       TEST_KV?: KVNamespace;
       TEST_DB?: D1Database;
+      TEST_SECRET?: SecretsStoreSecret;
+      TEST_WORKFLOW?: Workflow<TestWorkerModule.TestWorkflowPayload>;
       TEST_BUCKET?: R2Bucket;
       EMAIL?: SendEmail;
       HYPERDRIVE?: Hyperdrive;
       IMAGES?: ImagesBinding;
       AI?: Ai;
       REQUEST_ANALYTICS?: AnalyticsEngineDataset;
+      ARTIFACTS?: EffectArtifacts.ArtifactsBinding;
       RECIPE_VECTORS?: Vectorize;
       MYBROWSER?: unknown;
       DATABASE_URL?: string;
@@ -31,7 +36,7 @@ declare global {
 
     interface GlobalProps {
       mainModule: typeof TestWorkerModule;
-      durableNamespaces: "TestCounterDurableObject";
+      durableNamespaces: "TestComputerWorkspaceDurableObject" | "TestCounterDurableObject";
     }
   }
 }

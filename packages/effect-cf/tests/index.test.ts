@@ -1,4 +1,4 @@
-import { Clock, Context, Effect, Layer, Option, Schema as S, type Scope } from "effect";
+import { Clock, Context, Effect, Layer, Option, Predicate, Schema as S, type Scope } from "effect";
 import { expect, test } from "vite-plus/test";
 
 import {
@@ -12,13 +12,63 @@ import {
   WorkerEnvironment,
 } from "../src/index";
 import * as Rpc from "../src/Rpc";
+import { makePartialTestDouble } from "./TestDoubles";
 
 const expectType = <T>(_value: T) => {};
+const typeOnly = <Value>(): Value => {
+  throw new Error("type-only fixture");
+};
 
-const executionContext = {
+interface BoundaryRpcMethods {
+  readonly [name: string]: Worker.Method.Any;
+}
+
+interface BoundaryRpcHandlers {
+  readonly alarm?: () => Effect.Effect<string>;
+  readonly fetch?: () => Effect.Effect<string>;
+}
+
+interface BoundaryWorkerOptions {
+  readonly rpc: BoundaryRpcHandlers;
+}
+
+interface DynamicCounterStubCandidate {
+  readonly id: DurableObjectId;
+  readonly fetch: () => Promise<Response>;
+  readonly get?: number | (() => Promise<number>) | (() => never);
+  readonly resource?: () => Promise<{ readonly [Symbol.dispose]: () => void }>;
+}
+
+const defineWorkerAtBoundary = (id: string, methods: BoundaryRpcMethods): void => {
+  // SAFETY: Reserved-name tests intentionally pass a runtime method map outside Tag's static
+  // NoReservedMethods constraint so the constructor's defensive validation can be observed.
+  const define = Worker.Tag<object>() as (id: string, methods: BoundaryRpcMethods) => void;
+
+  define(id, methods);
+};
+
+const makeWorkerAtBoundary = (options: BoundaryWorkerOptions): void => {
+  type BoundaryFactory = (layer: typeof Layer.empty, options: BoundaryWorkerOptions) => void;
+  /* SAFETY: Reserved-name tests intentionally bypass the static options constraint to exercise
+  Worker.make's runtime validation of the explicitly typed RPC map. */
+  const make: BoundaryFactory = Worker.make as typeof Worker.make & BoundaryFactory;
+
+  make(Layer.empty, options);
+};
+
+const makeDurableObjectAtBoundary = (options: BoundaryWorkerOptions): void => {
+  type BoundaryFactory = (layer: typeof Layer.empty, options: BoundaryWorkerOptions) => void;
+  /* SAFETY: Reserved-name tests intentionally bypass the static options constraint to exercise
+  DurableObject.make's runtime validation of the explicitly typed RPC map. */
+  const make: BoundaryFactory = DurableObject.make as typeof DurableObject.make & BoundaryFactory;
+
+  make(Layer.empty, options);
+};
+
+const executionContext = makePartialTestDouble<ExecutionContext>({
   waitUntil() {},
   passThroughOnException() {},
-} as unknown as ExecutionContext;
+});
 
 class TestService extends Context.Service<TestService, { readonly value: string }>()(
   "effect-cf/test/TestService",
@@ -28,9 +78,9 @@ class DurableObjectEventValue extends Context.Service<DurableObjectEventValue, s
   "effect-cf/test/DurableObjectEventValue",
 ) {}
 
-const durableObjectId = {
+const durableObjectId = makePartialTestDouble<DurableObjectId>({
   toString: () => "counter-id",
-} as unknown as DurableObjectId;
+});
 
 const fetcher = {
   fetch: () => Promise.resolve(new Response(null, { status: 204 })),
@@ -72,7 +122,7 @@ const provideEchoService = <A, E>(effect: Effect.Effect<A, E, EchoWorker>, env: 
     ),
   );
 
-const makeNamespace = (stub: unknown) => {
+const makeNamespace = <Stub extends object>(stub: Stub) => {
   const namespace = {
     newUniqueId: () => durableObjectId,
     idFromName: () => durableObjectId,
@@ -85,8 +135,32 @@ const makeNamespace = (stub: unknown) => {
   return namespace;
 };
 
+const makeCounterEnv = <Binding extends object>(binding: Binding): Cloudflare.Env =>
+  makePartialTestDouble<Cloudflare.Env & { readonly COUNTERS: object }>({
+    COUNTERS: binding,
+  });
+
+const makeEchoEnv = <Binding extends object>(binding: Binding): Cloudflare.Env =>
+  makePartialTestDouble<Cloudflare.Env & { readonly ECHO: object }>({ ECHO: binding });
+
+type CounterStub = Effect.Success<ReturnType<typeof Counter.getByName>>;
+
+const dynamicCounterStub = (stub: DynamicCounterStubCandidate): CounterStub => {
+  if (
+    !Predicate.hasProperty(stub, "id") ||
+    !Predicate.hasProperty(stub, "fetch") ||
+    !Predicate.isFunction(stub.fetch)
+  ) {
+    throw new Error("Dynamic Counter stub must provide id and fetch");
+  }
+
+  // SAFETY: The checked base stub is intentionally allowed to omit or corrupt generated RPC
+  // methods so these tests can verify Counter.rpc performs its own dynamic method validation.
+  return stub as typeof stub & CounterStub;
+};
+
 test("exports Cloudflare primitives", () => {
-  expect(Binding.TypeId).toBe("effect-cf/Binding");
+  expect(Binding.TypeId).toBe("~effect-cf/Binding");
 });
 
 test("registers disposable RPC results with Effect scopes", async () => {
@@ -104,7 +178,7 @@ test("registers disposable RPC results with Effect scopes", async () => {
 
 test("rejects Worker RPC method names reserved by Cloudflare", () => {
   expect(() =>
-    (Worker.Tag as any)()("ReservedWorker", {
+    defineWorkerAtBoundary("ReservedWorker", {
       dup: Worker.method({ success: S.String }),
     }),
   ).toThrow(/reserved by Cloudflare Workers RPC/);
@@ -112,58 +186,40 @@ test("rejects Worker RPC method names reserved by Cloudflare", () => {
 
 test("rejects Worker lifecycle RPC method names reserved by Cloudflare", () => {
   expect(() =>
-    (Worker.Tag as any)()("ReservedLifecycleWorker", {
+    defineWorkerAtBoundary("ReservedLifecycleWorker", {
       alarm: Worker.method({ success: S.Void }),
     }),
   ).toThrow(/reserved by Cloudflare Workers RPC/);
 });
 
 test("rejects direct Worker RPC method names reserved by Cloudflare", () => {
-  expect(() =>
-    (Worker.make as any)(Layer.empty, {
-      rpc: {
-        fetch: () => Effect.succeed("invalid"),
-      },
-    }),
-  ).toThrow(/reserved by Cloudflare Workers RPC/);
-
-  expect(() =>
-    (Worker.make as any)(Layer.empty, {
-      rpc: {
-        alarm: () => Effect.succeed("invalid"),
-      },
-    }),
-  ).toThrow(/reserved by Cloudflare Workers RPC/);
+  expect(() => makeWorkerAtBoundary({ rpc: { fetch: () => Effect.succeed("invalid") } })).toThrow(
+    /reserved by Cloudflare Workers RPC/,
+  );
+  expect(() => makeWorkerAtBoundary({ rpc: { alarm: () => Effect.succeed("invalid") } })).toThrow(
+    /reserved by Cloudflare Workers RPC/,
+  );
 });
 
 test("rejects direct Durable Object RPC method names reserved by Cloudflare", () => {
   expect(() =>
-    (DurableObject.make as any)(Layer.empty, {
-      rpc: {
-        fetch: () => Effect.succeed("invalid"),
-      },
-    }),
+    makeDurableObjectAtBoundary({ rpc: { fetch: () => Effect.succeed("invalid") } }),
   ).toThrow(/reserved by Cloudflare Workers RPC/);
-
   expect(() =>
-    (DurableObject.make as any)(Layer.empty, {
-      rpc: {
-        alarm: () => Effect.succeed("invalid"),
-      },
-    }),
+    makeDurableObjectAtBoundary({ rpc: { alarm: () => Effect.succeed("invalid") } }),
   ).toThrow(/reserved by Cloudflare Workers RPC/);
 });
 
 test("Durable Object initialize runs when the instance is constructed", async () => {
   const calls: Array<string> = [];
   let initialize: Promise<unknown> | undefined;
-  const state = {
+  const state = makePartialTestDouble<globalThis.DurableObjectState>({
     id: durableObjectId,
-    storage: {} as globalThis.DurableObjectStorage,
+    storage: makePartialTestDouble<globalThis.DurableObjectStorage>({}),
     waitUntil: (promise: Promise<unknown>) => {
       initialize = promise;
     },
-    blockConcurrencyWhile: (callback: () => Promise<unknown>) => {
+    blockConcurrencyWhile: <Value>(callback: () => Promise<Value>) => {
       calls.push("block");
 
       return callback();
@@ -177,7 +233,7 @@ test("Durable Object initialize runs when the instance is constructed", async ()
     getHibernatableWebSocketEventTimeout: () => null,
     getTags: () => [],
     abort() {},
-  } as unknown as globalThis.DurableObjectState;
+  });
 
   const Live = DurableObject.make(Layer.empty, {
     initialize: Effect.gen(function* () {
@@ -191,7 +247,7 @@ test("Durable Object initialize runs when the instance is constructed", async ()
     }),
   });
 
-  new Live(state, {} as Cloudflare.Env);
+  new Live(state, makePartialTestDouble<Cloudflare.Env>({}));
 
   await initialize;
   expect(calls).toEqual(["block", "initialize:counter-id"]);
@@ -261,7 +317,7 @@ test("Durable Object eventLayer applies to events but not initialize", async () 
     },
   });
 
-  const object = new Live(state.raw, {} as Cloudflare.Env);
+  const object = new Live(state.raw, makePartialTestDouble<Cloudflare.Env>({}));
 
   await Promise.all(state.waitUntilPromises);
 
@@ -269,9 +325,11 @@ test("Durable Object eventLayer applies to events but not initialize", async () 
 
   await expect(response.text()).resolves.toBe("event:1");
   await object.alarm!();
-  await object.webSocketMessage!({} as WebSocket, "hello");
-  await object.webSocketClose!({} as WebSocket, 1000, "done", true);
-  await object.webSocketError!({} as WebSocket, new Error("boom"));
+  const webSocket = makePartialTestDouble<WebSocket>({});
+
+  await object.webSocketMessage!(webSocket, "hello");
+  await object.webSocketClose!(webSocket, 1000, "done", true);
+  await object.webSocketError!(webSocket, new Error("boom"));
   await expect(object.read()).resolves.toBe("event:6");
 
   expect(events).toEqual([
@@ -310,10 +368,13 @@ test("Durable Object handlers use an epoch nanosecond clock derived from wall ti
         return Response.json({ nanos: nanos.toString() });
       }),
     });
-    const object = new Live(makeDurableObjectState().raw, {} as Cloudflare.Env);
+    const object = new Live(
+      makeDurableObjectState().raw,
+      makePartialTestDouble<Cloudflare.Env>({}),
+    );
 
     const response = await object.fetch!(new Request("https://do.test/clock"));
-    const body = (await response.json()) as { readonly nanos: string };
+    const body = S.decodeUnknownSync(S.Struct({ nanos: S.String }))(await response.json());
 
     expect(BigInt(body.nanos)).toBe(BigInt(fixedMillis) * BigInt(1_000_000));
   } finally {
@@ -328,7 +389,7 @@ test("RPC-only Workers return a default 404 fetch response", async () => {
     },
   });
 
-  const instance = new WorkerClass(executionContext, {} as Cloudflare.Env);
+  const instance = new WorkerClass(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
   const response = await instance.fetch(new Request("https://example.com"));
 
   expect(response.status).toBe(404);
@@ -345,7 +406,7 @@ test("fetch provides the exact NativeRequest object", async () => {
     }),
   });
 
-  const instance = new WorkerClass(executionContext, {} as Cloudflare.Env);
+  const instance = new WorkerClass(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
   const request = new Request("https://example.com");
 
   await instance.fetch(request);
@@ -359,7 +420,7 @@ test("fetch returns the exact Response object from the handler", async () => {
     fetch: Effect.succeed(expectedResponse),
   });
 
-  const instance = new WorkerClass(executionContext, {} as Cloudflare.Env);
+  const instance = new WorkerClass(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
   const response = await instance.fetch(new Request("https://example.com"));
 
   expect(response).toBe(expectedResponse);
@@ -377,7 +438,7 @@ test("Worker RPC methods run through the managed runtime", async () => {
     },
   });
 
-  const instance = new WorkerClass(executionContext, {} as Cloudflare.Env);
+  const instance = new WorkerClass(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
 
   await expect(instance.ping()).resolves.toBe("runtime");
 });
@@ -396,8 +457,8 @@ test("Worker.Api exposes Cloudflare RPC-style pipelining types", () => {
   const assertTypes = () => {
     type NestedApi = Worker.Api<typeof NestedWorker>;
     type NestedServerApi = Worker.ServerApi<typeof NestedWorker>;
-    const client = null as unknown as NestedApi;
-    const server = null as unknown as NestedServerApi;
+    const client = typeOnly<NestedApi>();
+    const server = typeOnly<NestedServerApi>();
 
     expectType<Promise<{ readonly nested: { readonly value: string } }>>(server.getNested());
     expectType<Promise<string>>(client.getNested().nested.value);
@@ -419,8 +480,8 @@ test("DurableObject preserves server, client, handler, and namespace types", () 
   const assertTypes = () => {
     type CounterServerApi = DurableObject.ServerApi<typeof Counter>;
     type CounterApi = DurableObject.Api<typeof Counter>;
-    const server = null as unknown as CounterServerApi;
-    const client = null as unknown as CounterApi;
+    const server = typeOnly<CounterServerApi>();
+    const client = typeOnly<CounterApi>();
 
     expectType<Promise<number>>(server.get());
     expectType<Promise<number>>(client.get());
@@ -444,8 +505,7 @@ test("DurableObject preserves server, client, handler, and namespace types", () 
       "get"
     > = handlers.get();
 
-    type CounterStub = Effect.Success<ReturnType<typeof Counter.getByName>>;
-    const stub = null as unknown as CounterStub;
+    const stub = typeOnly<CounterStub>();
 
     expectType<
       Effect.Effect<Rpc.Result<number>, DurableObjectNamespace.DurableObjectRpcError, Counter>
@@ -516,16 +576,19 @@ test("DurableObject preserves server, client, handler, and namespace types", () 
 
 test("Durable Object namespace bindings report missing and invalid bindings", async () => {
   await expect(
-    Effect.runPromise(provideCounters(Counter.getByName("missing"), {} as Cloudflare.Env)),
+    Effect.runPromise(
+      provideCounters(Counter.getByName("missing"), makePartialTestDouble<Cloudflare.Env>({})),
+    ),
   ).rejects.toBeInstanceOf(Binding.BindingNotFoundError);
 
   await expect(
     Effect.runPromise(
-      provideCounters(Counter.getByName("invalid"), {
-        COUNTERS: {
+      provideCounters(
+        Counter.getByName("invalid"),
+        makeCounterEnv({
           getByName: () => undefined,
-        },
-      } as unknown as Cloudflare.Env),
+        }),
+      ),
     ),
   ).rejects.toBeInstanceOf(Binding.BindingValidationError);
 });
@@ -538,17 +601,19 @@ test("Durable Object namespace rpc validates dynamic methods", async () => {
 
   await expect(
     Effect.runPromise(
-      provideCounters(Counter.rpc(missingMethodStub as any, "get"), {
-        COUNTERS: makeNamespace(missingMethodStub),
-      } as unknown as Cloudflare.Env),
+      provideCounters(
+        Counter.rpc(dynamicCounterStub(missingMethodStub), "get"),
+        makeCounterEnv(makeNamespace(missingMethodStub)),
+      ),
     ),
   ).rejects.toBeInstanceOf(DurableObjectNamespace.DurableObjectRpcError);
 
   await expect(
     Effect.runPromise(
-      provideCounters(Counter.rpc({ ...missingMethodStub, get: 1 } as any, "get"), {
-        COUNTERS: makeNamespace(missingMethodStub),
-      } as unknown as Cloudflare.Env),
+      provideCounters(
+        Counter.rpc(dynamicCounterStub({ ...missingMethodStub, get: 1 }), "get"),
+        makeCounterEnv(makeNamespace(missingMethodStub)),
+      ),
     ),
   ).rejects.toBeInstanceOf(DurableObjectNamespace.DurableObjectRpcError);
 
@@ -556,15 +621,15 @@ test("Durable Object namespace rpc validates dynamic methods", async () => {
     Effect.runPromise(
       provideCounters(
         Counter.rpc(
-          {
+          dynamicCounterStub({
             ...missingMethodStub,
             get: () => {
               throw new Error("boom");
             },
-          } as any,
+          }),
           "get",
         ),
-        { COUNTERS: makeNamespace(missingMethodStub) } as unknown as Cloudflare.Env,
+        makeCounterEnv(makeNamespace(missingMethodStub)),
       ),
     ),
   ).rejects.toBeInstanceOf(DurableObjectNamespace.DurableObjectRpcError);
@@ -580,16 +645,18 @@ test("Durable Object namespace call resolves native RPC results", async () => {
 
   expect(
     Effect.runSync(
-      provideCounters(Counter.rpc(stub as any, "get"), {
-        COUNTERS: makeNamespace(stub),
-      } as unknown as Cloudflare.Env),
+      provideCounters(
+        Counter.rpc(dynamicCounterStub(stub), "get"),
+        makeCounterEnv(makeNamespace(stub)),
+      ),
     ),
   ).toBe(result);
   await expect(
     Effect.runPromise(
-      provideCounters(Counter.call(stub as any, "get"), {
-        COUNTERS: makeNamespace(stub),
-      } as unknown as Cloudflare.Env),
+      provideCounters(
+        Counter.call(dynamicCounterStub(stub), "get"),
+        makeCounterEnv(makeNamespace(stub)),
+      ),
     ),
   ).resolves.toBe(42);
 });
@@ -603,9 +670,10 @@ test("Durable Object namespace call maps rejected RPC results", async () => {
 
   await expect(
     Effect.runPromise(
-      provideCounters(Counter.call(stub as any, "get"), {
-        COUNTERS: makeNamespace(stub),
-      } as unknown as Cloudflare.Env),
+      provideCounters(
+        Counter.call(dynamicCounterStub(stub), "get"),
+        makeCounterEnv(makeNamespace(stub)),
+      ),
     ),
   ).rejects.toBeInstanceOf(DurableObjectNamespace.DurableObjectRpcError);
 });
@@ -624,9 +692,10 @@ test("Durable Object namespace scopedCall disposes disposable RPC results", asyn
   };
 
   await Effect.runPromise(
-    provideCounters(Effect.scoped(Counter.scopedCall(stub as any, "resource")), {
-      COUNTERS: makeNamespace(stub),
-    } as unknown as Cloudflare.Env),
+    provideCounters(
+      Effect.scoped(Counter.scopedCall(dynamicCounterStub(stub), "resource")),
+      makeCounterEnv(makeNamespace(stub)),
+    ),
   );
 
   expect(disposed).toBe(true);
@@ -647,9 +716,7 @@ test("Durable Object namespace binding retrieves stubs from the Worker environme
 
         return yield* counters.call(counter, "get");
       }),
-      {
-        COUNTERS: makeNamespace(stub),
-      } as unknown as Cloudflare.Env,
+      makeCounterEnv(makeNamespace(stub)),
     ),
   );
 
@@ -663,31 +730,24 @@ test("Service binding rpc uses the shared dynamic method validation", async () =
         Effect.gen(function* () {
           return yield* EchoService;
         }),
-        {
-          ECHO: {
-            fetch: "bad",
-          },
-        } as unknown as Cloudflare.Env,
+        makeEchoEnv({ fetch: "bad" }),
       ),
     ),
   ).rejects.toBeInstanceOf(Binding.BindingValidationError);
 
   await expect(
-    Effect.runPromise(
-      provideEchoService(EchoService.call("echo", "hello"), {
-        ECHO: fetcher,
-      } as unknown as Cloudflare.Env),
-    ),
+    Effect.runPromise(provideEchoService(EchoService.call("echo", "hello"), makeEchoEnv(fetcher))),
   ).rejects.toBeInstanceOf(ServiceBinding.ServiceBindingRpcError);
 
   await expect(
     Effect.runPromise(
-      provideEchoService(EchoService.call("echo", "hello"), {
-        ECHO: {
+      provideEchoService(
+        EchoService.call("echo", "hello"),
+        makeEchoEnv({
           ...fetcher,
           echo: 1,
-        },
-      } as unknown as Cloudflare.Env),
+        }),
+      ),
     ),
   ).rejects.toBeInstanceOf(ServiceBinding.ServiceBindingRpcError);
 
@@ -699,12 +759,10 @@ test("Service binding rpc uses the shared dynamic method validation", async () =
 
           return yield* service.call("echo", "hello");
         }),
-        {
-          ECHO: {
-            ...fetcher,
-            echo: (value: string) => Promise.resolve(value),
-          },
-        } as unknown as Cloudflare.Env,
+        makeEchoEnv({
+          ...fetcher,
+          echo: (value: string) => Promise.resolve(value),
+        }),
       ),
     ),
   ).resolves.toBe("hello");
@@ -712,13 +770,13 @@ test("Service binding rpc uses the shared dynamic method validation", async () =
 
 const makeDurableObjectState = () => {
   const waitUntilPromises: Array<Promise<unknown>> = [];
-  const raw = {
+  const raw = makePartialTestDouble<globalThis.DurableObjectState>({
     id: durableObjectId,
-    storage: {} as globalThis.DurableObjectStorage,
+    storage: makePartialTestDouble<globalThis.DurableObjectStorage>({}),
     waitUntil: (promise: Promise<unknown>) => {
       waitUntilPromises.push(promise);
     },
-    blockConcurrencyWhile: (callback: () => Promise<unknown>) => callback(),
+    blockConcurrencyWhile: <Value>(callback: () => Promise<Value>) => callback(),
     acceptWebSocket() {},
     getWebSockets: () => [],
     setWebSocketAutoResponse() {},
@@ -728,7 +786,7 @@ const makeDurableObjectState = () => {
     getHibernatableWebSocketEventTimeout: () => null,
     getTags: () => [],
     abort() {},
-  } as unknown as globalThis.DurableObjectState;
+  });
 
   return { raw, waitUntilPromises };
 };

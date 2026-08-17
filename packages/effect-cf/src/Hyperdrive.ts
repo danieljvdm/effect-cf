@@ -1,4 +1,4 @@
-import { Context, Effect, type Layer } from "effect";
+import { Context, Effect, type Layer, Predicate } from "effect";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
@@ -13,7 +13,7 @@ export interface HyperdriveDefinition {
 
 export interface HyperdriveClient {
   readonly connectionString: string;
-  readonly unsafeRaw: Effect.Effect<Hyperdrive>;
+  readonly rawUnsafe: Effect.Effect<Hyperdrive>;
   readonly definition: HyperdriveDefinition;
 }
 
@@ -45,22 +45,15 @@ export interface TagClass<Self, Id extends string> extends Context.ServiceClass<
   >;
 }
 
-export const isHyperdrive = (value: unknown): value is Hyperdrive => {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-
-  const resource = value as Record<string, unknown>;
-
-  return typeof resource.connectionString === "string";
-};
+export const isHyperdrive = <Candidate>(value: Candidate): value is Candidate & Hyperdrive =>
+  Predicate.hasProperty(value, "connectionString") && Predicate.isString(value.connectionString);
 
 export const makeClient =
   (definition: HyperdriveDefinition) =>
   (hyperdrive: Hyperdrive): HyperdriveClient => ({
     definition,
     connectionString: hyperdrive.connectionString,
-    unsafeRaw: Effect.succeed(hyperdrive),
+    rawUnsafe: Effect.succeed(hyperdrive),
   });
 
 export const layer = <Self>(
@@ -80,6 +73,7 @@ export const Tag =
 
     const makeLayer = (definition: LayerOptions) => layer(tag, definition);
 
+    // SAFETY: these are exactly the members required by TagClass, attached to the matching service tag.
     return Object.assign(tag, {
       id,
       layer: makeLayer,

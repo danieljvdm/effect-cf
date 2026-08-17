@@ -1,15 +1,25 @@
-import type {
-  ChatArtifact,
-  ChatMessage,
-  ChatPeer,
-  ChatServerEvent,
-  ChatSnapshot,
-  User,
+import {
+  ChatArtifact as ChatArtifactSchema,
+  ChatServerEvent as ChatServerEventSchema,
+  ChatSnapshot as ChatSnapshotSchema,
+  User as UserSchema,
+  type ChatArtifact,
+  type ChatMessage,
+  type ChatPeer,
+  type ChatServerEvent,
+  type ChatSnapshot,
+  type User,
 } from "@effect-cf/example-contracts/Schemas";
+import { Option, Predicate, Schema } from "effect";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-const apiBase =
-  (import.meta.env.VITE_CHAT_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "/api";
+const configuredApiBase = Option.getOrUndefined(
+  Schema.decodeUnknownOption(Schema.String)(import.meta.env.VITE_CHAT_API_BASE_URL),
+);
+const apiBase = configuredApiBase?.replace(/\/$/, "") ?? "/api";
+
+const UsersResponse = Schema.Struct({ users: Schema.Array(UserSchema) });
+const decodeServerEvent = Schema.decodeUnknownOption(Schema.fromJsonString(ChatServerEventSchema));
 
 const usersFallback: ReadonlyArray<User> = [
   { id: "ada", name: "Ada Lovelace", plan: "pro" },
@@ -243,11 +253,15 @@ export default function App() {
           return;
         }
 
-        if (typeof event.data !== "string") {
+        if (!Predicate.isString(event.data)) {
           return;
         }
 
-        handleServerEvent(clientId, JSON.parse(event.data) as ChatServerEvent);
+        const serverEvent = Option.getOrUndefined(decodeServerEvent(event.data));
+
+        if (serverEvent !== undefined) {
+          handleServerEvent(clientId, serverEvent);
+        }
       });
 
       socket.addEventListener("close", () => {
@@ -326,8 +340,8 @@ export default function App() {
       fetch(apiUrl(`/rooms/${encodeURIComponent(roomId)}/analysis`)),
     ]);
 
-    setSnapshot((await snapshotResponse.json()) as ChatSnapshot);
-    setAnalysis((await analysisResponse.json()) as ChatArtifact);
+    setSnapshot(Schema.decodeUnknownSync(ChatSnapshotSchema)(await snapshotResponse.json()));
+    setAnalysis(Schema.decodeUnknownSync(ChatArtifactSchema)(await analysisResponse.json()));
   }, [roomId]);
 
   const sendViaHttp = async () => {
@@ -340,7 +354,7 @@ export default function App() {
 
   useEffect(() => {
     fetch(apiUrl("/users"))
-      .then((response) => response.json() as Promise<{ users: ReadonlyArray<User> }>)
+      .then(async (response) => Schema.decodeUnknownSync(UsersResponse)(await response.json()))
       .then((body) => setUsers(body.users))
       .catch(() => setUsers(usersFallback));
   }, []);

@@ -1,5 +1,5 @@
 import { assert, layer } from "@effect/vitest";
-import { Effect, Layer, Schema } from "effect";
+import { Effect, Layer, Predicate, Schema } from "effect";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
@@ -10,6 +10,7 @@ import {
   DurableObjectState,
   DurableObjectWebSocket,
 } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
 class PingResult extends Schema.Class<PingResult>("PingResult")({
   nonce: Schema.String,
@@ -114,11 +115,40 @@ const TestRpcHandlers = TestRpcs.toLayer(
   });
 }
 
-function makeAppLayer(state: FakeDurableObjectState) {
+{
+  const socket = makeFakeWebSocket();
+  const durableSocket = DurableObjectWebSocket.fromWebSocket(socket);
+  const state = makeFakeDurableObjectState();
+
+  layer(makeAppLayer(state, RpcSerialization.layerNdjsonWith({ maxBufferSize: 16 })))(
+    "DurableObjectRpcWebSocket buffer limits",
+    (it) => {
+      it.effect("closes the socket with 1009 when a frame exceeds the max buffer size", () =>
+        Effect.gen(function* () {
+          const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
+
+          yield* transport.accept(durableSocket);
+          yield* transport.message(durableSocket, `${"x".repeat(64)}\n`);
+
+          assert.deepStrictEqual(
+            socket.closed.map((event) => event.code),
+            [1009],
+          );
+          assert.deepStrictEqual(socket.sent, []);
+        }),
+      );
+    },
+  );
+}
+
+function makeAppLayer(
+  state: FakeDurableObjectState,
+  serialization: Layer.Layer<RpcSerialization.RpcSerialization> = RpcSerialization.layerJson,
+) {
   return RpcServer.layer(TestRpcs, { disableFatalDefects: true }).pipe(
     Layer.provideMerge(DurableObjectRpcWebSocket.layer({ tag: "test-rpc" })),
     Layer.provide(TestRpcHandlers),
-    Layer.provide(RpcSerialization.layerJson),
+    Layer.provide(serialization),
     Layer.provide(
       Layer.succeed(
         DurableObjectState.DurableObjectState,
@@ -130,32 +160,43 @@ function makeAppLayer(state: FakeDurableObjectState) {
 
 interface FakeWebSocket extends WebSocket {
   readonly sent: Array<string | ArrayBuffer | ArrayBufferView>;
+  readonly closed: Array<{
+    readonly code: number | undefined;
+    readonly reason: string | undefined;
+  }>;
   readonly nextSend: Promise<void>;
 }
 
-function makeFakeWebSocket(initialAttachment: unknown = null): FakeWebSocket {
+type RpcAttachmentFixture = null | { readonly effectCloudflareRpcClientId: number };
+
+function makeFakeWebSocket(initialAttachment: RpcAttachmentFixture = null): FakeWebSocket {
   let attachment = initialAttachment;
   let resolveSend: () => void = () => {};
   const sent: Array<string | ArrayBuffer | ArrayBufferView> = [];
+  const closed: Array<{ readonly code: number | undefined; readonly reason: string | undefined }> =
+    [];
   const nextSend = new Promise<void>((resolve) => {
     resolveSend = resolve;
   });
 
-  return {
+  return makePartialTestDouble<FakeWebSocket>({
     sent,
+    closed,
     nextSend,
     send(message: string | ArrayBuffer | ArrayBufferView) {
       sent.push(message);
       resolveSend();
     },
-    close() {},
-    serializeAttachment(value: unknown) {
+    close(code?: number, reason?: string) {
+      closed.push({ code, reason });
+    },
+    serializeAttachment(value: RpcAttachmentFixture) {
       attachment = value;
     },
     deserializeAttachment() {
       return attachment;
     },
-  } as unknown as FakeWebSocket;
+  });
 }
 
 interface FakeDurableObjectState extends DurableObjectState.DurableObjectStateService {
@@ -173,9 +214,9 @@ function makeFakeDurableObjectState(options?: {
   const socketsByTag = options?.socketsByTag ?? new Map<string, Array<WebSocket>>();
 
   return {
-    raw: {} as globalThis.DurableObjectState,
-    id: {} as globalThis.DurableObjectId,
-    storage: {} as never,
+    raw: makePartialTestDouble<globalThis.DurableObjectState>({}),
+    id: makePartialTestDouble<globalThis.DurableObjectId>({}),
+    storage: makePartialTestDouble<DurableObjectState.DurableObjectStateService["storage"]>({}),
     waitUntil: () => Effect.void,
     blockConcurrencyWhile: (effect) => effect,
     blockConcurrencyWhileOrReset: (effect) => effect,
@@ -211,8 +252,10 @@ function makeFakeDurableObjectState(options?: {
 
 function decodeSent(socket: FakeWebSocket) {
   return socket.sent.map((message) => {
-    assert.strictEqual(typeof message, "string");
+    if (!Predicate.isString(message)) {
+      throw new Error("Expected the RPC transport to send a string frame");
+    }
 
-    return JSON.parse(message as string);
+    return JSON.parse(message);
   });
 }

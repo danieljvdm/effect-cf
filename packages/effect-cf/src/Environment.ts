@@ -1,4 +1,4 @@
-import { Config, ConfigProvider, Context, Effect } from "effect";
+import { Config, ConfigProvider, Context, Effect, type Layer, Predicate } from "effect";
 
 /** Cloudflare worker environment object (`env`). */
 export type WorkerEnv = Cloudflare.Env;
@@ -41,7 +41,7 @@ type ScalarConfigKey = Extract<
  * const program = Effect.gen(function* () {
  *   const config = yield* AppConfig;
  *   // ...
- * }).pipe(Effect.provide(WorkerConfig.layer));
+ * }).pipe(Effect.provide(WorkerConfig.providerLayer));
  * ```
  *
  * Keys are constrained to scalar `Cloudflare.Env` properties (`string`,
@@ -72,8 +72,37 @@ export namespace WorkerConfig {
   /** Read a scalar Cloudflare var or secret as a boolean. */
   export const boolean = <const Name extends Key>(name: Name) => Config.boolean(name);
 
-  /** Build a `ConfigProvider` from a Cloudflare worker `env` object. */
-  export const providerFromEnv = (env: WorkerEnv) => ConfigProvider.fromUnknown(env);
+  /** Options for building a `ConfigProvider` from a Cloudflare worker `env` object. */
+  export interface ProviderOptions {
+    /**
+     * Keep empty-string env values as explicit `""` config values.
+     *
+     * By default (absent or `false`), empty strings are treated as missing
+     * config, matching `ConfigProvider.fromEnvRecord`.
+     */
+    readonly preserveEmptyStrings?: boolean;
+  }
+
+  /**
+   * Build a `ConfigProvider` from a Cloudflare worker `env` object.
+   *
+   * Scalar vars and secrets use Effect's environment-record semantics;
+   * Cloudflare binding objects are ignored.
+   *
+   * Empty-string values are treated as missing config by default; pass
+   * `{ preserveEmptyStrings: true }` to keep them as explicit values.
+   */
+  export const providerFromEnv = (env: WorkerEnv, options?: ProviderOptions) => {
+    const record: Record<string, string> = {};
+
+    for (const [key, value] of Object.entries(env)) {
+      if (Predicate.isString(value) || Predicate.isNumber(value) || Predicate.isBoolean(value)) {
+        record[key] = String(value);
+      }
+    }
+
+    return ConfigProvider.fromEnvRecord(record, options);
+  };
 
   /**
    * Build a `ConfigProvider` from the current `WorkerEnvironment` with a custom
@@ -89,12 +118,12 @@ export namespace WorkerConfig {
    * Replace the active Effect `ConfigProvider` with one backed by the current
    * Cloudflare worker `env` object.
    */
-  export const providerLayer = ConfigProvider.layer(provider);
-
-  /** Alias for `providerLayer` for concise use in worker layers. */
-  export const layer = providerLayer;
+  export const providerLayer: Layer.Layer<never, never, WorkerEnvironment> =
+    ConfigProvider.layer(provider);
 
   /** Build a `ConfigProvider` layer with a custom `env` conversion function. */
-  export const layerWith = (makeProvider: (env: WorkerEnv) => ConfigProvider.ConfigProvider) =>
+  export const layerWith = (
+    makeProvider: (env: WorkerEnv) => ConfigProvider.ConfigProvider,
+  ): Layer.Layer<never, never, WorkerEnvironment> =>
     ConfigProvider.layer(providerWith(makeProvider));
 }

@@ -1,5 +1,156 @@
 # effect-cf
 
+## 0.28.1
+
+### Patch Changes
+
+- [#105](https://github.com/danieljvdm/effect-cf/pull/105) [`f5dfd5e`](https://github.com/danieljvdm/effect-cf/commit/f5dfd5e2c79b257cc760dc0b2cdf5a2901b0b295) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Bound internally scheduled telemetry flushes so exporter retries cannot extend Worker or Durable Object event lifetimes indefinitely.
+
+- [#106](https://github.com/danieljvdm/effect-cf/pull/106) [`c0fbb85`](https://github.com/danieljvdm/effect-cf/commit/c0fbb8535479262741e6844935e9ff9d508f6b56) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Silently absorb failures raised while scheduling automatic OTLP telemetry flushes so platform boundary defects cannot feed back into the configured exporter. Document the two-second best-effort boundary and keep explicit queue flush policy application-owned.
+
+## 0.28.0
+
+### Minor Changes
+
+- [#104](https://github.com/danieljvdm/effect-cf/pull/104) [`4aadbd0`](https://github.com/danieljvdm/effect-cf/commit/4aadbd0b6e76449bac190dbc5abb4c20486c8761) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Allow workflow step Effects to fail terminally with `WorkflowStepNonRetryableError`, which is rethrown to Cloudflare as its native `NonRetryableError`.
+
+- [#104](https://github.com/danieljvdm/effect-cf/pull/104) [`4aadbd0`](https://github.com/danieljvdm/effect-cf/commit/4aadbd0b6e76449bac190dbc5abb4c20486c8761) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Support method-only remote Artifacts repository bindings with a typed `info()` client operation and live commit history shapes.
+
+- [#102](https://github.com/danieljvdm/effect-cf/pull/102) [`1b32c54`](https://github.com/danieljvdm/effect-cf/commit/1b32c54757bf404c2454389b0386e0996974cdc6) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Harden Cloudflare and WebTransport runtime boundaries with receiver-safe invocation, truthful return types, validated external data, and stricter event-layer requirements.
+
+## 0.27.0
+
+### Minor Changes
+
+- [#99](https://github.com/danieljvdm/effect-cf/pull/99) [`5195812`](https://github.com/danieljvdm/effect-cf/commit/519581205c3d3b63e977515f2a33db989a5c9875) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Keep the optional `@cloudflare/computer` integration out of the root bundle so Durable Object and other unrelated consumers can bundle `effect-cf` without installing or externalizing that peer. The synchronous root namespaces could not be preserved without making esbuild resolve the optional dependency before tree-shaking, so update `ComputerWorkspace` imports to `effect-cf/computer-workspace` and `ComputerArtifacts` imports to `effect-cf/computer-artifacts`; `effect-cf/computer-workspace-host` remains unchanged.
+
+## 0.26.0
+
+### Minor Changes
+
+- [#97](https://github.com/danieljvdm/effect-cf/pull/97) [`b7bc27e`](https://github.com/danieljvdm/effect-cf/commit/b7bc27eb03130578e13a593d9efc45bb8d3d5269) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add first-class Cloudflare Artifacts binding support through the new `Artifacts` module. Namespace lifecycle operations, repository token and fork operations, and Git commit-history, commit, and tree reads are available as typed Effects with validated bindings, structured options and results, tracing spans, and Cloudflare error identifiers.
+
+- [#98](https://github.com/danieljvdm/effect-cf/pull/98) [`5b9a05e`](https://github.com/danieljvdm/effect-cf/commit/5b9a05e976f653eb9a9d2003fdd57379d906c871) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add Effect-native Cloudflare Computer workspaces, scoped execution handles, a Durable Object host mixin, and session-isolated Artifacts clients.
+
+- [#94](https://github.com/danieljvdm/effect-cf/pull/94) [`8a7ec63`](https://github.com/danieljvdm/effect-cf/commit/8a7ec630ecb2ddc2b55348cb6c701f5a9ce42d3b) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add the `WebTransport` module: a truthful WebTransport/HTTP-3 boundary for Workers. `inboundTransport` decodes the HTTP protocol metadata Cloudflare's edge attaches to requests (`httpProtocol`, `clientQuicRtt`, `clientTcpRtt`) with `isHttp3` on top; `capabilities` feature-detects what the runtime provides; and `inboundSessionsUnsupported` is an explicit typed boundary for the inbound WebTransport session API that workerd does not have (cloudflare/workerd#6451).
+
+## 0.25.3
+
+### Patch Changes
+
+- [#92](https://github.com/danieljvdm/effect-cf/pull/92) [`f174800`](https://github.com/danieljvdm/effect-cf/commit/f1748004e463d4e54c22e7c77fdea68ff8de7f82) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Flush configured OTLP telemetry after Durable Object alarm handlers, including failed alarms, so buffered telemetry is exported consistently with fetch and native RPC handlers.
+
+## 0.25.2
+
+### Patch Changes
+
+- [#90](https://github.com/danieljvdm/effect-cf/pull/90) [`56c1b2d`](https://github.com/danieljvdm/effect-cf/commit/56c1b2dfa30cbcc2336f28a8d8f7a48032f565df) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Flush configured OTLP telemetry after native Worker and Durable Object RPC handlers complete. Flush and scheduling failures keep the handler outcome unchanged and emit only bounded framework diagnostics.
+
+## 0.25.1
+
+### Patch Changes
+
+- [#88](https://github.com/danieljvdm/effect-cf/pull/88) [`18941d4`](https://github.com/danieljvdm/effect-cf/commit/18941d418c296c39a36d909516eb22a74778c8e7) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Upgrade to Effect 4 beta.107 and use its explicit environment-record config provider for
+  Cloudflare variables.
+
+## 0.25.0
+
+### Minor Changes
+
+- [#85](https://github.com/danieljvdm/effect-cf/pull/85) [`2c46f9d`](https://github.com/danieljvdm/effect-cf/commit/2c46f9d64774edb7994e3879313077e2a203777a) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Remove compatibility APIs. Use `WorkerConfig.providerLayer`,
+  `AnalyticsEngine.writeDataPoint` or `writeDataPoints`, and
+  `DurableObjectAlarm.processDue`; Email sends now require structured builder messages.
+
+### Patch Changes
+
+- [#87](https://github.com/danieljvdm/effect-cf/pull/87) [`6d6fdfa`](https://github.com/danieljvdm/effect-cf/commit/6d6fdfaaf4812bb46c49b49aad3fd2ca50af76f6) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Allow compatible Effect releases in package development dependency ranges.
+
+## 0.24.0
+
+### Minor Changes
+
+- [#82](https://github.com/danieljvdm/effect-cf/pull/82) [`877f289`](https://github.com/danieljvdm/effect-cf/commit/877f289a19ff15bdca1e7f9320aee3be1cffb3de) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add an `effect-cf/vitest` entrypoint with Effect-native Workers environment, fetch, queue, execution-context, and scoped Workflow testing helpers for Cloudflare's Vitest Workers pool.
+
+- [#84](https://github.com/danieljvdm/effect-cf/pull/84) [`9bbd554`](https://github.com/danieljvdm/effect-cf/commit/9bbd5543ca463447d0eb6a08d6441c7b72086b40) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add Effect-native scheduled and Pages runners, Durable Object test controls, D1 migrations, binding reset helpers, Workflow introspectors, and a Secrets Store admin client to `effect-cf/vitest`. The optional `@cloudflare/vitest-pool-workers` peer dependency now requires `^0.21.3`.
+
+## 0.23.1
+
+### Patch Changes
+
+- [#80](https://github.com/danieljvdm/effect-cf/pull/80) [`cd83c7c`](https://github.com/danieljvdm/effect-cf/commit/cd83c7cc86bb8edfcd1449c17cca1c26aecc8a06) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Stop failing workflow status reads with `WorkflowResultDecodeError` when Cloudflare reports `output: null` for a non-complete instance. The wrapped `WorkflowInstance.status` now returns the real status (e.g. `errored`) with `Option.none()` output and the preserved `error`, while a completed workflow with a `Schema.Null` result still decodes `null` as `Option.some(null)`.
+
+## 0.23.0
+
+### Minor Changes
+
+- [#78](https://github.com/danieljvdm/effect-cf/pull/78) [`f753742`](https://github.com/danieljvdm/effect-cf/commit/f753742500603ea604f4f11d4c7840a41efb849b) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Extend the `ContainerNamespace` client with the remaining caller-side Container primitives: `waitForPort` (preserving the native retry-count result), the runtime host-policy operations (`setAllowedHosts`, `setDeniedHosts`, `allowHost`, `denyHost`, `removeAllowedHost`, `removeDeniedHost`), and numeric stop signals alongside the named ones. `ContainerNamespace.Tag` now accepts an optional exact native namespace type (for example `DurableObjectNamespace<CodexSandbox>`) so `rawUnsafe` on the namespace and on named instances preserves the exact native namespace and stub types, including extra subclass methods. Existing consumers compile unchanged via default type parameters.
+
+- [#78](https://github.com/danieljvdm/effect-cf/pull/78) [`f753742`](https://github.com/danieljvdm/effect-cf/commit/f753742500603ea604f4f11d4c7840a41efb849b) Thanks [@danieljvdm](https://github.com/danieljvdm)! - `DurableObjectState.waitUntil` now also accepts an Effect, running it in the background with the caller's Effect context and the same failure modes as `WorkerContext.waitUntil` (`"observe"` logs or routes failures to `onFailure`; `"propagate"` also rejects the native `waitUntil` promise). The existing Promise form is unchanged, so Durable Objects no longer need to capture a Context and call `Effect.runPromiseWith` to schedule background Effects.
+
+## 0.22.0
+
+### Minor Changes
+
+- [#73](https://github.com/danieljvdm/effect-cf/pull/73) [`9096e1e`](https://github.com/danieljvdm/effect-cf/commit/9096e1e6801bb9ac29ce8de0fa30902d9e210983) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Encode RPC method schemas through their canonical JSON codec at the Workers RPC boundary. Declaration schemas such as `Schema.Result` keep their container instance in their encoded form, so Durable Object, Worker entrypoint, and service binding RPC methods declared with them crashed in production with `DataCloneError` even though local same-isolate calls worked. Wire values are now plain JSON in both directions: clients encode arguments and decode results back into real instances, servers decode arguments and encode results, and codec failures still surface as tagged errors naming the definition and method. The `Method.EncodedArgs` and `Method.EncodedSuccess` utility types now report the JSON wire form.
+
+## 0.21.0
+
+### Minor Changes
+
+- [#69](https://github.com/danieljvdm/effect-cf/pull/69) [`16d6190`](https://github.com/danieljvdm/effect-cf/commit/16d6190bc022f040b6e9ddb1f583a973357598c3) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Align effect-cf with effect 4.0.0-beta.105 canonical APIs. This release contains breaking renames alongside behavior fixes surfaced by a full audit of the beta.65 → beta.105 upgrade.
+
+  Breaking changes:
+
+  - `unsafeRaw` is now `rawUnsafe` on every binding client and definition tag, following the effect v4 `Unsafe`-suffix convention. Definition tag statics are now Effect properties (matching the client shape) rather than zero-arg functions.
+  - `Kv` clients: `remove` is now `delete`.
+  - Layer variants renamed: `AnalyticsEngine.queryFetchLayer`/`queryFetchLayerConfig` → `layerFetch`/`layerFetchConfig` (tag fields `fetchLayer`/`fetchLayerConfig` likewise); `CloudflareOtlp.workerLayer`/`durableObjectLayer` → `layerWorker`/`layerDurableObject`.
+  - Definition tags (Durable Objects, Queues, Workflows, Containers, Bindings) are keyed as `effect-cf/<Module>/<id>` instead of the bare user id, so a definition named `"X"` no longer silently collides with an unrelated service keyed `"X"`. `definition.id` is unchanged.
+  - Queue producers must provide `sendBatch`; the silent sequential-send fallback (which lost batch atomicity) was removed and now fails with `QueueOperationError`.
+  - `Worker.renderHttpResponse` removed — return `HttpServerResponse` values directly from fetch handlers to get canonical response handling, including streaming-scope transfer.
+  - `RpcDefinition`: the plain-Error `ReservedMethodNameError` and `assertNoReservedMethodNames` were removed (use `assertNoReservedMethods`, which now throws the tagged `RpcReservedMethodNameError`); the `index` field was removed from argument encode/decode errors (positional info lives in the schema issue path).
+  - `Worker.TagFactory` / `DurableObject.TagFactory` types removed; the definition type surface is now re-exported from `WorkerDefinition`/`DurableObjectDefinition`.
+  - The unexported legacy `Entry` module and the internal Cloudflare clock were deleted; the effect default clock is used (its epoch time is monotonic-anchored, so it may skew from `Date.now()` by microseconds).
+  - effect peer dependencies are pinned exactly to `4.0.0-beta.105` while the package depends on `effect/unstable/*` modules.
+
+  Fixes:
+
+  - `DurableObjectSqlite.layer` now passes Durable Object storage to the SQL client, so `sql.withTransaction` works — previously every transaction failed at runtime.
+  - `CloudflareOtlp` layers now expose `OtlpExporter.Flusher`, and Worker fetch handlers automatically flush buffered telemetry via `ctx.waitUntil` after each response — telemetry is no longer lost when the isolate freezes after responding.
+  - Worker fetch handlers built with `makeFetchHandler` cache the runtime per environment instead of rebuilding every layer on each request.
+  - RPC method errors keep their tags across the Workers RPC wire: `RpcArgumentCountError`, `RpcArgumentDecodeError`, and `RpcSuccessEncodeError` are schema-serialized at the entrypoint and rehydrated as tagged instances on the caller side.
+  - The Durable Object RPC WebSocket transport closes the socket with code 1009 when a frame exceeds the serialization buffer limit instead of leaving the connection in a poisoned state.
+  - `DurableObjectWebSocket.acceptUpgrade` fails with a typed `DurableWebSocketAttachmentError` for non-serializable attachments instead of an untyped defect.
+  - Cloudflare Workflow steps fail with a typed `WorkflowStepError` carrying the step name, operation, and cause instead of leaking raw `unknown` rejections.
+  - `AiGateway` HTTP requests abort in-flight fetches when the running fiber is interrupted, and merge a caller-supplied `AbortSignal`.
+
+  Additions:
+
+  - Named tracing spans across the public client surface (`Kv.put`, `R2.get`, `DurableObject.call`, `QueueBinding.send`, `Email.send`, ...) with binding/operation attributes, so operations show up in the OTLP traces the package exports.
+  - Error classes render actionable messages by default: `Cause.pretty` and logs now show the binding, operation, error code when present, and the underlying cause instead of an empty message with a stack trace.
+  - `WorkerConfig.providerFromEnv` accepts `{ preserveEmptyStrings: true }` for environments where an empty-string var must decode as `""` rather than as absent.
+  - `Email` error `code` extraction is documented as best-effort (dev-time remote-proxy bindings can strip the property).
+  - `package.json` declares `sideEffects: []` for better tree-shaking of Workers bundles, and `@cloudflare/workers-types` is an optional peer for consumers type-checking against the public declarations.
+
+## 0.20.1
+
+### Patch Changes
+
+- [#67](https://github.com/danieljvdm/effect-cf/pull/67) [`d8e1d64`](https://github.com/danieljvdm/effect-cf/commit/d8e1d64e8117fd8b86fabef6a61de01251557d2b) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Route `Worker.make` fetch handlers through `HttpEffect.toHandled`, matching the first-party Effect HTTP adapters.
+
+  - Pre-response handlers (`HttpEffect.appendPreResponseHandler`, and things built on it such as `HttpApiBuilder.securitySetCookie`) now run before `HttpServerResponse` results are rendered. Previously they were silently dropped, which broke cookie-based auth flows on Workers.
+  - Streaming response bodies keep request-scoped resources alive until the stream completes, instead of finalizing them as soon as the `Response` is returned.
+  - `HttpServerResponse` bodies are suppressed for `HEAD` requests.
+  - Handler failures are now rendered as HTTP error responses (with the cause reported) instead of rejecting the `fetch` promise. Note that exceptions no longer escape `fetch`, so `passThroughOnException` will not trigger origin fallback for Effect-level failures.
+  - Native `Response` values returned from a fetch handler continue to bypass all response processing, including pre-response handlers — WebSocket upgrade responses and app-level `HttpEffect.toHandled` wrappers pass through untouched.
+
+## 0.20.0
+
+### Minor Changes
+
+- [#64](https://github.com/danieljvdm/effect-cf/pull/64) [`d333039`](https://github.com/danieljvdm/effect-cf/commit/d33303949ac38d2a2e942954d0edbfeeebc16b81) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Upgrade Effect to `4.0.0-beta.105`. The `effect`, `@effect/sql-d1`, `@effect/sql-pg`, and `@effect/sql-sqlite-do` peer ranges now require `^4.0.0-beta.105`, so upgrade Effect alongside this release.
+
+  `CloudflareOtlp` resource precedence has flipped to match Effect's `OtlpResource.fromConfig`. Explicit `resource.serviceName` and `resource.serviceVersion` now take precedence over `OTEL_SERVICE_NAME`, `OTEL_SERVICE_VERSION`, and `OTEL_RESOURCE_ATTRIBUTES`; previously the environment won. Omit an option to keep letting operators set it from the environment.
+
 ## 0.19.0
 
 ### Minor Changes

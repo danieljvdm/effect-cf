@@ -2,6 +2,7 @@ import { assert, expect, it, test } from "@effect/vitest";
 import { Cause, DateTime, Effect, Layer, Schema } from "effect";
 
 import { DurableObject, DurableObjectAlarm, DurableObjectState } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
 it.effect("schedules, replaces, and reconciles to the earliest logical alarm", () =>
   Effect.gen(function* () {
@@ -294,16 +295,16 @@ it.effect("surfaces invalid input as typed scheduler errors", () =>
     assert.strictEqual(invalidRef._tag, "Failure");
     assert.strictEqual(invalidRepeat._tag, "Failure");
     if (invalidRef._tag === "Failure") {
-      assert.strictEqual(
-        (Cause.squash(invalidRef.cause) as DurableObjectAlarm.InvalidAlarmRefError)._tag,
-        "InvalidAlarmRefError",
-      );
+      const error = Cause.squash(invalidRef.cause);
+
+      assert.instanceOf(error, DurableObjectAlarm.InvalidAlarmRefError);
+      assert.strictEqual(error._tag, "InvalidAlarmRefError");
     }
     if (invalidRepeat._tag === "Failure") {
-      assert.strictEqual(
-        (Cause.squash(invalidRepeat.cause) as DurableObjectAlarm.InvalidRepeatEveryError)._tag,
-        "InvalidRepeatEveryError",
-      );
+      const error = Cause.squash(invalidRepeat.cause);
+
+      assert.instanceOf(error, DurableObjectAlarm.InvalidRepeatEveryError);
+      assert.strictEqual(error._tag, "InvalidRepeatEveryError");
     }
   }),
 );
@@ -469,14 +470,20 @@ test("DurableObject.make composes logical alarms before raw alarm hook", async (
     }),
   );
 
-  const instance = new Live(fixture.state, {} as Cloudflare.Env);
+  const instance = new Live(fixture.state, makePartialTestDouble<Cloudflare.Env>({}));
 
-  await (instance as unknown as { alarm(): Promise<void> | void }).alarm();
+  interface AlarmHandler {
+    alarm(): Promise<void> | void;
+  }
+
+  await makePartialTestDouble<AlarmHandler>(instance).alarm();
 
   expect(calls).toEqual(["logical:a", "raw"]);
 });
 
-interface StoredAlarmRow {
+type SqlFixtureRow = Record<string, globalThis.SqlStorageValue>;
+
+interface StoredAlarmRow extends SqlFixtureRow {
   readonly alarm_id: string;
   readonly payload: string;
   readonly repeat_every_ms: number | null;
@@ -502,7 +509,7 @@ function makeAlarmFixture() {
   let rejectNextSetAlarm = false;
 
   const sql = makeSqlStorage(rows);
-  const rawStorage = {
+  const rawStorageImplementation = {
     get: async () => undefined,
     put: async () => undefined,
     delete: async () => false,
@@ -521,14 +528,16 @@ function makeAlarmFixture() {
       currentAlarm = null;
       tracker.deletedAlarms.push(null);
     },
-    transaction: async <T>(closure: () => Promise<T>) => {
+    transaction: async <T>(closure: (txn: globalThis.DurableObjectTransaction) => Promise<T>) => {
       const rowsSnapshot = cloneRows(rows);
       const alarmSnapshot = currentAlarm;
       const setAlarmsLength = tracker.setAlarms.length;
       const deletedAlarmsLength = tracker.deletedAlarms.length;
 
       try {
-        return await closure();
+        return await closure(
+          makePartialTestDouble<globalThis.DurableObjectTransaction>({ rollback: () => {} }),
+        );
       } catch (error) {
         rows.clear();
         for (const [key, value] of rowsSnapshot) {
@@ -552,9 +561,13 @@ function makeAlarmFixture() {
       delete: () => false,
       list: () => [][Symbol.iterator](),
     },
-  } as unknown as globalThis.DurableObjectStorage;
-  const state = {
-    id: {} as globalThis.DurableObjectId,
+  };
+  // SAFETY: The alarm fixture implements the concrete storage operations used by the scheduler;
+  // unused overload branches remain outside this state-owned adapter.
+  const rawStorage = rawStorageImplementation as typeof rawStorageImplementation &
+    globalThis.DurableObjectStorage;
+  const state = makePartialTestDouble<globalThis.DurableObjectState>({
+    id: makePartialTestDouble<globalThis.DurableObjectId>({}),
     storage: rawStorage,
     waitUntil: () => {},
     blockConcurrencyWhile: async <T>(callback: () => Promise<T>) => callback(),
@@ -567,7 +580,7 @@ function makeAlarmFixture() {
     getHibernatableWebSocketEventTimeout: () => null,
     getTags: () => [],
     abort: () => {},
-  } as unknown as globalThis.DurableObjectState;
+  });
   const layer = DurableObjectAlarm.DurableObjectAlarm.layer.pipe(
     Layer.provide(
       Layer.succeed(
@@ -592,28 +605,24 @@ function makeAlarmFixture() {
 }
 
 function makeSqlStorage(rows: Map<string, StoredAlarmRow>): globalThis.SqlStorage {
-  return {
-    exec: <T extends Record<string, globalThis.SqlStorageValue>>(
-      query: string,
-      ...bindings: Array<globalThis.SqlStorageValue>
-    ) => {
+  const implementation = {
+    exec: (query: string, ...bindings: Array<globalThis.SqlStorageValue>) => {
       const normalized = query.replaceAll(/\s+/g, " ").trim();
 
       if (normalized.startsWith("CREATE TABLE")) {
-        return cursor<T>([], 0);
+        return cursor([], 0);
       }
 
       if (normalized.startsWith("SELECT run_at FROM")) {
         const next = sortRows(rows)[0];
 
-        return cursor<T>(
-          next === undefined ? [] : ([{ run_at: next.run_at }] as unknown as Array<T>),
-          0,
-        );
+        return cursor(next === undefined ? [] : [{ run_at: next.run_at }], 0);
       }
 
       if (normalized.startsWith("DELETE FROM") && normalized.includes("AND run_at = ?")) {
-        const [rowId, runAt, payload] = bindings as [string, number, string];
+        const [rowId, runAt, payload] = Schema.decodeUnknownSync(
+          Schema.Tuple([Schema.String, Schema.Number, Schema.String]),
+        )(bindings);
         const existing = rows.get(rowId);
         const deleted =
           existing !== undefined &&
@@ -625,25 +634,27 @@ function makeSqlStorage(rows: Map<string, StoredAlarmRow>): globalThis.SqlStorag
           rows.delete(rowId);
         }
 
-        return cursor<T>([], deleted ? 1 : 0);
+        return cursor([], deleted ? 1 : 0);
       }
 
       if (normalized.startsWith("DELETE FROM")) {
-        const [rowId] = bindings as [string];
+        const [rowId] = Schema.decodeUnknownSync(Schema.Tuple([Schema.String]))(bindings);
         const deleted = rows.delete(rowId);
 
-        return cursor<T>([], deleted ? 1 : 0);
+        return cursor([], deleted ? 1 : 0);
       }
 
       if (normalized.startsWith("INSERT OR REPLACE")) {
-        const [rowId, alarmId, tag, runAt, repeatEvery, payload] = bindings as [
-          string,
-          string,
-          string,
-          number,
-          number | null,
-          string,
-        ];
+        const [rowId, alarmId, tag, runAt, repeatEvery, payload] = Schema.decodeUnknownSync(
+          Schema.Tuple([
+            Schema.String,
+            Schema.String,
+            Schema.String,
+            Schema.Number,
+            Schema.NullOr(Schema.Number),
+            Schema.String,
+          ]),
+        )(bindings);
 
         rows.set(rowId, {
           storage_id: rowId,
@@ -654,25 +665,28 @@ function makeSqlStorage(rows: Map<string, StoredAlarmRow>): globalThis.SqlStorag
           payload,
         });
 
-        return cursor<T>([], 1);
+        return cursor([], 1);
       }
 
       if (normalized.startsWith("SELECT storage_id")) {
-        const [now, limit] = bindings as [number, number];
+        const [now, limit] = Schema.decodeUnknownSync(Schema.Tuple([Schema.Number, Schema.Number]))(
+          bindings,
+        );
 
-        return cursor<T>(
+        return cursor(
           sortRows(rows)
             .filter((row) => row.run_at <= now)
-            .slice(0, limit) as unknown as Array<T>,
+            .slice(0, limit),
           0,
         );
       }
 
       if (normalized.startsWith("UPDATE")) {
         const isOneShotUpdate = normalized.includes("repeat_every_ms IS NULL");
-        const [nextRunAt, rowId, previousRunAt] = bindings as [number, string, number];
-        const repeatEvery = isOneShotUpdate ? null : (bindings[3] as number);
-        const payload = bindings[isOneShotUpdate ? 3 : 4] as string;
+        const [nextRunAt, rowId, previousRunAt, repeatEvery, payload] = decodeUpdateBindings(
+          bindings,
+          isOneShotUpdate,
+        );
         const existing = rows.get(rowId);
         const updated =
           existing !== undefined &&
@@ -684,22 +698,43 @@ function makeSqlStorage(rows: Map<string, StoredAlarmRow>): globalThis.SqlStorag
           rows.set(rowId, { ...existing, run_at: nextRunAt });
         }
 
-        return cursor<T>([], updated ? 1 : 0);
+        return cursor([], updated ? 1 : 0);
       }
 
       throw new Error(`Unexpected SQL: ${query}`);
     },
     databaseSize: 0,
-  } as unknown as globalThis.SqlStorage;
+  };
+
+  // SAFETY: The fake SQL engine owns schema-shaped rows for every recognized production query;
+  // the native exec generic only projects the columns selected by that same query string.
+  return implementation as typeof implementation & globalThis.SqlStorage;
 }
 
-function cursor<T extends Record<string, globalThis.SqlStorageValue>>(
-  rows: Array<T>,
+function decodeUpdateBindings(
+  bindings: ReadonlyArray<globalThis.SqlStorageValue>,
+  isOneShotUpdate: boolean,
+): readonly [number, string, number, number | null, string] {
+  if (isOneShotUpdate) {
+    const [nextRunAt, rowId, previousRunAt, payload] = Schema.decodeUnknownSync(
+      Schema.Tuple([Schema.Number, Schema.String, Schema.Number, Schema.String]),
+    )(bindings);
+
+    return [nextRunAt, rowId, previousRunAt, null, payload];
+  }
+
+  return Schema.decodeUnknownSync(
+    Schema.Tuple([Schema.Number, Schema.String, Schema.Number, Schema.Number, Schema.String]),
+  )(bindings);
+}
+
+function cursor(
+  rows: Array<SqlFixtureRow>,
   rowsWritten: number,
-): globalThis.SqlStorageCursor<T> {
+): globalThis.SqlStorageCursor<SqlFixtureRow> {
   let index = 0;
 
-  return {
+  return makePartialTestDouble<globalThis.SqlStorageCursor<SqlFixtureRow>>({
     next: () => {
       const value = rows[index];
 
@@ -721,7 +756,7 @@ function cursor<T extends Record<string, globalThis.SqlStorageValue>>(
     columnNames: [],
     rowsRead: rows.length,
     rowsWritten,
-  } as unknown as globalThis.SqlStorageCursor<T>;
+  });
 }
 
 function sortRows(rows: Map<string, StoredAlarmRow>): Array<StoredAlarmRow> {

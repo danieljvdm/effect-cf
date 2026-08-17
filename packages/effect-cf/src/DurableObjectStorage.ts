@@ -1,4 +1,6 @@
-import { Data, Effect, Exit, Option, Schema as S } from "effect";
+import { Data, Effect, Exit, Option, Predicate, Schema as S } from "effect";
+
+import * as ErrorMessage from "./internal/ErrorMessage";
 
 /** Supported primitive value types for Durable Object SQL APIs. */
 export type SqlStorageValue = globalThis.SqlStorageValue;
@@ -7,7 +9,11 @@ export type SqlStorageValue = globalThis.SqlStorageValue;
 export class StorageOperationError extends Data.TaggedError("StorageOperationError")<{
   readonly operation: string;
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Durable Object storage ${this.operation} failed: ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 type StorageEffect<A> = Effect.Effect<A, StorageOperationError>;
 
@@ -254,6 +260,7 @@ const fromSyncKvStorage = (kv: globalThis.SyncKvStorage): SyncKvStorage => ({
     schemaBackedSyncKvStorage(kv, definition),
 });
 
+// SAFETY: every overload is dispatched by the native key form and wrapped with the same Effect error contract.
 const fromDurableObjectTransaction = (
   txn: globalThis.DurableObjectTransaction,
 ): DurableObjectTransaction =>
@@ -273,7 +280,7 @@ const fromDurableObjectTransaction = (
       maybeOptions?: globalThis.DurableObjectPutOptions,
     ) =>
       tryStoragePromise("transaction.put", () =>
-        typeof keyOrEntries === "string"
+        Predicate.isString(keyOrEntries)
           ? txn.put(keyOrEntries, valueOrOptions as T, maybeOptions)
           : txn.put(keyOrEntries, valueOrOptions as globalThis.DurableObjectPutOptions | undefined),
       ),

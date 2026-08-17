@@ -3,21 +3,24 @@ import { Effect, Layer } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 
 import { D1, WorkerEnvironment } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
+
+interface FakeD1Row {
+  readonly id: number;
+  readonly title: string;
+}
 
 class TestDatabase extends D1.Service<TestDatabase>()("test/TestDatabase", {
   binding: "TEST_DB",
 }) {}
 
 interface FakeD1Options {
-  readonly all?: (
-    query: string,
-    params: ReadonlyArray<unknown>,
-  ) => ReadonlyArray<Record<string, unknown>>;
+  readonly all?: (query: string, params: ReadonlyArray<unknown>) => ReadonlyArray<FakeD1Row>;
   readonly exec?: (query: string) => D1ExecResult;
 }
 
 const makeFakeD1 = (options: FakeD1Options = {}) =>
-  ({
+  makePartialTestDouble<D1Database>({
     prepare: (query: string) => {
       let params: ReadonlyArray<unknown> = [];
       const statement = {
@@ -27,20 +30,22 @@ const makeFakeD1 = (options: FakeD1Options = {}) =>
           return statement;
         },
         all: async () => ({
-          success: true,
+          success: true as const,
           meta: {},
           results: options.all?.(query, params) ?? [],
         }),
         raw: async () => [],
-        run: async () => ({ success: true, meta: {}, results: [] }),
+        run: async () => ({ success: true as const, meta: {}, results: [] }),
         first: async () => null,
       };
 
-      return statement;
+      // SAFETY: This fixture owns the rows and bindings for the concrete D1 operations exercised
+      // here; Cloudflare's prepared-statement methods expose caller-selected row generics.
+      return statement as typeof statement & D1PreparedStatement;
     },
     batch: async () => [],
     exec: async (query: string) => options.exec?.(query) ?? { count: 0, duration: 0 },
-  }) as unknown as D1Database;
+  });
 
 const workerEnvironmentLayer = (db: D1Database) =>
   Layer.succeed(WorkerEnvironment, { TEST_DB: db });

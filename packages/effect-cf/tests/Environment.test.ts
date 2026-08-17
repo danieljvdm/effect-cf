@@ -2,6 +2,7 @@ import { expect, test } from "vite-plus/test";
 import { Config, Effect, Layer, Redacted } from "effect";
 
 import { WorkerConfig, WorkerEnvironment } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
 const AppConfig = Config.all({
   databaseUrl: WorkerConfig.redacted("DATABASE_URL"),
@@ -20,15 +21,34 @@ void WorkerConfig.string("TEST_COUNTER_DO");
 // @ts-expect-error Unknown keys must be declared on Cloudflare.Env.
 void WorkerConfig.string("MISSING_CONFIG_KEY");
 
-test("WorkerConfig.layer reads scalar config from WorkerEnvironment", async () => {
-  const env = {
+test("WorkerConfig.providerFromEnv preserves empty strings when requested", async () => {
+  const env = makePartialTestDouble<Cloudflare.Env>({
+    APP_NAME: "",
+  });
+
+  const result = await Effect.runPromise(
+    WorkerConfig.string("APP_NAME").pipe(
+      Effect.provide(
+        WorkerConfig.layerWith((currentEnv) =>
+          WorkerConfig.providerFromEnv(currentEnv, { preserveEmptyStrings: true }),
+        ).pipe(Layer.provide(Layer.succeed(WorkerEnvironment, env))),
+      ),
+      Effect.orDie,
+    ),
+  );
+
+  expect(result).toBe("");
+});
+
+test("WorkerConfig.providerLayer reads scalar config from WorkerEnvironment", async () => {
+  const env = makePartialTestDouble<Cloudflare.Env>({
     DATABASE_URL: "postgres://example.test/app",
     SECRET_VALUE: "secret",
     APP_NAME: "effect-cf",
     APP_PORT: "8787",
     FEATURE_ENABLED: "yes",
     SAMPLE_RATE: 0.25,
-  } as Cloudflare.Env;
+  });
 
   const result = await Effect.runPromise(
     Effect.gen(function* () {
@@ -39,7 +59,9 @@ test("WorkerConfig.layer reads scalar config from WorkerEnvironment", async () =
         databaseUrl: Redacted.value(config.databaseUrl),
       };
     }).pipe(
-      Effect.provide(WorkerConfig.layer.pipe(Layer.provide(Layer.succeed(WorkerEnvironment, env)))),
+      Effect.provide(
+        WorkerConfig.providerLayer.pipe(Layer.provide(Layer.succeed(WorkerEnvironment, env))),
+      ),
       Effect.orDie,
     ),
   );

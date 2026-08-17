@@ -1,6 +1,7 @@
-import { Data, Effect, Option, Schema as S } from "effect";
+import { Data, Effect, Option, Result, Schema as S } from "effect";
 
 import { DurableObjectState } from "./DurableObjectState";
+import * as ErrorMessage from "./internal/ErrorMessage";
 
 /** Data supported by Cloudflare websocket `send`. */
 export type DurableWebSocketSendData = string | ArrayBuffer | ArrayBufferView;
@@ -8,12 +9,20 @@ export type DurableWebSocketSendData = string | ArrayBuffer | ArrayBufferView;
 /** Error raised when sending on a Durable Object websocket fails. */
 export class DurableWebSocketSendError extends Data.TaggedError("DurableWebSocketSendError")<{
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Durable Object websocket send failed: ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 /** Error raised when closing a Durable Object websocket fails. */
 export class DurableWebSocketCloseError extends Data.TaggedError("DurableWebSocketCloseError")<{
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Durable Object websocket close failed: ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 /** Error raised when serializing or deserializing a websocket attachment fails. */
 export class DurableWebSocketAttachmentError extends Data.TaggedError(
@@ -21,7 +30,11 @@ export class DurableWebSocketAttachmentError extends Data.TaggedError(
 )<{
   readonly operation: "serialize" | "deserialize";
   readonly cause: unknown;
-}> {}
+}> {
+  override get message(): string {
+    return `Durable Object websocket attachment ${this.operation} failed: ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
 
 /** Effect-native wrapper around a hibernatable Durable Object websocket. */
 export interface DurableWebSocket<Attachment = unknown> {
@@ -48,6 +61,7 @@ export const fromWebSocket = <Attachment = unknown>(
   const existing = wrappers.get(raw);
 
   if (existing !== undefined) {
+    // SAFETY: Attachment is phantom; a wrapper's runtime behavior is independent of that type.
     return existing as DurableWebSocket<Attachment>;
   }
 
@@ -76,6 +90,7 @@ export const fromWebSocket = <Attachment = unknown>(
 
   wrappers.set(raw, socket);
 
+  // SAFETY: Attachment is phantom; the newly created wrapper supports values through its generic serializer.
   return socket as DurableWebSocket<Attachment>;
 };
 
@@ -110,33 +125,35 @@ export interface AcceptedUpgrade<Attachment = unknown> {
  * return response.response;
  * ```
  */
-export const acceptUpgrade = <Attachment = unknown>(
+export const acceptUpgrade = Effect.fn("DurableObjectWebSocket.acceptUpgrade")(function* <
+  Attachment = unknown,
+>(
   options: AcceptUpgradeOptions<Attachment> = {},
-): Effect.Effect<AcceptedUpgrade<Attachment>, never, DurableObjectState> =>
-  Effect.gen(function* () {
-    const state = yield* DurableObjectState;
-    const pair = new WebSocketPair();
-    const client = pair[0];
-    const server = fromWebSocket<Attachment>(pair[1]);
+): Effect.fn.Return<
+  AcceptedUpgrade<Attachment>,
+  DurableWebSocketAttachmentError,
+  DurableObjectState
+> {
+  const state = yield* DurableObjectState;
+  const pair = new WebSocketPair();
+  const client = pair[0];
+  const server = fromWebSocket<Attachment>(pair[1]);
 
-    if (options.attachment !== undefined) {
-      server.raw.serializeAttachment(options.attachment);
-    }
+  if (options.attachment !== undefined) {
+    yield* server.serializeAttachment(options.attachment);
+  }
 
-    yield* state.acceptWebSocket(
-      server,
-      options.tags === undefined ? undefined : [...options.tags],
-    );
+  yield* state.acceptWebSocket(server, options.tags === undefined ? undefined : [...options.tags]);
 
-    return {
-      client,
-      server,
-      response: new Response(null, {
-        status: 101,
-        webSocket: client,
-      }),
-    };
-  });
+  return {
+    client,
+    server,
+    response: new Response(null, {
+      status: 101,
+      webSocket: client,
+    }),
+  };
+});
 
 export type AttachmentInvalidPolicy = "ignore" | "ignore-and-close" | "fail";
 
@@ -185,6 +202,7 @@ export const attachment = <const AttachmentSchema extends S.Codec<any, any, neve
       Effect.mapError(
         (cause) => new DurableWebSocketAttachmentError({ operation: "serialize", cause }),
       ),
+      // SAFETY: S.encodeEffect returns this codec's declared Encoded representation.
       Effect.flatMap((encoded) => socket.serializeAttachment(encoded as Encoded)),
     );
 
@@ -213,23 +231,18 @@ export const attachment = <const AttachmentSchema extends S.Codec<any, any, neve
       const onInvalid = options.onInvalid ?? "ignore";
 
       for (const socket of sockets) {
-        const decoded = yield* deserialize(socket).pipe(
-          Effect.match({
-            onFailure: (error) => ({ _tag: "Failure" as const, error }),
-            onSuccess: (value) => ({ _tag: "Success" as const, value }),
-          }),
-        );
+        const decoded = yield* Effect.result(deserialize(socket));
 
-        if (decoded._tag === "Success" && Option.isSome(decoded.value)) {
-          restored.push({ socket, attachment: decoded.value.value });
+        if (Result.isSuccess(decoded) && Option.isSome(decoded.success)) {
+          restored.push({ socket, attachment: decoded.success.value });
           continue;
         }
 
-        if (decoded._tag === "Failure" && onInvalid === "fail") {
-          return yield* Effect.fail(decoded.error);
+        if (Result.isFailure(decoded) && onInvalid === "fail") {
+          return yield* Effect.fail(decoded.failure);
         }
 
-        if (decoded._tag === "Failure" && onInvalid === "ignore-and-close") {
+        if (Result.isFailure(decoded) && onInvalid === "ignore-and-close") {
           yield* socket.close(1008, "invalid websocket attachment").pipe(Effect.ignore);
         }
       }
@@ -251,7 +264,7 @@ export interface DurableWebSocketHandlers<R = never, E = unknown> {
     reason: string,
     wasClean: boolean,
   ) => Effect.Effect<void, E, R>;
-  readonly error?: (socket: DurableWebSocket, error: unknown) => Effect.Effect<void, E, R>;
+  readonly error?: (socket: DurableWebSocket, cause: unknown) => Effect.Effect<void, E, R>;
 }
 
 /** Maps compact websocket lifecycle handler names to `DurableObject.make` options. */

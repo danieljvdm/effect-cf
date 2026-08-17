@@ -2,6 +2,7 @@ import { assert, expect, it, test } from "@effect/vitest";
 import { Effect, Option, Schema as S } from "effect";
 
 import { DurableObjectState, DurableObjectWebSocket, Worker } from "../src/index";
+import { makePartialTestDouble } from "./TestDoubles";
 
 test("detects websocket upgrade requests", () => {
   expect(
@@ -44,6 +45,26 @@ it.effect("acceptUpgrade accepts the server socket and returns the client respon
     ]);
     assert.strictEqual(upgrade.response.status, 101);
     assert.strictEqual(upgrade.response.webSocket, upgrade.client);
+  }),
+);
+
+it.effect("acceptUpgrade fails with a typed error for non-serializable attachments", () =>
+  Effect.gen(function* () {
+    const state = makeFakeDurableObjectState();
+
+    const failure = yield* DurableObjectWebSocket.acceptUpgrade({
+      attachment: { callback: () => {} },
+    }).pipe(
+      Effect.flip,
+      Effect.provideService(
+        DurableObjectState.DurableObjectState,
+        DurableObjectState.DurableObjectState.of(state),
+      ),
+    );
+
+    assert.strictEqual(failure._tag, "DurableWebSocketAttachmentError");
+    assert.strictEqual(failure.operation, "serialize");
+    assert.deepStrictEqual(state.accepted, []);
   }),
 );
 
@@ -144,9 +165,9 @@ function makeFakeDurableObjectState(options?: {
   const sockets = options?.sockets ?? [];
 
   return {
-    raw: {} as globalThis.DurableObjectState,
-    id: {} as globalThis.DurableObjectId,
-    storage: {} as never,
+    raw: makePartialTestDouble<globalThis.DurableObjectState>({}),
+    id: makePartialTestDouble<globalThis.DurableObjectId>({}),
+    storage: makePartialTestDouble<DurableObjectState.DurableObjectStateService["storage"]>({}),
     waitUntil: () => Effect.void,
     blockConcurrencyWhile: (effect) => effect,
     blockConcurrencyWhileOrReset: (effect) => effect,
@@ -175,8 +196,11 @@ interface FakeWebSocket extends WebSocket {
   }>;
 }
 
+type AttachmentFixture = null | { readonly id: number | string };
+const AttachmentFixtureSchema = S.NullOr(S.Struct({ id: S.Union([S.Number, S.String]) }));
+
 function makeFakeWebSocket(options?: {
-  readonly initialAttachment?: unknown;
+  readonly initialAttachment?: AttachmentFixture;
   readonly sendError?: unknown;
   readonly closeError?: unknown;
 }): FakeWebSocket {
@@ -185,7 +209,7 @@ function makeFakeWebSocket(options?: {
   const closed: Array<{ readonly code: number | undefined; readonly reason: string | undefined }> =
     [];
 
-  return {
+  return makePartialTestDouble<FakeWebSocket>({
     sent,
     closed,
     send(message: string | ArrayBuffer | ArrayBufferView) {
@@ -200,11 +224,11 @@ function makeFakeWebSocket(options?: {
       }
       closed.push({ code, reason });
     },
-    serializeAttachment(value: unknown) {
-      attachment = value;
+    serializeAttachment(value) {
+      attachment = S.decodeUnknownSync(AttachmentFixtureSchema)(value);
     },
     deserializeAttachment() {
       return attachment;
     },
-  } as unknown as FakeWebSocket;
+  });
 }

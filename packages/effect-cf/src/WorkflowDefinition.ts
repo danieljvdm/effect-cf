@@ -46,7 +46,11 @@ export interface TagClass<
   Id extends string,
   Payload extends RpcDefinition.ServiceFreeSchema,
   Result extends RpcDefinition.ServiceFreeSchema,
-> extends Context.ServiceClass<Self, Id, WorkflowBinding.WorkflowBindingClient<Payload, Result>> {
+> extends Context.ServiceClass<
+  Self,
+  `effect-cf/Workflow/${Id}`,
+  WorkflowBinding.WorkflowBindingClient<Payload, Result>
+> {
   readonly id: Id;
   readonly payload: Payload;
   readonly result: Result;
@@ -86,11 +90,7 @@ export interface TagClass<
     WorkflowBinding.WorkflowOperationError,
     Self
   >;
-  readonly unsafeRaw: () => Effect.Effect<
-    globalThis.Workflow<S.Codec.Encoded<Payload>>,
-    never,
-    Self
-  >;
+  readonly rawUnsafe: Effect.Effect<globalThis.Workflow<S.Codec.Encoded<Payload>>, never, Self>;
 }
 
 const makeDefinition = <
@@ -148,7 +148,9 @@ export const Tag =
     },
   ) => {
     const workflowDefinition = makeDefinition(id, definition);
-    const tag = Context.Service<Self, WorkflowBinding.WorkflowBindingClient<Payload, Result>>()(id);
+    const tag = Context.Service<Self, WorkflowBinding.WorkflowBindingClient<Payload, Result>>()(
+      `effect-cf/Workflow/${id}` as const,
+    );
 
     const layer = (binding: LayerOptions) =>
       WorkflowBinding.layer(tag, {
@@ -183,12 +185,9 @@ export const Tag =
       return yield* workflow.get(instanceId);
     });
 
-    const unsafeRaw = Effect.fnUntraced(function* () {
-      const workflow = yield* tag;
+    const rawUnsafe = Effect.flatMap(tag, (workflow) => workflow.rawUnsafe);
 
-      return yield* workflow.unsafeRaw;
-    });
-
+    // SAFETY: Object.assign attaches the definition-derived static helpers declared by TagClass.
     return Object.assign(tag, {
       id: workflowDefinition.id,
       payload: workflowDefinition.payload,
@@ -198,7 +197,7 @@ export const Tag =
       create,
       createBatch,
       get,
-      unsafeRaw,
+      rawUnsafe,
     }) as TagClass<Self, Id, Payload, Result>;
   };
 
@@ -215,20 +214,20 @@ const wrapHandler = <ROut, const Self extends Definition.Any>(
   const decodePayload = S.decodeUnknownEffect(definition.payload);
   const encodeResult = S.encodeEffect(definition.result);
 
-  return (payload) =>
-    Effect.gen(function* () {
-      const decodedPayload = yield* decodePayload(payload);
-      const event = yield* WorkflowEntrypoint.WorkflowEvent;
-      const decodedEvent = {
-        ...event,
-        payload: decodedPayload,
-      } as WorkflowEntrypoint.WorkflowEventService<S.Schema.Type<Self["payload"]>>;
-      const result = yield* handler(decodedPayload as S.Schema.Type<Self["payload"]>).pipe(
-        Effect.provideService(WorkflowEntrypoint.WorkflowEvent, decodedEvent),
-      );
+  return Effect.fnUntraced(function* (payload: S.Codec.Encoded<Self["payload"]>) {
+    const decodedPayload = yield* decodePayload(payload);
+    const event = yield* WorkflowEntrypoint.WorkflowEvent;
+    // SAFETY: replacing the encoded event payload with its schema-decoded value establishes this service type.
+    const decodedEvent = {
+      ...event,
+      payload: decodedPayload,
+    } as WorkflowEntrypoint.WorkflowEventService<S.Schema.Type<Self["payload"]>>;
+    const result = yield* handler(decodedPayload).pipe(
+      Effect.provideService(WorkflowEntrypoint.WorkflowEvent, decodedEvent),
+    );
 
-      return yield* encodeResult(result as S.Schema.Type<Self["result"]>);
-    });
+    return yield* encodeResult(result);
+  });
 };
 
 export const implement = <ROut, const Self extends Definition.Any>(

@@ -1,9 +1,12 @@
-import { Context, Data, Effect, Layer } from "effect";
+import { Context, Data, Effect, Layer, Predicate } from "effect";
 
 import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 
 /** Internal type id marker used by binding helper services. */
-export const TypeId = "effect-cf/Binding" as const;
+export const TypeId = "~effect-cf/Binding" as const;
+
+/** Internal type id marker used by binding helper services. */
+export type TypeId = typeof TypeId;
 
 /** Error raised when a configured binding does not exist on `env`. */
 export class BindingNotFoundError extends Data.TaggedError("BindingNotFoundError")<{
@@ -25,22 +28,25 @@ export interface ValidationOptions {
 
 const defaultExpected = "Cloudflare binding resource";
 
-const isPropertyTarget = (value: unknown): value is object =>
-  (typeof value === "object" || typeof value === "function") && value !== null;
+type BindingCandidate = Parameters<typeof Predicate.isUnknown>[0];
+type PropertyTarget = { readonly constructor?: Function };
 
-const getObjectName = (value: object | Function): string => {
+const isPropertyTarget = (value: BindingCandidate): value is PropertyTarget =>
+  Predicate.isObjectOrArray(value) || Predicate.isFunction(value);
+
+const getObjectName = (value: PropertyTarget): string => {
   const tag = (() => {
     try {
       return Object.prototype.toString.call(value).slice("[object ".length, -1);
     } catch {
-      return typeof value;
+      return Predicate.isFunction(value) ? "function" : "object";
     }
   })();
   const constructorName = (() => {
     try {
       return "constructor" in value &&
-        typeof value.constructor === "function" &&
-        typeof value.constructor.name === "string"
+        Predicate.isFunction(value.constructor) &&
+        Predicate.isString(value.constructor.name)
         ? value.constructor.name
         : undefined;
     } catch {
@@ -59,7 +65,7 @@ const getObjectName = (value: object | Function): string => {
   return tag;
 };
 
-const propertyNames = (value: object | Function): ReadonlyArray<string> => {
+const propertyNames = (value: PropertyTarget): ReadonlyArray<string> => {
   const names = new Set<string>();
 
   for (const target of [value, Object.getPrototypeOf(value)] as const) {
@@ -79,21 +85,27 @@ const propertyNames = (value: object | Function): ReadonlyArray<string> => {
   return [...names].filter((name) => name !== "constructor").sort();
 };
 
-const isMethod = (value: object | Function, name: string): boolean => {
+const isMethod = (value: PropertyTarget, name: string): boolean => {
   try {
-    return typeof Reflect.get(value, name) === "function";
+    return Predicate.hasProperty(value, name) && Predicate.isFunction(value[name]);
   } catch {
     return false;
   }
 };
 
-const describeActual = (value: unknown): string => {
+const describeActual = (value: BindingCandidate): string => {
   if (value === null) {
     return "null";
   }
 
-  if (typeof value !== "object" && typeof value !== "function") {
-    return typeof value;
+  if (!isPropertyTarget(value)) {
+    if (Predicate.isString(value)) return "string";
+    if (Predicate.isNumber(value)) return "number";
+    if (Predicate.isBoolean(value)) return "boolean";
+    if (Predicate.isBigInt(value)) return "bigint";
+    if (Predicate.isSymbol(value)) return "symbol";
+
+    return "undefined";
   }
 
   const names = propertyNames(value);
@@ -114,7 +126,7 @@ const describeActual = (value: unknown): string => {
 const getBinding = <Resource>(
   env: WorkerEnv,
   binding: string,
-  isResource: (value: unknown) => value is Resource,
+  isResource: (value: BindingCandidate) => value is Resource,
   options?: ValidationOptions,
 ): Effect.Effect<Resource, BindingNotFoundError | BindingValidationError> =>
   Effect.gen(function* () {
@@ -131,7 +143,7 @@ const getBinding = <Resource>(
       );
     }
 
-    const resource = Reflect.get(env, binding);
+    const resource = Predicate.hasProperty(env, binding) ? env[binding] : undefined;
 
     if (resource === undefined) {
       return yield* Effect.fail(
@@ -161,13 +173,17 @@ const getBinding = <Resource>(
 
 /**
  * Creates a Context tag + layer for reading and validating a Cloudflare binding.
+ *
+ * The Context key is namespaced as `effect-cf/Binding/<id>`; `id` stays the
+ * bare user-supplied identifier.
  */
 export interface BindingService<Self, Id extends string, Service> extends Context.ServiceClass<
   Self,
-  Id,
+  `effect-cf/Binding/${Id}`,
   Service
 > {
-  readonly [TypeId]: typeof TypeId;
+  readonly [TypeId]: TypeId;
+  readonly id: Id;
   readonly binding: string;
   readonly layer: Layer.Layer<
     Self,
@@ -176,12 +192,17 @@ export interface BindingService<Self, Id extends string, Service> extends Contex
   >;
 }
 
-export const layer = <Self, Resource, Service = Resource>(
+/**
+ * The overloads on {@link layer} and {@link Service} guarantee that
+ * `Service = Resource` whenever `wrap` is absent, making the fallback cast
+ * safe.
+ */
+const makeBindingLayer = <Self, Resource, Service>(
   tag: Context.Service<Self, Service>,
   binding: string,
-  isResource: (value: unknown) => value is Resource,
-  wrap?: (resource: Resource) => Service,
-  options?: ValidationOptions,
+  isResource: (value: BindingCandidate) => value is Resource,
+  wrap: ((resource: Resource) => Service) | undefined,
+  options: ValidationOptions | undefined,
 ): Layer.Layer<Self, BindingNotFoundError | BindingValidationError, WorkerEnvironment> =>
   Layer.effect(
     tag,
@@ -189,25 +210,68 @@ export const layer = <Self, Resource, Service = Resource>(
       const env = yield* WorkerEnvironment;
       const resource = yield* getBinding(env, binding, isResource, options);
 
-      return wrap === undefined ? (resource as unknown as Service) : wrap(resource);
+      // SAFETY: the overload without wrap fixes Service to Resource; the other branch invokes wrap.
+      return wrap === undefined ? (resource as Resource & Service) : wrap(resource);
     }),
   );
 
-export const Service =
-  <Self>() =>
-  <Id extends string, Resource, Service = Resource>(
+export function layer<Self, Resource>(
+  tag: Context.Service<Self, Resource>,
+  binding: string,
+  isResource: (value: BindingCandidate) => value is Resource,
+  wrap?: undefined,
+  options?: ValidationOptions,
+): Layer.Layer<Self, BindingNotFoundError | BindingValidationError, WorkerEnvironment>;
+export function layer<Self, Resource, Service>(
+  tag: Context.Service<Self, Service>,
+  binding: string,
+  isResource: (value: BindingCandidate) => value is Resource,
+  wrap: (resource: Resource) => Service,
+  options?: ValidationOptions,
+): Layer.Layer<Self, BindingNotFoundError | BindingValidationError, WorkerEnvironment>;
+export function layer<Self, Resource, Service = Resource>(
+  tag: Context.Service<Self, Service>,
+  binding: string,
+  isResource: (value: BindingCandidate) => value is Resource,
+  wrap?: (resource: Resource) => Service,
+  options?: ValidationOptions,
+): Layer.Layer<Self, BindingNotFoundError | BindingValidationError, WorkerEnvironment> {
+  return makeBindingLayer(tag, binding, isResource, wrap, options);
+}
+
+export const Service = <Self>() => {
+  function makeService<Id extends string, Resource>(
     id: Id,
     binding: string,
-    isResource: (value: unknown) => value is Resource,
+    isResource: (value: BindingCandidate) => value is Resource,
+    wrap?: undefined,
+    options?: ValidationOptions,
+  ): BindingService<Self, Id, Resource>;
+  function makeService<Id extends string, Resource, Service>(
+    id: Id,
+    binding: string,
+    isResource: (value: BindingCandidate) => value is Resource,
+    wrap: (resource: Resource) => Service,
+    options?: ValidationOptions,
+  ): BindingService<Self, Id, Service>;
+  function makeService<Id extends string, Resource, Service = Resource>(
+    id: Id,
+    binding: string,
+    isResource: (value: BindingCandidate) => value is Resource,
     wrap?: (resource: Resource) => Service,
     options?: ValidationOptions,
-  ): BindingService<Self, Id, Service> => {
-    const tag = Context.Service<Self, Service>()(id);
-    const serviceLayer = layer(tag, binding, isResource, wrap, options);
+  ): BindingService<Self, Id, Service> {
+    const tag = Context.Service<Self, Service>()(`effect-cf/Binding/${id}` as const);
+    const serviceLayer = makeBindingLayer(tag, binding, isResource, wrap, options);
 
+    // SAFETY: the assigned metadata and layer exactly implement BindingService for this tag.
     return Object.assign(tag, {
       [TypeId]: TypeId,
+      id,
       binding,
       layer: serviceLayer,
     }) as BindingService<Self, Id, Service>;
-  };
+  }
+
+  return makeService;
+};

@@ -1,15 +1,45 @@
+/**
+ * OTLP telemetry layers for Cloudflare Workers and Durable Objects.
+ *
+ * Every layer exposes {@link OtlpExporter.Flusher}, which drains buffered
+ * telemetry on demand. Cloudflare isolates can freeze before the periodic
+ * export interval fires. Effect-backed Worker fetch handlers, Worker or
+ * Durable Object native RPC handlers, and Durable Object alarm handlers
+ * schedule this flusher automatically. These automatic flushes are capped at
+ * two seconds and silently discard timeouts and failures so telemetry cannot
+ * extend or fail the user event, or recursively log through an unhealthy
+ * exporter.
+ *
+ * Other entrypoint lifecycles, including queue handlers, do not flush
+ * automatically. Applications can flush explicitly or hand the flush to their
+ * `waitUntil` mechanism, and own the timeout and failure policy at that call
+ * site:
+ *
+ * ```ts
+ * const flusher = yield* OtlpExporter.Flusher;
+ *
+ * yield* flusher.flush.pipe(
+ *   Effect.timeoutOption("2 seconds"),
+ *   Effect.ignoreCause,
+ * );
+ * ```
+ */
 import { ConfigProvider, Effect, Layer, Option } from "effect";
 import type * as Tracer from "effect/Tracer";
 import { FetchHttpClient, type Headers } from "effect/unstable/http";
 import {
+  OtlpExporter,
   OtlpLogger,
   OtlpMetrics,
+  OtlpResource,
   OtlpSerialization,
   OtlpTracer,
 } from "effect/unstable/observability";
 
 import { DurableObjectState } from "./DurableObjectState";
 import { WorkerConfig, WorkerEnvironment } from "./Environment";
+
+type ResourceAttributes = NonNullable<Parameters<typeof OtlpResource.make>[0]["attributes"]>;
 
 /** Telemetry signal groups supported by the Cloudflare OTLP layers. */
 export type Signal = "logs" | "traces" | "metrics";
@@ -32,7 +62,7 @@ export interface ResourceOptions {
   /** Explicit service version. Takes precedence over OTEL environment variables. */
   readonly serviceVersion?: string;
   /** Additional resource attributes attached to exported telemetry. */
-  readonly attributes?: Record<string, unknown>;
+  readonly attributes?: ResourceAttributes;
 }
 
 /** Options shared by all Cloudflare OTLP telemetry layers. */
@@ -95,8 +125,8 @@ const cloudflareConfigProviderLayer = ConfigProvider.layerAdd(
 const selectedSignals = (signals: ReadonlyArray<Signal> | undefined): ReadonlySet<Signal> =>
   new Set(signals ?? allSignals);
 
-const withDefinedAttributes = (attributes: Record<string, unknown>): Record<string, unknown> => {
-  const out: Record<string, unknown> = {};
+const withDefinedAttributes = (attributes: ResourceAttributes): ResourceAttributes => {
+  const out: ResourceAttributes = {};
 
   for (const [key, value] of Object.entries(attributes)) {
     if (value !== undefined) {
@@ -109,7 +139,7 @@ const withDefinedAttributes = (attributes: Record<string, unknown>): Record<stri
 
 const makeResource = (
   options: LayerOptions,
-  runtimeAttributes: Record<string, unknown>,
+  runtimeAttributes: ResourceAttributes,
 ): ResourceOptions => ({
   serviceName: options.resource?.serviceName,
   serviceVersion: options.resource?.serviceVersion,
@@ -137,8 +167,8 @@ const mergeSignalLayers = (layers: ReadonlyArray<SignalLayer>): SignalLayer => {
 
 const makeLayer = (
   options: LayerOptions = {},
-  runtimeAttributes: Record<string, unknown> = {},
-): Layer.Layer<never, never, never> => {
+  runtimeAttributes: ResourceAttributes = {},
+): Layer.Layer<OtlpExporter.Flusher> => {
   const signals = selectedSignals(options.signals);
   const resource = makeResource(options, runtimeAttributes);
   const layers: Array<SignalLayer> = [];
@@ -174,7 +204,7 @@ const makeLayer = (
   }
 
   if (layers.length === 0) {
-    return Layer.empty;
+    return OtlpExporter.layerFlusher;
   }
 
   return mergeSignalLayers(layers).pipe(
@@ -191,16 +221,22 @@ const makeLayer = (
  * layers. In Cloudflare Workers and Durable Objects, the current `env` object is
  * installed as the primary `ConfigProvider`; outside Cloudflare, the ambient
  * Effect `ConfigProvider` remains the fallback.
+ *
+ * The layer provides {@link OtlpExporter.Flusher} for draining buffered
+ * telemetry before the isolate freezes.
  */
-export const layer = (options: LayerOptions = {}) => makeLayer(options);
+export const layer = (options: LayerOptions = {}): Layer.Layer<OtlpExporter.Flusher> =>
+  makeLayer(options);
 
 /** Base OTLP telemetry layer forced to JSON serialization. */
-export const layerJson = (options: Omit<LayerOptions, "serialization"> = {}) =>
-  layer({ ...options, serialization: "json" });
+export const layerJson = (
+  options: Omit<LayerOptions, "serialization"> = {},
+): Layer.Layer<OtlpExporter.Flusher> => layer({ ...options, serialization: "json" });
 
 /** Base OTLP telemetry layer forced to protobuf serialization. */
-export const layerProtobuf = (options: Omit<LayerOptions, "serialization"> = {}) =>
-  layer({ ...options, serialization: "protobuf" });
+export const layerProtobuf = (
+  options: Omit<LayerOptions, "serialization"> = {},
+): Layer.Layer<OtlpExporter.Flusher> => layer({ ...options, serialization: "protobuf" });
 
 /**
  * OTLP layer with Cloudflare Worker resource attributes.
@@ -208,7 +244,7 @@ export const layerProtobuf = (options: Omit<LayerOptions, "serialization"> = {})
  * Provide this layer at runtime scope for long-lived metrics aggregation, or at
  * handler scope when traces/logs should flush as the Cloudflare event finishes.
  */
-export const workerLayer = (options: WorkerLayerOptions = {}) =>
+export const layerWorker = (options: WorkerLayerOptions = {}): Layer.Layer<OtlpExporter.Flusher> =>
   makeLayer(options, {
     "cloudflare.resource_type": "worker",
     "cloudflare.worker.name": options.workerName,
@@ -221,7 +257,9 @@ export const workerLayer = (options: WorkerLayerOptions = {}) =>
  * Durable Object id. Prefer leaving `includeObjectId` disabled unless the
  * backend can tolerate high-cardinality resource attributes.
  */
-export const durableObjectLayer = (options: DurableObjectLayerOptions = {}) =>
+export const layerDurableObject = (
+  options: DurableObjectLayerOptions = {},
+): Layer.Layer<OtlpExporter.Flusher, never, DurableObjectState> =>
   Layer.unwrap(
     Effect.map(DurableObjectState, (state) =>
       makeLayer(options, {

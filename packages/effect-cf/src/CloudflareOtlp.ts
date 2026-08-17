@@ -5,16 +5,23 @@
  * telemetry on demand. Cloudflare isolates can freeze before the periodic
  * export interval fires. Effect-backed Worker fetch handlers, Worker or
  * Durable Object native RPC handlers, and Durable Object alarm handlers
- * schedule this flusher automatically.
- * Flush or scheduling failures do not replace the handler outcome and emit
- * only bounded framework diagnostics without attaching the foreign cause.
- * Other entrypoint lifecycles can flush explicitly or hand the flush to their
- * `waitUntil` mechanism:
+ * schedule this flusher automatically. These automatic flushes are capped at
+ * two seconds and silently discard timeouts and failures so telemetry cannot
+ * extend or fail the user event, or recursively log through an unhealthy
+ * exporter.
+ *
+ * Other entrypoint lifecycles, including queue handlers, do not flush
+ * automatically. Applications can flush explicitly or hand the flush to their
+ * `waitUntil` mechanism, and own the timeout and failure policy at that call
+ * site:
  *
  * ```ts
  * const flusher = yield* OtlpExporter.Flusher;
  *
- * yield* flusher.flush;
+ * yield* flusher.flush.pipe(
+ *   Effect.timeoutOption("2 seconds"),
+ *   Effect.ignoreCause,
+ * );
  * ```
  */
 import { ConfigProvider, Effect, Layer, Option } from "effect";

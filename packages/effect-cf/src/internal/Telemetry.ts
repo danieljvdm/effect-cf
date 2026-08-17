@@ -4,12 +4,12 @@ import { OtlpExporter } from "effect/unstable/observability";
 /** Maximum event lifetime spent on an internally scheduled telemetry flush. */
 const scheduledFlushTimeout = "2 seconds";
 
-const logFlushSchedulingFailure = Effect.logError("Telemetry flush scheduling failed").pipe(
-  Effect.ignoreCause,
-);
-
 /**
  * Schedules a configured OTLP flusher through the current Cloudflare event.
+ *
+ * The handed-off effect is best-effort: it settles within two seconds and
+ * silently absorbs every failure cause so telemetry cannot extend or fail the
+ * user event, or recursively log through an unhealthy exporter.
  */
 export const scheduleTelemetryFlush = <R>(
   waitUntil: (flush: Effect.Effect<void>) => Effect.Effect<void, never, R>,
@@ -21,6 +21,9 @@ export const scheduleTelemetryFlush = <R>(
       return;
     }
 
+    // Exporters and platform schedulers are foreign boundaries. Do not log
+    // their arbitrary failure causes: the configured logger may be the same
+    // unhealthy OTLP exporter and recursively increase its backlog.
     yield* waitUntil(
       flusher.value.flush.pipe(
         Effect.timeoutOption(scheduledFlushTimeout),
@@ -28,4 +31,4 @@ export const scheduleTelemetryFlush = <R>(
         Effect.asVoid,
       ),
     );
-  }).pipe(Effect.catchCause(() => logFlushSchedulingFailure));
+  }).pipe(Effect.ignoreCause);

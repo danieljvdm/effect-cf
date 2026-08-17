@@ -1,5 +1,13 @@
 # effect-cf
 
+## 0.28.1
+
+### Patch Changes
+
+- [#105](https://github.com/danieljvdm/effect-cf/pull/105) [`f5dfd5e`](https://github.com/danieljvdm/effect-cf/commit/f5dfd5e2c79b257cc760dc0b2cdf5a2901b0b295) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Bound internally scheduled telemetry flushes so exporter retries cannot extend Worker or Durable Object event lifetimes indefinitely.
+
+- [#106](https://github.com/danieljvdm/effect-cf/pull/106) [`c0fbb85`](https://github.com/danieljvdm/effect-cf/commit/c0fbb8535479262741e6844935e9ff9d508f6b56) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Silently absorb failures raised while scheduling automatic OTLP telemetry flushes so platform boundary defects cannot feed back into the configured exporter. Document the two-second best-effort boundary and keep explicit queue flush policy application-owned.
+
 ## 0.28.0
 
 ### Minor Changes

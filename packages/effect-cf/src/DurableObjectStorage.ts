@@ -320,7 +320,12 @@ export const fromDurableObjectStorage = (
   transactionSync: <A, E, R>(closure: () => Effect.Effect<A, E, R>) =>
     Effect.context<R>().pipe(
       Effect.flatMap((context) =>
-        Effect.suspend(() => {
+        Effect.suspend((): Effect.Effect<A, E | StorageOperationError> => {
+          // Cloudflare rolls the transaction back when the callback throws, so a
+          // failed Exit is thrown to abort it. Keep a typed reference to that
+          // Exit rather than recovering its type from the untyped catch binding.
+          let aborted: Exit.Exit<A, E> | undefined;
+
           try {
             return Effect.succeed(
               storage.transactionSync(() => {
@@ -329,18 +334,14 @@ export const fromDurableObjectStorage = (
                 if (Exit.isSuccess(exit)) {
                   return exit.value;
                 }
+                aborted = exit;
 
                 throw exit;
               }),
             );
           } catch (cause) {
-            if (Exit.isExit(cause) && Exit.isFailure(cause)) {
-              // SAFETY: Exit.isFailure proves this cause carries the closure's typed E failure.
-              return Effect.failCause(cause.cause) as Effect.Effect<
-                A,
-                E | StorageOperationError,
-                R
-              >;
+            if (aborted !== undefined && cause === aborted && Exit.isFailure(aborted)) {
+              return Effect.failCause(aborted.cause);
             }
 
             return Effect.fail(storageError("transactionSync", cause));
@@ -352,6 +353,10 @@ export const fromDurableObjectStorage = (
     Effect.context<R>().pipe(
       Effect.flatMap((context) =>
         Effect.callback<A, E | StorageOperationError>((resume) => {
+          // See `transactionSync`: the thrown Exit aborts Cloudflare's
+          // transaction, and holding it here keeps its error type.
+          let aborted: Exit.Exit<A, E> | undefined;
+
           void storage
             .transaction(async (txn) => {
               const exit = await Effect.runPromiseExitWith(context)(
@@ -361,17 +366,15 @@ export const fromDurableObjectStorage = (
               if (Exit.isSuccess(exit)) {
                 return exit.value;
               }
+              aborted = exit;
 
               throw exit;
             })
             .then(
               (value) => resume(Effect.succeed(value)),
               (cause) => {
-                if (Exit.isExit(cause) && Exit.isFailure(cause)) {
-                  // SAFETY: Exit.isFailure proves this cause carries the closure's typed E failure.
-                  resume(
-                    Effect.failCause(cause.cause) as Effect.Effect<A, E | StorageOperationError>,
-                  );
+                if (aborted !== undefined && cause === aborted && Exit.isFailure(aborted)) {
+                  resume(Effect.failCause(aborted.cause));
                 } else {
                   resume(Effect.fail(storageError("transaction", cause)));
                 }

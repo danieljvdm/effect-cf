@@ -368,6 +368,7 @@ test("Worker.fetch renders Effect HttpServerResponse values", async () => {
 
         // SAFETY: This fixture deliberately leaves RenderValue in the stream environment to prove
         // Worker.fetch supplies handler services while HttpServerResponse consumes the stream.
+        // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off
         return HttpServerResponse.stream(stream as Stream.Stream<Uint8Array, never, never>);
       }
 

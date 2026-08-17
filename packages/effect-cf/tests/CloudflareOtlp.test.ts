@@ -152,14 +152,15 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
           CloudflareOtlp.layerJson({
             signals: ["traces"],
             resource: { serviceName: "ambient-provider-test" },
-          }),
-        ),
-        Effect.provide(
-          ConfigProvider.layer(
-            ConfigProvider.fromUnknown({
-              OTEL_TRACES_EXPORTER: "otlp",
-              OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.endpoint}/v1/traces`,
-            }),
+          }).pipe(
+            Layer.provide(
+              ConfigProvider.layer(
+                ConfigProvider.fromUnknown({
+                  OTEL_TRACES_EXPORTER: "otlp",
+                  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.endpoint}/v1/traces`,
+                }),
+              ),
+            ),
           ),
         ),
       );
@@ -408,15 +409,16 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
           CloudflareOtlp.layerJson({
             signals: ["traces"],
             resource: { serviceName: "flusher-test" },
-          }),
-        ),
-        Effect.provide(
-          ConfigProvider.layer(
-            ConfigProvider.fromUnknown({
-              OTEL_TRACES_EXPORTER: "otlp",
-              OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.endpoint}/v1/traces`,
-              OTEL_BSP_SCHEDULE_DELAY: "600000",
-            }),
+          }).pipe(
+            Layer.provide(
+              ConfigProvider.layer(
+                ConfigProvider.fromUnknown({
+                  OTEL_TRACES_EXPORTER: "otlp",
+                  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.endpoint}/v1/traces`,
+                  OTEL_BSP_SCHEDULE_DELAY: "600000",
+                }),
+              ),
+            ),
           ),
         ),
       );
@@ -434,14 +436,15 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
             signals: ["traces"],
             serialization: "json",
             resource: { serviceName: "generic-endpoint-test" },
-          }),
-        ),
-        Effect.provide(
-          ConfigProvider.layer(
-            ConfigProvider.fromUnknown({
-              OTEL_TRACES_EXPORTER: "otlp",
-              OTEL_EXPORTER_OTLP_ENDPOINT: `${collector.endpoint}/base/`,
-            }),
+          }).pipe(
+            Layer.provide(
+              ConfigProvider.layer(
+                ConfigProvider.fromUnknown({
+                  OTEL_TRACES_EXPORTER: "otlp",
+                  OTEL_EXPORTER_OTLP_ENDPOINT: `${collector.endpoint}/base/`,
+                }),
+              ),
+            ),
           ),
         ),
       );

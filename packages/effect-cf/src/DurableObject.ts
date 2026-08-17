@@ -200,6 +200,7 @@ export const make = <
         // SAFETY: event-layer bypass is used only for initialize; otherwise an absent layer means REvent is never.
         return Runtime.runEventPromise(
           this.runtime,
+          // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off
           effect as Effect.Effect<A, E, HandlerContext<ROut>>,
         );
       }

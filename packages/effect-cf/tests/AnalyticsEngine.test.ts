@@ -463,13 +463,16 @@ test("AnalyticsEngine query layer reads config through the active ConfigProvider
 
       return row;
     }).pipe(
-      Effect.provide(queryLayerWithFetch(RequestAnalyticsQuery.layerConfig(), request)),
       Effect.provide(
-        ConfigProvider.layer(
-          ConfigProvider.fromUnknown({
-            CLOUDFLARE_ACCOUNT_ID: "account-1",
-            CLOUDFLARE_API_TOKEN: "secret-token",
-          }),
+        queryLayerWithFetch(RequestAnalyticsQuery.layerConfig(), request).pipe(
+          Layer.provide(
+            ConfigProvider.layer(
+              ConfigProvider.fromUnknown({
+                CLOUDFLARE_ACCOUNT_ID: "account-1",
+                CLOUDFLARE_API_TOKEN: "secret-token",
+              }),
+            ),
+          ),
         ),
       ),
     ),
@@ -501,14 +504,15 @@ test("AnalyticsEngine query config accepts custom config keys", async () => {
             }),
           ),
           request,
-        ),
-      ),
-      Effect.provide(
-        ConfigProvider.layer(
-          ConfigProvider.fromUnknown({
-            ACCOUNT_ID: "account-1",
-            API_TOKEN: "custom-secret",
-          }),
+        ).pipe(
+          Layer.provide(
+            ConfigProvider.layer(
+              ConfigProvider.fromUnknown({
+                ACCOUNT_ID: "account-1",
+                API_TOKEN: "custom-secret",
+              }),
+            ),
+          ),
         ),
       ),
     ),

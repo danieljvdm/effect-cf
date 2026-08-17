@@ -392,6 +392,7 @@ export function make<
         // SAFETY: the public make overloads permit an absent event layer only when REvent is never.
         return Runtime.runEventPromise(
           this.runtime,
+          // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off
           effect as Effect.Effect<A, E, RuntimeContext<ROut> | Scope.Scope>,
         );
       }

@@ -31,9 +31,8 @@ test("WorkerConfig.providerFromEnv preserves empty strings when requested", asyn
       Effect.provide(
         WorkerConfig.layerWith((currentEnv) =>
           WorkerConfig.providerFromEnv(currentEnv, { preserveEmptyStrings: true }),
-        ),
+        ).pipe(Layer.provide(Layer.succeed(WorkerEnvironment, env))),
       ),
-      Effect.provide(Layer.succeed(WorkerEnvironment, env)),
       Effect.orDie,
     ),
   );
@@ -60,8 +59,9 @@ test("WorkerConfig.providerLayer reads scalar config from WorkerEnvironment", as
         databaseUrl: Redacted.value(config.databaseUrl),
       };
     }).pipe(
-      Effect.provide(WorkerConfig.providerLayer),
-      Effect.provide(Layer.succeed(WorkerEnvironment, env)),
+      Effect.provide(
+        WorkerConfig.providerLayer.pipe(Layer.provide(Layer.succeed(WorkerEnvironment, env))),
+      ),
       Effect.orDie,
     ),
   );

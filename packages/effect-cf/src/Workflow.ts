@@ -157,6 +157,7 @@ const fromWorkflowStep = (
                     Effect.provideService(
                       Effect.provideContext(
                         // SAFETY: WorkflowStepContext is provided immediately below; context supplies every other R service.
+                        // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off
                         effect as Effect.Effect<A, E, Exclude<R, WorkflowStepContext>>,
                         context,
                       ),

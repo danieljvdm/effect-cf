@@ -253,7 +253,7 @@ test("WorkerDefinition RPC does not schedule background work without a flusher",
   expect(waitUntilPromises).toHaveLength(0);
 });
 
-test("WorkerDefinition RPC logs a bounded diagnostic for telemetry flush failure", async () => {
+test("WorkerDefinition RPC silently absorbs telemetry flush failure", async () => {
   const secret = "Bearer sensitive-exporter-credential";
   const flushFailure = Object.assign(new Error(`foreign exporter failure: ${secret}`), {
     headers: { authorization: secret },
@@ -281,7 +281,7 @@ test("WorkerDefinition RPC logs a bounded diagnostic for telemetry flush failure
   expect(waitUntilPromises).toHaveLength(1);
   await expect(Promise.all(waitUntilPromises)).resolves.toEqual([undefined]);
   expect(flushAttempts).toBe(1);
-  expectBoundedTelemetryLog(logs, "Telemetry flush failed", flushFailure);
+  expect(logs).toEqual([]);
 });
 
 test("WorkerDefinition RPC logs a bounded diagnostic for telemetry scheduling failure", async () => {

@@ -1,7 +1,8 @@
 import { Effect, Option } from "effect";
 import { OtlpExporter } from "effect/unstable/observability";
 
-const logFlushFailure = Effect.logError("Telemetry flush failed").pipe(Effect.ignoreCause);
+/** Maximum event lifetime spent on an internally scheduled telemetry flush. */
+const scheduledFlushTimeout = "2 seconds";
 
 const logFlushSchedulingFailure = Effect.logError("Telemetry flush scheduling failed").pipe(
   Effect.ignoreCause,
@@ -20,8 +21,11 @@ export const scheduleTelemetryFlush = <R>(
       return;
     }
 
-    // Exporters and platform schedulers are foreign boundaries. Preserve a
-    // useful diagnostic without retaining their arbitrary failure causes in
-    // logs, where payloads, headers, or credentials could otherwise escape.
-    yield* waitUntil(flusher.value.flush.pipe(Effect.catchCause(() => logFlushFailure)));
+    yield* waitUntil(
+      flusher.value.flush.pipe(
+        Effect.timeoutOption(scheduledFlushTimeout),
+        Effect.ignoreCause,
+        Effect.asVoid,
+      ),
+    );
   }).pipe(Effect.catchCause(() => logFlushSchedulingFailure));

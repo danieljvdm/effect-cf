@@ -104,19 +104,6 @@ const makeCapturedLoggerLayer = (logs: Array<CapturedLog>) =>
     }),
   ]);
 
-const expectBoundedTelemetryLog = (
-  logs: Array<CapturedLog>,
-  message: string,
-  foreignFailure: Error,
-) => {
-  expect(logs).toHaveLength(1);
-  expect(logs[0]?.level).toBe("Error");
-  expect(logs[0]?.message).toEqual([message]);
-  expect(logs[0]?.message).not.toContain(foreignFailure);
-  expect(String(logs[0]?.message)).not.toContain(foreignFailure.message);
-  expect(logs[0]?.cause.reasons).toEqual([]);
-};
-
 test("Worker.makeFetchHandler returns an ExportedHandler-compatible fetch object", async () => {
   const handler = Worker.makeFetchHandler(Layer.empty, {
     fetch: Effect.succeed(new Response("ok")),
@@ -284,7 +271,7 @@ test("WorkerDefinition RPC silently absorbs telemetry flush failure", async () =
   expect(logs).toEqual([]);
 });
 
-test("WorkerDefinition RPC logs a bounded diagnostic for telemetry scheduling failure", async () => {
+test("WorkerDefinition RPC does not log telemetry scheduling failures", async () => {
   const handlerFailure = new BoomError();
   const secret = "Bearer sensitive-platform-credential";
   const schedulingFailure = Object.assign(new Error(`foreign waitUntil failure: ${secret}`), {
@@ -314,7 +301,7 @@ test("WorkerDefinition RPC logs a bounded diagnostic for telemetry scheduling fa
 
   await expect(worker.fail()).rejects.toBe(handlerFailure);
   expect(schedulingAttempts).toBe(1);
-  expectBoundedTelemetryLog(logs, "Telemetry flush scheduling failed", schedulingFailure);
+  expect(logs).toEqual([]);
 });
 
 test("DurableObjectDefinition RPC uses DurableObjectState.waitUntil for telemetry", async () => {

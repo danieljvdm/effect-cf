@@ -357,6 +357,12 @@ Producers should usually use `const queue = yield* AvatarQueue` and then call `q
 
 Queue handlers run inline failures through Cloudflare's normal retry path. If background work scheduled with `WorkerContext.waitUntil(...)` should also make the batch retry, use `WorkerContext.waitUntilPropagating(...)` or `waitUntil(..., { mode: "propagate" })`; the default `waitUntil` mode observes and logs failures without rejecting the native `waitUntil` promise.
 
+effect-cf automatically schedules best-effort OTLP flushes only for Worker
+fetch/RPC and Durable Object alarm/RPC handlers. Those internal flushes are
+capped at two seconds. Queue handlers do not flush telemetry automatically;
+applications that explicitly flush in a queue handler own that flush's timeout
+and failure policy.
+
 ## Cache Example
 
 `Cache.layer` exposes Cloudflare's global Cache API as an Effect service. Cache misses are represented by `Option.none()`, and named caches are available through `open(...)`.

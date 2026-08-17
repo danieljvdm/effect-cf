@@ -185,7 +185,8 @@ export interface WorkerOptions<
    *
    * The layer is built inside the event's Effect scope and finalized when the
    * event effect completes. Use this for event-scoped resources such as OTLP
-   * trace/log exporters that should flush at event completion.
+   * trace/log exporters. Worker fetch and RPC handlers schedule a best-effort
+   * flush capped at two seconds; queue handlers do not flush automatically.
    */
   readonly eventLayer?: Layer.Layer<REvent, EventLayerError, WorkerBaseContext<RRuntime>>;
   /** Main request handler. */
@@ -200,7 +201,8 @@ export interface WorkerOptions<
    * Optional RPC methods exposed as class instance methods.
    *
    * After every invocation, the configured OTLP flusher is scheduled through
-   * `WorkerContext.waitUntil`, including when the handler fails.
+   * `WorkerContext.waitUntil`, including when the handler fails. The scheduled
+   * flush silently settles within two seconds even if the exporter does not.
    */
   readonly rpc?: Rpc;
 }
@@ -300,7 +302,8 @@ const isWorkerOptions = <ROut, REvent, EventLayerError, Rpc extends WorkerRpc<RO
  *
  * The flush is handed to `ctx.waitUntil` so it never delays the response
  * (including streaming bodies still being consumed). It is a no-op when the
- * context does not contain an `OtlpExporter.Flusher`.
+ * context does not contain an `OtlpExporter.Flusher`. The handed-off effect is
+ * best-effort and silently settles within two seconds.
  */
 const scheduleTelemetryFlush: Effect.Effect<void, never, WorkerContext> =
   Telemetry.scheduleTelemetryFlush((flush) =>

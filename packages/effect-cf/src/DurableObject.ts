@@ -108,7 +108,9 @@ export interface DurableObjectOptions<
    * Optional RPC methods exposed as Durable Object instance methods.
    *
    * After every invocation, the configured OTLP flusher is scheduled through
-   * `DurableObjectState.waitUntil`, including when the handler fails.
+   * `DurableObjectState.waitUntil`, including when the handler fails. The
+   * scheduled flush silently settles within two seconds even if the exporter
+   * does not.
    */
   readonly rpc?: Rpc;
   /** Optional fetch handler for HTTP/WebSocket requests. */
@@ -125,7 +127,9 @@ export interface DurableObjectOptions<
    * Optional raw alarm handler.
    *
    * After every invocation, the configured OTLP flusher is scheduled through
-   * `DurableObjectState.waitUntil`, including when the handler fails.
+   * `DurableObjectState.waitUntil`, including when the handler fails. The
+   * scheduled flush silently settles within two seconds even if the exporter
+   * does not.
    */
   readonly alarm?: (
     alarmInfo?: globalThis.AlarmInvocationInfo,

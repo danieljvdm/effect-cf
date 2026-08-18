@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
-import { Cause, Context, Effect } from "effect";
+import { Cause, Context, Duration, Effect } from "effect";
+import { TestClock } from "effect/testing";
 
 const TransactionMessage = Context.Service<{ readonly message: string }>(
   "effect-cf/test/TransactionMessage",
@@ -43,6 +44,30 @@ it.effect("wraps transaction with Effect-native callbacks", () =>
     assert.strictEqual(result, 42);
     assert.strictEqual(yield* storage.get("count"), 42);
     assert.strictEqual(tracker.transactionCalls, 1);
+  }),
+);
+
+it.effect("schedules alarms after Effect durations using the Effect clock", () =>
+  Effect.gen(function* () {
+    const { raw, tracker } = makeRawDurableObjectStorage();
+    const storage = DurableObjectStorage.fromDurableObjectStorage(raw);
+
+    yield* TestClock.setTime(1_700_000_000_000);
+    yield* storage.setAlarmAfter(Duration.seconds(10), { allowUnconfirmed: true });
+    yield* storage.transaction((txn) => txn.setAlarmAfter("20 seconds"));
+
+    assert.deepStrictEqual(tracker.alarms, [
+      {
+        options: { allowUnconfirmed: true },
+        scheduledTime: 1_700_000_010_000,
+      },
+    ]);
+    assert.deepStrictEqual(tracker.transactionAlarms, [
+      {
+        options: undefined,
+        scheduledTime: 1_700_000_020_000,
+      },
+    ]);
   }),
 );
 
@@ -170,8 +195,16 @@ it.effect("maps platform transactionSync failures to StorageOperationError", () 
 );
 
 interface StorageTracker {
+  readonly alarms: Array<{
+    readonly options: globalThis.DurableObjectSetAlarmOptions | undefined;
+    readonly scheduledTime: number | Date;
+  }>;
   readonly deleteAllOptions: Array<globalThis.DurableObjectPutOptions | undefined>;
   syncCalls: number;
+  readonly transactionAlarms: Array<{
+    readonly options: globalThis.DurableObjectSetAlarmOptions | undefined;
+    readonly scheduledTime: number | Date;
+  }>;
   transactionCalls: number;
   transactionRollbacks: number;
   transactionSyncCalls: number;
@@ -193,8 +226,10 @@ type StorageFixtureValue = number | string;
 function makeRawDurableObjectStorage(options: StorageOptions = {}): RawStorageFixture {
   const values = new Map<string, StorageFixtureValue>();
   const tracker: StorageTracker = {
+    alarms: [],
     deleteAllOptions: [],
     syncCalls: 0,
+    transactionAlarms: [],
     transactionCalls: 0,
     transactionRollbacks: 0,
     transactionSyncCalls: 0,
@@ -220,7 +255,7 @@ function makeRawDurableObjectStorage(options: StorageOptions = {}): RawStorageFi
       }
 
       try {
-        return await closure(makeRawDurableObjectTransaction(values));
+        return await closure(makeRawDurableObjectTransaction(values, tracker));
       } catch (error) {
         tracker.transactionRollbacks += 1;
         restore(values, snapshot);
@@ -228,7 +263,12 @@ function makeRawDurableObjectStorage(options: StorageOptions = {}): RawStorageFi
       }
     },
     getAlarm: async () => null,
-    setAlarm: async () => undefined,
+    setAlarm: async (
+      scheduledTime: number | Date,
+      alarmOptions?: globalThis.DurableObjectSetAlarmOptions,
+    ) => {
+      tracker.alarms.push({ options: alarmOptions, scheduledTime });
+    },
     deleteAlarm: async () => undefined,
     sync: async () => {
       tracker.syncCalls += 1;
@@ -279,6 +319,7 @@ function makeRawDurableObjectStorage(options: StorageOptions = {}): RawStorageFi
 
 function makeRawDurableObjectTransaction(
   values: Map<string, StorageFixtureValue>,
+  tracker: StorageTracker,
 ): globalThis.DurableObjectTransaction {
   const implementation = {
     get: async (key: string) => values.get(key),
@@ -291,7 +332,12 @@ function makeRawDurableObjectTransaction(
       throw new Error("rollback not used");
     },
     getAlarm: async () => null,
-    setAlarm: async () => undefined,
+    setAlarm: async (
+      scheduledTime: number | Date,
+      options?: globalThis.DurableObjectSetAlarmOptions,
+    ) => {
+      tracker.transactionAlarms.push({ options, scheduledTime });
+    },
     deleteAlarm: async () => undefined,
   };
 

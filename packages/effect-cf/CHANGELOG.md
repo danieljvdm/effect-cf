@@ -1,5 +1,15 @@
 # effect-cf
 
+## 0.29.0
+
+### Minor Changes
+
+- [#108](https://github.com/danieljvdm/effect-cf/pull/108) [`735b6d9`](https://github.com/danieljvdm/effect-cf/commit/735b6d95e4b62c7ade598a7f18ba2d8b4ee60f87) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Require the Effect 4.0.0-rc.110 family — dependency ranges move from `^4.0.0-beta.107 <4.0.0-rc.0` to `^4.0.0-rc.110`.
+
+### Patch Changes
+
+- [#66](https://github.com/danieljvdm/effect-cf/pull/66) [`fe34f95`](https://github.com/danieljvdm/effect-cf/commit/fe34f95abc92f4637968186aeebbb8033157c041) Thanks [@danieljvdm](https://github.com/danieljvdm)! - `DurableObjectStorage.transaction` and `transactionSync` now recover the aborting `Exit` by identity instead of re-deriving its type from the untyped `catch` binding. Failures raised inside a transaction keep the same typed error channel, and a failure thrown by the platform itself is still reported as `StorageOperationError`. No public API change.
+
 ## 0.28.1
 
 ### Patch Changes

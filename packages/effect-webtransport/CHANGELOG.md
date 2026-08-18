@@ -1,5 +1,11 @@
 # effect-webtransport
 
+## 0.2.0
+
+### Minor Changes
+
+- [#108](https://github.com/danieljvdm/effect-cf/pull/108) [`735b6d9`](https://github.com/danieljvdm/effect-cf/commit/735b6d95e4b62c7ade598a7f18ba2d8b4ee60f87) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Require the Effect 4.0.0-rc.110 family — dependency ranges move from `^4.0.0-beta.107 <4.0.0-rc.0` to `^4.0.0-rc.110`.
+
 ## 0.1.1
 
 ### Patch Changes

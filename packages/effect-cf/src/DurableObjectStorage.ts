@@ -1,4 +1,4 @@
-import { Data, Effect, Exit, Option, Predicate, Schema as S } from "effect";
+import { Clock, Data, Duration, Effect, Exit, Option, Predicate, Schema as S } from "effect";
 
 import * as ErrorMessage from "./internal/ErrorMessage";
 
@@ -99,6 +99,11 @@ export interface DurableObjectTransaction {
     scheduledTime: number | Date,
     options?: globalThis.DurableObjectSetAlarmOptions,
   ): StorageEffect<void>;
+  /** Schedules the alarm after a delay measured by the Effect clock. */
+  setAlarmAfter(
+    delay: Duration.Input,
+    options?: globalThis.DurableObjectSetAlarmOptions,
+  ): StorageEffect<void>;
   deleteAlarm(options?: globalThis.DurableObjectSetAlarmOptions): StorageEffect<void>;
 }
 
@@ -130,6 +135,11 @@ export interface DurableObjectStorage {
   getAlarm(options?: globalThis.DurableObjectGetAlarmOptions): StorageEffect<number | null>;
   setAlarm(
     scheduledTime: number | Date,
+    options?: globalThis.DurableObjectSetAlarmOptions,
+  ): StorageEffect<void>;
+  /** Schedules the alarm after a delay measured by the Effect clock. */
+  setAlarmAfter(
+    delay: Duration.Input,
     options?: globalThis.DurableObjectSetAlarmOptions,
   ): StorageEffect<void>;
   deleteAlarm(options?: globalThis.DurableObjectSetAlarmOptions): StorageEffect<void>;
@@ -173,6 +183,21 @@ const tryStoragePromise = <A>(operation: string, evaluate: () => Promise<A>): St
     try: evaluate,
     catch: (cause) => storageError(operation, cause),
   });
+
+const setAlarmAfter = Effect.fn("DurableObjectStorage.setAlarmAfter")(function* (
+  operation: string,
+  setAlarm: (
+    scheduledTime: number,
+    options?: globalThis.DurableObjectSetAlarmOptions,
+  ) => Promise<void>,
+  delay: Duration.Input,
+  options?: globalThis.DurableObjectSetAlarmOptions,
+) {
+  const now = yield* Clock.currentTimeMillis;
+  const delayMillis = Math.ceil(Duration.toMillis(delay));
+
+  yield* tryStoragePromise(operation, () => setAlarm(now + delayMillis, options));
+});
 
 const fromSqlCursor = <T extends Record<string, SqlStorageValue>>(
   cursor: globalThis.SqlStorageCursor<T>,
@@ -293,6 +318,13 @@ const fromDurableObjectTransaction = (
       tryStoragePromise("transaction.getAlarm", () => txn.getAlarm(options)),
     setAlarm: (scheduledTime: number | Date, options?: globalThis.DurableObjectSetAlarmOptions) =>
       tryStoragePromise("transaction.setAlarm", () => txn.setAlarm(scheduledTime, options)),
+    setAlarmAfter: (delay: Duration.Input, options?: globalThis.DurableObjectSetAlarmOptions) =>
+      setAlarmAfter(
+        "transaction.setAlarm",
+        (scheduledTime, options) => txn.setAlarm(scheduledTime, options),
+        delay,
+        options,
+      ),
     deleteAlarm: (options?: globalThis.DurableObjectSetAlarmOptions) =>
       tryStoragePromise("transaction.deleteAlarm", () => txn.deleteAlarm(options)),
   }) as DurableObjectTransaction;
@@ -315,6 +347,13 @@ export const fromDurableObjectStorage = (
     tryStoragePromise("getAlarm", () => storage.getAlarm(options)),
   setAlarm: (scheduledTime: number | Date, options?: globalThis.DurableObjectSetAlarmOptions) =>
     tryStoragePromise("setAlarm", () => storage.setAlarm(scheduledTime, options)),
+  setAlarmAfter: (delay: Duration.Input, options?: globalThis.DurableObjectSetAlarmOptions) =>
+    setAlarmAfter(
+      "setAlarm",
+      (scheduledTime, options) => storage.setAlarm(scheduledTime, options),
+      delay,
+      options,
+    ),
   deleteAlarm: (options?: globalThis.DurableObjectSetAlarmOptions) =>
     tryStoragePromise("deleteAlarm", () => storage.deleteAlarm(options)),
   transactionSync: <A, E, R>(closure: () => Effect.Effect<A, E, R>) =>

@@ -45,7 +45,7 @@ jobs:
     steps:
       - name: Check out the review profile
         if: env.HAS_OPENAI_KEY == 'true'
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
@@ -89,10 +89,12 @@ jobs:
           guidance-file: .github/review-guidance.md
           # Generated or vendored surfaces the reviewer should never spend
           # budget on.
+          # .changeset/** stays REVIEWABLE so the guidance's changeset
+          # policy is enforceable on ordinary PRs; changeset-only release
+          # plumbing is already excluded by the trigger's paths-ignore.
           ignore: >-
             bun.lock,
             **/CHANGELOG.md,
-            .changeset/**,
             dev-kit.lock.json,
             .agents/skills/**,
             .repos/**

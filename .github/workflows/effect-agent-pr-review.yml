@@ -1,0 +1,108 @@
+# Agentic pull-request review via effect-agent's prebuilt node24 action.
+# The reviewer reads pull-request code through the GitHub API. The checkout
+# exists only for the repository-owned guidance profile and intentionally uses
+# the pull_request merge ref, which has the same trust level as this workflow
+# file itself.
+name: Effect Agent PR review
+
+on:
+  pull_request:
+    branches: [main]
+    # labeled feeds the pr-review:final-audit label; every other label event
+    # is filtered out by the job condition below.
+    types: [opened, reopened, ready_for_review, synchronize, labeled]
+    # Generated Version Packages updates are release plumbing, not review
+    # scope; ordinary PRs touching source alongside these paths still run.
+    paths-ignore:
+      - ".changeset/**"
+      - "bun.lock"
+      - "**/CHANGELOG.md"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: effect-agent-pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.draft == false &&
+      (github.event.action != 'labeled' ||
+       github.event.label.name == 'pr-review:final-audit')
+    runs-on: ubuntu-latest
+    # The fan-out reviewer's packaged duration budget is 20 minutes; leave
+    # setup and publication headroom outside the reviewer's own bound.
+    timeout-minutes: 25
+    env:
+      # Until the OPENAI_API_KEY secret exists, this job is a visible green
+      # no-op instead of a red check on every pull request.
+      HAS_OPENAI_KEY: ${{ secrets.OPENAI_API_KEY != '' }}
+      HAS_REVIEWER_APP: ${{ vars.APP_CLIENT_ID != '' && secrets.APP_PRIVATE_KEY != '' }}
+    steps:
+      - name: Check out the review profile
+        if: env.HAS_OPENAI_KEY == 'true'
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # With the repository GitHub App configured, reviews post under the
+      # app's own identity and avatar instead of github-actions[bot]. Absent
+      # the app variable/secret, the workflow falls back to the scoped
+      # github.token.
+      - name: Mint the reviewer app token
+        id: app-token
+        if: env.HAS_OPENAI_KEY == 'true' && env.HAS_REVIEWER_APP == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          permission-contents: read
+          permission-pull-requests: write
+
+      - name: Review the pull request
+        id: review
+        if: env.HAS_OPENAI_KEY == 'true'
+        # effect-agent#132 (monotone review continuity): the authenticated
+        # baseline advances on EVERY completed run and carries unsettled
+        # scope forward for automatic retry, review passes are host-scheduled
+        # with one bounded retry each, an invalid finding anchor discards
+        # that one claim instead of failing its pass, and an "incomplete"
+        # conclusion explicitly names a reviewer-side gap rather than
+        # requesting code changes.
+        uses: danieljvdm/effect-agent/action@15f041f6dcd092f5933ce528db391d6185dd85d6 # effect-agent#132, ahead of @effect-agent/pr-review@0.1.0-beta.22
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          github-token: ${{ steps.app-token.outputs.token || github.token }}
+          # Reviews post under the app identity; the continuity-state and
+          # fingerprint author gate must expect the same login. Falls back to
+          # the default github-actions[bot] when the app is not configured.
+          review-author: ${{ env.HAS_REVIEWER_APP == 'true' && format('{0}[bot]', steps.app-token.outputs.app-slug) || 'github-actions[bot]' }}
+          # HMAC key for incremental review-state markers. A missing or
+          # rotated secret safely forces a full review, never a forged
+          # narrow one.
+          state-secret: ${{ secrets.PR_REVIEW_STATE_SECRET }}
+          effort: ${{ github.event.action == 'labeled' && 'high' || 'medium' }}
+          guidance-file: .github/review-guidance.md
+          # Generated or vendored surfaces the reviewer should never spend
+          # budget on.
+          ignore: >-
+            bun.lock,
+            **/CHANGELOG.md,
+            .changeset/**,
+            dev-kit.lock.json,
+            .agents/skills/**,
+            .repos/**
+          # Scale the safety ceiling with PR size instead of truncating a
+          # large review to the same output as a tiny patch.
+          max-findings: ${{ (github.event.pull_request.changed_files > 20 || github.event.pull_request.additions > 800) && '16' || (github.event.pull_request.changed_files > 5 || github.event.pull_request.additions > 250) && '10' || '6' }}
+          fan-out: "true"
+          skip-unchanged: "true"
+          retire-stale-reviews: "true"
+          # Ordinary pushes review incrementally against the last reviewed
+          # head plus any carried scope; applying the pr-review:final-audit
+          # label requests one deliberate full-diff merge-readiness audit.
+          review-mode: ${{ github.event.action == 'labeled' && 'final' || 'incremental' }}

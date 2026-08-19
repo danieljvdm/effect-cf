@@ -33,6 +33,14 @@ Workspace Git operations additionally require `@platformatic/vfs`,
 bun add "@platformatic/vfs@^0.4.0"
 ```
 
+The Sandbox integration is an optional peer. Install the `@next` release line
+of `@cloudflare/sandbox` (the Sandbox SDK 1.0 API) only in applications that
+import `effect-cf/sandbox`:
+
+```bash
+bun add "@cloudflare/sandbox@next"
+```
+
 ## Goal
 
 Cloudflare APIs return promises and expose platform-specific bindings. `effect-cf` wraps those boundaries as `Context`, `Layer`, and `Effect` values so application code stays inside one managed Effect runtime.
@@ -54,6 +62,7 @@ Runtime creation belongs at Cloudflare entrypoints, not inside binding helpers.
 - `effect-cf/computer-workspace` - scoped Effect wrappers for the complete Cloudflare Computer filesystem, Git, runtime, Assets, Artifacts, and Think-compatible client surfaces
 - `effect-cf/computer-artifacts` - session-isolated Artifacts repositories backed by `@cloudflare/computer/artifacts`
 - `effect-cf/computer-workspace-host` - optional Durable Object host mixin, worker-shell backend wiring, and `WorkspaceServiceProxy`
+- `effect-cf/sandbox` - Effect-native client for Cloudflare Sandbox containers: processes with log streams, files and watches, preview URLs, tunnels, terminals, bucket mounts, and backups
 - `Hyperdrive` - typed Hyperdrive binding helper for connection strings and optional Postgres SQL integration
 - `Images` - typed Cloudflare Images binding helper with transformation APIs and optional hosted image operations
 - `Email` - typed Cloudflare Email Service binding helper for `send_email` bindings, with limit validation and typed error codes
@@ -321,6 +330,75 @@ const stub = Sandboxes.byName("codex").rawUnsafe;
 
 See [`examples/containers/README.md`](../../examples/containers/README.md) for
 the corresponding Wrangler configuration and entrypoint responsibilities.
+
+## Sandbox Example
+
+`effect-cf/sandbox` wraps the [Cloudflare Sandbox SDK](https://github.com/cloudflare/sandbox-sdk)
+1.0 API (`@cloudflare/sandbox@next`). The Sandbox Durable Object class remains
+owned by `@cloudflare/sandbox`; `effect-cf` wraps the namespace binding used by
+a calling Worker and loads the SDK lazily, so applications without the optional
+peer are unaffected.
+
+```ts
+import { Effect, Option } from "effect";
+import { Worker } from "effect-cf";
+import * as Sandbox from "effect-cf/sandbox";
+
+export { Sandbox as SandboxDurableObject } from "@cloudflare/sandbox";
+
+class Sandboxes extends Sandbox.Tag<Sandboxes>()("Sandboxes") {}
+
+const SandboxesLive = Sandboxes.layer({ binding: "Sandbox" });
+
+export default Worker.make(SandboxesLive, {
+  fetch: Effect.gen(function* () {
+    const request = yield* Worker.NativeRequest;
+
+    // Route preview-URL traffic before any other routing.
+    const proxied = yield* Sandbox.proxyToSandbox(request);
+    if (Option.isSome(proxied)) {
+      return proxied.value;
+    }
+
+    const sandbox = yield* Sandboxes.get("my-sandbox");
+    const handle = yield* sandbox.exec(["python3", "-c", "print(2 + 2)"]);
+    const output = yield* handle.outputText();
+
+    return new Response(output.stdout);
+  }),
+});
+```
+
+The instance client mirrors the complete `ISandbox` client contract plus the
+lifecycle, port, tunnel, and backup operations the SDK client proxies to the
+Sandbox Durable Object. `exec` returns a process handle whose `logs` is an
+Effect `Stream` of typed log events; `watch` decodes the SDK's Server-Sent
+Events into a `Stream` of file-watch events; `readFileStream` streams raw
+bytes. Interruptible waits (`waitForExit`, `waitForLog`, `output`,
+`waitForPort`) abort the underlying SDK call when the Effect is interrupted.
+Failures carry a typed `SandboxOperationError` whose `cause` preserves the
+SDK's rich error classes (`ProcessNotFoundError`, `PortNotExposedError`, and
+friends) for inspection.
+
+The corresponding `wrangler.jsonc` declares the container image and Durable
+Object binding; note the SDK requires the exported Durable Object class to be
+reachable under the configured `class_name`:
+
+```jsonc
+{
+  "containers": [
+    {
+      "class_name": "SandboxDurableObject",
+      "image": "./Dockerfile",
+      "instance_type": "lite",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [{ "class_name": "SandboxDurableObject", "name": "Sandbox" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SandboxDurableObject"] }],
+}
+```
 
 ## Queue Example
 

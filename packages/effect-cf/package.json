@@ -42,6 +42,11 @@
       "import": "./dist/ComputerWorkspaceHost.mjs",
       "default": "./dist/ComputerWorkspaceHost.mjs"
     },
+    "./sandbox": {
+      "types": "./dist/Sandbox.d.mts",
+      "import": "./dist/Sandbox.mjs",
+      "default": "./dist/Sandbox.mjs"
+    },
     "./vitest": {
       "types": "./dist/Vitest.d.mts",
       "import": "./dist/Vitest.mjs",
@@ -62,6 +67,7 @@
   "devDependencies": {
     "@cloudflare/computer": "0.2.0",
     "@cloudflare/containers": "catalog:",
+    "@cloudflare/sandbox": "0.13.0-next.738.2",
     "@cloudflare/vitest-pool-workers": "catalog:",
     "@cloudflare/workers-types": "catalog:",
     "@effect/platform-node": "^4.0.0-rc.110",
@@ -77,6 +83,7 @@
   },
   "peerDependencies": {
     "@cloudflare/computer": "^0.2.0",
+    "@cloudflare/sandbox": "^0.13.0-next.738.2",
     "@cloudflare/vitest-pool-workers": "^0.21.3",
     "@cloudflare/workers-types": "^4.20260611.1",
     "@effect/sql-d1": "^4.0.0-rc.110",
@@ -86,6 +93,9 @@
   },
   "peerDependenciesMeta": {
     "@cloudflare/computer": {
+      "optional": true
+    },
+    "@cloudflare/sandbox": {
       "optional": true
     },
     "@cloudflare/vitest-pool-workers": {

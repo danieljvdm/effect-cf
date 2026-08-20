@@ -45,7 +45,7 @@ Durable Object namespace:
 {
   "name": "container-example",
   "main": "src/index.ts",
-  "compatibility_date": "2026-06-11",
+  "compatibility_date": "2026-08-20",
   "containers": [
     {
       "class_name": "RendererContainer",

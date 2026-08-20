@@ -48,6 +48,7 @@ const makeHandle = (id: string) =>
   makePartialTestDouble<ImageHandle>({
     details: async () => metadata(id),
     bytes: async () => stream(),
+    signedUrl: async () => `https://imagedelivery.test/${id}`,
     update: async (options: ImageUpdateOptions) => ({
       ...metadata(id),
       requireSignedURLs: options.requireSignedURLs ?? false,
@@ -63,6 +64,7 @@ interface FakeImagesOptions {
     options: ImageInputOptions | undefined,
   ) => Promise<ImageInfoResponse>;
   readonly input?: (image: Images.ImageInputValue, options: ImageInputOptions | undefined) => void;
+  readonly text?: (content: string, options: TextOptions) => void;
   readonly image?: (imageId: string) => ImageHandle;
   readonly hosted?: HostedImagesBinding;
   readonly includeHosted?: boolean;
@@ -75,6 +77,11 @@ const makeFakeImages = (options: FakeImagesOptions = {}) => {
     info: options.info ?? (async () => ({ format: "image/png", fileSize: 4, width: 1, height: 1 })),
     input: (image: Images.ImageInputValue, inputOptions: ImageInputOptions | undefined) => {
       options.input?.(image, inputOptions);
+
+      return makeTransformer(state);
+    },
+    text: (content: string, textOptions: TextOptions) => {
+      options.text?.(content, textOptions);
 
       return makeTransformer(state);
     },
@@ -93,6 +100,10 @@ const makeFakeImages = (options: FakeImagesOptions = {}) => {
           list: async () => ({
             images: [metadata("image-1")],
             listComplete: true,
+          }),
+          createDirectUpload: async () => ({
+            id: "direct-1",
+            uploadURL: "https://upload.imagedelivery.test/direct-1",
           }),
         } satisfies HostedImagesBinding),
     });
@@ -155,13 +166,47 @@ const imagesLayer = (images: ImagesBinding) =>
           outputOptions: { format: "image/webp" },
         });
         const contentType = yield* result.contentType;
-        const response = yield* result.response;
+        const response = yield* result.response();
 
         assert.strictEqual(seen[0], bytes);
         assert.deepStrictEqual(state.transforms, [{ width: 128 }]);
         assert.deepStrictEqual(state.draws, [{ opacity: 0.5 }]);
         assert.strictEqual(contentType, "image/webp");
         assert.strictEqual(response.headers.get("content-type"), "image/webp");
+      }),
+    );
+  });
+}
+
+{
+  const state: FakeTransformerState = { transforms: [], draws: [] };
+  const seenText: Array<{ content: string; options: TextOptions }> = [];
+  const images = makeFakeImages({
+    state,
+    text: (content, options) => {
+      seenText.push({ content, options });
+    },
+  });
+
+  layer(imagesLayer(images))("Images text rasterization", (it) => {
+    it.effect("runs process from text rasterization input", () =>
+      Effect.gen(function* () {
+        const images = yield* TestImages;
+        const result = yield* images.process(Images.transform(Images.empty, { width: 256 }), {
+          text: "hello",
+          textOptions: { font: { url: "https://fonts.test/Inter.ttf" }, size: 32 },
+          outputOptions: { format: "image/png" },
+        });
+        const contentType = yield* result.contentType;
+
+        assert.strictEqual(contentType, "image/webp");
+        assert.deepStrictEqual(seenText, [
+          {
+            content: "hello",
+            options: { font: { url: "https://fonts.test/Inter.ttf" }, size: 32 },
+          },
+        ]);
+        assert.deepStrictEqual(state.transforms, [{ width: 256 }]);
       }),
     );
   });
@@ -184,15 +229,20 @@ const imagesLayer = (images: ImagesBinding) =>
         const hosted = Option.getOrThrow(images.hosted);
         const uploaded = yield* hosted.upload(new ArrayBuffer(0), { id: "avatar-1" });
         const listed = yield* hosted.list();
+        const direct = yield* hosted.createDirectUpload({ expiresIn: 60 });
         const handle = hosted.image("missing");
         const details = yield* handle.details;
         const bytes = yield* handle.bytes;
+        const signedUrl = yield* handle.signedUrl({ variant: "public" });
         const deleted = yield* handle.delete;
 
         assert.strictEqual(uploaded.id, "avatar-1");
         assert.strictEqual(listed.images[0]?.id, "image-1");
+        assert.strictEqual(direct.id, "direct-1");
+        assert.strictEqual(direct.uploadURL, "https://upload.imagedelivery.test/direct-1");
         assert.strictEqual(Option.isNone(details), true);
         assert.strictEqual(Option.isNone(bytes), true);
+        assert.strictEqual(signedUrl, "https://imagedelivery.test/missing");
         assert.strictEqual(deleted, true);
       }),
     );

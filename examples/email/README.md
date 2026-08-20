@@ -62,7 +62,7 @@ locally:
 {
   "name": "email-example",
   "main": "src/index.ts",
-  "compatibility_date": "2026-06-11",
+  "compatibility_date": "2026-08-20",
   "send_email": [
     {
       "name": "EMAIL",

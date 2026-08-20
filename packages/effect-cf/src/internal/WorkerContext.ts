@@ -101,5 +101,6 @@ export const fromExecutionContext = (
       options?: Omit<WorkerContextWaitUntilOptions<E, R2>, "mode">,
     ) => schedule(effect, options, "propagate"),
     passThroughOnException: Effect.sync(() => ctx.passThroughOnException()),
+    abort: (reason?: string) => Effect.sync(() => ctx.abort(reason)),
   };
 };

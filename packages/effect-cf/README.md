@@ -4,7 +4,8 @@ Effect-native Cloudflare primitives for Workers, Durable Objects, Containers, bi
 
 ## Install
 
-`effect-cf` targets Effect `^4.0.0-beta.105`.
+`effect-cf` targets Effect `^4.0.0-beta.105` and Cloudflare workerd `1.20260820.1`
+(`@cloudflare/workers-types@5.20260820.1`, recommended `compatibility_date` `2026-08-20`).
 
 ```bash
 bun add effect-cf "effect@^4.0.0-beta.105"
@@ -719,9 +720,25 @@ export const resizeAvatar = (image: Images.ImageInputValue) =>
       },
     );
 
-    return yield* result.response;
+    return yield* result.response();
   });
 ```
+
+## Cloudflare runtime pin
+
+`effect-cf` develops and tests against a fixed Cloudflare Workers runtime stack. Keep consumer
+`compatibility_date` and optional `@cloudflare/workers-types` peers at or above this pin:
+
+| Pin                                         | Version        |
+| ------------------------------------------- | -------------- |
+| workerd                                     | `1.20260820.1` |
+| `@cloudflare/workers-types` (optional peer) | `5.20260820.1` |
+| wrangler (repo catalog / examples)          | `4.125.0`      |
+| Recommended `compatibility_date`            | `2026-08-20`   |
+
+The date in the `workerd` / `@cloudflare/workers-types` version is the API surface this package wraps.
+Repo catalog pins live in the root `package.json` `catalog` field (`@cloudflare/workers-types`, `wrangler`).
+`wrangler@4.125.0` pulls `workerd@1.20260820.1` and peers `@cloudflare/workers-types@^5.20260820.1`.
 
 ## Email Example
 

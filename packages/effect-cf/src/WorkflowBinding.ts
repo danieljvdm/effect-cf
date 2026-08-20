@@ -3,7 +3,9 @@ import type {
   Workflow as CloudflareWorkflow,
   WorkflowInstance as CloudflareWorkflowInstance,
   WorkflowInstanceCreateOptions as CloudflareWorkflowInstanceCreateOptions,
+  WorkflowInstanceLocationHint as CloudflareWorkflowInstanceLocationHint,
   WorkflowInstanceRestartOptions as CloudflareWorkflowInstanceRestartOptions,
+  WorkflowInstanceTerminateOptions as CloudflareWorkflowInstanceTerminateOptions,
 } from "@cloudflare/workers-types";
 import { type Context, Data, Effect, Option, Predicate, Schema as S } from "effect";
 
@@ -23,6 +25,8 @@ export type WorkflowInstanceCreateBatchOptions<Payload, EncodedPayload = unknown
 >;
 
 export type WorkflowInstanceRestartOptions = CloudflareWorkflowInstanceRestartOptions;
+export type WorkflowInstanceTerminateOptions = CloudflareWorkflowInstanceTerminateOptions;
+export type WorkflowInstanceLocationHint = CloudflareWorkflowInstanceLocationHint;
 
 export type WorkflowInstanceStatusName = CloudflareInstanceStatus["status"];
 
@@ -40,10 +44,13 @@ export interface WorkflowInstance<Result> {
   readonly id: string;
   readonly pause: Effect.Effect<void, WorkflowOperationError>;
   readonly resume: Effect.Effect<void, WorkflowOperationError>;
-  readonly terminate: Effect.Effect<void, WorkflowOperationError>;
+  readonly terminate: (
+    options?: WorkflowInstanceTerminateOptions,
+  ) => Effect.Effect<void, WorkflowOperationError>;
   readonly restart: (
     options?: WorkflowInstanceRestartOptions,
   ) => Effect.Effect<void, WorkflowOperationError>;
+  readonly delete: Effect.Effect<void, WorkflowOperationError>;
   readonly status: Effect.Effect<
     WorkflowInstanceStatus<Result>,
     WorkflowOperationError | WorkflowResultDecodeError
@@ -165,8 +172,9 @@ export const makeClient = <
       id: raw.id,
       pause: operation("pause", () => raw.pause()),
       resume: operation("resume", () => raw.resume()),
-      terminate: operation("terminate", () => raw.terminate()),
+      terminate: (options) => operation("terminate", () => raw.terminate(options)),
       restart: (options) => operation("restart", () => raw.restart(options)),
+      delete: operation("delete", () => raw.delete()),
       status: operation("status", () => raw.status()).pipe(
         Effect.flatMap((status) =>
           Effect.gen(function* () {

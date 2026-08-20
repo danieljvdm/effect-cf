@@ -72,12 +72,12 @@ Runtime creation belongs at Cloudflare entrypoints, not inside binding helpers.
 - `Rpc` - Cloudflare RPC type helpers and scoped disposal utilities
 - `WebTransport` - truthful WebTransport/HTTP-3 boundary: typed runtime capabilities and decoded inbound protocol metadata
 - `WorkerConfig` - Effect `Config` helpers backed by Cloudflare `env`
-- `effect-cf/vitest` - Effect-native runners and scoped test helpers for Cloudflare's Vitest Workers pool
+- `effect-cf/vitest` - Effect-native runners and scoped test helpers for Cloudflare's Workers Vitest plugin
 
-## Vitest Workers Pool
+## Vitest Workers Plugin
 
-Install and configure a `^0.21.3` release of
-[`@cloudflare/vitest-pool-workers`](https://github.com/cloudflare/workers-sdk/tree/main/packages/vitest-pool-workers#readme),
+Install and configure a `^1.0.0` release of
+[`@cloudflare/vitest-plugin`](https://github.com/cloudflare/workers-sdk/tree/main/packages/vitest-plugin#readme),
 then import the test-only helpers from `effect-cf/vitest`. The `fetch` runner
 constructs the Worker with the current test environment and waits for all
 `waitUntil` work before completing the Effect.
@@ -109,7 +109,7 @@ it.effect("reads Wrangler vars", () =>
 ```
 
 Queue consumers can be invoked with typed message bodies while retaining the
-pool's acknowledgement and retry result:
+plugin's acknowledgement and retry result:
 
 ```ts
 it.effect("acknowledges a job", () =>
@@ -130,7 +130,7 @@ it.effect("acknowledges a job", () =>
 
 Scheduled handlers and Pages Functions use the same lifecycle behavior: their
 Effects complete only after the event's `waitUntil` work has settled. Pages
-tests must configure the `ASSETS` binding required by Pool Workers.
+tests must configure the `ASSETS` binding required by the Workers Vitest plugin.
 
 ```ts
 it.effect("runs the cron handler", () =>

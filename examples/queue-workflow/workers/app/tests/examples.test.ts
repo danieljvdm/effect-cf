@@ -29,7 +29,8 @@ const executionContext = {
   waitUntil(_promise: Promise<unknown>) {},
   passThroughOnException() {},
   props: undefined,
-} satisfies ExecutionContext;
+  abort() {},
+} as ExecutionContext;
 
 test("Queue example sends typed jobs through a producer binding", async () => {
   await Effect.runPromise(
@@ -184,30 +185,21 @@ interface ReportInstanceStatus extends Omit<InstanceStatus, "output"> {
   readonly output?: ReportResult;
 }
 
-const makeWorkflowInstance = (id: string, status: ReportInstanceStatus): WorkflowInstance => ({
-  id,
-  pause: async () => undefined,
-  resume: async () => undefined,
-  terminate: async () => undefined,
-  restart: async () => undefined,
-  status: async () => status,
-  sendEvent: async () => undefined,
-});
+const makeWorkflowInstance = (id: string, status: ReportInstanceStatus): WorkflowInstance =>
+  ({
+    id,
+    pause: async () => undefined,
+    resume: async () => undefined,
+    terminate: async () => undefined,
+    restart: async () => undefined,
+    delete: async () => undefined,
+    status: async () => status,
+    sendEvent: async () => undefined,
+  }) as WorkflowInstance;
 
-class TestWorkflowStep implements WorkflowStep {
+class TestWorkflowStep {
   constructor(private readonly calls: Array<string>) {}
 
-  do<T>(
-    name: string,
-    callback: (context: WorkflowStepContext) => Promise<T>,
-    rollbackOptions?: WorkflowStepRollbackOptions<T>,
-  ): Promise<T>;
-  do<T>(
-    name: string,
-    config: WorkflowStepConfig,
-    callback: (context: WorkflowStepContext) => Promise<T>,
-    rollbackOptions?: WorkflowStepRollbackOptions<T>,
-  ): Promise<T>;
   async do<T>(
     name: string,
     configOrCallback: WorkflowStepConfig | ((context: WorkflowStepContext) => Promise<T>),
@@ -242,4 +234,5 @@ class TestWorkflowStep implements WorkflowStep {
   }
 }
 
-const makeWorkflowStep = (calls: Array<string>): WorkflowStep => new TestWorkflowStep(calls);
+const makeWorkflowStep = (calls: Array<string>): WorkflowStep =>
+  new TestWorkflowStep(calls) as unknown as WorkflowStep;

@@ -42,7 +42,11 @@ const makeExecutingStep = (onReject?: (cause: Error) => void): CloudflareWorkflo
         return await callback({
           step: { name, count: 1 },
           attempt: 1,
-          config: Predicate.isFunction(callbackOrConfig) ? {} : callbackOrConfig,
+          // Cloudflare now specializes WorkflowStepContext.config by delay kind;
+          // these fixtures only exercise the callback path, not delay typing.
+          config: (Predicate.isFunction(callbackOrConfig)
+            ? {}
+            : callbackOrConfig) as CloudflareWorkflowStepContext["config"],
         });
       } catch (cause) {
         if (cause instanceof Error) onReject?.(cause);

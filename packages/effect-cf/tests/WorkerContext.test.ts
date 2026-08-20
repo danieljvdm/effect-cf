@@ -15,6 +15,7 @@ class TestService extends Context.Service<
 const makeExecutionContext = () => {
   const waitUntilPromises: Array<Promise<unknown>> = [];
   let passThroughCalls = 0;
+  const abortReasons: Array<unknown> = [];
 
   const executionContext = makePartialTestDouble<globalThis.ExecutionContext>({
     props: undefined,
@@ -24,6 +25,9 @@ const makeExecutionContext = () => {
     passThroughOnException: () => {
       passThroughCalls++;
     },
+    abort: (reason?: unknown) => {
+      abortReasons.push(reason);
+    },
   });
 
   return {
@@ -31,6 +35,9 @@ const makeExecutionContext = () => {
     waitUntilPromises,
     get passThroughCalls() {
       return passThroughCalls;
+    },
+    get abortReasons() {
+      return abortReasons;
     },
   };
 };
@@ -159,6 +166,24 @@ test("WorkerContext.passThroughOnException delegates to the raw ExecutionContext
   await worker.fetch!(new Request("https://example.com/"));
 
   expect(context.passThroughCalls).toBe(1);
+});
+
+test("WorkerContext.abort delegates to the raw ExecutionContext", async () => {
+  const Live = Worker.make(Layer.empty, {
+    fetch: Effect.gen(function* () {
+      const ctx = yield* Worker.WorkerContext;
+
+      yield* ctx.abort("shutdown");
+
+      return new Response("ok");
+    }),
+  });
+  const context = makeExecutionContext();
+  const worker = new Live(context.executionContext, makePartialTestDouble<Cloudflare.Env>({}));
+
+  await worker.fetch!(new Request("https://example.com/"));
+
+  expect(context.abortReasons).toEqual(["shutdown"]);
 });
 
 const makeMessageBatch = (queue: string): globalThis.MessageBatch<unknown> =>

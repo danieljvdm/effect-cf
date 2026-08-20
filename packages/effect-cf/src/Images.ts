@@ -311,9 +311,8 @@ const wrapHosted = (
   list: Effect.fn("Images.list")((options?: ImageListOptions) =>
     tryImagesPromise(binding, "list", () => hosted.list(options)),
   ),
-  createDirectUpload: Effect.fn("Images.createDirectUpload")(
-    (options?: ImageDirectUploadOptions) =>
-      tryImagesPromise(binding, "createDirectUpload", () => hosted.createDirectUpload(options)),
+  createDirectUpload: Effect.fn("Images.createDirectUpload")((options?: ImageDirectUploadOptions) =>
+    tryImagesPromise(binding, "createDirectUpload", () => hosted.createDirectUpload(options)),
   ),
   rawUnsafe: Effect.succeed(hosted),
 });

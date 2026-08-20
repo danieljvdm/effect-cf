@@ -729,12 +729,12 @@ export const resizeAvatar = (image: Images.ImageInputValue) =>
 `effect-cf` develops and tests against a fixed Cloudflare Workers runtime stack. Keep consumer
 `compatibility_date` and optional `@cloudflare/workers-types` peers at or above this pin:
 
-| Pin | Version |
-| --- | --- |
-| workerd | `1.20260820.1` |
+| Pin                                         | Version        |
+| ------------------------------------------- | -------------- |
+| workerd                                     | `1.20260820.1` |
 | `@cloudflare/workers-types` (optional peer) | `5.20260820.1` |
-| wrangler (repo catalog / examples) | `4.125.0` |
-| Recommended `compatibility_date` | `2026-08-20` |
+| wrangler (repo catalog / examples)          | `4.125.0`      |
+| Recommended `compatibility_date`            | `2026-08-20`   |
 
 The date in the `workerd` / `@cloudflare/workers-types` version is the API surface this package wraps.
 Repo catalog pins live in the root `package.json` `catalog` field (`@cloudflare/workers-types`, `wrangler`).

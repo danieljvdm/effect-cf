@@ -12,11 +12,13 @@ const TelemetryWorker = WorkerDefinition.make("CloudflareOtlpTelemetryWorker", {
   run: WorkerDefinition.method({ success: S.String }),
 });
 
-const makeExecutionContext = (): globalThis.ExecutionContext => ({
-  props: undefined,
-  waitUntil: () => undefined,
-  passThroughOnException: () => undefined,
-});
+const makeExecutionContext = (): globalThis.ExecutionContext =>
+  makePartialTestDouble<globalThis.ExecutionContext>({
+    props: undefined,
+    waitUntil: () => undefined,
+    passThroughOnException: () => undefined,
+    abort: () => undefined,
+  });
 
 const makeWaitUntilExecutionContext = () => {
   const waitUntilPromises: Array<Promise<unknown>> = [];
@@ -26,6 +28,7 @@ const makeWaitUntilExecutionContext = () => {
       waitUntilPromises.push(promise);
     },
     passThroughOnException: () => undefined,
+    abort: () => undefined,
   });
 
   return { executionContext, waitUntilPromises };

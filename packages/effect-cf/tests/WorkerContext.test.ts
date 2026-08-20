@@ -25,7 +25,7 @@ const makeExecutionContext = () => {
     passThroughOnException: () => {
       passThroughCalls++;
     },
-    abort: (reason?: unknown) => {
+    abort: (reason?: string) => {
       abortReasons.push(reason);
     },
   });

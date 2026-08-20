@@ -42,8 +42,10 @@ const makeExecutingStep = (onReject?: (cause: Error) => void): CloudflareWorkflo
         return await callback({
           step: { name, count: 1 },
           attempt: 1,
-          // Cloudflare now specializes WorkflowStepContext.config by delay kind;
+          // Cloudflare specializes WorkflowStepContext.config by delay kind;
           // these fixtures only exercise the callback path, not delay typing.
+          // SAFETY: callbackOrConfig is either empty or the WorkflowStepConfig already
+          // accepted by step.do; the specialized context config is a structural subset.
           config: (Predicate.isFunction(callbackOrConfig)
             ? {}
             : callbackOrConfig) as CloudflareWorkflowStepContext["config"],

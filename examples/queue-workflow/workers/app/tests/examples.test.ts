@@ -25,6 +25,8 @@ import {
   startReportWorkflow,
 } from "../src/workflow.ts";
 
+// SAFETY: This fixture only implements the ExecutionContext methods the queue/workflow
+// examples exercise; workers-types v5 also requires exports/tracing which stay unused here.
 const executionContext = {
   waitUntil(_promise: Promise<unknown>) {},
   passThroughOnException() {},
@@ -185,8 +187,10 @@ interface ReportInstanceStatus extends Omit<InstanceStatus, "output"> {
   readonly output?: ReportResult;
 }
 
-const makeWorkflowInstance = (id: string, status: ReportInstanceStatus): WorkflowInstance =>
-  ({
+const makeWorkflowInstance = (id: string, status: ReportInstanceStatus): WorkflowInstance => {
+  // SAFETY: This fixture implements the WorkflowInstance methods exercised by the example
+  // binding tests; platform-only fields beyond that surface are unused.
+  return {
     id,
     pause: async () => undefined,
     resume: async () => undefined,
@@ -195,7 +199,8 @@ const makeWorkflowInstance = (id: string, status: ReportInstanceStatus): Workflo
     delete: async () => undefined,
     status: async () => status,
     sendEvent: async () => undefined,
-  }) as WorkflowInstance;
+  } as WorkflowInstance;
+};
 
 class TestWorkflowStep {
   constructor(private readonly calls: Array<string>) {}
@@ -234,5 +239,8 @@ class TestWorkflowStep {
   }
 }
 
-const makeWorkflowStep = (calls: Array<string>): WorkflowStep =>
-  new TestWorkflowStep(calls) as unknown as WorkflowStep;
+const makeWorkflowStep = (calls: Array<string>): WorkflowStep => {
+  // SAFETY: This fixture owns the do/sleep/sleepUntil callbacks the example workflow
+  // invokes; Cloudflare's newer delay-function overloads are unused here.
+  return new TestWorkflowStep(calls) as WorkflowStep;
+};

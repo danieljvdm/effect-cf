@@ -47,7 +47,7 @@ export interface WorkerContextService {
   ): Effect.Effect<void, never, R | R2>;
   readonly passThroughOnException: Effect.Effect<void>;
   /** Abort the current stateless Worker invocation (`ExecutionContext.abort`). */
-  abort(reason?: unknown): Effect.Effect<void>;
+  abort(reason?: string): Effect.Effect<void>;
 }
 
 /**

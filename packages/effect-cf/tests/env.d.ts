@@ -1,4 +1,4 @@
-/// <reference types="@cloudflare/vitest-pool-workers/types" />
+/// <reference types="@cloudflare/vitest-plugin/types" />
 
 import type * as EffectArtifacts from "../src/Artifacts";
 import type * as TestWorkerModule from "./worker-fixture";

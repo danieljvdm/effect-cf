@@ -1,4 +1,4 @@
-/// <reference types="@cloudflare/vitest-pool-workers/types" />
+/// <reference types="@cloudflare/vitest-plugin/types" />
 
 import { createExecutionContext } from "cloudflare:test";
 import { Clock, Duration, Effect, Layer, Schema } from "effect";

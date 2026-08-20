@@ -1,4 +1,4 @@
-import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
+import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import { createRecommendedVitePlusConfig } from "@danieljvdm/dev-kit/vite-plus";
 import { defineConfig } from "vite-plus";
 

@@ -1,5 +1,5 @@
 /**
- * Effect-native helpers for tests running in Cloudflare's Vitest Workers pool.
+ * Effect-native helpers for tests running in Cloudflare's Workers Vitest plugin.
  *
  * Import this module through the `effect-cf/vitest` subpath. It is intended to
  * run inside the Workers test runtime, where `cloudflare:test` is available.
@@ -37,7 +37,7 @@ import type { WorkflowInstanceStatusName } from "./WorkflowBinding";
 const currentEnv: WorkerEnv = env;
 
 /**
- * Provides the Workers pool environment as both {@link WorkerEnvironment} and
+ * Provides the Workers test environment as both {@link WorkerEnvironment} and
  * the active Effect `ConfigProvider`.
  */
 export const layer: Layer.Layer<WorkerEnvironment> = Layer.mergeAll(
@@ -134,7 +134,7 @@ type PagesEventContextInitData<Context> =
       : { readonly data: Data }
     : never;
 
-/** Initialization accepted by Pool Workers for a Pages Function. */
+/** Initialization accepted by the Workers Vitest plugin for a Pages Function. */
 export type PagesEventContextInit<Function extends AnyPagesFunction> = PagesEventContextInitBase &
   PagesEventContextInitParams<Parameters<Function>[0]> &
   PagesEventContextInitData<Parameters<Function>[0]>;
@@ -162,14 +162,14 @@ interface QueueWorker {
   queue(batch: globalThis.MessageBatch): Promise<void>;
 }
 
-/** Input message accepted by Pool Workers' `createMessageBatch` helper. */
+/** Input message accepted by the Workers Vitest plugin's `createMessageBatch` helper. */
 export type QueueMessage<Body> = {
   readonly id: string;
   readonly timestamp: Date;
   readonly attempts: number;
 } & ({ readonly body: Body } | { readonly serializedBody: ArrayBuffer | ArrayBufferView });
 
-/** Acknowledgement and retry result returned by Pool Workers. */
+/** Acknowledgement and retry result returned by the Workers Vitest plugin. */
 export type QueueResult = Awaited<ReturnType<typeof getQueueResult>>;
 
 /** Result of invoking a queue consumer through {@link queue}. */
@@ -180,7 +180,7 @@ export interface QueueRunResult<Body> {
 
 /**
  * Invokes an Effect-backed queue consumer, drains its `waitUntil` work, and
- * returns Pool Workers' acknowledgement and retry result.
+ * returns the Workers Vitest plugin's acknowledgement and retry result.
  */
 export const queue = Effect.fn("effect-cf/vitest/queue")(function* <
   Body,
@@ -280,7 +280,7 @@ export const evictAllDurableObjects = Effect.fn("effect-cf/vitest/evictAllDurabl
   },
 );
 
-/** A D1 migration accepted by Pool Workers. */
+/** A D1 migration accepted by the Workers Vitest plugin. */
 export interface D1Migration {
   readonly name: string;
   readonly queries: ReadonlyArray<string>;
@@ -310,7 +310,7 @@ export interface SecretsStoreSecret {
   readonly metadata?: { readonly uuid: string };
 }
 
-/** Effect-native wrapper around Pool Workers' Secrets Store admin API. */
+/** Effect-native wrapper around the Workers Vitest plugin's Secrets Store admin API. */
 export interface SecretsStoreAdmin {
   readonly raw: NativeSecretsStoreAdmin;
   readonly create: (value: string) => Effect.Effect<string>;
@@ -445,7 +445,7 @@ const runWorkflowModifier = Effect.fnUntraced(function* <A, E, R>(
     }
 
     if (callbackExit === undefined) {
-      throw new Error("Pool Workers did not invoke the Workflow modifier callback");
+      throw new Error("The Workers Vitest plugin did not invoke the Workflow modifier callback");
     }
 
     return callbackExit;

@@ -1,5 +1,15 @@
 # effect-cf
 
+## 0.31.0
+
+### Minor Changes
+
+- [#116](https://github.com/danieljvdm/effect-cf/pull/116) [`98d343b`](https://github.com/danieljvdm/effect-cf/commit/98d343ba7d5a427789ec8e7fc030668987eab1ea) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Move the optional `effect-cf/vitest` peer from `@cloudflare/vitest-pool-workers` to `@cloudflare/vitest-plugin` `^1.0.0`. The package API is unchanged: keep using `cloudflareTest()` and `cloudflare:test`.
+
+- [#118](https://github.com/danieljvdm/effect-cf/pull/118) [`80730a8`](https://github.com/danieljvdm/effect-cf/commit/80730a82b26728e824ba6e4ed8bdbe290428baa6) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Pin the Cloudflare Workers runtime stack to workerd `1.20260820.1` (`@cloudflare/workers-types@^5.20260820.1`, wrangler `4.125.0`, recommended `compatibility_date` `2026-08-20`).
+
+  Images gains text rasterization (`text` / `process` text input), hosted `createDirectUpload` and `signedUrl`, and `response(options?)` for extra headers. Workflow instances gain `delete`, optional `terminate({ rollback })`, and `create`/`createBatch` `locationHint` via the updated types. `Worker.WorkerContext` now wraps the non-experimental `ExecutionContext.abort`.
+
 ## 0.30.0
 
 ### Minor Changes

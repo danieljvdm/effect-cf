@@ -1,0 +1,4 @@
+{
+  "name": "effect-cf",
+  "install": "bash .cursor/install.sh"
+}

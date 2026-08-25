@@ -1,4 +1,14 @@
-import { Effect, Layer, Option, Predicate, Schema as S } from "effect";
+import {
+  Context,
+  Effect,
+  Layer,
+  Option,
+  Predicate,
+  PubSub,
+  Schema as S,
+  Semaphore,
+  Stream,
+} from "effect";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
@@ -127,26 +137,174 @@ export class TestCounterDurableObject extends TestCounterLive {
   readonly instanceId = crypto.randomUUID();
 }
 
-class HibernationPingResult extends S.Class<HibernationPingResult>("HibernationPingResult")({
+export class HibernationPingResult extends S.Class<HibernationPingResult>("HibernationPingResult")({
   nonce: S.String,
 }) {}
 
-class HibernationPing extends Rpc.make("HibernationPing", {
+export class HibernationPing extends Rpc.make("HibernationPing", {
   payload: { nonce: S.String },
   success: HibernationPingResult,
 }) {}
 
-class HibernationNever extends Rpc.make("HibernationNever", {
+export class HibernationNever extends Rpc.make("HibernationNever", {
   payload: { nonce: S.String },
   success: S.Void,
 }) {}
 
-class HibernationRpcs extends RpcGroup.make(HibernationPing, HibernationNever) {}
+export class HibernationEvent extends S.Class<HibernationEvent>("HibernationEvent")({
+  cursor: S.Finite,
+  value: S.String,
+}) {}
+
+export class HibernationAppendEvent extends Rpc.make("HibernationAppendEvent", {
+  payload: { value: S.String },
+  success: HibernationEvent,
+}) {}
+
+export class HibernationEvents extends Rpc.make("HibernationEvents", {
+  payload: { subscriptionKey: S.String, after: S.Finite, until: S.Finite },
+  success: HibernationEvent,
+  stream: true,
+}) {}
+
+export class HibernationCheckpointSubscription extends Rpc.make(
+  "HibernationCheckpointSubscription",
+  {
+    payload: { subscriptionKey: S.String, checkpoint: S.Finite },
+    success: S.Boolean,
+  },
+) {}
+
+export class HibernationNonResumableEvents extends Rpc.make("HibernationNonResumableEvents", {
+  success: HibernationEvent,
+  stream: true,
+}) {}
+
+export class HibernationRpcs extends RpcGroup.make(
+  HibernationPing,
+  HibernationNever,
+  HibernationAppendEvent,
+  HibernationEvents,
+  HibernationCheckpointSubscription,
+  HibernationNonResumableEvents,
+) {}
+
+const HibernationEventsPayload = S.Struct({
+  subscriptionKey: S.String,
+  after: S.Finite,
+  until: S.Finite,
+});
+const decodeHibernationEventsPayload = S.decodeUnknownOption(HibernationEventsPayload);
+const decodeHibernationEvent = S.decodeUnknownOption(HibernationEvent);
+
+export const HibernationEventsResume = DurableObjectRpcWebSocket.resumableStream({
+  id: "workerd-hibernation-events/v1",
+  rpcTag: "HibernationEvents",
+  identify: (request) =>
+    Option.map(
+      decodeHibernationEventsPayload(request.payload),
+      ({ after, subscriptionKey, until }) => ({
+        subscriptionKey,
+        resumeDescriptor: { subscriptionKey, until },
+        acknowledgedCheckpoint: after,
+      }),
+    ),
+  rebuild: ({ resumeDescriptor, acknowledgedCheckpoint }) => ({
+    payload: {
+      subscriptionKey: resumeDescriptor.subscriptionKey,
+      after: acknowledgedCheckpoint,
+      until: resumeDescriptor.until,
+    },
+    headers: [],
+  }),
+  checkpointFromValue: (value) =>
+    Option.map(decodeHibernationEvent(value), (event) => event.cursor),
+  checkpointToken: String,
+});
+
+interface HibernationEventLogService {
+  readonly events: PubSub.PubSub<HibernationEvent>;
+  readonly lock: Semaphore.Semaphore;
+}
+
+class HibernationEventLog extends Context.Service<
+  HibernationEventLog,
+  HibernationEventLogService
+>()("effect-cf/tests/HibernationEventLog") {}
+
+const HibernationEventLogLive = Layer.effect(
+  HibernationEventLog,
+  Effect.gen(function* () {
+    const events = yield* PubSub.unbounded<HibernationEvent>();
+    const lock = yield* Semaphore.make(1);
+
+    return { events, lock };
+  }),
+);
+
+const hibernationEventLogStorageKey = "hibernation-events";
+
+const readHibernationEvents = Effect.gen(function* () {
+  const state = yield* DurableObjectState.DurableObjectState;
+  const events = yield* state.storage.get<
+    Array<{ readonly cursor: number; readonly value: string }>
+  >(hibernationEventLogStorageKey);
+
+  return (events ?? []).map((event) => HibernationEvent.make(event));
+}).pipe(Effect.orDie);
 
 const HibernationRpcHandlers = HibernationRpcs.toLayer(
-  Effect.succeed(
-    HibernationRpcs.of({
-      HibernationPing: ({ nonce }) => Effect.succeed(new HibernationPingResult({ nonce })),
+  Effect.gen(function* () {
+    const eventLog = yield* HibernationEventLog;
+    const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
+
+    return HibernationRpcs.of({
+      HibernationAppendEvent: ({ value }) =>
+        eventLog.lock.withPermit(
+          Effect.gen(function* () {
+            const state = yield* DurableObjectState.DurableObjectState;
+            const events = yield* readHibernationEvents;
+            const event = HibernationEvent.make({
+              cursor: (events.at(-1)?.cursor ?? 0) + 1,
+              value,
+            });
+
+            yield* state.storage
+              .put(hibernationEventLogStorageKey, [...events, event])
+              .pipe(Effect.orDie);
+            yield* PubSub.publish(eventLog.events, event);
+
+            return event;
+          }),
+        ),
+      HibernationEvents: ({ after, until }) =>
+        Stream.unwrap(
+          eventLog.lock.withPermit(
+            Effect.gen(function* () {
+              const subscription = yield* PubSub.subscribe(eventLog.events);
+              const replay = yield* readHibernationEvents;
+
+              return Stream.fromIterable(replay).pipe(
+                Stream.concat(Stream.fromSubscription(subscription)),
+                Stream.filter((event) => event.cursor > after),
+                Stream.takeUntil((event) => event.cursor >= until),
+                Stream.rechunk(1),
+              );
+            }),
+          ),
+        ),
+      HibernationCheckpointSubscription: ({ checkpoint, subscriptionKey }, { client }) =>
+        transport.checkpoint(HibernationEventsResume, {
+          clientId: client.id,
+          subscriptionKey,
+          checkpoint,
+        }),
+      HibernationNonResumableEvents: () =>
+        Stream.make(HibernationEvent.make({ cursor: 0, value: "non-resumable" })).pipe(
+          Stream.concat(Stream.never),
+          Stream.rechunk(1),
+        ),
+      HibernationPing: ({ nonce }) => Effect.succeed(HibernationPingResult.make({ nonce })),
       HibernationNever: () =>
         Effect.gen(function* () {
           const state = yield* DurableObjectState.DurableObjectState;
@@ -155,13 +313,23 @@ const HibernationRpcHandlers = HibernationRpcs.toLayer(
 
           return yield* Effect.never;
         }),
-    }),
-  ),
+    });
+  }),
+);
+
+const HibernationTransportLive = DurableObjectRpcWebSocket.layer({
+  tag: "hibernation-rpc",
+  resumableStreams: [HibernationEventsResume],
+});
+
+const HibernationRpcHandlersLive = HibernationRpcHandlers.pipe(
+  Layer.provideMerge(HibernationEventLogLive),
+  Layer.provideMerge(HibernationTransportLive),
 );
 
 const HibernationRpcLive = RpcServer.layer(HibernationRpcs).pipe(
-  Layer.provideMerge(DurableObjectRpcWebSocket.layer({ tag: "hibernation-rpc" })),
-  Layer.provide(HibernationRpcHandlers),
+  Layer.provideMerge(HibernationRpcHandlersLive),
+  Layer.provide(HibernationTransportLive),
   Layer.provide(RpcSerialization.layerJson),
 );
 

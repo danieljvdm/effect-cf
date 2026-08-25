@@ -5,6 +5,7 @@ import {
   Effect,
   Fiber,
   Layer,
+  Option,
   Predicate,
   Queue,
   Schema,
@@ -48,6 +49,51 @@ class Events extends Rpc.make("Events", {
 }) {}
 
 class TestRpcs extends RpcGroup.make(Ping, Never, Events) {}
+
+const ResumableEventPayload = Schema.Struct({
+  subscriptionKey: Schema.String,
+  after: Schema.Number,
+});
+
+const ResumableEventValue = Schema.Struct({
+  cursor: Schema.Number,
+  value: Schema.String,
+});
+
+class ResumableEvents extends Rpc.make("ResumableEvents", {
+  payload: ResumableEventPayload.fields,
+  success: ResumableEventValue,
+  stream: true,
+}) {}
+
+class ResumableProbe extends Rpc.make("ResumableProbe", {
+  success: Schema.String,
+}) {}
+
+class ResumableRpcs extends RpcGroup.make(ResumableEvents, ResumableProbe) {}
+
+const decodeResumablePayload = Schema.decodeUnknownOption(ResumableEventPayload);
+const decodeResumableValue = Schema.decodeUnknownOption(ResumableEventValue);
+
+const ResumableEventsDeclaration = DurableObjectRpcWebSocket.resumableStream({
+  id: "test-events/v1",
+  rpcTag: "ResumableEvents",
+  identify: (request) =>
+    Option.map(decodeResumablePayload(request.payload), (payload) => ({
+      subscriptionKey: payload.subscriptionKey,
+      resumeDescriptor: { subscriptionKey: payload.subscriptionKey },
+      acknowledgedCheckpoint: payload.after,
+    })),
+  rebuild: ({ resumeDescriptor, acknowledgedCheckpoint }) => ({
+    payload: {
+      subscriptionKey: resumeDescriptor.subscriptionKey,
+      after: acknowledgedCheckpoint,
+    },
+    headers: [],
+  }),
+  checkpointFromValue: (value) => Option.map(decodeResumableValue(value), (event) => event.cursor),
+  checkpointToken: String,
+});
 
 const makeTestRpcHandlers = (options?: {
   readonly neverStarted?: Deferred.Deferred<void>;
@@ -171,6 +217,23 @@ Object.defineProperty(globalThis, "WebSocketRequestResponsePair", {
 }
 
 {
+  const socket = makeFakeWebSocket({ application: "preserved" });
+  const state = makeFakeDurableObjectState({
+    socketsByTag: new Map([["test-rpc", [socket]]]),
+  });
+
+  layer(makeAppLayer(state))("DurableObjectRpcWebSocket missing restored metadata", (it) => {
+    it.effect("resets a tagged restored socket whose adapter metadata is missing", () =>
+      Effect.sync(() => {
+        assert.deepStrictEqual(socket.closed, [
+          { code: 1012, reason: "Durable Object RPC activation reset" },
+        ]);
+      }),
+    );
+  });
+}
+
+{
   const applicationPair = new WebSocketRequestResponsePair("application-ping", "application-pong");
   const state = makeFakeDurableObjectState({ autoResponse: applicationPair });
 
@@ -185,6 +248,57 @@ Object.defineProperty(globalThis, "WebSocketRequestResponsePair", {
           request: "application-ping",
           response: "application-pong",
         });
+      }),
+    );
+  });
+}
+
+{
+  layer(Layer.empty)("DurableObjectRpcWebSocket deferred serialization", (it) => {
+    it.effect("resets instead of clearing state when a serializer buffers a response", () =>
+      Effect.gen(function* () {
+        let resolveClose: () => void = () => {};
+        const closed = new Promise<void>((resolve) => {
+          resolveClose = resolve;
+        });
+        const socket = makeFakeWebSocket(null, undefined, resolveClose);
+        const durableSocket = DurableObjectWebSocket.fromWebSocket(socket);
+        const state = makeFakeDurableObjectState();
+        const parentScope = yield* Scope.Scope;
+        const scope = yield* Scope.fork(parentScope);
+        const context = yield* Layer.buildWithScope(
+          makeAppLayer(state, RpcSerialization.layerJsonRpc(), makeTestRpcHandlers()),
+          scope,
+        );
+        const transport = Context.get(context, DurableObjectRpcWebSocket.DurableObjectRpcWebSocket);
+
+        yield* transport.accept(durableSocket);
+        yield* transport.message(
+          durableSocket,
+          JSON.stringify([
+            {
+              jsonrpc: "2.0",
+              id: "never-in-batch",
+              method: "Never",
+              params: null,
+              headers: [],
+            },
+            {
+              jsonrpc: "2.0",
+              id: "finite-in-batch",
+              method: "Ping",
+              params: { nonce: "buffered" },
+              headers: [],
+            },
+          ]),
+        );
+        yield* Effect.promise(() => closed);
+
+        assert.deepStrictEqual(socket.closed, [
+          { code: 1012, reason: "Durable Object RPC activation reset" },
+        ]);
+        assert.deepStrictEqual(socket.sent, []);
+        assert.strictEqual(readRpcAttachment(socket).hasPendingRequests, true);
       }),
     );
   });
@@ -362,6 +476,452 @@ Object.defineProperty(globalThis, "WebSocketRequestResponsePair", {
 }
 
 {
+  layer(Layer.empty)("DurableObjectRpcWebSocket resumable streams", (it) => {
+    it.effect("releases a multi-value chunk only after its final checkpoint", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const secondBatchPulled = yield* Deferred.make<void>();
+          const thirdBatchPulled = yield* Deferred.make<void>();
+          const socket = makeFakeWebSocket();
+          const durableSocket = DurableObjectWebSocket.fromWebSocket(socket);
+          const state = makeFakeDurableObjectState();
+          const parentScope = yield* Scope.Scope;
+          const activation = yield* makeResumableActivation(parentScope, state, {
+            makeStream: () =>
+              Stream.fromIterable([
+                { cursor: 1, value: "one" },
+                { cursor: 2, value: "two" },
+              ]).pipe(
+                Stream.concat(
+                  Stream.fromEffect(Deferred.succeed(secondBatchPulled, undefined)).pipe(
+                    Stream.map(() => ({ cursor: 3, value: "three" })),
+                  ),
+                ),
+                Stream.concat(
+                  Stream.fromEffect(Deferred.succeed(thirdBatchPulled, undefined)).pipe(
+                    Stream.map(() => ({ cursor: 4, value: "four" })),
+                  ),
+                ),
+                Stream.concat(Stream.never),
+              ),
+          });
+
+          yield* activation.transport.accept(durableSocket);
+          yield* activation.transport.message(
+            durableSocket,
+            JSON.stringify({
+              _tag: "Request",
+              id: "batched-stream",
+              tag: "ResumableEvents",
+              payload: { subscriptionKey: "batched-events", after: 0 },
+              headers: [],
+            }),
+          );
+          yield* Effect.promise(() => socket.waitForSentCount(1));
+
+          assert.deepStrictEqual(decodeSent(socket)[0], {
+            _tag: "Chunk",
+            requestId: "batched-stream",
+            values: [
+              { cursor: 1, value: "one" },
+              { cursor: 2, value: "two" },
+            ],
+          });
+
+          assert.isTrue(
+            yield* activation.transport.checkpoint(ResumableEventsDeclaration, {
+              clientId: 0,
+              subscriptionKey: "batched-events",
+              checkpoint: 1,
+            }),
+          );
+          assert.strictEqual(readResumableSubscription(socket).acknowledgedCheckpoint, 1);
+          assert.deepStrictEqual(readResumableSubscription(socket).pending, {
+            checkpointTokens: ["2"],
+          });
+          assert.isTrue(Option.isNone(yield* Deferred.poll(secondBatchPulled)));
+          assert.isFalse(
+            yield* activation.transport.checkpoint(ResumableEventsDeclaration, {
+              clientId: 0,
+              subscriptionKey: "batched-events",
+              checkpoint: 1,
+            }),
+          );
+
+          assert.isTrue(
+            yield* activation.transport.checkpoint(ResumableEventsDeclaration, {
+              clientId: 0,
+              subscriptionKey: "batched-events",
+              checkpoint: 2,
+            }),
+          );
+          yield* Deferred.await(secondBatchPulled);
+          yield* Effect.promise(() => socket.waitForSentCount(2));
+
+          assert.deepStrictEqual(decodeSent(socket)[1], {
+            _tag: "Chunk",
+            requestId: "batched-stream",
+            values: [{ cursor: 3, value: "three" }],
+          });
+          assert.isFalse(
+            yield* activation.transport.checkpoint(ResumableEventsDeclaration, {
+              clientId: 0,
+              subscriptionKey: "batched-events",
+              checkpoint: 2,
+            }),
+          );
+          assert.isFalse(
+            yield* activation.transport.checkpoint(ResumableEventsDeclaration, {
+              clientId: 0,
+              subscriptionKey: "batched-events",
+              checkpoint: 1,
+            }),
+          );
+          assert.isTrue(Option.isNone(yield* Deferred.poll(thirdBatchPulled)));
+          assert.strictEqual(socket.sent.length, 2);
+
+          assert.isTrue(
+            yield* activation.transport.checkpoint(ResumableEventsDeclaration, {
+              clientId: 0,
+              subscriptionKey: "batched-events",
+              checkpoint: 3,
+            }),
+          );
+          yield* Deferred.await(thirdBatchPulled);
+          yield* Effect.promise(() => socket.waitForSentCount(3));
+
+          assert.deepStrictEqual(decodeSent(socket)[2], {
+            _tag: "Chunk",
+            requestId: "batched-stream",
+            values: [{ cursor: 4, value: "four" }],
+          });
+          assert.isFalse(
+            yield* activation.transport.checkpoint(ResumableEventsDeclaration, {
+              clientId: 0,
+              subscriptionKey: "batched-events",
+              checkpoint: 3,
+            }),
+          );
+        }),
+      ),
+    );
+
+    it.effect("reconstructs the original request and rejects a stale stock Ack", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const secondEventPulled = yield* Deferred.make<void>();
+          const socket = makeFakeWebSocket({ application: "preserved" });
+          const durableSocket = DurableObjectWebSocket.fromWebSocket(socket);
+          const state = makeFakeDurableObjectState();
+          const parentScope = yield* Scope.Scope;
+          const activationOne = yield* makeResumableActivation(parentScope, state);
+
+          yield* activationOne.transport.accept(durableSocket, ["application-tag"]);
+          yield* activationOne.transport.message(
+            durableSocket,
+            JSON.stringify({
+              _tag: "Request",
+              id: "resumable-stream-1",
+              tag: "ResumableEvents",
+              payload: { subscriptionKey: "events", after: 0 },
+              headers: [],
+            }),
+          );
+          yield* Effect.promise(() => socket.waitForSentCount(1));
+
+          assert.deepStrictEqual(decodeSent(socket)[0], {
+            _tag: "Chunk",
+            requestId: "resumable-stream-1",
+            values: [{ cursor: 1, value: "one" }],
+          });
+          assert.deepStrictEqual(socket.deserializeAttachment(), {
+            application: "preserved",
+            effectCloudflareRpcClientId: {
+              version: 2,
+              clientId: 0,
+              hasPendingRequests: true,
+              hasNonResumableRequests: false,
+              subscriptions: [
+                {
+                  definitionId: "test-events/v1",
+                  subscriptionKey: "events",
+                  requestId: "resumable-stream-1",
+                  rpcTag: "ResumableEvents",
+                  resumeDescriptor: { subscriptionKey: "events" },
+                  acknowledgedCheckpoint: 0,
+                  pending: {
+                    checkpointTokens: ["1"],
+                  },
+                },
+              ],
+            },
+          });
+
+          const activationTwo = yield* makeResumableActivation(parentScope, state, {
+            makeStream: () =>
+              Stream.fromIterable([
+                { cursor: 1, value: "one" },
+                { cursor: 2, value: "two" },
+              ]).pipe(
+                Stream.mapEffect((event) =>
+                  event.cursor !== 2
+                    ? Effect.succeed(event)
+                    : Deferred.succeed(secondEventPulled, undefined).pipe(Effect.as(event)),
+                ),
+                Stream.rechunk(1),
+                Stream.concat(Stream.never),
+              ),
+          });
+
+          yield* Effect.promise(() => socket.waitForSentCount(2));
+          assert.deepStrictEqual(decodeSent(socket)[1], {
+            _tag: "Chunk",
+            requestId: "resumable-stream-1",
+            values: [{ cursor: 1, value: "one" }],
+          });
+          assert.deepStrictEqual(socket.closed, []);
+          assert.deepStrictEqual(readResumableSubscription(socket).pending, {
+            checkpointTokens: ["1"],
+          });
+
+          yield* activationTwo.transport.message(
+            durableSocket,
+            JSON.stringify({ _tag: "Ack", requestId: "resumable-stream-1" }),
+          );
+          yield* activationTwo.transport.message(
+            durableSocket,
+            JSON.stringify({
+              _tag: "Request",
+              id: "stale-ack-barrier",
+              tag: "ResumableProbe",
+              payload: null,
+              headers: [],
+            }),
+          );
+          yield* Effect.promise(() => socket.waitForSentCount(3));
+
+          assert.isTrue(Option.isNone(yield* Deferred.poll(secondEventPulled)));
+          assert.deepStrictEqual(decodeSent(socket)[2], {
+            _tag: "Exit",
+            requestId: "stale-ack-barrier",
+            exit: { _tag: "Success", value: "probe" },
+          });
+
+          assert.isTrue(
+            yield* activationTwo.transport.checkpoint(ResumableEventsDeclaration, {
+              clientId: 0,
+              subscriptionKey: "events",
+              checkpoint: 1,
+            }),
+          );
+          yield* Deferred.await(secondEventPulled);
+          yield* Effect.promise(() => socket.waitForSentCount(4));
+
+          assert.deepStrictEqual(decodeSent(socket)[3], {
+            _tag: "Chunk",
+            requestId: "resumable-stream-1",
+            values: [{ cursor: 2, value: "two" }],
+          });
+        }),
+      ),
+    );
+
+    it.effect("reconstructs after a final checkpoint with no pending batch", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const nextPullStarted = yield* Deferred.make<void>();
+          const releaseOldActivation = yield* Deferred.make<void>();
+          const socket = makeFakeWebSocket();
+          const durableSocket = DurableObjectWebSocket.fromWebSocket(socket);
+          const state = makeFakeDurableObjectState();
+          const parentScope = yield* Scope.Scope;
+          const activationOne = yield* makeResumableActivation(parentScope, state, {
+            makeStream: () =>
+              Stream.succeed({ cursor: 1, value: "one" }).pipe(
+                Stream.concat(
+                  Stream.fromEffect(
+                    Deferred.succeed(nextPullStarted, undefined).pipe(
+                      Effect.andThen(Deferred.await(releaseOldActivation)),
+                      Effect.as({ cursor: 2, value: "two" }),
+                    ),
+                  ),
+                ),
+                Stream.concat(Stream.never),
+              ),
+          });
+
+          yield* activationOne.transport.accept(durableSocket);
+          yield* activationOne.transport.message(
+            durableSocket,
+            JSON.stringify({
+              _tag: "Request",
+              id: "checkpointed-stream",
+              tag: "ResumableEvents",
+              payload: { subscriptionKey: "checkpointed-events", after: 0 },
+              headers: [],
+            }),
+          );
+          yield* Effect.promise(() => socket.waitForSentCount(1));
+
+          assert.isTrue(
+            yield* activationOne.transport.checkpoint(ResumableEventsDeclaration, {
+              clientId: 0,
+              subscriptionKey: "checkpointed-events",
+              checkpoint: 1,
+            }),
+          );
+          yield* Deferred.await(nextPullStarted);
+
+          const checkpointed = readResumableSubscription(socket);
+
+          assert.strictEqual(checkpointed.acknowledgedCheckpoint, 1);
+          assert.isFalse(Object.hasOwn(checkpointed, "pending"));
+
+          yield* makeResumableActivation(parentScope, state);
+          yield* Effect.promise(() => socket.waitForSentCount(2));
+
+          assert.deepStrictEqual(decodeSent(socket)[1], {
+            _tag: "Chunk",
+            requestId: "checkpointed-stream",
+            values: [{ cursor: 2, value: "two" }],
+          });
+          assert.deepStrictEqual(socket.closed, []);
+          assert.strictEqual(readResumableSubscription(socket).acknowledgedCheckpoint, 1);
+        }),
+      ),
+    );
+
+    it.effect("clears persisted subscription metadata after a normal stream Exit", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const socket = makeFakeWebSocket();
+          const durableSocket = DurableObjectWebSocket.fromWebSocket(socket);
+          const state = makeFakeDurableObjectState();
+          const parentScope = yield* Scope.Scope;
+          const activation = yield* makeResumableActivation(parentScope, state, {
+            makeStream: () => Stream.succeed({ cursor: 1, value: "one" }),
+          });
+
+          yield* activation.transport.accept(durableSocket);
+          yield* activation.transport.message(
+            durableSocket,
+            JSON.stringify({
+              _tag: "Request",
+              id: "finite-resumable-stream",
+              tag: "ResumableEvents",
+              payload: { subscriptionKey: "finite-events", after: 0 },
+              headers: [],
+            }),
+          );
+          yield* Effect.promise(() => socket.waitForSentCount(1));
+
+          assert.isTrue(
+            yield* activation.transport.checkpoint(ResumableEventsDeclaration, {
+              clientId: 0,
+              subscriptionKey: "finite-events",
+              checkpoint: 1,
+            }),
+          );
+          yield* Effect.promise(() => socket.waitForSentCount(2));
+          yield* Effect.promise(() =>
+            socket.waitForAttachment((attachment) => hasNoResumableSubscriptions(attachment)),
+          );
+
+          assert.strictEqual(decodeSent(socket)[1]?._tag, "Exit");
+          assert.deepStrictEqual(readRpcAttachment(socket), {
+            version: 2,
+            clientId: 0,
+            hasPendingRequests: false,
+            hasNonResumableRequests: false,
+            subscriptions: [],
+          });
+        }),
+      ),
+    );
+
+    it.effect("clears interrupted subscriptions and ignores late stock Acks", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const secondEventPulled = yield* Deferred.make<void>();
+          const socket = makeFakeWebSocket();
+          const durableSocket = DurableObjectWebSocket.fromWebSocket(socket);
+          const state = makeFakeDurableObjectState();
+          const parentScope = yield* Scope.Scope;
+          const activation = yield* makeResumableActivation(parentScope, state, {
+            makeStream: () =>
+              Stream.succeed({ cursor: 1, value: "one" }).pipe(
+                Stream.concat(
+                  Stream.fromEffect(Deferred.succeed(secondEventPulled, undefined)).pipe(
+                    Stream.map(() => ({ cursor: 2, value: "two" })),
+                  ),
+                ),
+                Stream.concat(Stream.never),
+              ),
+          });
+
+          yield* activation.transport.accept(durableSocket);
+          yield* activation.transport.message(
+            durableSocket,
+            JSON.stringify({
+              _tag: "Request",
+              id: "interrupted-resumable-stream",
+              tag: "ResumableEvents",
+              payload: { subscriptionKey: "interrupted-events", after: 0 },
+              headers: [],
+            }),
+          );
+          yield* Effect.promise(() => socket.waitForSentCount(1));
+
+          yield* activation.transport.message(
+            durableSocket,
+            JSON.stringify({ _tag: "Interrupt", requestId: "interrupted-resumable-stream" }),
+          );
+
+          assert.deepStrictEqual(readRpcAttachment(socket), {
+            version: 2,
+            clientId: 0,
+            hasPendingRequests: false,
+            hasNonResumableRequests: false,
+            subscriptions: [],
+          });
+
+          yield* activation.transport.message(
+            durableSocket,
+            JSON.stringify({ _tag: "Ack", requestId: "interrupted-resumable-stream" }),
+          );
+          yield* activation.transport.message(
+            durableSocket,
+            JSON.stringify({
+              _tag: "Request",
+              id: "interrupt-ack-barrier",
+              tag: "ResumableProbe",
+              payload: null,
+              headers: [],
+            }),
+          );
+          yield* Effect.promise(() => socket.waitForSentCount(3));
+
+          assert.strictEqual(decodeSent(socket)[1]?._tag, "Exit");
+          assert.deepStrictEqual(decodeSent(socket)[2], {
+            _tag: "Exit",
+            requestId: "interrupt-ack-barrier",
+            exit: { _tag: "Success", value: "probe" },
+          });
+          assert.isTrue(Option.isNone(yield* Deferred.poll(secondEventPulled)));
+          assert.deepStrictEqual(readRpcAttachment(socket), {
+            version: 2,
+            clientId: 0,
+            hasPendingRequests: false,
+            hasNonResumableRequests: false,
+            subscriptions: [],
+          });
+        }),
+      ),
+    );
+  });
+}
+
+{
   const socket = makeFakeWebSocket();
   const durableSocket = DurableObjectWebSocket.fromWebSocket(socket);
   const state = makeFakeDurableObjectState();
@@ -413,18 +973,45 @@ interface FakeWebSocket extends WebSocket {
     readonly reason: string | undefined;
   }>;
   readonly nextSend: Promise<void>;
+  readonly waitForSentCount: (count: number) => Promise<void>;
+  readonly waitForAttachment: (
+    predicate: (attachment: FakeWebSocketAttachment) => boolean,
+  ) => Promise<void>;
+  readonly deserializeAttachment: () => FakeWebSocketAttachment;
+}
+
+interface FakeRpcAttachmentV1 {
+  readonly version: 1;
+  readonly clientId: number;
+  readonly hasPendingRequests: boolean;
+}
+
+interface TestPersistedPendingBatch {
+  readonly checkpointTokens: ReadonlyArray<string>;
+}
+
+interface TestPersistedResumableSubscription {
+  readonly definitionId: string;
+  readonly subscriptionKey: string;
+  readonly requestId: string | number;
+  readonly rpcTag: string;
+  readonly resumeDescriptor: { readonly subscriptionKey: string };
+  readonly acknowledgedCheckpoint: number;
+  readonly pending?: TestPersistedPendingBatch;
+}
+
+interface FakeRpcAttachmentV2 {
+  readonly version: 2;
+  readonly clientId: number;
+  readonly hasPendingRequests: boolean;
+  readonly hasNonResumableRequests: boolean;
+  readonly subscriptions: ReadonlyArray<TestPersistedResumableSubscription>;
 }
 
 interface FakeWebSocketAttachmentFields {
   readonly application?: string | { readonly room: string };
   readonly applicationMessageCount?: number;
-  readonly effectCloudflareRpcClientId?:
-    | number
-    | {
-        readonly version: number;
-        readonly clientId: number;
-        readonly hasPendingRequests: boolean;
-      };
+  readonly effectCloudflareRpcClientId?: number | FakeRpcAttachmentV1 | FakeRpcAttachmentV2;
 }
 
 type FakeWebSocketAttachment = null | FakeWebSocketAttachmentFields;
@@ -437,6 +1024,11 @@ function makeFakeWebSocket(
   let attachment = initialAttachment;
   let resolveSend: () => void = () => {};
   const sent: Array<string | ArrayBuffer | ArrayBufferView> = [];
+  const sendWaiters = new Map<number, Array<() => void>>();
+  const attachmentWaiters: Array<{
+    readonly predicate: (attachment: FakeWebSocketAttachment) => boolean;
+    readonly resolve: () => void;
+  }> = [];
   const closed: Array<{ readonly code: number | undefined; readonly reason: string | undefined }> =
     [];
   const nextSend = new Promise<void>((resolve) => {
@@ -450,6 +1042,15 @@ function makeFakeWebSocket(
     send(message: string | ArrayBuffer | ArrayBufferView) {
       sent.push(message);
       resolveSend();
+      for (const [count, waiters] of sendWaiters) {
+        if (sent.length < count) {
+          continue;
+        }
+        sendWaiters.delete(count);
+        for (const resolve of waiters) {
+          resolve();
+        }
+      }
       onSend?.(message);
     },
     close(code?: number, reason?: string) {
@@ -458,9 +1059,38 @@ function makeFakeWebSocket(
     },
     serializeAttachment(value: FakeWebSocketAttachment) {
       attachment = value;
+      for (let index = attachmentWaiters.length - 1; index >= 0; index--) {
+        const waiter = attachmentWaiters[index];
+
+        if (waiter !== undefined && waiter.predicate(attachment)) {
+          attachmentWaiters.splice(index, 1);
+          waiter.resolve();
+        }
+      }
     },
     deserializeAttachment() {
       return attachment;
+    },
+    waitForSentCount: (count) => {
+      if (sent.length >= count) {
+        return Promise.resolve();
+      }
+
+      return new Promise<void>((resolve) => {
+        const waiters = sendWaiters.get(count) ?? [];
+
+        waiters.push(resolve);
+        sendWaiters.set(count, waiters);
+      });
+    },
+    waitForAttachment: (predicate) => {
+      if (predicate(attachment)) {
+        return Promise.resolve();
+      }
+
+      return new Promise<void>((resolve) => {
+        attachmentWaiters.push({ predicate, resolve });
+      });
     },
   });
 }
@@ -564,22 +1194,52 @@ function decodeMessage(
   return messages as Array<RpcMessage.FromServerEncoded>;
 }
 
-function readRpcAttachment(socket: FakeWebSocket) {
+function readRpcAttachment(socket: FakeWebSocket): FakeRpcAttachmentV1 | FakeRpcAttachmentV2 {
   const attachment = socket.deserializeAttachment();
+  const metadata = attachment?.effectCloudflareRpcClientId;
 
-  if (
-    !Predicate.isObject(attachment) ||
-    !Predicate.hasProperty(attachment, "effectCloudflareRpcClientId") ||
-    !Predicate.isObject(attachment.effectCloudflareRpcClientId) ||
-    !Predicate.hasProperty(attachment.effectCloudflareRpcClientId, "clientId") ||
-    !Predicate.isNumber(attachment.effectCloudflareRpcClientId.clientId) ||
-    !Predicate.hasProperty(attachment.effectCloudflareRpcClientId, "hasPendingRequests") ||
-    !Predicate.isBoolean(attachment.effectCloudflareRpcClientId.hasPendingRequests)
-  ) {
+  if (!isFakeRpcAttachment(metadata)) {
     throw new Error("Expected the RPC transport attachment metadata");
   }
 
-  return attachment.effectCloudflareRpcClientId;
+  return metadata;
+}
+
+function isFakeRpcAttachment(
+  metadata: FakeWebSocketAttachmentFields["effectCloudflareRpcClientId"],
+): metadata is FakeRpcAttachmentV1 | FakeRpcAttachmentV2 {
+  return (
+    Predicate.isObject(metadata) &&
+    Predicate.isNumber(metadata.clientId) &&
+    Predicate.isBoolean(metadata.hasPendingRequests)
+  );
+}
+
+function readResumableSubscription(socket: FakeWebSocket): TestPersistedResumableSubscription {
+  const metadata = readRpcAttachment(socket);
+
+  if (metadata.version !== 2 || metadata.subscriptions.length !== 1) {
+    throw new Error("Expected one persisted resumable RPC subscription");
+  }
+
+  const subscription = metadata.subscriptions[0];
+
+  if (subscription === undefined) {
+    throw new Error("Expected one persisted resumable RPC subscription");
+  }
+
+  return subscription;
+}
+
+function hasNoResumableSubscriptions(attachment: FakeWebSocketAttachment): boolean {
+  const metadata = attachment?.effectCloudflareRpcClientId;
+
+  return (
+    isFakeRpcAttachment(metadata) &&
+    metadata.version === 2 &&
+    metadata.hasPendingRequests === false &&
+    metadata.subscriptions.length === 0
+  );
 }
 
 interface ClientProtocolBridge {
@@ -651,3 +1311,58 @@ const makeActivation = Effect.fn("DurableObjectRpcWebSocket.test.makeActivation"
     transport: Context.get(context, DurableObjectRpcWebSocket.DurableObjectRpcWebSocket),
   };
 });
+
+const makeResumableActivation = Effect.fn("DurableObjectRpcWebSocket.test.makeResumableActivation")(
+  function* (
+    parentScope: Scope.Scope,
+    state: FakeDurableObjectState,
+    options?: {
+      readonly makeStream: () => Stream.Stream<
+        { readonly cursor: number; readonly value: string },
+        never,
+        never
+      >;
+    },
+  ) {
+    const scope = yield* Scope.fork(parentScope);
+    const handlers = ResumableRpcs.toLayer(
+      Effect.succeed(
+        ResumableRpcs.of({
+          ResumableEvents: ({ after }) =>
+            (
+              options?.makeStream() ??
+              Stream.fromIterable([
+                { cursor: 1, value: "one" },
+                { cursor: 2, value: "two" },
+              ]).pipe(Stream.rechunk(1), Stream.concat(Stream.never))
+            ).pipe(Stream.filter((event) => event.cursor > after)),
+          ResumableProbe: () => Effect.yieldNow.pipe(Effect.as("probe")),
+        }),
+      ),
+    );
+    const context = yield* Layer.buildWithScope(
+      RpcServer.layer(ResumableRpcs, { disableFatalDefects: true }).pipe(
+        Layer.provideMerge(
+          DurableObjectRpcWebSocket.layer({
+            tag: "test-rpc",
+            resumableStreams: [ResumableEventsDeclaration],
+          }),
+        ),
+        Layer.provide(handlers),
+        Layer.provide(RpcSerialization.layerJson),
+        Layer.provide(
+          Layer.succeed(
+            DurableObjectState.DurableObjectState,
+            DurableObjectState.DurableObjectState.of(state),
+          ),
+        ),
+      ),
+      scope,
+    );
+
+    return {
+      scope,
+      transport: Context.get(context, DurableObjectRpcWebSocket.DurableObjectRpcWebSocket),
+    };
+  },
+);

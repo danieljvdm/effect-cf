@@ -1,8 +1,14 @@
-import { Effect, Layer, Option, Schema as S } from "effect";
+import { Effect, Layer, Option, Predicate, Schema as S } from "effect";
+import * as Rpc from "effect/unstable/rpc/Rpc";
+import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
+import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
+import * as RpcServer from "effect/unstable/rpc/RpcServer";
 
 import * as ComputerWorkspace from "../src/ComputerWorkspace";
 import {
+  DurableObject,
   DurableObjectDefinition,
+  DurableObjectRpcWebSocket,
   DurableObjectState,
   Worker,
   WorkerDefinition,
@@ -118,6 +124,92 @@ const TestCounterLive = TestCounterDefinition.make(Layer.empty, {
 });
 
 export class TestCounterDurableObject extends TestCounterLive {
+  readonly instanceId = crypto.randomUUID();
+}
+
+class HibernationPingResult extends S.Class<HibernationPingResult>("HibernationPingResult")({
+  nonce: S.String,
+}) {}
+
+class HibernationPing extends Rpc.make("HibernationPing", {
+  payload: { nonce: S.String },
+  success: HibernationPingResult,
+}) {}
+
+class HibernationNever extends Rpc.make("HibernationNever", {
+  payload: { nonce: S.String },
+  success: S.Void,
+}) {}
+
+class HibernationRpcs extends RpcGroup.make(HibernationPing, HibernationNever) {}
+
+const HibernationRpcHandlers = HibernationRpcs.toLayer(
+  Effect.succeed(
+    HibernationRpcs.of({
+      HibernationPing: ({ nonce }) => Effect.succeed(new HibernationPingResult({ nonce })),
+      HibernationNever: () =>
+        Effect.gen(function* () {
+          const state = yield* DurableObjectState.DurableObjectState;
+
+          yield* state.storage.put("hibernation-never-starts", 1).pipe(Effect.orDie);
+
+          return yield* Effect.never;
+        }),
+    }),
+  ),
+);
+
+const HibernationRpcLive = RpcServer.layer(HibernationRpcs).pipe(
+  Layer.provideMerge(DurableObjectRpcWebSocket.layer({ tag: "hibernation-rpc" })),
+  Layer.provide(HibernationRpcHandlers),
+  Layer.provide(RpcSerialization.layerJson),
+);
+
+const TestHibernationRpcLive = DurableObject.make(HibernationRpcLive, {
+  fetch: Effect.gen(function* () {
+    const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
+    const upgrade = yield* transport.acceptUpgrade({
+      // This application-owned field is deliberately unrelated to adapter metadata.
+      attachment: { application: "survives", applicationMessageCount: 0 },
+      tags: ["application-tag"],
+    });
+
+    return upgrade.response;
+  }),
+  webSocketMessage: (socket, message) =>
+    Effect.gen(function* () {
+      const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
+      const attachment = socket.raw.deserializeAttachment();
+      const current = Predicate.isObject(attachment) ? attachment : {};
+      const applicationMessageCount =
+        Predicate.hasProperty(current, "applicationMessageCount") &&
+        Predicate.isNumber(current.applicationMessageCount)
+          ? current.applicationMessageCount
+          : 0;
+
+      socket.raw.serializeAttachment({
+        ...current,
+        applicationMessageCount: applicationMessageCount + 1,
+      });
+
+      yield* transport.message(socket, message);
+    }),
+  webSocketClose: (socket) =>
+    Effect.gen(function* () {
+      const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
+
+      yield* transport.close(socket);
+    }),
+  webSocketError: (socket, cause) =>
+    Effect.gen(function* () {
+      const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
+
+      yield* transport.error(socket, cause);
+    }),
+});
+
+/** A hibernatable finite-RPC transport fixture used by the worker-pool lifecycle test. */
+export class TestHibernationRpcDurableObject extends TestHibernationRpcLive {
   readonly instanceId = crypto.randomUUID();
 }
 

@@ -8,6 +8,7 @@ declare global {
     interface Env {
       TEST_COUNTER_DO?: DurableObjectNamespace<TestWorkerModule.TestCounterDurableObject>;
       TEST_COMPUTER_DO?: DurableObjectNamespace<TestWorkerModule.TestComputerWorkspaceDurableObject>;
+      TEST_HIBERNATION_RPC_DO?: DurableObjectNamespace<TestWorkerModule.TestHibernationRpcDurableObject>;
       TEST_KV?: KVNamespace;
       TEST_DB?: D1Database;
       TEST_SECRET?: SecretsStoreSecret;
@@ -36,7 +37,10 @@ declare global {
 
     interface GlobalProps {
       mainModule: typeof TestWorkerModule;
-      durableNamespaces: "TestComputerWorkspaceDurableObject" | "TestCounterDurableObject";
+      durableNamespaces:
+        | "TestComputerWorkspaceDurableObject"
+        | "TestCounterDurableObject"
+        | "TestHibernationRpcDurableObject";
     }
   }
 }

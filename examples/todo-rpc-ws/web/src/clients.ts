@@ -29,6 +29,8 @@ const webSocketUrl = Effect.sync(() => {
 //
 // Because selection happens before use and the transport is pinned, no
 // in-flight request is ever replayed across transports.
+// A Durable Object activation reset likewise fails the current RPC; the
+// socket protocol can reconnect for later calls but never replays the request.
 //
 // Serialization note: `layerJson` below matches the WebSocket server and is
 // safe there because WebSocket frames delimit messages. A deployment where

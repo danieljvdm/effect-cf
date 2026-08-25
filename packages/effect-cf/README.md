@@ -962,7 +962,73 @@ if (Worker.isWebSocketUpgrade(request)) {
 }
 ```
 
-Use `DurableObjectRpcWebSocket.layer(...)` for Effect RPC-over-WebSocket transports. It owns protocol parsing and RPC client bookkeeping; use `DurableWebSocket` for general application sockets, rooms, presence, and broadcast flows.
+### Hibernation-aware Effect RPC WebSockets
+
+`DurableObjectRpcWebSocket.layer(...)` adapts Effect RPC to Cloudflare's hibernatable WebSocket API. Build the layer in the Durable Object runtime and forward all three WebSocket lifecycle events:
+
+```ts
+import { Effect, Layer } from "effect";
+import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
+import { DurableObject, DurableObjectRpcWebSocket, Worker } from "effect-cf";
+
+const RpcLive = RpcServer.layer(MyRpcs).pipe(
+  Layer.provideMerge(DurableObjectRpcWebSocket.layer({ tag: "my-rpc" })),
+  Layer.provide(MyRpcHandlers),
+  Layer.provide(RpcSerialization.layerJson),
+);
+
+const MyObjectLive = DurableObject.make(RpcLive, {
+  fetch: Effect.gen(function* () {
+    const request = yield* Worker.NativeRequest;
+
+    if (!Worker.isWebSocketUpgrade(request)) {
+      return new Response("Expected WebSocket upgrade", { status: 426 });
+    }
+
+    const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
+    const upgrade = yield* transport.acceptUpgrade({
+      tags: ["room:general"],
+      attachment: { roomId: "general" },
+    });
+
+    return upgrade.response;
+  }),
+  webSocketMessage: (socket, message) =>
+    Effect.gen(function* () {
+      const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
+
+      yield* transport.message(socket, message);
+    }),
+  webSocketClose: (socket) =>
+    Effect.gen(function* () {
+      const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
+
+      yield* transport.close(socket);
+    }),
+  webSocketError: (socket, cause) =>
+    Effect.gen(function* () {
+      const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
+
+      yield* transport.error(socket, cause);
+    }),
+});
+
+export class MyDurableObject extends MyObjectLive {}
+```
+
+`DurableObject.make` builds a new managed runtime whenever Cloudflare constructs or reconstructs the object. During that build, the RPC layer calls `getWebSockets(tag)` and registers idle tagged sockets before the triggering lifecycle handler runs. A completed finite call can therefore be followed by idle hibernation and another finite call on the same physical socket.
+
+This is a hibernation-aware RPC transport, not a durable RPC runtime. The adapter stores versioned state under the `attachmentKey` namespace, which defaults to `effectCloudflareRpcClientId`, and shallow-merges it with application-owned object fields. Its RPC tag is added alongside application tags. Application code that later replaces an attachment must preserve the reserved namespace; the adapter requires object-shaped attachments. Legacy numeric client-ID metadata is migrated when read.
+
+Each non-notification request stays marked pending until its terminal `Exit` is sent or the request is interrupted. If a new constructor finds that marker, it quarantines the socket and closes it with WebSocket code `1012` before dispatching the event that woke the object. Effect's stock socket protocol reports this as an `RpcClientError` containing `SocketCloseError`, so the affected call or stream fails instead of hanging. The socket transport may reconnect for later calls, but the RPC request is never replayed. Retrying a mutation requires application-level idempotency or deduplication. Notifications are also not durable and have no delivery acknowledgement.
+
+The default `heartbeat: "auto-response"` policy installs Cloudflare's exact text Ping/Pong auto-response while at least one RPC socket exists and no RPC operation is active. The stock Effect client's five-second Ping therefore does not run Durable Object JavaScript while the socket is idle, and the adapter creates no timer. While any call or stream is active, the global auto-response is removed so a Ping wakes a newly reconstructed object and triggers the pending-operation reset. Cloudflare provides only one auto-response pair per Durable Object, across every accepted socket. One active stream consequently causes Ping events from every socket on that object to reach JavaScript; use `"passthrough"` if unrelated WebSocket protocols share the same object.
+
+Use `heartbeat: "passthrough"` for a non-text serialization or when the application owns a different auto-response pair. That mode does not alter the pair; the application is responsible for ensuring a lost pending operation still wakes and resets. With the default policy, a conflicting application pair fails layer construction instead of being overwritten.
+
+Streams work only while one JavaScript activation remains alive. An active stream keeps the pending marker set and idle auto-response disabled; constructor recreation resets it with code `1012`. Effect fibers, stream acknowledgement state, and cursors do not resume. Use finite calls for hibernatable operation.
+
+`accept(socket, tags)` remains available for a manually created, not-yet-accepted server socket. Prefer `transport.acceptUpgrade(...)` for new upgrades so the socket is accepted exactly once. Use the general `DurableObjectWebSocket` module instead for rooms, presence, broadcasts, or other non-RPC protocols.
 
 ## WebTransport and HTTP/3
 

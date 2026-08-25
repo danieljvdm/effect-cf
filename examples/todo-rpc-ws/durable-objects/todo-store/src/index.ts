@@ -5,7 +5,6 @@ import {
   type DurableObjectStorage,
   DurableObject,
   DurableObjectRpcWebSocket,
-  DurableObjectWebSocket,
   Worker,
 } from "effect-cf";
 import { TodoRepository } from "./TodoRepository";
@@ -75,10 +74,11 @@ export const TodoStoreLive = DurableObject.make(layer, {
 
     if (!Worker.isWebSocketUpgrade(request))
       return new Response("Expected WebSocket upgrade", { status: 426 });
-    const upgrade = yield* DurableObjectWebSocket.acceptUpgrade();
     const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
-
-    yield* transport.accept(upgrade.server);
+    const upgrade = yield* transport.acceptUpgrade({
+      tags: ["todo-application"],
+      attachment: { application: "todo-rpc-ws" },
+    });
 
     return upgrade.response;
   }),

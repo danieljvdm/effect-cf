@@ -4,8 +4,8 @@ Effect-native Cloudflare primitives for Workers, Durable Objects, Containers, bi
 
 ## Install
 
-`effect-cf` targets Effect `^4.0.0-beta.105` and Cloudflare workerd `1.20260820.1`
-(`@cloudflare/workers-types@5.20260820.1`, recommended `compatibility_date` `2026-08-20`).
+`effect-cf` targets Effect `^4.0.0-beta.105` and Cloudflare workerd `1.20260825.1`
+(`@cloudflare/workers-types@5.20260825.1`, recommended `compatibility_date` `2026-08-25`).
 
 ```bash
 bun add effect-cf "effect@^4.0.0-beta.105"
@@ -273,6 +273,10 @@ Effect form runs in the background with the caller's Effect context and the
 same failure modes as `WorkerContext.waitUntil`, so Durable Objects can
 schedule background Effects (for example a pump consuming an outbound
 WebSocket) without capturing a Context and calling `Effect.runPromiseWith`.
+
+`DurableObjectState.abort(reason, { retryAlarm: false })` resets the current
+Durable Object without retrying the alarm that triggered the reset. The option
+has no effect outside an alarm handler and defaults to retrying the alarm.
 
 ## Container Example
 
@@ -729,16 +733,19 @@ export const resizeAvatar = (image: Images.ImageInputValue) =>
 `effect-cf` develops and tests against a fixed Cloudflare Workers runtime stack. Keep consumer
 `compatibility_date` and optional `@cloudflare/workers-types` peers at or above this pin:
 
-| Pin                                         | Version        |
-| ------------------------------------------- | -------------- |
-| workerd                                     | `1.20260820.1` |
-| `@cloudflare/workers-types` (optional peer) | `5.20260820.1` |
-| wrangler (repo catalog / examples)          | `4.125.0`      |
-| Recommended `compatibility_date`            | `2026-08-20`   |
+| Pin                                         | Version              |
+| ------------------------------------------- | -------------------- |
+| workerd                                     | `1.20260825.1`       |
+| `@cloudflare/workers-types` (optional peer) | `5.20260825.1`       |
+| miniflare (repo override / tests)           | `5.20260825.0-alpha` |
+| wrangler (repo catalog / examples)          | `4.126.0`            |
+| Recommended `compatibility_date`            | `2026-08-25`         |
 
 The date in the `workerd` / `@cloudflare/workers-types` version is the API surface this package wraps.
 Repo catalog pins live in the root `package.json` `catalog` field (`@cloudflare/workers-types`, `wrangler`).
-`wrangler@4.125.0` pulls `workerd@1.20260820.1` and peers `@cloudflare/workers-types@^5.20260820.1`.
+`wrangler@4.126.0` pulls `workerd@1.20260825.1` and peers `@cloudflare/workers-types@^5.20260825.1`.
+The Miniflare and Wrangler overrides keep worker tests on the same runtime when
+`@cloudflare/vitest-plugin` lags the repo catalog.
 
 ## Email Example
 

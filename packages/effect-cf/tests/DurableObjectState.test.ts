@@ -144,8 +144,10 @@ it.effect("wraps hibernation metadata and abort helpers", () =>
     yield* service.setHibernatableWebSocketEventTimeout();
     assert.strictEqual(yield* service.getHibernatableWebSocketEventTimeout, null);
 
-    yield* service.abort("reset requested");
-    assert.deepStrictEqual(tracker.abortReasons, ["reset requested"]);
+    yield* service.abort("cleanup complete", { retryAlarm: false });
+    assert.deepStrictEqual(tracker.aborts, [
+      { reason: "cleanup complete", options: { retryAlarm: false } },
+    ]);
   }),
 );
 
@@ -161,7 +163,10 @@ interface BlockConcurrencyTracker {
   }>;
   sockets: Array<WebSocket>;
   hibernatableTimeout: number | null;
-  readonly abortReasons: Array<string | undefined>;
+  readonly aborts: Array<{
+    readonly reason: string | undefined;
+    readonly options: globalThis.DurableObjectAbortOptions | undefined;
+  }>;
   readonly waitUntilPromises: Array<Promise<unknown>>;
 }
 
@@ -180,7 +185,7 @@ function makeRawDurableObjectState(): RawStateFixture {
     acceptedSockets: [],
     sockets: [],
     hibernatableTimeout: null,
-    abortReasons: [],
+    aborts: [],
     waitUntilPromises: [],
   };
 
@@ -217,8 +222,8 @@ function makeRawDurableObjectState(): RawStateFixture {
     },
     getHibernatableWebSocketEventTimeout: () => tracker.hibernatableTimeout,
     getTags: (ws: WebSocket) => tracker.tags.get(ws) ?? [],
-    abort: (reason?: string) => {
-      tracker.abortReasons.push(reason);
+    abort: (reason?: string, options?: globalThis.DurableObjectAbortOptions) => {
+      tracker.aborts.push({ reason, options });
     },
   });
 

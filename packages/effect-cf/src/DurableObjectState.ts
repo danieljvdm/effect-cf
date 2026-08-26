@@ -66,9 +66,11 @@ export interface DurableObjectStateService {
   /**
    * Forcibly resets the Durable Object. Cloudflare logs an uncaught Error using
    * the optional reason, and the method is not available in `wrangler dev` local
-   * development according to the Durable Object State docs.
+   * development according to the Durable Object State docs. Set
+   * `retryAlarm: false` to prevent the current alarm invocation from retrying;
+   * this option has no effect outside an alarm handler.
    */
-  abort(reason?: string): Effect.Effect<void>;
+  abort(reason?: string, options?: globalThis.DurableObjectAbortOptions): Effect.Effect<void>;
 }
 
 /**
@@ -136,7 +138,8 @@ export const fromDurableObjectState = (
       state.getHibernatableWebSocketEventTimeout(),
     ),
     getTags: (ws: DurableWebSocket) => Effect.sync(() => state.getTags(ws.raw)),
-    abort: (reason?: string) => Effect.sync(() => state.abort(reason)),
+    abort: (reason?: string, options?: globalThis.DurableObjectAbortOptions) =>
+      Effect.sync(() => state.abort(reason, options)),
   };
 };
 

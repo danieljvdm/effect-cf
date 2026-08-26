@@ -2,7 +2,7 @@
   "$schema": "../../../../node_modules/wrangler/config-schema.json",
   "name": "effect-cf-todo-rpc-ws-api",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-20",
+  "compatibility_date": "2026-08-25",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
   "durable_objects": {

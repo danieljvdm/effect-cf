@@ -6,8 +6,8 @@ This monorepo also publishes [`effect-webtransport`](packages/effect-webtranspor
 
 ## Install
 
-`effect-cf` targets Effect `^4.0.0-beta.105` and Cloudflare workerd `1.20260820.1`
-(`@cloudflare/workers-types@5.20260820.1`, recommended `compatibility_date` `2026-08-20`).
+`effect-cf` targets Effect `^4.0.0-beta.105` and Cloudflare workerd `1.20260825.1`
+(`@cloudflare/workers-types@5.20260825.1`, recommended `compatibility_date` `2026-08-25`).
 
 ```bash
 bun add effect-cf "effect@^4.0.0-beta.105"

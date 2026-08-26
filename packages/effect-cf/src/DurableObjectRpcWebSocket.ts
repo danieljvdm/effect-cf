@@ -1059,11 +1059,7 @@ export const layer = (
             }),
           ),
         close: unregister,
-        error: (socket, cause) =>
-          Effect.gen(function* () {
-            yield* Effect.logDebug("Durable Object RPC websocket error", cause);
-            yield* unregister(socket);
-          }),
+        error: resetSocket,
         checkpoint,
       });
 

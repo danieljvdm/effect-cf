@@ -979,7 +979,100 @@ if (Worker.isWebSocketUpgrade(request)) {
 }
 ```
 
-Use `DurableObjectRpcWebSocket.layer(...)` for Effect RPC-over-WebSocket transports. It owns protocol parsing and RPC client bookkeeping; use `DurableWebSocket` for general application sockets, rooms, presence, and broadcast flows.
+### Hibernation-aware Effect RPC WebSockets
+
+`DurableObjectRpcWebSocket.layer(...)` adapts Effect RPC to Cloudflare's hibernatable WebSocket API. Build the layer in the Durable Object runtime and forward all three WebSocket lifecycle events:
+
+```ts
+import { Effect, Layer } from "effect";
+import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
+import { DurableObject, DurableObjectRpcWebSocket, Worker } from "effect-cf";
+
+const RpcLive = RpcServer.layer(MyRpcs).pipe(
+  Layer.provideMerge(DurableObjectRpcWebSocket.layer({ tag: "my-rpc" })),
+  Layer.provide(MyRpcHandlers),
+  Layer.provide(RpcSerialization.layerJson),
+);
+
+const MyObjectLive = DurableObject.make(RpcLive, {
+  fetch: Effect.gen(function* () {
+    const request = yield* Worker.NativeRequest;
+
+    if (!Worker.isWebSocketUpgrade(request)) {
+      return new Response("Expected WebSocket upgrade", { status: 426 });
+    }
+
+    const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
+    const upgrade = yield* transport.acceptUpgrade({
+      tags: ["room:general"],
+      attachment: { roomId: "general" },
+    });
+
+    return upgrade.response;
+  }),
+  webSocketMessage: (socket, message) =>
+    Effect.gen(function* () {
+      const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
+
+      yield* transport.message(socket, message);
+    }),
+  webSocketClose: (socket) =>
+    Effect.gen(function* () {
+      const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
+
+      yield* transport.close(socket);
+    }),
+  webSocketError: (socket, cause) =>
+    Effect.gen(function* () {
+      const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
+
+      yield* transport.error(socket, cause);
+    }),
+});
+
+export class MyDurableObject extends MyObjectLive {}
+```
+
+`DurableObject.make` builds a new managed runtime whenever Cloudflare constructs or reconstructs the object. During that build, the RPC layer calls `getWebSockets(tag)` and registers tagged sockets before the triggering lifecycle handler runs. A completed finite call can therefore be followed by idle hibernation and another finite call on the same physical socket.
+
+This is a hibernation-aware RPC transport, not a durable RPC runtime. The adapter stores versioned state under the `attachmentKey` namespace, which defaults to `effectCloudflareRpcClientId`, and shallow-merges it with application-owned object fields. Its RPC tag is added alongside application tags. Application code that later replaces an attachment must preserve the reserved namespace; the adapter requires object-shaped attachments. Keep resume descriptors compact because Cloudflare caps the entire serialized attachment, including application fields, at 16,384 bytes. Legacy numeric client-ID metadata is migrated when read.
+
+Each non-notification request stays marked pending until its terminal `Exit` is sent or the request is interrupted. If a new constructor finds a pending non-resumable request, it quarantines the socket and closes it with WebSocket code `1012` before dispatching the event that woke the object. Effect's stock socket protocol reports this as an `RpcClientError` containing `SocketCloseError`, so the affected call or stream fails instead of hanging. The socket transport may reconnect for later calls, but the adapter never replays a non-resumable request. Retrying a mutation requires application-level idempotency or deduplication. Notifications are also not durable and have no delivery acknowledgement.
+
+The default `heartbeat: "auto-response"` policy installs Cloudflare's exact text Ping/Pong auto-response while at least one RPC socket exists and no non-resumable RPC operation is active. The stock Effect client's five-second Ping therefore does not run Durable Object JavaScript while the socket is idle or while an explicitly resumable subscription waits for data. The adapter creates no timer. A non-resumable call or stream removes the global auto-response so a Ping wakes a newly reconstructed object and triggers its pending-operation reset. Cloudflare provides only one auto-response pair per Durable Object, across every accepted socket. Use `"passthrough"` if unrelated WebSocket protocols share the same object.
+
+Use `heartbeat: "passthrough"` for a non-text serialization or when the application owns a different auto-response pair. That mode does not alter the pair; the application is responsible for ensuring a lost pending operation still wakes and resets. With the default policy, a conflicting application pair fails layer construction instead of being overwritten.
+
+Streams are non-resumable unless their RPC tag matches a declaration passed in `resumableStreams`. Constructor recreation resets an ordinary active stream with code `1012`.
+
+An explicitly resumable stream persists its original Effect request ID, RPC tag, application subscription key, compact resume descriptor, and last application checkpoint in the socket attachment. The new constructor rebuilds an encoded request from that checkpoint and writes it through the new `RpcServer.Protocol` with the original request ID. Effect runs request decoding, middleware, authorization, and the handler again. The physical socket stays open, so the stock Effect client routes later `Chunk` messages into the existing client `Stream`.
+
+This reconstructs a declared logical subscription. It does not restore the original Effect fiber, scope, stream, queue, or middleware context. The application must keep a durable event log and rebuild the stream after its cursor. Delivery is at least once. If hibernation lands after a chunk reaches the client but before its checkpoint is stored, the rebuilt handler emits that chunk again. Apply events idempotently by cursor, then call a finite checkpoint RPC. Retention, cursor expiry, snapshots, and resync remain application concerns. This transport does not provide exactly-once delivery or generic stream resumption.
+
+The declaration also gives the transport a stable token for each encoded chunk value. A cursor/token must identify one logical event for the full lifetime of that subscription. Distinct events must not share it; a replay of the same event reuses it. The adapter ignores stock request-ID-only stream `Ack` messages for resumable requests. It persists the matching explicit checkpoint before releasing the current server chunk latch, and an acknowledgement left over from an earlier activation cannot release a later chunk. Interrupt and terminal `Exit` remove the persisted descriptor.
+
+The compiled [`ResumableEventLog.example.ts`](../../examples/todo-rpc-ws/durable-objects/todo-store/src/ResumableEventLog.example.ts) defines a standard `RpcGroup`, cursor-backed Durable Object SQL event log, `RpcServer.layer`, resumable declaration, checkpoint handler using `Rpc.ServerClient.id`, and complete constructor/event wiring. Its client-side ordering is the important part:
+
+```ts
+import { Effect, Stream } from "effect";
+
+client.SubscribeEvents({ subscriptionKey, topic, after }).pipe(
+  Stream.runForEach((event) =>
+    applyEventIfNew(event).pipe(
+      Effect.andThen(
+        client.CheckpointSubscription({
+          subscriptionKey,
+          cursor: event.cursor,
+        }),
+      ),
+    ),
+  ),
+);
+```
+
+Checkpoint only after `applyEventIfNew` commits. A replayed cursor must make that function a no-op. `CheckpointSubscription` is an ordinary non-resumable finite RPC, so make it idempotent and safe for the client to retry. It must be able to run while stream handlers are active. Keep Effect's default unbounded RPC server concurrency, or set a bound above the maximum number of simultaneously open streams so checkpoint calls retain capacity. If the activation disappears after checkpoint persistence but before that RPC sends its `Exit`, the socket resets with `1012`. The client reconnects and starts a new subscription after its durably applied cursor. Register the same declaration on every constructor activation and keep its `id`, descriptor shape, and checkpoint token semantics stable for stored attachments.
+
+`accept(socket, tags)` remains available for a manually created, not-yet-accepted server socket. Prefer `transport.acceptUpgrade(...)` for new upgrades so the socket is accepted exactly once. Use the general `DurableObjectWebSocket` module instead for rooms, presence, broadcasts, or other non-RPC protocols.
 
 ## WebTransport and HTTP/3
 

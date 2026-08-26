@@ -110,7 +110,8 @@ export default function App() {
         <p className="lede">
           Every todo operation travels through Effect RPC over a WebSocket. The API Worker only
           forwards the /api/ws upgrade to one named Durable Object, where
-          DurableObjectRpcWebSocket.layer adapts hibernation lifecycle events to RpcServer.Protocol.
+          DurableObjectRpcWebSocket.layer rebuilds the finite-call transport after idle hibernation
+          and resets a call if its server activation disappears.
         </p>
       </section>
       <section className="console">

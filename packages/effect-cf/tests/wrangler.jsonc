@@ -42,12 +42,20 @@
         "name": "TEST_COMPUTER_DO",
         "class_name": "TestComputerWorkspaceDurableObject",
       },
+      {
+        "name": "TEST_HIBERNATION_RPC_DO",
+        "class_name": "TestHibernationRpcDurableObject",
+      },
     ],
   },
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["TestCounterDurableObject", "TestComputerWorkspaceDurableObject"],
+      "new_sqlite_classes": [
+        "TestCounterDurableObject",
+        "TestComputerWorkspaceDurableObject",
+        "TestHibernationRpcDurableObject",
+      ],
     },
   ],
 }

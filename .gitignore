@@ -45,7 +45,7 @@ Session.vim
 *.sln
 *.sw?
 
-# dev-kit managed paths
+# Local tool state and source checkouts
 .repos/
 .dev-kit/
 

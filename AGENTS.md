@@ -1,11 +1,3 @@
-<!-- DEV KIT START -->
-
-# Dev Kit
-
-This project uses `@danieljvdm/dev-kit` to manage portable agent skills and reproducible setup from `dev-kit.jsonc` and `dev-kit.lock.json`.
-
-For dev-kit operations, use the `dev-kit` skill and read `.agents/skills/dev-kit/SKILL.md` before changing managed outputs.
-
 # Learning more about the Effect
 
 This repository uses the Effect Typescript library.
@@ -36,9 +28,7 @@ Use these repository commands:
 
 Do not use `bun run`, `npm run`, `pnpm run`, or `yarn run` in this repository. Do not invoke underlying tools such as `tsc`, `vitest`, `oxlint`, or `oxfmt` directly; use the Vite+ entry points above.
 
-<!-- DEV KIT END -->
-
-# Package Layout
+# Package layout
 
 - `packages/effect-cf` and `packages/effect-webtransport` are the publishable packages.
 - `packages/effect-cf` holds Cloudflare-specific primitives; `packages/effect-webtransport` is a platform-generic Effect WebTransport library with no Cloudflare dependency.
@@ -46,8 +36,11 @@ Do not use `bun run`, `npm run`, `pnpm run`, or `yarn run` in this repository. D
 - `examples/` contains consumer and example applications.
 - Reusable package code belongs under a package's `src/` and must be exported from that package's `src/index.ts`.
 - Worker projects use `@cloudflare/workers-types` directly for Cloudflare runtime types.
-- Effect source code can be referenced at `.repos/effect` for patterns and API style when changing Effect-heavy code. Do not edit it; Dev Kit owns and version-matches that checkout.
 
-# Repo-Local Skills
+# Repo-local skills
 
+- Skills under `.agents/skills` are repository-owned. Each `.dev-kit-origin.json` records update
+  provenance only. Check for upstream changes with
+  `bunx @danieljvdm/dev-kit@latest skills status`; use `skills update <name>` for an unmodified
+  skill and `skills add <selector>` for a new one.
 - Use `.agents/skills/effect-cf-repo-pr-hygiene/SKILL.md` before creating or updating PRs, choosing PR titles, writing PR bodies, or adding changesets.

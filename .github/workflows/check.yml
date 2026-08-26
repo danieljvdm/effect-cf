@@ -35,8 +35,8 @@ jobs:
           run-install: |
             args: ["--frozen-lockfile", "--ignore-scripts"]
 
-      - name: Verify locked Dev Kit setup
-        run: bun ./node_modules/@danieljvdm/dev-kit/bin/dev-kit.mjs apply --locked
+      - name: Patch Effect TypeScript-Go
+        run: vp run patch:tsgo
 
       - name: "Build packages"
         run: |

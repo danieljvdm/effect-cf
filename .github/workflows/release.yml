@@ -32,7 +32,7 @@ jobs:
           cache: true
           run-install: |
             args: ["--frozen-lockfile", "--ignore-scripts"]
-      - run: bun ./node_modules/@danieljvdm/dev-kit/bin/dev-kit.mjs apply --locked
+      - run: vp run patch:tsgo
       # Build here rather than from a `prepublishOnly` script: npm's lifecycle
       # environment resolves a different TypeScript than Vite+ does, which
       # emits different declarations and needs an undeclared dependency.

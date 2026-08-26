@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.33.0
+
+### Minor Changes
+
+- [#125](https://github.com/danieljvdm/effect-cf/pull/125) [`3821343`](https://github.com/danieljvdm/effect-cf/commit/3821343214de0ab2b05178001cf299488378760a) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Expose `DurableObjectState.abort(reason, { retryAlarm: false })` so alarm handlers can reset the object without retrying the current alarm. The package now targets workerd `1.20260825.1` and recommends `compatibility_date` `2026-08-25`.
+
 ## 0.32.1
 
 ### Patch Changes

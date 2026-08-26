@@ -1,92 +1,70 @@
-# Agentic pull-request review via effect-agent's prebuilt node24 action.
-# The reviewer reads pull-request code through the GitHub API. The checkout
-# contains only the trusted guidance profile from the default branch.
 name: Effect Agent PR review
 
 on:
   pull_request:
     branches: [main]
-    # labeled feeds the pr-review:final-audit label; every other label event
-    # is filtered out by the job condition below.
-    types: [opened, reopened, ready_for_review, synchronize, labeled]
+    types: [opened, reopened, ready_for_review, synchronize]
     # Generated Version Packages updates are release plumbing, not review
     # scope; ordinary PRs touching source alongside these paths still run.
     paths-ignore:
       - ".changeset/**"
-      - ".agents/skills/**"
-      - ".repos/**"
       - "bun.lock"
       - "**/CHANGELOG.md"
-      - "dev-kit.lock.json"
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read
+  issues: write
   pull-requests: write
+
+concurrency:
+  group: effect-agent-pr-review-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
 
 jobs:
   review:
     if: >-
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.draft == false &&
-      (github.event.action != 'labeled' ||
-       github.event.label.name == 'pr-review:final-audit')
+      (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        !github.event.pull_request.draft) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+        (github.event.comment.author_association == 'OWNER' ||
+         github.event.comment.author_association == 'MEMBER' ||
+         github.event.comment.author_association == 'COLLABORATOR') &&
+        (startsWith(github.event.comment.body, '@effect-agent review') ||
+         startsWith(github.event.comment.body, '/effect-agent review')))
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    concurrency:
-      group: effect-agent-pr-review-${{ github.event.pull_request.number }}
-      cancel-in-progress: false
-    env:
-      # Until the OPENAI_API_KEY secret exists, this job is a visible green
-      # no-op instead of a red check on every pull request.
-      HAS_OPENAI_KEY: ${{ secrets.OPENAI_API_KEY != '' }}
-      HAS_REVIEWER_APP: ${{ vars.APP_CLIENT_ID != '' && secrets.APP_PRIVATE_KEY != '' }}
     steps:
-      - name: Check out the trusted review profile
-        if: env.HAS_OPENAI_KEY == 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Check out the trusted review channel
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
-      # With the repository GitHub App configured, reviews post under the
-      # app's own identity and avatar instead of github-actions[bot]. Absent
-      # the app variable/secret, the workflow falls back to the scoped
-      # github.token.
-      - name: Mint the reviewer app token
+      - name: Mint the Effect Agent GitHub App token
         id: app-token
-        if: env.HAS_OPENAI_KEY == 'true' && env.HAS_REVIEWER_APP == 'true'
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
         with:
-          client-id: ${{ vars.APP_CLIENT_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          app-id: ${{ secrets.EFFECT_AGENT_APP_ID }}
+          private-key: ${{ secrets.EFFECT_AGENT_APP_PRIVATE_KEY }}
           permission-contents: read
+          permission-issues: write
           permission-pull-requests: write
 
       - name: Review the pull request
-        id: review
-        if: env.HAS_OPENAI_KEY == 'true'
-        # beta.29 runs one bounded parallel review wave. Automatic events get
-        # at most two waves per PR; the final-audit label requests a full pass.
-        uses: danieljvdm/effect-agent/action@96bc7fd54cac20b7d0caee65687f10836c37b8ca # effect-agent@0.1.0-beta.29
+        uses: danieljvdm/effect-agent/action@a098b8714389c17f5fe76776ac6c99c66185fa72 # action-v0.1.0
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          github-token: ${{ steps.app-token.outputs.token || github.token }}
-          pull-request: ${{ github.event.pull_request.number }}
-          # Reviews post under the app identity, so history lookup must expect
-          # the same login. Falls back to github-actions[bot] without the app.
-          review-author: ${{ env.HAS_REVIEWER_APP == 'true' && format('{0}[bot]', steps.app-token.outputs.app-slug) || 'github-actions[bot]' }}
-          mode: ${{ github.event.action == 'labeled' && 'full' || 'auto' }}
-          expected-head: ${{ github.event.pull_request.head.sha }}
-          effort: ${{ github.event.action == 'labeled' && 'high' || 'medium' }}
+          github-token: ${{ steps.app-token.outputs.token }}
+          pull-request: ${{ github.event.pull_request.number || github.event.issue.number }}
+          review-author: effect-agent[bot]
+          mode: ${{ github.event_name == 'pull_request' && 'auto' || 'incremental' }}
+          command: ${{ github.event_name == 'issue_comment' && github.event.comment.body || '' }}
+          comment-id: ${{ github.event.comment.id || 0 }}
+          automatic-review-limit: 2
+          expected-head: ${{ github.event.pull_request.head.sha || '' }}
+          effort: medium
           guidance-file: .github/review-guidance.md
-          # Generated or vendored surfaces the reviewer should never spend
-          # budget on.
-          # .changeset/** stays REVIEWABLE so the guidance's changeset
-          # policy is enforceable on ordinary PRs; changeset-only release
-          # plumbing is already excluded by the trigger's paths-ignore.
-          ignore: >-
-            bun.lock,
-            **/CHANGELOG.md,
-            dev-kit.lock.json,
-            .agents/skills/**,
-            .repos/**
+          ignore: "bun.lock,**/CHANGELOG.md,.agents/skills/**,.repos/**"

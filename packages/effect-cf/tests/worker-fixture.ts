@@ -194,12 +194,18 @@ const HibernationEventsPayload = S.Struct({
   after: S.Finite,
   until: S.Finite,
 });
+const HibernationEventsResumeDescriptor = S.Struct({
+  subscriptionKey: S.String,
+  until: S.Finite,
+});
 const decodeHibernationEventsPayload = S.decodeUnknownOption(HibernationEventsPayload);
 const decodeHibernationEvent = S.decodeUnknownOption(HibernationEvent);
 
 export const HibernationEventsResume = DurableObjectRpcWebSocket.resumableStream({
   id: "workerd-hibernation-events/v1",
   rpcTag: "HibernationEvents",
+  resumeDescriptorSchema: HibernationEventsResumeDescriptor,
+  checkpointSchema: S.Finite,
   identify: (request) =>
     Option.map(
       decodeHibernationEventsPayload(request.payload),
@@ -294,11 +300,13 @@ const HibernationRpcHandlers = HibernationRpcs.toLayer(
           ),
         ),
       HibernationCheckpointSubscription: ({ checkpoint, subscriptionKey }, { client }) =>
-        transport.checkpoint(HibernationEventsResume, {
-          clientId: client.id,
-          subscriptionKey,
-          checkpoint,
-        }),
+        transport
+          .checkpoint(HibernationEventsResume, {
+            clientId: client.id,
+            subscriptionKey,
+            checkpoint,
+          })
+          .pipe(Effect.orDie),
       HibernationNonResumableEvents: () =>
         Stream.make(HibernationEvent.make({ cursor: 0, value: "non-resumable" })).pipe(
           Stream.concat(Stream.never),
@@ -308,8 +316,10 @@ const HibernationRpcHandlers = HibernationRpcs.toLayer(
       HibernationNever: () =>
         Effect.gen(function* () {
           const state = yield* DurableObjectState.DurableObjectState;
+          const starts =
+            (yield* state.storage.get<number>("hibernation-never-starts").pipe(Effect.orDie)) ?? 0;
 
-          yield* state.storage.put("hibernation-never-starts", 1).pipe(Effect.orDie);
+          yield* state.storage.put("hibernation-never-starts", starts + 1).pipe(Effect.orDie);
 
           return yield* Effect.never;
         }),

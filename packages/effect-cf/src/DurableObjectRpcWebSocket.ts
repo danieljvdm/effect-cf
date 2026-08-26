@@ -8,7 +8,7 @@ import {
   type AcceptedUpgrade,
   type AcceptUpgradeOptions,
   type DurableWebSocket,
-  type DurableWebSocketAttachmentError,
+  DurableWebSocketAttachmentError,
   fromWebSocket,
 } from "./DurableObjectWebSocket";
 
@@ -31,6 +31,10 @@ export interface ResumableStreamDeclaration<ResumeDescriptor = unknown, Checkpoi
   readonly id: string;
   /** RPC tag matched against encoded client requests. */
   readonly rpcTag: string;
+  /** Validates a resume descriptor restored from a websocket attachment. */
+  readonly resumeDescriptorSchema: Schema.Decoder<ResumeDescriptor>;
+  /** Validates an acknowledged checkpoint restored from a websocket attachment. */
+  readonly checkpointSchema: Schema.Decoder<Checkpoint>;
   /**
    * Extracts compact persisted state from an initial encoded request. Do not
    * recycle a subscription key for an unrelated logical subscription while a
@@ -120,7 +124,9 @@ export interface DurableObjectRpcWebSocketService {
   readonly error: (socket: DurableWebSocket, cause: unknown) => Effect.Effect<void>;
   /**
    * Persists forward checkpoint progress for a resumable stream. Returns `true`
-   * only when the checkpoint advances the current pending chunk batch.
+   * only when the checkpoint advances the current pending chunk batch. A failed
+   * websocket attachment write resets the connection and fails with
+   * `DurableWebSocketAttachmentError`.
    */
   readonly checkpoint: <ResumeDescriptor, Checkpoint>(
     declaration: ResumableStreamDeclaration<ResumeDescriptor, Checkpoint>,
@@ -129,7 +135,7 @@ export interface DurableObjectRpcWebSocketService {
       readonly subscriptionKey: string;
       readonly checkpoint: Checkpoint;
     },
-  ) => Effect.Effect<boolean>;
+  ) => Effect.Effect<boolean, DurableWebSocketAttachmentError>;
 }
 
 interface RpcConnection {
@@ -305,25 +311,31 @@ export const layer = (
         return created;
       };
 
-      const addSubscription = (connection: RpcConnection, subscription: ActiveSubscription) => {
+      const addSubscription = (
+        connection: RpcConnection,
+        subscription: ActiveSubscription,
+      ): boolean => {
+        if (connection.subscriptionsByRequestId.has(subscription.requestId)) {
+          return false;
+        }
+
         let byKey = connection.subscriptionsByDefinition.get(subscription.definitionId);
+
+        if (byKey?.has(subscription.subscriptionKey) === true) {
+          return false;
+        }
 
         if (byKey === undefined) {
           byKey = new Map();
           connection.subscriptionsByDefinition.set(subscription.definitionId, byKey);
         }
 
-        if (
-          byKey.has(subscription.subscriptionKey) ||
-          connection.subscriptionsByRequestId.has(subscription.requestId)
-        ) {
-          throw new Error("Duplicate resumable RPC stream subscription identity");
-        }
-
         byKey.set(subscription.subscriptionKey, subscription);
         connection.subscriptionsByRequestId.set(subscription.requestId, subscription);
         connection.requestIds.add(subscription.requestId);
         connection.metadataVersion = resumableAttachmentVersion;
+
+        return true;
       };
 
       const removeSubscription = (connection: RpcConnection, requestId: string | number) => {
@@ -374,7 +386,9 @@ export const layer = (
         }
 
         for (const subscription of restoredSubscriptions) {
-          addSubscription(connection, subscription);
+          if (!addSubscription(connection, subscription)) {
+            throw new Error("Duplicate restored resumable RPC stream subscription identity");
+          }
         }
 
         connectionsBySocket.set(socket.raw, connection);
@@ -394,45 +408,111 @@ export const layer = (
       const syncHeartbeat = () =>
         heartbeat.setEnabled(connectionsBySocket.size > 0 && activeNonResumableRequestCount === 0);
 
-      const persistConnection = (connection: RpcConnection) =>
-        Effect.sync(() => {
-          if (connection.metadataVersion === legacyAttachmentVersion) {
+      const persistConnection = Effect.fn("DurableObjectRpcWebSocket.persistConnection")(function* (
+        connection: RpcConnection,
+      ): Effect.fn.Return<void, DurableWebSocketAttachmentError> {
+        return yield* Effect.try({
+          try: () => {
+            if (connection.metadataVersion === legacyAttachmentVersion) {
+              writeAttachment(connection.socket.raw, attachmentKey, {
+                version: legacyAttachmentVersion,
+                clientId: connection.id,
+                hasPendingRequests: connection.requestIds.size > 0,
+              });
+
+              return;
+            }
+
+            const subscriptions = Array.from(connection.subscriptionsByRequestId.values()).map(
+              ({ declaration: _, ...subscription }): PersistedSubscription => subscription,
+            );
+
             writeAttachment(connection.socket.raw, attachmentKey, {
-              version: legacyAttachmentVersion,
+              version: resumableAttachmentVersion,
               clientId: connection.id,
               hasPendingRequests: connection.requestIds.size > 0,
+              hasNonResumableRequests: connection.nonResumableRequestIds.size > 0,
+              subscriptions,
             });
-
-            return;
-          }
-
-          const subscriptions = Array.from(connection.subscriptionsByRequestId.values()).map(
-            ({ declaration: _, ...subscription }): PersistedSubscription => subscription,
-          );
-
-          writeAttachment(connection.socket.raw, attachmentKey, {
-            version: resumableAttachmentVersion,
-            clientId: connection.id,
-            hasPendingRequests: connection.requestIds.size > 0,
-            hasNonResumableRequests: connection.nonResumableRequestIds.size > 0,
-            subscriptions,
-          });
+          },
+          catch: (cause) => new DurableWebSocketAttachmentError({ operation: "serialize", cause }),
         });
+      });
 
-      const trackRequest = (connection: RpcConnection, request: RpcMessage.RequestEncoded) =>
-        Effect.gen(function* () {
-          if (connection.requestIds.has(request.id)) {
-            return;
-          }
+      const unregister = Effect.fn("DurableObjectRpcWebSocket.unregister")(function* (
+        socket: DurableWebSocket,
+      ) {
+        const connection = connectionsBySocket.get(socket.raw);
 
-          const declaration = declarationsByTag.get(request.tag);
-          const identified =
-            declaration === undefined
-              ? Option.none()
-              : yield* Effect.sync(() => declaration.identify(request));
+        if (connection === undefined) {
+          return;
+        }
 
-          if (declaration !== undefined && Option.isSome(identified)) {
-            addSubscription(connection, {
+        connectionsBySocket.delete(socket.raw);
+        connectionsById.delete(connection.id);
+        clientIds.delete(connection.id);
+        activeNonResumableRequestCount -= connection.nonResumableRequestIds.size;
+        connection.requestIds.clear();
+        connection.nonResumableRequestIds.clear();
+        connection.subscriptionsByRequestId.clear();
+        connection.subscriptionsByDefinition.clear();
+        connection.suppressedAckRequestIds.clear();
+        connection.currentPendingRequestIds.clear();
+        Queue.offerUnsafe(disconnects, connection.id);
+
+        yield* syncHeartbeat();
+      });
+
+      const resetSocket = Effect.fn("DurableObjectRpcWebSocket.resetSocket")(function* (
+        socket: DurableWebSocket,
+        cause?: unknown,
+      ) {
+        resetSockets.add(socket.raw);
+        yield* unregister(socket).pipe(
+          Effect.catchCause((unregisterCause) =>
+            Effect.logDebug("Failed to unregister Durable Object RPC websocket", unregisterCause),
+          ),
+        );
+
+        if (cause !== undefined) {
+          yield* Effect.logDebug("Resetting Durable Object RPC websocket", cause);
+        }
+
+        yield* socket
+          .close(serviceRestartCode, serviceRestartReason)
+          .pipe(
+            Effect.catch((closeError) =>
+              Effect.logDebug("Failed to close Durable Object RPC websocket", closeError),
+            ),
+          );
+      });
+
+      const persistOrReset = Effect.fn("DurableObjectRpcWebSocket.persistOrReset")(function* (
+        connection: RpcConnection,
+      ) {
+        return yield* persistConnection(connection).pipe(
+          Effect.as(true),
+          Effect.catch((cause) => resetSocket(connection.socket, cause).pipe(Effect.as(false))),
+        );
+      });
+
+      const trackRequest = Effect.fn("DurableObjectRpcWebSocket.trackRequest")(function* (
+        connection: RpcConnection,
+        request: RpcMessage.RequestEncoded,
+      ) {
+        if (connection.requestIds.has(request.id)) {
+          return true;
+        }
+
+        const declaration = declarationsByTag.get(request.tag);
+        const identified =
+          declaration === undefined
+            ? Option.none()
+            : yield* Effect.sync(() => declaration.identify(request));
+
+        if (declaration !== undefined && Option.isSome(identified)) {
+          if (
+            !addSubscription(connection, {
               declaration,
               definitionId: declaration.id,
               subscriptionKey: identified.value.subscriptionKey,
@@ -440,48 +520,62 @@ export const layer = (
               rpcTag: declaration.rpcTag,
               resumeDescriptor: identified.value.resumeDescriptor,
               acknowledgedCheckpoint: identified.value.acknowledgedCheckpoint,
-            });
-          } else {
-            connection.requestIds.add(request.id);
-            connection.nonResumableRequestIds.add(request.id);
-            activeNonResumableRequestCount++;
+            })
+          ) {
+            yield* resetSocket(
+              connection.socket,
+              new Error(`Duplicate resumable RPC stream subscription: ${declaration.id}`),
+            );
+
+            return false;
           }
+        } else {
+          connection.requestIds.add(request.id);
+          connection.nonResumableRequestIds.add(request.id);
+          activeNonResumableRequestCount++;
+        }
 
-          yield* persistConnection(connection);
-          yield* syncHeartbeat();
-        });
+        if (!(yield* persistOrReset(connection))) {
+          return false;
+        }
 
-      const completeRequest = (
+        yield* syncHeartbeat();
+
+        return true;
+      });
+
+      const completeRequest = Effect.fn("DurableObjectRpcWebSocket.completeRequest")(function* (
         connection: RpcConnection,
         requestId: string | number,
         preserveAckFilter = false,
-      ) =>
-        Effect.gen(function* () {
-          if (connection.requestIds.delete(requestId)) {
-            if (connection.nonResumableRequestIds.delete(requestId)) {
-              activeNonResumableRequestCount--;
-            }
-
-            const subscription = removeSubscription(connection, requestId);
-
-            connection.currentPendingRequestIds.delete(requestId);
-
-            if (preserveAckFilter && subscription !== undefined) {
-              connection.suppressedAckRequestIds.add(requestId);
-            }
-
-            yield* persistConnection(connection);
+      ) {
+        if (connection.requestIds.delete(requestId)) {
+          if (connection.nonResumableRequestIds.delete(requestId)) {
+            activeNonResumableRequestCount--;
           }
 
-          if (!preserveAckFilter) {
-            connection.suppressedAckRequestIds.delete(requestId);
+          const subscription = removeSubscription(connection, requestId);
+
+          connection.currentPendingRequestIds.delete(requestId);
+
+          if (preserveAckFilter && subscription !== undefined) {
+            connection.suppressedAckRequestIds.add(requestId);
           }
 
-          yield* syncHeartbeat();
-        });
+          if (!(yield* persistOrReset(connection))) {
+            return;
+          }
+        }
 
-      const completeAllRequests = (connection: RpcConnection) =>
-        Effect.gen(function* () {
+        if (!preserveAckFilter) {
+          connection.suppressedAckRequestIds.delete(requestId);
+        }
+
+        yield* syncHeartbeat();
+      });
+
+      const completeAllRequests = Effect.fn("DurableObjectRpcWebSocket.completeAllRequests")(
+        function* (connection: RpcConnection) {
           const hadRequests = connection.requestIds.size > 0;
 
           if (connection.requestIds.size > 0) {
@@ -495,46 +589,19 @@ export const layer = (
           connection.suppressedAckRequestIds.clear();
           connection.currentPendingRequestIds.clear();
 
-          if (hadRequests) {
-            yield* persistConnection(connection);
-          }
-
-          yield* syncHeartbeat();
-        });
-
-      const unregister = (socket: DurableWebSocket) =>
-        Effect.gen(function* () {
-          const connection = connectionsBySocket.get(socket.raw);
-
-          if (connection === undefined) {
+          if (hadRequests && !(yield* persistOrReset(connection))) {
             return;
           }
 
-          connectionsBySocket.delete(socket.raw);
-          connectionsById.delete(connection.id);
-          clientIds.delete(connection.id);
-          activeNonResumableRequestCount -= connection.nonResumableRequestIds.size;
-          connection.requestIds.clear();
-          connection.nonResumableRequestIds.clear();
-          connection.subscriptionsByRequestId.clear();
-          connection.subscriptionsByDefinition.clear();
-          connection.suppressedAckRequestIds.clear();
-          connection.currentPendingRequestIds.clear();
-          Queue.offerUnsafe(disconnects, connection.id);
-
           yield* syncHeartbeat();
-        });
+        },
+      );
 
       const restored = yield* durableObjectState.getWebSockets(tag);
       const restoredAttachments = restored.map((socket) => ({
         socket,
         attachment: readAttachment(socket.raw, attachmentKey),
       }));
-      const resetSocket = (socket: DurableWebSocket) =>
-        Effect.gen(function* () {
-          resetSockets.add(socket.raw);
-          yield* socket.close(serviceRestartCode, serviceRestartReason).pipe(Effect.orDie);
-        });
 
       for (const { attachment, socket } of restoredAttachments) {
         if (attachment._tag === "Invalid") {
@@ -557,7 +624,7 @@ export const layer = (
           } else {
             const connection = register(socket, metadata);
 
-            yield* persistConnection(connection);
+            yield* persistOrReset(connection);
           }
 
           continue;
@@ -611,10 +678,21 @@ export const layer = (
                 }
               }
 
+              const resumeDescriptor = Schema.decodeUnknownOption(
+                declaration.resumeDescriptorSchema,
+              )(persisted.resumeDescriptor);
+              const acknowledgedCheckpoint = Schema.decodeUnknownOption(
+                declaration.checkpointSchema,
+              )(persisted.acknowledgedCheckpoint);
+
+              if (Option.isNone(resumeDescriptor) || Option.isNone(acknowledgedCheckpoint)) {
+                throw new Error("Invalid persisted resumable RPC stream state");
+              }
+
               const rebuilt = declaration.rebuild({
                 subscriptionKey: persisted.subscriptionKey,
-                resumeDescriptor: persisted.resumeDescriptor,
-                acknowledgedCheckpoint: persisted.acknowledgedCheckpoint,
+                resumeDescriptor: resumeDescriptor.value,
+                acknowledgedCheckpoint: acknowledgedCheckpoint.value,
               });
               const request = {
                 _tag: "Request" as const,
@@ -637,7 +715,12 @@ export const layer = (
                 Object.assign(request, { sampled: rebuilt.sampled });
               }
 
-              subscriptions.push({ ...persisted, declaration });
+              subscriptions.push({
+                ...persisted,
+                resumeDescriptor: resumeDescriptor.value,
+                acknowledgedCheckpoint: acknowledgedCheckpoint.value,
+                declaration,
+              });
               requests.push(request);
             }
 
@@ -709,7 +792,10 @@ export const layer = (
                 checkpointTokens,
               };
               connection.currentPendingRequestIds.add(subscription.requestId);
-              yield* persistConnection(connection);
+
+              if (!(yield* persistOrReset(connection))) {
+                return;
+              }
             }
           }
 
@@ -807,7 +893,7 @@ export const layer = (
           readonly subscriptionKey: string;
           readonly checkpoint: Checkpoint;
         },
-      ): Effect.fn.Return<boolean> {
+      ): Effect.fn.Return<boolean, DurableWebSocketAttachmentError> {
         const connection = connectionsById.get(checkpointOptions.clientId);
         const configured = declarationsById.get(declaration.id);
         const subscription = connection?.subscriptionsByDefinition
@@ -849,7 +935,15 @@ export const layer = (
               };
             }
 
-            yield* persistConnection(connection);
+            yield* persistConnection(connection).pipe(
+              Effect.catch((cause) =>
+                Effect.gen(function* () {
+                  yield* resetSocket(connection.socket, cause);
+
+                  return yield* cause;
+                }),
+              ),
+            );
 
             if (shouldAck) {
               const run = writeRequest;
@@ -926,7 +1020,9 @@ export const layer = (
               const request = current as RpcMessage.FromClientEncoded;
 
               if (request._tag === "Request" && request.isNotification !== true) {
-                yield* trackRequest(connection, request);
+                if (!(yield* trackRequest(connection, request))) {
+                  return;
+                }
               }
 
               if (
@@ -1127,9 +1223,13 @@ const makeHeartbeatController = (
           return Effect.void;
         }
 
-        enabled = nextEnabled;
-
-        return state.setWebSocketAutoResponse(nextEnabled ? pair : undefined);
+        return state.setWebSocketAutoResponse(nextEnabled ? pair : undefined).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              enabled = nextEnabled;
+            }),
+          ),
+        );
       },
     };
   });

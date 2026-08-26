@@ -3,6 +3,7 @@ import {
   Context,
   Deferred,
   Effect,
+  Exit,
   Fiber,
   Layer,
   Option,
@@ -60,6 +61,10 @@ const ResumableEventValue = Schema.Struct({
   value: Schema.String,
 });
 
+const ResumableEventResumeDescriptor = Schema.Struct({
+  subscriptionKey: Schema.String,
+});
+
 class ResumableEvents extends Rpc.make("ResumableEvents", {
   payload: ResumableEventPayload.fields,
   success: ResumableEventValue,
@@ -78,6 +83,8 @@ const decodeResumableValue = Schema.decodeUnknownOption(ResumableEventValue);
 const ResumableEventsDeclaration = DurableObjectRpcWebSocket.resumableStream({
   id: "test-events/v1",
   rpcTag: "ResumableEvents",
+  resumeDescriptorSchema: ResumableEventResumeDescriptor,
+  checkpointSchema: Schema.Number,
   identify: (request) =>
     Option.map(decodeResumablePayload(request.payload), (payload) => ({
       subscriptionKey: payload.subscriptionKey,
@@ -174,6 +181,106 @@ Object.defineProperty(globalThis, "WebSocketRequestResponsePair", {
 }
 
 {
+  layer(Layer.empty)("DurableObjectRpcWebSocket restoration isolation", (it) => {
+    it.effect("continues restoring healthy sockets when an invalid socket cannot close", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const invalidSocket = makeFakeWebSocket({ application: "invalid" });
+          const healthySocket = makeFakeWebSocket({ effectCloudflareRpcClientId: 7 });
+          const healthyDurableSocket = DurableObjectWebSocket.fromWebSocket(healthySocket);
+
+          invalidSocket.failNextClose(new Error("close failed"));
+
+          const state = makeFakeDurableObjectState({
+            socketsByTag: new Map([["test-rpc", [invalidSocket, healthySocket]]]),
+          });
+          const parentScope = yield* Scope.Scope;
+          const activation = yield* makeActivation(parentScope, state, makeTestRpcHandlers());
+
+          yield* activation.transport.message(
+            healthyDurableSocket,
+            JSON.stringify({
+              _tag: "Request",
+              id: "healthy-after-failed-close",
+              tag: "Ping",
+              payload: { nonce: "healthy" },
+              headers: [],
+            }),
+          );
+          yield* Effect.promise(() => healthySocket.waitForSentCount(1));
+
+          assert.deepStrictEqual(decodeSent(healthySocket), [
+            {
+              _tag: "Exit",
+              requestId: "healthy-after-failed-close",
+              exit: { _tag: "Success", value: { nonce: "healthy" } },
+            },
+          ]);
+        }),
+      ),
+    );
+
+    it.effect("rejects restored descriptors and checkpoints that fail declaration schemas", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const invalidDescriptor = makeFakeWebSocket({
+            effectCloudflareRpcClientId: {
+              version: 2,
+              clientId: 1,
+              hasPendingRequests: true,
+              hasNonResumableRequests: false,
+              subscriptions: [
+                {
+                  definitionId: "test-events/v1",
+                  subscriptionKey: "invalid-descriptor",
+                  requestId: "invalid-descriptor",
+                  rpcTag: "ResumableEvents",
+                  resumeDescriptor: { subscriptionKey: 42 },
+                  acknowledgedCheckpoint: 0,
+                },
+              ],
+            },
+          });
+          const invalidCheckpoint = makeFakeWebSocket({
+            effectCloudflareRpcClientId: {
+              version: 2,
+              clientId: 2,
+              hasPendingRequests: true,
+              hasNonResumableRequests: false,
+              subscriptions: [
+                {
+                  definitionId: "test-events/v1",
+                  subscriptionKey: "invalid-checkpoint",
+                  requestId: "invalid-checkpoint",
+                  rpcTag: "ResumableEvents",
+                  resumeDescriptor: { subscriptionKey: "invalid-checkpoint" },
+                  acknowledgedCheckpoint: "zero",
+                },
+              ],
+            },
+          });
+          const state = makeFakeDurableObjectState({
+            socketsByTag: new Map([["test-rpc", [invalidDescriptor, invalidCheckpoint]]]),
+          });
+          const parentScope = yield* Scope.Scope;
+
+          yield* makeResumableActivation(parentScope, state);
+
+          assert.deepStrictEqual(invalidDescriptor.closed, [
+            { code: 1012, reason: "Durable Object RPC activation reset" },
+          ]);
+          assert.deepStrictEqual(invalidCheckpoint.closed, [
+            { code: 1012, reason: "Durable Object RPC activation reset" },
+          ]);
+          assert.deepStrictEqual(invalidDescriptor.sent, []);
+          assert.deepStrictEqual(invalidCheckpoint.sent, []);
+        }),
+      ),
+    );
+  });
+}
+
+{
   const socket = makeFakeWebSocket({ effectCloudflareRpcClientId: 7 });
   const durableSocket = DurableObjectWebSocket.fromWebSocket(socket);
   const state = makeFakeDurableObjectState({
@@ -212,6 +319,36 @@ Object.defineProperty(globalThis, "WebSocketRequestResponsePair", {
           },
         ]);
       }),
+    );
+  });
+}
+
+{
+  layer(Layer.empty)("DurableObjectRpcWebSocket heartbeat state", (it) => {
+    it.effect("retries an auto-response update after Cloudflare's setter fails", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const socket = makeFakeWebSocket();
+          const durableSocket = DurableObjectWebSocket.fromWebSocket(socket);
+          const state = makeFakeDurableObjectState();
+          const parentScope = yield* Scope.Scope;
+          const activation = yield* makeActivation(parentScope, state, makeTestRpcHandlers());
+
+          state.failNextAutoResponseUpdate(new Error("setter failed"));
+
+          const failedAccept = yield* Effect.exit(activation.transport.accept(durableSocket));
+
+          assert.isTrue(Exit.isFailure(failedAccept));
+          assert.strictEqual(state.autoResponse, null);
+
+          yield* activation.transport.accept(durableSocket);
+
+          assert.deepStrictEqual(state.autoResponse, {
+            request: JSON.stringify(RpcMessage.constPing),
+            response: JSON.stringify(RpcMessage.constPong),
+          });
+        }),
+      ),
     );
   });
 }
@@ -477,6 +614,155 @@ Object.defineProperty(globalThis, "WebSocketRequestResponsePair", {
 
 {
   layer(Layer.empty)("DurableObjectRpcWebSocket resumable streams", (it) => {
+    it.effect("resets before sending a chunk whose checkpoint metadata cannot persist", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const release = yield* Deferred.make<void>();
+          const socket = makeFakeWebSocket();
+          const durableSocket = DurableObjectWebSocket.fromWebSocket(socket);
+          const state = makeFakeDurableObjectState();
+          const parentScope = yield* Scope.Scope;
+          const activation = yield* makeResumableActivation(parentScope, state, {
+            makeStream: () =>
+              Stream.fromEffect(
+                Deferred.await(release).pipe(Effect.as({ cursor: 1, value: "one" })),
+              ).pipe(Stream.concat(Stream.never)),
+          });
+
+          yield* activation.transport.accept(durableSocket);
+          yield* activation.transport.message(
+            durableSocket,
+            JSON.stringify({
+              _tag: "Request",
+              id: "failing-chunk",
+              tag: "ResumableEvents",
+              payload: { subscriptionKey: "failing-chunk", after: 0 },
+              headers: [],
+            }),
+          );
+
+          const persistenceAttempted = socket.failNextAttachmentSerialization(
+            new Error("attachment limit exceeded"),
+          );
+
+          yield* Deferred.succeed(release, undefined);
+          yield* Effect.promise(() => persistenceAttempted);
+          yield* Effect.yieldNow;
+
+          assert.deepStrictEqual(socket.sent, []);
+          assert.deepStrictEqual(socket.closed, [
+            { code: 1012, reason: "Durable Object RPC activation reset" },
+          ]);
+          assert.strictEqual(state.autoResponse, null);
+        }),
+      ),
+    );
+
+    it.effect("fails a checkpoint and resets when durable persistence fails", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const socket = makeFakeWebSocket();
+          const durableSocket = DurableObjectWebSocket.fromWebSocket(socket);
+          const state = makeFakeDurableObjectState();
+          const parentScope = yield* Scope.Scope;
+          const activation = yield* makeResumableActivation(parentScope, state);
+
+          yield* activation.transport.accept(durableSocket);
+          yield* activation.transport.message(
+            durableSocket,
+            JSON.stringify({
+              _tag: "Request",
+              id: "failing-checkpoint",
+              tag: "ResumableEvents",
+              payload: { subscriptionKey: "failing-checkpoint", after: 0 },
+              headers: [],
+            }),
+          );
+          yield* Effect.promise(() => socket.waitForSentCount(1));
+
+          socket.failNextAttachmentSerialization(new Error("attachment limit exceeded"));
+
+          const checkpointFailure = yield* activation.transport
+            .checkpoint(ResumableEventsDeclaration, {
+              clientId: 0,
+              subscriptionKey: "failing-checkpoint",
+              checkpoint: 1,
+            })
+            .pipe(Effect.flip);
+
+          assert.strictEqual(checkpointFailure._tag, "DurableWebSocketAttachmentError");
+          assert.strictEqual(checkpointFailure.operation, "serialize");
+          assert.deepStrictEqual(socket.closed, [
+            { code: 1012, reason: "Durable Object RPC activation reset" },
+          ]);
+          assert.strictEqual(state.autoResponse, null);
+          assert.strictEqual(readResumableSubscription(socket).acknowledgedCheckpoint, 0);
+        }),
+      ),
+    );
+
+    it.effect("resets a duplicate resumable subscription before dispatch", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          let streamStarts = 0;
+          let probeStarts = 0;
+          const socket = makeFakeWebSocket();
+          const durableSocket = DurableObjectWebSocket.fromWebSocket(socket);
+          const state = makeFakeDurableObjectState();
+          const parentScope = yield* Scope.Scope;
+          const activation = yield* makeResumableActivation(parentScope, state, {
+            makeStream: () => {
+              streamStarts++;
+
+              return Stream.succeed({ cursor: 1, value: "one" }).pipe(Stream.concat(Stream.never));
+            },
+            onProbe: () => {
+              probeStarts++;
+            },
+          });
+
+          yield* activation.transport.accept(durableSocket);
+          yield* activation.transport.message(
+            durableSocket,
+            JSON.stringify({
+              _tag: "Request",
+              id: "first-subscription",
+              tag: "ResumableEvents",
+              payload: { subscriptionKey: "duplicate-key", after: 0 },
+              headers: [],
+            }),
+          );
+          yield* Effect.promise(() => socket.waitForSentCount(1));
+
+          yield* activation.transport.message(
+            durableSocket,
+            JSON.stringify([
+              {
+                _tag: "Request",
+                id: "second-subscription",
+                tag: "ResumableEvents",
+                payload: { subscriptionKey: "duplicate-key", after: 0 },
+                headers: [],
+              },
+              {
+                _tag: "Request",
+                id: "after-reset",
+                tag: "ResumableProbe",
+                payload: null,
+                headers: [],
+              },
+            ]),
+          );
+
+          assert.strictEqual(streamStarts, 1);
+          assert.strictEqual(probeStarts, 0);
+          assert.deepStrictEqual(socket.closed, [
+            { code: 1012, reason: "Durable Object RPC activation reset" },
+          ]);
+        }),
+      ),
+    );
+
     it.effect("releases a multi-value chunk only after its final checkpoint", () =>
       Effect.scoped(
         Effect.gen(function* () {
@@ -977,6 +1263,8 @@ interface FakeWebSocket extends WebSocket {
   readonly waitForAttachment: (
     predicate: (attachment: FakeWebSocketAttachment) => boolean,
   ) => Promise<void>;
+  readonly failNextAttachmentSerialization: (cause?: unknown) => Promise<void>;
+  readonly failNextClose: (cause?: unknown) => void;
   readonly deserializeAttachment: () => FakeWebSocketAttachment;
 }
 
@@ -995,8 +1283,8 @@ interface TestPersistedResumableSubscription {
   readonly subscriptionKey: string;
   readonly requestId: string | number;
   readonly rpcTag: string;
-  readonly resumeDescriptor: { readonly subscriptionKey: string };
-  readonly acknowledgedCheckpoint: number;
+  readonly resumeDescriptor: unknown;
+  readonly acknowledgedCheckpoint: unknown;
   readonly pending?: TestPersistedPendingBatch;
 }
 
@@ -1022,6 +1310,10 @@ function makeFakeWebSocket(
   onClose?: (code?: number, reason?: string) => void,
 ): FakeWebSocket {
   let attachment = initialAttachment;
+  let attachmentSerializationFailure:
+    | { readonly cause: unknown; readonly resolve: () => void }
+    | undefined;
+  let closeFailure: unknown | undefined;
   let resolveSend: () => void = () => {};
   const sent: Array<string | ArrayBuffer | ArrayBufferView> = [];
   const sendWaiters = new Map<number, Array<() => void>>();
@@ -1054,10 +1346,25 @@ function makeFakeWebSocket(
       onSend?.(message);
     },
     close(code?: number, reason?: string) {
+      if (closeFailure !== undefined) {
+        const cause = closeFailure;
+
+        closeFailure = undefined;
+        throw cause;
+      }
+
       closed.push({ code, reason });
       onClose?.(code, reason);
     },
     serializeAttachment(value: FakeWebSocketAttachment) {
+      if (attachmentSerializationFailure !== undefined) {
+        const failure = attachmentSerializationFailure;
+
+        attachmentSerializationFailure = undefined;
+        failure.resolve();
+        throw failure.cause;
+      }
+
       attachment = value;
       for (let index = attachmentWaiters.length - 1; index >= 0; index--) {
         const waiter = attachmentWaiters[index];
@@ -1070,6 +1377,13 @@ function makeFakeWebSocket(
     },
     deserializeAttachment() {
       return attachment;
+    },
+    failNextAttachmentSerialization: (cause = new Error("serialize attachment failed")) =>
+      new Promise<void>((resolve) => {
+        attachmentSerializationFailure = { cause, resolve };
+      }),
+    failNextClose: (cause = new Error("close failed")) => {
+      closeFailure = cause;
     },
     waitForSentCount: (count) => {
       if (sent.length >= count) {
@@ -1103,6 +1417,7 @@ interface FakeDurableObjectState extends DurableObjectState.DurableObjectStateSe
   readonly autoResponse: { readonly request: string; readonly response: string } | null;
   readonly autoResponseHits: number;
   readonly autoRespond: (message: string) => string | undefined;
+  readonly failNextAutoResponseUpdate: (cause?: unknown) => void;
 }
 
 function makeFakeDurableObjectState(options?: {
@@ -1115,6 +1430,7 @@ function makeFakeDurableObjectState(options?: {
   const tagsBySocket = new Map<WebSocket, Array<string>>();
   let autoResponse: WebSocketRequestResponsePair | null = options?.autoResponse ?? null;
   let autoResponseHits = 0;
+  let autoResponseUpdateFailure: unknown | undefined;
 
   return {
     raw: makePartialTestDouble<globalThis.DurableObjectState>({}),
@@ -1145,6 +1461,13 @@ function makeFakeDurableObjectState(options?: {
       }),
     setWebSocketAutoResponse: (pair) =>
       Effect.sync(() => {
+        if (autoResponseUpdateFailure !== undefined) {
+          const cause = autoResponseUpdateFailure;
+
+          autoResponseUpdateFailure = undefined;
+          throw cause;
+        }
+
         autoResponse = pair ?? null;
       }),
     get getWebSocketAutoResponse() {
@@ -1172,6 +1495,9 @@ function makeFakeDurableObjectState(options?: {
       autoResponseHits++;
 
       return autoResponse.response;
+    },
+    failNextAutoResponseUpdate: (cause = new Error("auto-response update failed")) => {
+      autoResponseUpdateFailure = cause;
     },
   };
 }
@@ -1317,11 +1643,12 @@ const makeResumableActivation = Effect.fn("DurableObjectRpcWebSocket.test.makeRe
     parentScope: Scope.Scope,
     state: FakeDurableObjectState,
     options?: {
-      readonly makeStream: () => Stream.Stream<
+      readonly makeStream?: () => Stream.Stream<
         { readonly cursor: number; readonly value: string },
         never,
         never
       >;
+      readonly onProbe?: () => void;
     },
   ) {
     const scope = yield* Scope.fork(parentScope);
@@ -1330,13 +1657,19 @@ const makeResumableActivation = Effect.fn("DurableObjectRpcWebSocket.test.makeRe
         ResumableRpcs.of({
           ResumableEvents: ({ after }) =>
             (
-              options?.makeStream() ??
+              options?.makeStream?.() ??
               Stream.fromIterable([
                 { cursor: 1, value: "one" },
                 { cursor: 2, value: "two" },
               ]).pipe(Stream.rechunk(1), Stream.concat(Stream.never))
             ).pipe(Stream.filter((event) => event.cursor > after)),
-          ResumableProbe: () => Effect.yieldNow.pipe(Effect.as("probe")),
+          ResumableProbe: () =>
+            Effect.gen(function* () {
+              yield* Effect.sync(() => options?.onProbe?.());
+              yield* Effect.yieldNow;
+
+              return "probe";
+            }),
         }),
       ),
     );

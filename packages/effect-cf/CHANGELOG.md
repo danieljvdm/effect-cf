@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.32.0
+
+### Minor Changes
+
+- [#119](https://github.com/danieljvdm/effect-cf/pull/119) [`34b1abf`](https://github.com/danieljvdm/effect-cf/commit/34b1abfab7ee963b9d28c143ad29c678ee88483e) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add hibernation-aware Durable Object Effect RPC WebSockets that restore idle connections, reset lost non-resumable operations instead of hanging, and use Cloudflare auto-responses for idle heartbeats. Applications can opt specific cursor-backed streams into logical subscription reconstruction on the same socket and Effect request ID. Declaration schemas validate persisted resume state before reconstruction. Explicit application checkpoints establish the replay boundary, report attachment persistence failures in the typed error channel, and prevent stale stock acknowledgements from advancing a reconstructed stream.
+
 ## 0.31.0
 
 ### Minor Changes

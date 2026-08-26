@@ -9,6 +9,7 @@ import {
   Option,
   Predicate,
   Queue,
+  Ref,
   Schema,
   Scope,
   Stream,
@@ -104,6 +105,8 @@ const ResumableEventsDeclaration = DurableObjectRpcWebSocket.resumableStream({
 
 const makeTestRpcHandlers = (options?: {
   readonly neverStarted?: Deferred.Deferred<void>;
+  readonly neverInterrupted?: Deferred.Deferred<void>;
+  readonly neverInterruptions?: Ref.Ref<number>;
   readonly streamStarted?: Deferred.Deferred<void>;
 }) =>
   TestRpcs.toLayer(
@@ -114,7 +117,20 @@ const makeTestRpcHandlers = (options?: {
           (options?.neverStarted === undefined
             ? Effect.void
             : Deferred.succeed(options.neverStarted, undefined)
-          ).pipe(Effect.andThen(Effect.never)),
+          ).pipe(
+            Effect.andThen(Effect.never),
+            Effect.onInterrupt(() =>
+              Effect.gen(function* () {
+                if (options?.neverInterruptions !== undefined) {
+                  yield* Ref.update(options.neverInterruptions, (count) => count + 1);
+                }
+
+                if (options?.neverInterrupted !== undefined) {
+                  yield* Deferred.succeed(options.neverInterrupted, undefined);
+                }
+              }),
+            ),
+          ),
         Events: () =>
           Stream.fromEffect(
             (options?.streamStarted === undefined
@@ -437,6 +453,118 @@ Object.defineProperty(globalThis, "WebSocketRequestResponsePair", {
         assert.deepStrictEqual(socket.sent, []);
         assert.strictEqual(readRpcAttachment(socket).hasPendingRequests, true);
       }),
+    );
+  });
+}
+
+{
+  layer(Layer.empty)("DurableObjectRpcWebSocket error lifecycle", (it) => {
+    it.effect("quarantines a pending connection without disrupting another socket", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const responses = yield* Queue.make<RpcMessage.FromServerEncoded>();
+          const neverStarted = yield* Deferred.make<void>();
+          const neverInterrupted = yield* Deferred.make<void>();
+          const neverInterruptions = yield* Ref.make(0);
+          const failedSocket = makeFakeWebSocket(
+            null,
+            (message) => {
+              for (const response of decodeMessage(message)) {
+                Queue.offerUnsafe(responses, response);
+              }
+            },
+            (code, reason) => {
+              Queue.offerUnsafe(responses, {
+                _tag: "ClientProtocolError",
+                error: new RpcClientError({
+                  reason: new Socket.SocketCloseError({ code: code ?? 1001, closeReason: reason }),
+                }),
+              });
+            },
+          );
+          const healthySocket = makeFakeWebSocket();
+          const failedDurableSocket = DurableObjectWebSocket.fromWebSocket(failedSocket);
+          const healthyDurableSocket = DurableObjectWebSocket.fromWebSocket(healthySocket);
+          const state = makeFakeDurableObjectState();
+          const bridge = makeClientProtocolBridge(responses, state, failedDurableSocket);
+          const client = yield* RpcClient.make(TestRpcs).pipe(
+            Effect.provideService(RpcClient.Protocol, bridge.protocol),
+          );
+          const parentScope = yield* Scope.Scope;
+          const activation = yield* makeActivation(
+            parentScope,
+            state,
+            makeTestRpcHandlers({ neverStarted, neverInterrupted, neverInterruptions }),
+          );
+
+          bridge.setTransport(activation.transport);
+          yield* activation.transport.accept(failedDurableSocket);
+          yield* activation.transport.accept(healthyDurableSocket);
+
+          const pendingCall = yield* client.Never().pipe(Effect.forkChild);
+
+          yield* Deferred.await(neverStarted);
+          assert.strictEqual(state.autoResponse, null);
+          assert.strictEqual(readRpcAttachment(failedSocket).hasPendingRequests, true);
+
+          yield* activation.transport.error(failedDurableSocket, new Error("socket failed"));
+
+          assert.deepStrictEqual(failedSocket.closed, [
+            { code: 1012, reason: "Durable Object RPC activation reset" },
+          ]);
+
+          const clientError = yield* Fiber.join(pendingCall).pipe(Effect.flip);
+
+          yield* Deferred.await(neverInterrupted);
+          assert.strictEqual(clientError._tag, "RpcClientError");
+          assert.strictEqual(clientError.reason._tag, "SocketCloseError");
+          if (clientError.reason._tag === "SocketCloseError") {
+            assert.strictEqual(clientError.reason.code, 1012);
+            assert.strictEqual(
+              clientError.reason.closeReason,
+              "Durable Object RPC activation reset",
+            );
+          }
+          assert.strictEqual(yield* Ref.get(neverInterruptions), 1);
+          assert.deepStrictEqual(state.autoResponse, {
+            request: JSON.stringify(RpcMessage.constPing),
+            response: JSON.stringify(RpcMessage.constPong),
+          });
+
+          yield* activation.transport.close(failedDurableSocket);
+          yield* activation.transport.message(
+            failedDurableSocket,
+            JSON.stringify({
+              _tag: "Request",
+              id: "quarantined",
+              tag: "Ping",
+              payload: { nonce: "must-not-run" },
+              headers: [],
+            }),
+          );
+          yield* activation.transport.message(
+            healthyDurableSocket,
+            JSON.stringify({
+              _tag: "Request",
+              id: "healthy",
+              tag: "Ping",
+              payload: { nonce: "still-usable" },
+              headers: [],
+            }),
+          );
+          yield* Effect.promise(() => healthySocket.nextSend);
+
+          assert.strictEqual(yield* Ref.get(neverInterruptions), 1);
+          assert.deepStrictEqual(failedSocket.sent, []);
+          assert.deepStrictEqual(decodeSent(healthySocket), [
+            {
+              _tag: "Exit",
+              requestId: "healthy",
+              exit: { _tag: "Success", value: { nonce: "still-usable" } },
+            },
+          ]);
+        }),
+      ),
     );
   });
 }

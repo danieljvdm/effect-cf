@@ -40,6 +40,12 @@ const ResumableAttachment = Schema.Struct({
 
 const readResumableAttachment = Schema.decodeUnknownSync(ResumableAttachment);
 
+const RpcClientAttachment = Schema.Struct({
+  effectCloudflareRpcClientId: Schema.Struct({ clientId: Schema.Finite }),
+});
+
+const readRpcClientAttachment = Schema.decodeUnknownSync(RpcClientAttachment);
+
 test("a declared RPC stream resumes on the original client stream after hibernation", async () => {
   const namespace = env.TEST_HIBERNATION_RPC_DO;
 
@@ -337,6 +343,79 @@ test("a hibernated RPC websocket accepts a new finite call after activation recr
 
   expect(recreatedInstanceId).not.toBe(firstInstanceId);
   expect(attachments).toMatchObject([{ application: "survives", applicationMessageCount: 2 }]);
+});
+
+test("webSocketError closes only the affected idle RPC socket with 1012", async () => {
+  const namespace = env.TEST_HIBERNATION_RPC_DO;
+
+  if (namespace === undefined) {
+    throw new Error("TEST_HIBERNATION_RPC_DO binding is missing");
+  }
+
+  const stub = namespace.get(namespace.idFromName(`hibernation-error-${crypto.randomUUID()}`));
+  const firstResponse = await stub.fetch(
+    new Request("https://example.test/rpc", { headers: { Upgrade: "websocket" } }),
+  );
+  const secondResponse = await stub.fetch(
+    new Request("https://example.test/rpc", { headers: { Upgrade: "websocket" } }),
+  );
+  const firstClient = firstResponse.webSocket;
+  const secondClient = secondResponse.webSocket;
+
+  if (firstClient === null || secondClient === null) {
+    throw new Error("Durable Object did not return both websocket upgrades");
+  }
+
+  firstClient.accept();
+  secondClient.accept();
+
+  const closed = waitForClose(firstClient);
+
+  await runInDurableObject(stub, async (instance: TestHibernationRpcDurableObject, state) => {
+    const sockets = state.getWebSockets();
+    const target = sockets.find(
+      (socket) =>
+        readRpcClientAttachment(socket.deserializeAttachment()).effectCloudflareRpcClientId
+          .clientId === 0,
+    );
+
+    if (target === undefined) {
+      throw new Error("First RPC websocket is missing");
+    }
+
+    if (instance.webSocketError === undefined) {
+      throw new Error("Durable Object websocket error handler is missing");
+    }
+
+    await instance.webSocketError(target, new Error("injected websocket error"));
+  });
+
+  await expect(closed).resolves.toEqual({
+    code: 1012,
+    reason: "Durable Object RPC activation reset",
+  });
+
+  const remaining = await runInDurableObject(stub, (_instance, state) => ({
+    clientIds: state
+      .getWebSockets()
+      .map(
+        (socket) =>
+          readRpcClientAttachment(socket.deserializeAttachment()).effectCloudflareRpcClientId
+            .clientId,
+      ),
+    heartbeat: state.getWebSocketAutoResponse(),
+  }));
+
+  expect(remaining.clientIds).toEqual([1]);
+  expect(remaining.heartbeat).toMatchObject({
+    request: JSON.stringify(RpcMessage.constPing),
+    response: JSON.stringify(RpcMessage.constPong),
+  });
+
+  const second = waitForMessage(secondClient);
+
+  secondClient.send(request("after-peer-error", "still-usable"));
+  await expect(second).resolves.toEqual(success("after-peer-error", "still-usable"));
 });
 
 test("a hibernated in-flight finite RPC is reset without replay", async () => {

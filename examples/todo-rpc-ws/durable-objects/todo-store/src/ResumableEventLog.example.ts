@@ -43,6 +43,7 @@ class AppendEvent extends Rpc.make("AppendEvent", {
 class CheckpointSubscription extends Rpc.make("CheckpointSubscription", {
   payload: { subscriptionKey: Schema.String, cursor: Schema.Int },
   success: Schema.Struct({ advanced: Schema.Boolean }),
+  error: EventLogError,
 }) {}
 
 class EventRpcs extends RpcGroup.make(SubscribeEvents, AppendEvent, CheckpointSubscription) {}
@@ -52,12 +53,17 @@ const SubscribePayload = Schema.Struct({
   topic: Schema.String,
   after: Schema.Int,
 });
+const SubscribeResumeDescriptor = Schema.Struct({
+  topic: Schema.String,
+});
 const decodeSubscribePayload = Schema.decodeUnknownOption(SubscribePayload);
 const decodeDurableEvent = Schema.decodeUnknownOption(DurableEvent);
 
 const SubscribeEventsResume = DurableObjectRpcWebSocket.resumableStream({
   id: "todo-events/v1",
   rpcTag: "SubscribeEvents",
+  resumeDescriptorSchema: SubscribeResumeDescriptor,
+  checkpointSchema: Schema.Int,
   identify: (request) =>
     Option.map(decodeSubscribePayload(request.payload), (payload) => ({
       subscriptionKey: payload.subscriptionKey,
@@ -182,11 +188,13 @@ const EventHandlers = EventRpcs.toLayer({
   CheckpointSubscription: ({ subscriptionKey, cursor }, { client }) =>
     Effect.gen(function* () {
       const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
-      const advanced = yield* transport.checkpoint(SubscribeEventsResume, {
-        clientId: client.id,
-        subscriptionKey,
-        checkpoint: cursor,
-      });
+      const advanced = yield* transport
+        .checkpoint(SubscribeEventsResume, {
+          clientId: client.id,
+          subscriptionKey,
+          checkpoint: cursor,
+        })
+        .pipe(Effect.mapError(toEventLogError));
 
       return { advanced };
     }),

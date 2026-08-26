@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.32.1
+
+### Patch Changes
+
+- [#124](https://github.com/danieljvdm/effect-cf/pull/124) [`a37b2b9`](https://github.com/danieljvdm/effect-cf/commit/a37b2b955421d7f274985a4f93b8485fc1f99bbf) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Close hibernatable Durable Object RPC WebSockets with code 1012 after protocol errors so pending calls fail instead of hanging.
+
 ## 0.32.0
 
 ### Minor Changes

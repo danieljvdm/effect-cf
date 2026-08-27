@@ -27,6 +27,7 @@ export * as QueueDefinition from "./QueueDefinition";
 export * as R2 from "./R2";
 export * as Rpc from "./Rpc";
 export * as RpcDefinition from "./RpcDefinition";
+export * as RpcTracing from "./RpcTracing";
 export * as ServiceBinding from "./ServiceBinding";
 export * as Vectorize from "./Vectorize";
 export * as WebTransport from "./WebTransport";

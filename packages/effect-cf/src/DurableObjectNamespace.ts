@@ -7,6 +7,7 @@ import type * as DurableObjectDefinition from "./DurableObjectDefinition";
 import * as RpcDefinition from "./RpcDefinition";
 import * as ErrorMessage from "./internal/ErrorMessage";
 import * as RpcInvocation from "./internal/RpcInvocation";
+import * as RpcTracing from "./RpcTracing";
 
 const expectedDurableObjectNamespace =
   "Durable Object namespace binding with getByName(), get(), idFromName(), idFromString(), newUniqueId(), and jurisdiction()";
@@ -73,6 +74,8 @@ export interface DurableObjectNamespaceBindingDefinition<
 > {
   readonly binding: string;
   readonly definition?: Definition;
+  /** Append live trace context only when the receiver also enables rpcTracing. */
+  readonly rpcTracing?: boolean;
 }
 
 /**
@@ -352,9 +355,11 @@ export const makeClient = <
         catch: (cause) => new DurableObjectFetchError({ binding: definition.binding, cause }),
       });
 
-    const rpc = Effect.fn("DurableObjectNamespace.rpc")(function* <
-      Method extends StubMethodKey<Api>,
-    >(stub: StubClient, method: Method, ...args: StubMethodArgs<Api, Method>) {
+    const rpc = Effect.fnUntraced(function* <Method extends StubMethodKey<Api>>(
+      stub: StubClient,
+      method: Method,
+      ...args: StubMethodArgs<Api, Method>
+    ): Effect.fn.Return<StubMethodCloudflareReturn<Api, Method>, DurableObjectRpcError> {
       const methodName = String(method);
       // SAFETY: the runtime definition and method name select the same method schemas as Method.
       const encodedArgs =
@@ -375,11 +380,15 @@ export const makeClient = <
               ),
             );
 
-      // SAFETY: encodedArgs preserves the selected method's positional argument contract.
+      const nativeArgs = definition.rpcTracing
+        ? yield* RpcTracing.withRpcTraceContext(encodedArgs)
+        : encodedArgs;
+
+      // SAFETY: domain arguments retain their encoded order; an opted-in receiver strips only valid trace metadata.
       return yield* RpcInvocation.invokeRpcMethod(
         stub,
         method,
-        encodedArgs as StubMethodArgs<Api, Method>,
+        nativeArgs as StubMethodArgs<Api, Method>,
         (cause) =>
           new DurableObjectRpcError({
             binding: definition.binding,
@@ -389,9 +398,10 @@ export const makeClient = <
       );
     });
 
-    const decodeSuccess = Effect.fn("DurableObjectNamespace.decodeSuccess")(function* <
-      Method extends StubMethodKey<Api>,
-    >(methodName: string, value: Awaited<StubMethodCloudflareReturn<Api, Method>>) {
+    const decodeSuccess = Effect.fnUntraced(function* <Method extends StubMethodKey<Api>>(
+      methodName: string,
+      value: Awaited<StubMethodCloudflareReturn<Api, Method>>,
+    ): Effect.fn.Return<StubMethodSuccess<Api, Method>, DurableObjectRpcError> {
       if (definition.definition === undefined) {
         // SAFETY: without a schema codec, the native RPC result is already the declared success type.
         return value as StubMethodSuccess<Api, Method>;
@@ -417,33 +427,45 @@ export const makeClient = <
       return decoded as StubMethodSuccess<Api, Method>;
     });
 
-    const call = Effect.fn("DurableObjectNamespace.call")(function* <
-      Method extends StubMethodKey<Api>,
-    >(stub: StubClient, method: Method, ...args: StubMethodArgs<Api, Method>) {
-      const methodName = String(method);
-      const value = yield* CloudflareRpc.resolve(yield* rpc(stub, method, ...args)).pipe(
-        Effect.mapError(
-          (cause) =>
-            new DurableObjectRpcError({
-              binding: definition.binding,
-              method: methodName,
-              cause,
-            }),
-        ),
-      );
+    const call = Effect.fnUntraced(
+      function* <Method extends StubMethodKey<Api>>(
+        stub: StubClient,
+        method: Method,
+        ...args: StubMethodArgs<Api, Method>
+      ): Effect.fn.Return<StubMethodSuccess<Api, Method>, DurableObjectRpcError> {
+        const methodName = String(method);
+        const value = yield* CloudflareRpc.resolve(yield* rpc(stub, method, ...args)).pipe(
+          Effect.mapError(
+            (cause) =>
+              new DurableObjectRpcError({
+                binding: definition.binding,
+                method: methodName,
+                cause,
+              }),
+          ),
+        );
 
-      return yield* decodeSuccess<Method>(methodName, value);
-    });
+        return yield* decodeSuccess<Method>(methodName, value);
+      },
+      (effect, ...args) =>
+        RpcTracing.withRpcClientSpan(effect, definition.binding, String(args[1])),
+    );
 
-    const scopedCall = Effect.fn("DurableObjectNamespace.scopedCall")(function* <
-      Method extends StubMethodKey<Api>,
-    >(stub: StubClient, method: Method, ...args: StubMethodArgs<Api, Method>) {
-      const methodName = String(method);
-      const result = yield* rpc(stub, method, ...args);
-      const value = yield* CloudflareRpc.scoped(result);
+    const scopedCall = Effect.fnUntraced(
+      function* <Method extends StubMethodKey<Api>>(
+        stub: StubClient,
+        method: Method,
+        ...args: StubMethodArgs<Api, Method>
+      ): Effect.fn.Return<StubMethodSuccess<Api, Method>, unknown, Scope.Scope> {
+        const methodName = String(method);
+        const result = yield* rpc(stub, method, ...args);
+        const value = yield* CloudflareRpc.scoped(result);
 
-      return yield* decodeSuccess<Method>(methodName, value);
-    });
+        return yield* decodeSuccess<Method>(methodName, value);
+      },
+      (effect, ...args) =>
+        RpcTracing.withRpcClientSpan(effect, definition.binding, String(args[1])),
+    );
 
     const directMethods = makeDirectMethods<never, Api, Definition>(definition.definition, {
       call,

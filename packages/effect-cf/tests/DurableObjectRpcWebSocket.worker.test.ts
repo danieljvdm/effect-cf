@@ -453,9 +453,7 @@ test("a hibernated in-flight finite RPC is reset without replay", async () => {
         neverStarts,
       };
     });
-  const hasRegisteredPendingRequest = (
-    snapshot: Awaited<ReturnType<typeof readPendingSnapshot>>,
-  ) =>
+  const hasRegisteredPendingRequest = (snapshot: Awaited<ReturnType<typeof readPendingSnapshot>>) =>
     snapshot.neverStarts === 1 &&
     snapshot.attachments.length === 1 &&
     isPendingFlagAttachment(snapshot.attachments[0]) &&

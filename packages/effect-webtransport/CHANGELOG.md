@@ -1,5 +1,11 @@
 # effect-webtransport
 
+## 0.2.1
+
+### Patch Changes
+
+- [#127](https://github.com/danieljvdm/effect-cf/pull/127) [`40b64e3`](https://github.com/danieljvdm/effect-cf/commit/40b64e3411adc959393733fe25f2752b6a11b635) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Trim package guides and API comments to setup, core usage, and behavioral constraints. Public APIs and runtime behavior are unchanged.
+
 ## 0.2.0
 
 ### Minor Changes

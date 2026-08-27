@@ -9,7 +9,6 @@ import type * as Rpc from "./Rpc";
 import * as RpcDefinition from "./RpcDefinition";
 import type { WorkerEnvironment } from "./Environment";
 
-/** Internal dynamic invocation used only before the public client contract is restored. */
 type ErasedInvoke<E> = (...args: ReadonlyArray<unknown>) => Effect.Effect<unknown, E>;
 
 export type ServiceFreeSchema = S.Codec<any, any, never, never>;
@@ -34,7 +33,6 @@ export namespace Method {
       ? [S.Schema.Type<Head>, ...ArgsFromSchemas<Tail>]
       : Array<S.Schema.Type<Args[number]>>;
 
-  /** Method schemas cross the wire through their canonical JSON codec. */
   type EncodedArgsFromSchemas<Args extends ReadonlyArray<ServiceFreeSchema>> = {
     [Index in keyof Args]: S.Json;
   };
@@ -192,19 +190,6 @@ export function method(definition: {
   return RpcDefinition.method(definition);
 }
 
-/**
- * Creates a Durable Object RPC definition plus implementation/binding helpers.
- *
- * @example
- * ```ts
- * const ChatRoom = DurableObjectDefinition.make("ChatRoom", {
- *   postMessage: DurableObjectDefinition.method({
- *     args: [Schema.String],
- *     success: Schema.Void,
- *   }),
- * });
- * ```
- */
 const makeDefinition = <Id extends string, const MethodDefinitions extends Methods>(
   id: Id,
   methods: MethodDefinitions & NoReservedMethods<MethodDefinitions>,

@@ -27,19 +27,16 @@ import { Socket } from "effect/unstable/socket";
 import * as WebTransport from "./WebTransport";
 import * as WebTransportSocket from "./WebTransportSocket";
 
-/** A named transport candidate producing a `Socket` when it is viable. */
 export interface Candidate<E = unknown, R = never> {
   readonly name: string;
   readonly socket: Effect.Effect<Socket.Socket, E, R>;
 }
 
-/** The transport pinned by {@link select}. */
 export interface SelectedTransport {
   readonly name: string;
   readonly socket: Socket.Socket;
 }
 
-/** Every transport candidate failed. Carries each candidate's failure. */
 export class TransportSelectionError extends Schema.TaggedError<TransportSelectionError>()(
   "TransportSelectionError",
   {
@@ -105,7 +102,6 @@ export const webSocket = (
   socket: Socket.makeWebSocket(url, options),
 });
 
-/** Context required by a union of candidates. */
 export type CandidateContext<C extends Candidate<any, any>> =
   C extends Candidate<any, infer R> ? R : never;
 

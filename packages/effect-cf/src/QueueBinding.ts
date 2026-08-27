@@ -27,9 +27,7 @@ const expectedQueueProducer = "Queue producer binding with send(); optional send
 type QueueCandidate = Parameters<typeof Predicate.isUnknown>[0];
 
 export interface QueueBindingDefinition<Message extends RpcDefinition.ServiceFreeSchema> {
-  /** Binding name as configured in `wrangler.jsonc`. */
   readonly binding: string;
-  /** Codec used to encode messages before sending them to Cloudflare Queues. */
   readonly message: Message;
 }
 

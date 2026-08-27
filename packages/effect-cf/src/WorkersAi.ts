@@ -18,7 +18,6 @@ import * as ErrorMessage from "./internal/ErrorMessage";
 
 const expectedWorkersAiBinding = "Workers AI binding with run(), gateway(), and models()";
 
-/** Error raised when a Workers AI operation fails. */
 export class WorkersAiOperationError extends Data.TaggedError("WorkersAiOperationError")<{
   readonly binding: string;
   readonly operation: string;
@@ -29,9 +28,7 @@ export class WorkersAiOperationError extends Data.TaggedError("WorkersAiOperatio
   }
 }
 
-/** Typed Workers AI binding definition. */
 export interface WorkersAiDefinition {
-  /** Binding name as configured in `wrangler.jsonc`. */
   readonly binding: string;
 }
 
@@ -117,7 +114,6 @@ export interface WorkersAiClient<ModelList extends AiModelListType = AiModels> {
 
 declare const WorkersAiServiceTypeId: unique symbol;
 
-/** Nominal service marker for Workers AI services created with {@link make}. */
 export interface WorkersAiService<Id extends string> {
   readonly [WorkersAiServiceTypeId]: {
     readonly id: Id;

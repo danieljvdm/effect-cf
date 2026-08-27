@@ -1,15 +1,3 @@
-/**
- * Effect-native access to the WebTransport API.
- *
- * WebTransport is the application-level API for HTTP/3 transport: a session
- * multiplexes reliable bidirectional/unidirectional streams and unreliable
- * datagrams over one QUIC connection.
- *
- * This module wraps a platform `WebTransport` implementation (browser global,
- * Deno, or a test fake) behind a feature-detected, test-substitutable
- * {@link WebTransportConstructor} service, and exposes sessions as scoped
- * Effect resources with typed errors.
- */
 import {
   Cause,
   Channel,
@@ -25,29 +13,16 @@ import {
   Stream,
 } from "effect";
 
-// -----------------------------------------------------------------------------
-// Platform (structural) types
-//
-// These mirror the WebTransport WebIDL surface without requiring the DOM type
-// library, so the package can be consumed from browser, Deno, Node, and Workers
-// type environments alike, and so tests can substitute plain-object fakes.
-// A `lib.dom.d.ts` `WebTransport` instance is structurally assignable to
-// `NativeWebTransport`.
-// -----------------------------------------------------------------------------
-
-/** Close information passed to `WebTransport.close` and reported by `closed`. */
 export interface NativeCloseInfo {
   readonly closeCode?: number | undefined;
   readonly reason?: string | undefined;
 }
 
-/** Certificate hash entry accepted by the `serverCertificateHashes` option. */
 export interface NativeCertificateHash {
   readonly algorithm: string;
   readonly value: ArrayBuffer | ArrayBufferView;
 }
 
-/** Options accepted by the platform `WebTransport` constructor. */
 export interface NativeConnectOptions {
   readonly allowPooling?: boolean | undefined;
   readonly congestionControl?: "default" | "low-latency" | "throughput" | undefined;
@@ -56,18 +31,15 @@ export interface NativeConnectOptions {
   readonly serverCertificateHashes?: ReadonlyArray<NativeCertificateHash> | undefined;
 }
 
-/** Options accepted when opening an outgoing stream. */
 export interface NativeSendStreamOptions {
   readonly sendOrder?: number | undefined;
 }
 
-/** A reliable bidirectional WebTransport stream: a readable/writable byte pair. */
 export interface NativeBidirectionalStream {
   readonly readable: ReadableStream<Uint8Array>;
   readonly writable: WritableStream<Uint8Array>;
 }
 
-/** The duplex datagram surface of a WebTransport session. */
 export interface NativeDatagramDuplexStream {
   readonly readable: ReadableStream<Uint8Array>;
   readonly writable: WritableStream<Uint8Array>;
@@ -78,14 +50,6 @@ export interface NativeDatagramDuplexStream {
   outgoingMaxAge?: number | null;
 }
 
-/**
- * Structural type of a platform `WebTransport` instance.
- *
- * `createUnidirectionalStream`, `incomingUnidirectionalStreams`, and
- * `datagrams` are optional so partial implementations are represented
- * truthfully; the wrappers fail with a typed `UnsupportedError` when a member
- * is absent.
- */
 export interface NativeWebTransport {
   readonly ready: Promise<void>;
   readonly closed: Promise<unknown>;
@@ -101,18 +65,11 @@ export interface NativeWebTransport {
   readonly datagrams?: NativeDatagramDuplexStream | undefined;
 }
 
-// -----------------------------------------------------------------------------
-// Errors
-// -----------------------------------------------------------------------------
-
-/** Type-level identifier used to mark `WebTransportError` values. */
 export type WebTransportErrorTypeId = "~effect-webtransport/WebTransport/WebTransportError";
 
-/** Runtime type identifier attached to `WebTransportError` values. */
 export const WebTransportErrorTypeId: WebTransportErrorTypeId =
   "~effect-webtransport/WebTransport/WebTransportError";
 
-/** Failure while establishing a WebTransport session. */
 export class ConnectError extends Schema.Error<ConnectError>(
   "effect-webtransport/WebTransport/ConnectError",
 )({
@@ -127,7 +84,6 @@ export class ConnectError extends Schema.Error<ConnectError>(
   }
 }
 
-/** The WebTransport session terminated, either cleanly by the peer or abruptly. */
 export class SessionClosedError extends Schema.Error<SessionClosedError>(
   "effect-webtransport/WebTransport/SessionClosedError",
 )({
@@ -143,7 +99,6 @@ export class SessionClosedError extends Schema.Error<SessionClosedError>(
   }
 }
 
-/** Failure while opening an outgoing WebTransport stream. */
 export class StreamOpenError extends Schema.Error<StreamOpenError>(
   "effect-webtransport/WebTransport/StreamOpenError",
 )({
@@ -156,7 +111,6 @@ export class StreamOpenError extends Schema.Error<StreamOpenError>(
   }
 }
 
-/** Failure while reading from a WebTransport stream or the datagram surface. */
 export class ReadError extends Schema.Error<ReadError>(
   "effect-webtransport/WebTransport/ReadError",
 )({
@@ -169,7 +123,6 @@ export class ReadError extends Schema.Error<ReadError>(
   }
 }
 
-/** Failure while writing to a WebTransport stream or the datagram surface. */
 export class WriteError extends Schema.Error<WriteError>(
   "effect-webtransport/WebTransport/WriteError",
 )({
@@ -182,7 +135,6 @@ export class WriteError extends Schema.Error<WriteError>(
   }
 }
 
-/** The datagram payload exceeds the session's `maxDatagramSize`. */
 export class DatagramTooLargeError extends Schema.Error<DatagramTooLargeError>(
   "effect-webtransport/WebTransport/DatagramTooLargeError",
 )({
@@ -195,7 +147,6 @@ export class DatagramTooLargeError extends Schema.Error<DatagramTooLargeError>(
   }
 }
 
-/** The current platform does not provide the requested WebTransport feature. */
 export class UnsupportedError extends Schema.Error<UnsupportedError>(
   "effect-webtransport/WebTransport/UnsupportedError",
 )({
@@ -207,7 +158,6 @@ export class UnsupportedError extends Schema.Error<UnsupportedError>(
   }
 }
 
-/** Schema for all WebTransport-specific error reasons. */
 export const WebTransportErrorReason = Schema.Union([
   ConnectError,
   SessionClosedError,
@@ -218,7 +168,6 @@ export const WebTransportErrorReason = Schema.Union([
   UnsupportedError,
 ]);
 
-/** Union of WebTransport-specific error reasons. */
 export type WebTransportErrorReason =
   | ConnectError
   | SessionClosedError
@@ -245,10 +194,8 @@ export class WebTransportError extends Schema.TaggedError<WebTransportError>(
     }
   }
 
-  /** Marks this value as a WebTransport error wrapper for runtime guards. */
   readonly [WebTransportErrorTypeId]: WebTransportErrorTypeId = WebTransportErrorTypeId;
 
-  /** Returns `true` when the value is a `WebTransportError`. */
   static is(cause: unknown): cause is WebTransportError {
     return isWebTransportError(cause);
   }
@@ -256,7 +203,6 @@ export class WebTransportError extends Schema.TaggedError<WebTransportError>(
   override readonly message = this.reason.message;
 }
 
-/** Returns `true` when a value is a `WebTransportError`. */
 export function isWebTransportError(cause: unknown): cause is WebTransportError {
   return Predicate.hasProperty(cause, WebTransportErrorTypeId);
 }
@@ -264,11 +210,6 @@ export function isWebTransportError(cause: unknown): cause is WebTransportError 
 const wtError = (reason: WebTransportErrorReason): WebTransportError =>
   new WebTransportError({ reason });
 
-// -----------------------------------------------------------------------------
-// Close info
-// -----------------------------------------------------------------------------
-
-/** Validated close information reported when a session ends cleanly. */
 export class CloseInfo extends Schema.Class<CloseInfo>(
   "effect-webtransport/WebTransport/CloseInfo",
 )({
@@ -278,32 +219,17 @@ export class CloseInfo extends Schema.Class<CloseInfo>(
 
 const decodeCloseInfo = Schema.decodeUnknownResult(CloseInfo);
 
-// -----------------------------------------------------------------------------
-// Constructor service and feature detection
-// -----------------------------------------------------------------------------
-
-/**
- * Context service for constructing platform `WebTransport` instances from a
- * URL and options. Substitute this service in tests or non-browser platforms.
- */
 export class WebTransportConstructor extends Context.Service<
   WebTransportConstructor,
   (url: string, options?: NativeConnectOptions) => NativeWebTransport
 >()("effect-webtransport/WebTransport/WebTransportConstructor") {}
 
-/** Returns `true` when `globalThis` exposes a `WebTransport` constructor. */
 const platformGlobal: { readonly WebTransport?: unknown } = globalThis;
 
 export const isSupportedUnsafe = (): boolean => Predicate.isFunction(platformGlobal.WebTransport);
 
-/** Effectful variant of {@link isSupportedUnsafe}. */
 export const isSupported: Effect.Effect<boolean> = Effect.sync(isSupportedUnsafe);
 
-/**
- * Feature-detected constructor from `globalThis.WebTransport`, failing with a
- * typed `UnsupportedError` when the platform does not implement the
- * WebTransport API.
- */
 export const constructorGlobal: Effect.Effect<
   (url: string, options?: NativeConnectOptions) => NativeWebTransport,
   WebTransportError
@@ -323,24 +249,12 @@ export const constructorGlobal: Effect.Effect<
   );
 });
 
-/**
- * Layer that provides `WebTransportConstructor` from `globalThis.WebTransport`,
- * failing with a typed `UnsupportedError` when the platform does not implement
- * the WebTransport API.
- */
 export const layerConstructorGlobal: Layer.Layer<WebTransportConstructor, WebTransportError> =
   Layer.effect(WebTransportConstructor)(constructorGlobal);
 
-// -----------------------------------------------------------------------------
-// Session model
-// -----------------------------------------------------------------------------
-
-/** Runtime type identifier attached to `WebTransport` session values. */
 export const TypeId = "~effect-webtransport/WebTransport";
 
-/** Datagram surface of a session: unreliable, bounded, backpressured. */
 export interface Datagrams {
-  /** Maximum payload size currently accepted by {@link Datagrams.send}. */
   readonly maxDatagramSize: Effect.Effect<number, WebTransportError>;
   /**
    * Sends one datagram. Waits for the outgoing queue (bounded by
@@ -362,15 +276,8 @@ export interface Datagrams {
   readonly stream: Stream.Stream<Uint8Array, WebTransportError>;
 }
 
-/**
- * An established WebTransport session as an Effect resource.
- *
- * Sessions are acquired with {@link connect} inside a `Scope`; closing the
- * scope closes the session (and thereby every stream it carries).
- */
 export interface WebTransport {
   readonly [TypeId]: typeof TypeId;
-  /** The underlying platform instance, for escape hatches and diagnostics. */
   readonly native: NativeWebTransport;
   /**
    * Opens an outgoing reliable bidirectional stream. Releasing the scope
@@ -386,22 +293,18 @@ export interface WebTransport {
   readonly openUnidirectionalStream: (
     options?: NativeSendStreamOptions,
   ) => Effect.Effect<WritableStream<Uint8Array>, WebTransportError, Scope.Scope>;
-  /** Bidirectional streams initiated by the peer. Single consumer. */
+  /** Peer streams have a single consumer. */
   readonly incomingBidirectionalStreams: Stream.Stream<
     NativeBidirectionalStream,
     WebTransportError
   >;
-  /**
-   * Unidirectional (receive) streams initiated by the peer, where the
-   * platform supports them. Single consumer.
-   */
+  /** Optional peer stream support has a single consumer. */
   readonly incomingUnidirectionalStreams: Stream.Stream<
     ReadableStream<Uint8Array>,
     WebTransportError
   >;
-  /** The unreliable datagram surface of the session. */
   readonly datagrams: Datagrams;
-  /** Closes the session and waits for closure to settle. Idempotent. */
+  /** Idempotent. */
   readonly close: (info?: NativeCloseInfo) => Effect.Effect<void>;
   /**
    * Waits for the session to end. Succeeds with validated {@link CloseInfo}
@@ -411,7 +314,6 @@ export interface WebTransport {
   readonly closed: Effect.Effect<CloseInfo, WebTransportError>;
 }
 
-/** Service tag for the current WebTransport session. */
 export const WebTransport: Context.Service<WebTransport, WebTransport> =
   Context.Service<WebTransport>("effect-webtransport/WebTransport");
 
@@ -621,11 +523,6 @@ export const fromNative = (native: NativeWebTransport): WebTransport => ({
   ),
 });
 
-// -----------------------------------------------------------------------------
-// Session acquisition
-// -----------------------------------------------------------------------------
-
-/** Bounded-buffer configuration applied to the datagram surface on connect. */
 export interface DatagramBufferOptions {
   readonly incomingHighWaterMark?: number | undefined;
   readonly outgoingHighWaterMark?: number | undefined;
@@ -633,22 +530,12 @@ export interface DatagramBufferOptions {
   readonly outgoingMaxAge?: number | null | undefined;
 }
 
-/** Options accepted by {@link connect} and {@link layer}. */
 export interface ConnectOptions extends NativeConnectOptions {
-  /** Time to wait for the session handshake. Defaults to 10 seconds. */
   readonly openTimeout?: Duration.Input | undefined;
-  /** Close information sent when the owning scope closes the session. */
   readonly closeInfo?: NativeCloseInfo | undefined;
-  /** Bounded-buffer configuration for the datagram surface. */
   readonly datagrams?: DatagramBufferOptions | undefined;
 }
 
-/**
- * Acquires a WebTransport session as a scoped resource: constructs the
- * platform instance via {@link WebTransportConstructor}, waits for the
- * handshake with a timeout, and closes the session (awaiting settlement of
- * `closed`) when the scope ends — including on interruption.
- */
 export const connect = Effect.fn("WebTransport.connect")(function* (
   url: string | Effect.Effect<string>,
   options?: ConnectOptions,
@@ -710,21 +597,12 @@ export const connect = Effect.fn("WebTransport.connect")(function* (
   return fromNative(native);
 });
 
-/**
- * Layer that provides a `WebTransport` session for the layer's lifetime,
- * connecting on build and closing the session when the layer is released.
- */
 export const layer = (
   url: string | Effect.Effect<string>,
   options?: ConnectOptions,
 ): Layer.Layer<WebTransport, WebTransportError, WebTransportConstructor> =>
   Layer.effect(WebTransport)(connect(url, options));
 
-// -----------------------------------------------------------------------------
-// Stream helpers
-// -----------------------------------------------------------------------------
-
-/** Reads a WebTransport receive stream as a byte `Stream`, ending on FIN. */
 export const readStream = (
   readable: ReadableStream<Uint8Array>,
 ): Stream.Stream<Uint8Array, WebTransportError> =>

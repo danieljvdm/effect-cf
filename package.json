@@ -4,10 +4,7 @@
   "private": true,
   "workspaces": [
     "packages/*",
-    "examples/*/packages/*",
-    "examples/*/workers/*",
-    "examples/*/durable-objects/*",
-    "examples/*/web",
+    "examples/*",
     "tools/*"
   ],
   "type": "module",
@@ -18,20 +15,7 @@
     "changeset": "vp exec changeset",
     "changeset:version": "vp exec changeset version",
     "changeset:publish": "vp exec changeset publish",
-    "dev": "vp run chat-api-worker#dev",
-    "dev:web": "vp run chat-web#dev",
-    "dev:todo-http-api": "vp run todo-http-api-worker#dev",
-    "dev:todo-http-web": "vp run todo-http-web#dev",
-    "dev:todo-http": "vp run todo-http-web#dev",
-    "build:todo-http": "vp run todo-http-domain#build && vp run todo-http-api-worker#build && vp run todo-http-web#build",
-    "dev:todo-rpc-http-api": "vp run todo-rpc-http-api-worker#dev",
-    "dev:todo-rpc-http-web": "vp run todo-rpc-http-web#dev",
-    "dev:todo-rpc-http": "vp run todo-rpc-http-web#dev",
-    "build:todo-rpc-http": "vp run todo-rpc-http-domain#build && vp run todo-rpc-http-api-worker#build && vp run todo-rpc-http-web#build",
-    "dev:todo-rpc-ws-api": "vp run todo-rpc-ws-api-worker#dev",
-    "dev:todo-rpc-ws-web": "vp run todo-rpc-ws-web#dev",
-    "dev:todo-rpc-ws": "vp run todo-rpc-ws-web#dev",
-    "build:todo-rpc-ws": "vp run todo-rpc-ws-domain#build && vp run todo-rpc-ws-store-do#build && vp run todo-rpc-ws-api-worker#build && vp run todo-rpc-ws-web#build"
+    "dev": "vp run effect-cf#build && vp run counter-example#dev"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.7.0",

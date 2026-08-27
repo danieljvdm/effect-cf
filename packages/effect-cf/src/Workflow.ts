@@ -1,7 +1,3 @@
-/**
- * Effect wrapper for Cloudflare Workflows entrypoints and bindings; distinct
- * from Effect's runtime-agnostic `effect/unstable/workflow` cluster module.
- */
 import {
   WorkflowEntrypoint as CloudflareWorkflowEntrypoint,
   type WorkflowEvent as CloudflareWorkflowEvent,
@@ -46,7 +42,6 @@ export class WorkflowEvent extends Context.Service<WorkflowEvent, WorkflowEventS
 
 type RunWorkflowStepEffect = <A, E>(effect: Effect.Effect<A, E, never>) => Promise<A>;
 
-/** Failure raised when a Cloudflare Workflow step operation rejects. */
 export class WorkflowStepError extends Data.TaggedError("WorkflowStepError")<{
   readonly step?: string;
   readonly operation: string;

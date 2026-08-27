@@ -39,29 +39,20 @@ export type DurableObjectStubClient<Api extends object> = DurableObjectFetcher &
     readonly name?: string;
   };
 
-/**
- * Native Durable Object namespace binding shape.
- */
 export interface DurableObjectNamespaceClient<Api extends object> {
-  /** Creates a globally unique Durable Object id. */
   newUniqueId(
     options?: globalThis.DurableObjectNamespaceNewUniqueIdOptions,
   ): globalThis.DurableObjectId;
-  /** Deterministically maps a name to a Durable Object id. */
   idFromName(name: string): globalThis.DurableObjectId;
-  /** Rehydrates a Durable Object id from its string form. */
   idFromString(id: string): globalThis.DurableObjectId;
-  /** Returns a stub for an existing Durable Object id. */
   get(
     id: globalThis.DurableObjectId,
     options?: globalThis.DurableObjectNamespaceGetDurableObjectOptions,
   ): DurableObjectStubClient<Api>;
-  /** Returns a stub by deterministic name. */
   getByName(
     name: string,
     options?: globalThis.DurableObjectNamespaceGetDurableObjectOptions,
   ): DurableObjectStubClient<Api>;
-  /** Selects a namespace pinned to a specific jurisdiction. */
   jurisdiction(
     jurisdiction: globalThis.DurableObjectJurisdiction,
   ): DurableObjectNamespaceClient<Api>;
@@ -80,9 +71,7 @@ export interface DurableObjectNamespaceDefinition {
 export interface DurableObjectNamespaceBindingDefinition<
   Definition extends DurableObjectDefinition.Definition.Any | undefined = undefined,
 > {
-  /** Binding name as configured in `wrangler.jsonc`. */
   readonly binding: string;
-  /** Optional RPC schema used for argument/result encoding. */
   readonly definition?: Definition;
 }
 
@@ -199,46 +188,22 @@ export type DurableObjectNamespaceEffectClient<
   Api extends object,
   Definition extends DurableObjectDefinition.Definition.Any | undefined = undefined,
 > = DirectMethods<never, Api, Definition> & {
-  /** Creates a globally unique Durable Object id. */
   readonly newUniqueId: (
     options?: globalThis.DurableObjectNamespaceNewUniqueIdOptions,
   ) => Effect.Effect<globalThis.DurableObjectId>;
-  /** Deterministically maps a name to a Durable Object id. */
   readonly idFromName: (name: string) => Effect.Effect<globalThis.DurableObjectId>;
-  /** Rehydrates a Durable Object id from its string form. */
   readonly idFromString: (id: string) => Effect.Effect<globalThis.DurableObjectId>;
-  /** Returns a stub for an existing Durable Object id. */
   readonly get: (
     id: globalThis.DurableObjectId,
     options?: globalThis.DurableObjectNamespaceGetDurableObjectOptions,
   ) => Effect.Effect<DurableObjectStubClient<Api>>;
-  /** Returns a stub by deterministic name. */
   readonly getByName: (
     name: string,
     options?: globalThis.DurableObjectNamespaceGetDurableObjectOptions,
   ) => Effect.Effect<DurableObjectStubClient<Api>>;
-  /** Selects a namespace pinned to a specific jurisdiction. */
   readonly jurisdiction: (
     jurisdiction: globalThis.DurableObjectJurisdiction,
   ) => Effect.Effect<DurableObjectNamespaceClient<Api>>;
-  /**
-   * Forwards an HTTP request to a Durable Object stub.
-   *
-   * Use this for fetch-based Durable Object APIs, including WebSocket upgrade
-   * forwarding where the native response must be preserved.
-   *
-   * @example
-   * ```ts
-   * import { Effect } from "effect";
-   *
-   * const program = Effect.gen(function* () {
-   *   const rooms = yield* ChatRooms;
-   *   const room = yield* rooms.getByName("general");
-   *
-   *   return yield* rooms.fetch(room, new Request("https://worker.example/room"));
-   * });
-   * ```
-   */
   readonly fetch: (
     stub: DurableObjectStubClient<Api>,
     input: RequestInfo | URL,
@@ -252,21 +217,6 @@ export type DurableObjectNamespaceEffectClient<
    * promise-like value and it does not decode definition-backed success schemas.
    *
    * Most application code should use {@link call} instead.
-   *
-   * @example
-   * ```ts
-   * import { Effect } from "effect";
-   *
-   * const program = Effect.gen(function* () {
-   *   const counters = yield* Counters;
-   *   const counter = yield* counters.getByName("main");
-   *
-   *   const result = yield* counters.rpc(counter, "get");
-   *   const value = yield* Effect.promise(() => result);
-   *
-   *   return value;
-   * });
-   * ```
    */
   readonly rpc: <Method extends StubMethodKey<Api>>(
     stub: DurableObjectStubClient<Api>,
@@ -278,18 +228,6 @@ export type DurableObjectNamespaceEffectClient<
    * decodes the success value when the namespace was created from a definition.
    *
    * This is the normal choice when application code wants the final typed value.
-   *
-   * @example
-   * ```ts
-   * import { Effect } from "effect";
-   *
-   * const program = Effect.gen(function* () {
-   *   const counters = yield* Counters;
-   *   const counter = yield* counters.getByName("main");
-   *
-   *   return yield* counters.call(counter, "increment", 1);
-   * });
-   * ```
    */
   readonly call: <Method extends StubMethodKey<Api>>(
     stub: DurableObjectStubClient<Api>,
@@ -304,21 +242,6 @@ export type DurableObjectNamespaceEffectClient<
    *
    * Use this for RPC methods that return Cloudflare RPC resources or other
    * disposable objects whose lifetime should be tied to an Effect scope.
-   *
-   * @example
-   * ```ts
-   * import { Effect } from "effect";
-   *
-   * const program = Effect.scoped(
-   *   Effect.gen(function* () {
-   *     const rooms = yield* ChatRooms;
-   *     const room = yield* rooms.getByName("general");
-   *     const handle = yield* rooms.scopedCall(room, "openStream");
-   *
-   *     return yield* handle.read();
-   *   }),
-   * );
-   * ```
    */
   readonly scopedCall: <Method extends StubMethodKey<Api>>(
     stub: DurableObjectStubClient<Api>,

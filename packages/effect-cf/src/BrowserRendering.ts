@@ -6,7 +6,6 @@ import * as ErrorMessage from "./internal/ErrorMessage";
 
 const expectedBrowserRenderingBinding = "Browser Rendering binding resource";
 
-/** Error raised when a Browser Rendering operation fails. */
 export class BrowserRenderingOperationError extends Data.TaggedError(
   "BrowserRenderingOperationError",
 )<{
@@ -19,9 +18,7 @@ export class BrowserRenderingOperationError extends Data.TaggedError(
   }
 }
 
-/** Typed Browser Rendering binding definition. */
 export interface BrowserRenderingDefinition {
-  /** Binding name as configured in `wrangler.jsonc`. */
   readonly binding: string;
 }
 
@@ -132,7 +129,6 @@ export interface BrowserRenderingClient<
 
 declare const BrowserRenderingServiceTypeId: unique symbol;
 
-/** Nominal service marker for Browser Rendering services created with {@link make}. */
 export interface BrowserRenderingService<Id extends string> {
   readonly [BrowserRenderingServiceTypeId]: {
     readonly id: Id;

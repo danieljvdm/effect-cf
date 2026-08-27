@@ -6,13 +6,10 @@ import * as ErrorMessage from "./internal/ErrorMessage";
 
 const expectedContainerNamespace = "Container namespace binding with getByName()";
 
-/** Named signal accepted by Cloudflare Container instances. */
 export type ContainerSignal = "SIGKILL" | "SIGINT" | "SIGTERM";
 
-/** Named or numeric signal accepted by Container `stop()`. */
 export type ContainerStopSignal = ContainerSignal | number;
 
-/** Per-instance Container startup configuration. */
 export interface ContainerStartOptions {
   readonly envVars?: Record<string, string>;
   readonly entrypoint?: Array<string>;
@@ -34,7 +31,6 @@ export interface ContainerReadinessOptions {
   readonly waitInterval?: number;
 }
 
-/** Options for starting a Container and waiting for its ports. */
 export interface ContainerStartAndWaitForPortsOptions {
   readonly startOptions?: ContainerStartOptions;
   readonly ports?: number | Array<number>;
@@ -77,7 +73,6 @@ export interface ContainerStub {
   removeDeniedHost(hostname: string): Promise<void>;
 }
 
-/** Native Container namespace binding shape. */
 export interface ContainerNamespaceResource {
   getByName(
     name: string,
@@ -85,18 +80,14 @@ export interface ContainerNamespaceResource {
   ): ContainerStub;
 }
 
-/** Exact native stub type produced by a Container namespace binding. */
 export type ContainerStubOf<Namespace extends ContainerNamespaceResource> = ReturnType<
   Namespace["getByName"]
 >;
 
-/** Container namespace binding metadata. */
 export interface ContainerNamespaceDefinition {
-  /** Binding name as configured in `wrangler.jsonc`. */
   readonly binding: string;
 }
 
-/** Failure raised when invoking a named Container operation. */
 export class ContainerOperationError extends Data.TaggedError("ContainerOperationError")<{
   readonly binding: string;
   readonly instance: string;
@@ -108,7 +99,6 @@ export class ContainerOperationError extends Data.TaggedError("ContainerOperatio
   }
 }
 
-/** Effect-wrapped client for one named Container instance. */
 export interface ContainerInstanceClient<Stub extends ContainerStub = ContainerStub> {
   readonly rawUnsafe: Effect.Effect<Stub, ContainerOperationError>;
   readonly state: Effect.Effect<ContainerState, ContainerOperationError>;
@@ -140,7 +130,6 @@ export interface ContainerInstanceClient<Stub extends ContainerStub = ContainerS
   readonly removeDeniedHost: (hostname: string) => Effect.Effect<void, ContainerOperationError>;
 }
 
-/** Effect client for a Container namespace binding. */
 export interface ContainerNamespaceClient<
   Namespace extends ContainerNamespaceResource = ContainerNamespaceResource,
 > {
@@ -433,14 +422,12 @@ export const make = <Id extends string>(id: Id) => Tag<ContainerNamespaceService
 
 declare const ContainerNamespaceServiceTypeId: unique symbol;
 
-/** Nominal service marker for Container namespaces created with {@link make}. */
 export interface ContainerNamespaceService<Id extends string> {
   readonly [ContainerNamespaceServiceTypeId]: {
     readonly id: Id;
   };
 }
 
-/** Creates a typed Effect service for a Cloudflare Container namespace. */
 export const Tag =
   <Self, Namespace extends ContainerNamespaceResource = ContainerNamespaceResource>() =>
   <Id extends string>(id: Id) => {

@@ -25,7 +25,6 @@ import { Socket } from "effect/unstable/socket";
 
 import * as WebTransport from "./WebTransport";
 
-/** Options for adapting a bidirectional stream to a `Socket`. */
 export interface FromBidirectionalStreamOptions {
   /**
    * Classifies which close codes fail the socket run. WebTransport streams
@@ -35,13 +34,10 @@ export interface FromBidirectionalStreamOptions {
   readonly closeCodeIsError?: ((code: number) => boolean) | undefined;
 }
 
-/** Options accepted by {@link makeSocket} and {@link layerSocket}. */
 export interface MakeSocketOptions extends FromBidirectionalStreamOptions {
-  /** Options applied when opening each outgoing bidirectional stream. */
   readonly sendStream?: WebTransport.NativeSendStreamOptions | undefined;
 }
 
-/** Default close-code classifier: only a graceful end (code 1000) is clean. */
 export const defaultCloseCodeIsError = (code: number): boolean => code !== 1000;
 
 const toSocketOpenError = (cause: unknown): Socket.SocketError =>
@@ -188,10 +184,6 @@ export const fromBidirectionalStream = <R>(
     });
   });
 
-/**
- * Builds a `Socket` backed by the current `WebTransport` session, opening a
- * fresh reliable bidirectional stream for each `Socket.run`.
- */
 export const makeSocket = (
   options?: MakeSocketOptions,
 ): Effect.Effect<Socket.Socket, never, WebTransport.WebTransport> =>
@@ -199,17 +191,11 @@ export const makeSocket = (
     fromBidirectionalStream(session.openBidirectionalStream(options?.sendStream), options),
   );
 
-/** Layer that provides a `Socket` backed by the current `WebTransport` session. */
 export const layerSocket = (
   options?: MakeSocketOptions,
 ): Layer.Layer<Socket.Socket, never, WebTransport.WebTransport> =>
   Layer.effect(Socket.Socket)(makeSocket(options));
 
-/**
- * Layer that connects a WebTransport session to `url` and provides a `Socket`
- * over one reliable bidirectional stream per run. The session lives as long
- * as the layer.
- */
 export const layerSocketWebTransport = (
   url: string | Effect.Effect<string>,
   options?: MakeSocketOptions & WebTransport.ConnectOptions,

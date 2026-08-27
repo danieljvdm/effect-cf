@@ -10,9 +10,6 @@ import * as RpcInvocation from "./internal/RpcInvocation";
 const TypeId = "effect-cf/ServiceBinding" as const;
 const expectedServiceBinding = "Worker service binding with fetch()";
 
-/**
- * Minimum shape for a Cloudflare service binding.
- */
 export interface ServiceFetcher {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
 }
@@ -27,9 +24,6 @@ type RpcClient<Api> = {
 
 type ReservedMethodName = WorkerDefinition.ReservedMethodName | "fetch";
 
-/**
- * Native Cloudflare service object including optional RPC methods.
- */
 export type ServiceBindingClient<Api extends object> = ServiceFetcher &
   RpcClient<CloudflareRpc.Provider<Api, ReservedMethodName>>;
 
@@ -47,9 +41,7 @@ type ApiOrDefinition<Api extends object, Definition> = [Api] extends [never]
 export interface ServiceBindingDefinition<
   Definition extends WorkerDefinition.Definition.Any | undefined = undefined,
 > {
-  /** Binding name as configured in `wrangler.jsonc`. */
   readonly binding: string;
-  /** Optional RPC schema used for argument/result encoding. */
   readonly definition?: Definition;
 }
 
@@ -112,22 +104,6 @@ export type ServiceBindingEffectClient<
   Api extends object,
   Definition extends WorkerDefinition.Definition.Any | undefined = undefined,
 > = DirectMethods<never, Definition> & {
-  /**
-   * Forwards an HTTP request to the bound Worker service.
-   *
-   * Use this when the service binding is acting as an HTTP origin rather than a
-   * Cloudflare RPC target.
-   *
-   * @example
-   * ```ts
-   * import { Effect } from "effect";
-   *
-   * const program = Effect.gen(function* () {
-   *   const api = yield* ApiWorker;
-   *   return yield* api.fetch(new Request("https://internal.example/users"));
-   * });
-   * ```
-   */
   readonly fetch: (
     input: RequestInfo | URL,
     init?: RequestInit,
@@ -140,20 +116,6 @@ export type ServiceBindingEffectClient<
    * promise-like value and it does not decode definition-backed success schemas.
    *
    * Most application code should use {@link call} instead.
-   *
-   * @example
-   * ```ts
-   * import { Effect } from "effect";
-   *
-   * const program = Effect.gen(function* () {
-   *   const counter = yield* CounterService;
-   *
-   *   const result = yield* counter.rpc("increment", 41);
-   *   const value = yield* Effect.promise(() => result);
-   *
-   *   return value;
-   * });
-   * ```
    */
   readonly rpc: <Method extends ServiceMethodKey<Api>>(
     method: Method,
@@ -164,18 +126,6 @@ export type ServiceBindingEffectClient<
    * the success value when the binding was created from a definition.
    *
    * This is the normal choice when application code wants the final typed value.
-   *
-   * @example
-   * ```ts
-   * import { Effect } from "effect";
-   *
-   * const program = Effect.gen(function* () {
-   *   const counter = yield* CounterService;
-   *   const value = yield* counter.call("increment", 41);
-   *
-   *   return value;
-   * });
-   * ```
    */
   readonly call: <Method extends ServiceMethodKey<Api>>(
     method: Method,
@@ -188,20 +138,6 @@ export type ServiceBindingEffectClient<
    *
    * Use this for RPC methods that return Cloudflare RPC resources or other
    * disposable objects whose lifetime should be tied to an Effect scope.
-   *
-   * @example
-   * ```ts
-   * import { Effect } from "effect";
-   *
-   * const program = Effect.scoped(
-   *   Effect.gen(function* () {
-   *     const files = yield* FileService;
-   *     const handle = yield* files.scopedCall("open", "report.csv");
-   *
-   *     return yield* handle.read();
-   *   }),
-   * );
-   * ```
    */
   readonly scopedCall: <Method extends ServiceMethodKey<Api>>(
     method: Method,
@@ -385,35 +321,6 @@ export const layer = <
     { expected: expectedServiceBinding },
   );
 
-/**
- * Creates a typed Effect service for a Worker service binding.
- *
- * Returned value includes:
- * - a Context tag for dependency injection
- * - `fetch(...)` for raw HTTP forwarding
- * - `rpc(...)` for raw Cloudflare RPC results
- * - `call(...)` for resolved and decoded RPC results
- * - `scopedCall(...)` for scoped and decoded disposable RPC results
- * - direct RPC methods when `definition` is provided
- *
- * @example
- * ```ts
- * const Counter = WorkerDefinition.make("Counter", {
- *   increment: WorkerDefinition.method({
- *     args: [Schema.Number],
- *     success: Schema.Number,
- *   }),
- * });
- *
- * const CounterLive = Counter.layer({ binding: "COUNTER" });
- *
- * const program = Effect.gen(function* () {
- *   const counter = yield* Counter;
- *   const next = yield* counter.increment(1);
- *   return next;
- * });
- * ```
- */
 export const Service =
   <Self, Api extends object = never>() =>
   <

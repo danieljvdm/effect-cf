@@ -22,7 +22,6 @@ import * as ErrorMessage from "./internal/ErrorMessage";
 const expectedVectorizeBinding =
   "Vectorize index binding with describe(), query(), insert(), upsert(), deleteByIds(), and getByIds()";
 
-/** Vectorize operation represented by {@link VectorizeOperationError}. */
 export type VectorizeOperation =
   | "describe"
   | "query"
@@ -32,7 +31,6 @@ export type VectorizeOperation =
   | "deleteByIds"
   | "getByIds";
 
-/** Error raised when a Vectorize operation fails. */
 export class VectorizeOperationError extends Data.TaggedError("VectorizeOperationError")<{
   readonly binding: string;
   readonly operation: VectorizeOperation;
@@ -43,9 +41,7 @@ export class VectorizeOperationError extends Data.TaggedError("VectorizeOperatio
   }
 }
 
-/** Typed Vectorize binding definition. */
 export interface VectorizeDefinition {
-  /** Binding name as configured in `wrangler.jsonc`. */
   readonly binding: string;
 }
 
@@ -114,7 +110,6 @@ export interface VectorizeClient {
 
 declare const VectorizeServiceTypeId: unique symbol;
 
-/** Nominal service marker for Vectorize services created with {@link make}. */
 export interface VectorizeService<Id extends string> {
   readonly [VectorizeServiceTypeId]: {
     readonly id: Id;

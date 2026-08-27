@@ -27,14 +27,6 @@ const failureHandler = <E, R>(
     ),
   );
 
-/**
- * Builds a `waitUntil` scheduler for any Cloudflare lifecycle that accepts
- * background promises (`ExecutionContext`, `DurableObjectState`).
- *
- * Background effects capture the calling fiber's context via `Effect.context`
- * before being registered, so the default module-level `Effect.runPromiseExit`
- * runner is sufficient; entrypoints may still pass a runtime-bound runner.
- */
 export const makeWaitUntilScheduler = (
   label: string,
   register: (promise: Promise<unknown>) => void,
@@ -77,9 +69,6 @@ export const makeWaitUntilScheduler = (
     );
 };
 
-/**
- * Builds the `WorkerContext` service from a native `ExecutionContext`.
- */
 export const fromExecutionContext = (
   ctx: globalThis.ExecutionContext,
   runPromiseExit: RunWaitUntilEffect = (effect) => Effect.runPromiseExit(effect),

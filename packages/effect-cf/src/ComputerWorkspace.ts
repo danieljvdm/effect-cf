@@ -128,7 +128,6 @@ export interface WorkspaceReadFile {
   ): Effect.Effect<ReadableStream<Uint8Array>, WorkspaceFsError>;
 }
 
-/** Complete Effect wrapper of `WorkspaceClient.fs`. */
 export interface ComputerWorkspaceFilesystem {
   readonly readFile: WorkspaceReadFile;
   readonly stat: (path: string) => Effect.Effect<WorkspaceEntryStat, WorkspaceFsError>;
@@ -173,7 +172,6 @@ export type WorkspaceGitDiffOptions = CloudflareGitDiffOptions;
 export type WorkspaceGitCommitOptions = CloudflareGitCommitOptions;
 
 export interface WorkspaceGitLogOptions extends Omit<CloudflareGitLogOptions, "depth"> {
-  /** Preferred upstream name for the history bound. */
   readonly depth?: number;
   /** Consumer-port compatibility alias for `depth`. */
   readonly maxCount?: number;
@@ -235,7 +233,6 @@ export type WorkspaceExecOptions<Encoding extends WorkspaceExecEncoding = "utf8"
   "encoding" | "timeoutMs"
 > & {
   readonly encoding?: Encoding;
-  /** Upstream runtime option name. */
   readonly timeoutMs?: number;
   /** Consumer-port compatibility alias for `timeoutMs`. */
   readonly timeoutMillis?: number;
@@ -334,7 +331,6 @@ export interface WorkspaceExecCollect {
   ): Effect.Effect<WorkspaceExecResult<"binary">, WorkspaceExecError>;
 }
 
-/** Complete Effect wrapper of `WorkspaceClient.runtime`. */
 export interface ComputerWorkspaceRuntime {
   readonly exec: WorkspaceExec;
   readonly execCollect: WorkspaceExecCollect;
@@ -349,7 +345,6 @@ export interface ComputerWorkspaceRuntime {
   ) => Effect.Effect<void, WorkspaceExecError>;
 }
 
-/** Effect wrapper over a configured local `Workspace.assets` client. */
 export interface ComputerWorkspaceAssets {
   readonly share: (
     path: string,
@@ -368,7 +363,6 @@ export type ComputerWorkspaceThink = {
   >;
 };
 
-/** Effect service over every client surface exposed by Cloudflare Computer. */
 export interface ComputerWorkspaceService {
   readonly fs: ComputerWorkspaceFilesystem;
   readonly git: ComputerWorkspaceGit;
@@ -377,7 +371,6 @@ export interface ComputerWorkspaceService {
   readonly assets: ComputerWorkspaceAssets | undefined;
   readonly think: ComputerWorkspaceThink | undefined;
 
-  /** Flat filesystem aliases retained for mechanical consumer migration. */
   readonly readFile: WorkspaceReadFile;
   readonly stat: ComputerWorkspaceFilesystem["stat"];
   readonly lstat: ComputerWorkspaceFilesystem["lstat"];
@@ -395,7 +388,6 @@ export interface ComputerWorkspaceService {
   readonly chmod: ComputerWorkspaceFilesystem["chmod"];
   readonly symlink: ComputerWorkspaceFilesystem["symlink"];
 
-  /** Flat runtime aliases retained for mechanical consumer migration. */
   readonly exec: WorkspaceExec;
   readonly execCollect: WorkspaceExecCollect;
   readonly getExec: WorkspaceGetExec;
@@ -1169,7 +1161,6 @@ export const fromWorkspaceClient = (
   };
 };
 
-/** Effect service for the workspace owned by the enclosing Durable Object. */
 export class ComputerWorkspace extends Context.Service<
   ComputerWorkspace,
   ComputerWorkspaceService

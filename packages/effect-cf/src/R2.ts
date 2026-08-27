@@ -21,7 +21,6 @@ import * as ErrorMessage from "./internal/ErrorMessage";
 const expectedR2Bucket =
   "R2 bucket binding with head(), get(), put(), createMultipartUpload(), resumeMultipartUpload(), delete(), and list()";
 
-/** R2 operation represented by {@link R2OperationError}. */
 export type R2Operation =
   | "head"
   | "get"
@@ -39,7 +38,6 @@ export type R2Operation =
   | "json"
   | "blob";
 
-/** Error raised when an R2 operation fails. */
 export class R2OperationError extends Data.TaggedError("R2OperationError")<{
   readonly binding: string;
   readonly operation: R2Operation;
@@ -50,9 +48,7 @@ export class R2OperationError extends Data.TaggedError("R2OperationError")<{
   }
 }
 
-/** Typed R2 bucket binding definition. */
 export interface R2Definition {
-  /** Binding name as configured in `wrangler.jsonc`. */
   readonly binding: string;
 }
 
@@ -133,7 +129,6 @@ export interface R2Client {
 
 declare const R2ServiceTypeId: unique symbol;
 
-/** Nominal service marker for R2 services created with {@link make}. */
 export interface R2Service<Id extends string> {
   readonly [R2ServiceTypeId]: {
     readonly id: Id;

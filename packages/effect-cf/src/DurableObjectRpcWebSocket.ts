@@ -22,14 +22,12 @@ const serviceRestartReason = "Durable Object RPC activation reset";
 /** Heartbeat handling for Effect's application-level RPC Ping messages. */
 export type HeartbeatPolicy = "auto-response" | "passthrough";
 
-/** Object-shaped application attachment fields that can coexist with adapter metadata. */
 export type RpcWebSocketAttachment = object;
 
 /** A resumable RPC stream declaration understood by the websocket transport. */
 export interface ResumableStreamDeclaration<ResumeDescriptor = unknown, Checkpoint = unknown> {
   /** Stable declaration identifier. Change it when the persisted representation changes. */
   readonly id: string;
-  /** RPC tag matched against encoded client requests. */
   readonly rpcTag: string;
   /** Validates a resume descriptor restored from a websocket attachment. */
   readonly resumeDescriptorSchema: Schema.Decoder<ResumeDescriptor>;
@@ -45,7 +43,6 @@ export interface ResumableStreamDeclaration<ResumeDescriptor = unknown, Checkpoi
     readonly resumeDescriptor: ResumeDescriptor;
     readonly acknowledgedCheckpoint: Checkpoint;
   }>;
-  /** Rebuilds the encoded request fields used to restart a handler. */
   readonly rebuild: (options: {
     readonly subscriptionKey: string;
     readonly resumeDescriptor: ResumeDescriptor;
@@ -80,9 +77,7 @@ export const resumableStream = <ResumeDescriptor, Checkpoint>(
  * Configuration for {@link layer}.
  */
 export interface LayerOptions {
-  /** Tag used to select hibernated sockets. */
   readonly tag?: string | undefined;
-  /** Socket attachment namespace used to persist adapter metadata across hibernation. */
   readonly attachmentKey?: string | undefined;
   /**
    * Heartbeat behavior. `"auto-response"` (the default) installs Cloudflare's
@@ -95,24 +90,16 @@ export interface LayerOptions {
    * when RPC and unrelated websocket protocols share one object.
    */
   readonly heartbeat?: HeartbeatPolicy | undefined;
-  /** Explicit stream declarations that may be reconstructed after activation loss. */
   readonly resumableStreams?: ReadonlyArray<AnyResumableStreamDeclaration> | undefined;
 }
 
-/** Native websocket event payload accepted by Cloudflare Durable Objects. */
 export type NativeWebSocketMessage = string | ArrayBuffer;
 
-/**
- * Service API used to wire websocket lifecycle events to Effect RPC server protocol.
- */
 export interface DurableObjectRpcWebSocketService {
-  /** Accepts a new, not-yet-accepted socket with the RPC tag and any application tags. */
+  /** Accept a server socket that has not already been accepted. */
   readonly accept: (socket: DurableWebSocket, tags?: ReadonlyArray<string>) => Effect.Effect<void>;
-  /**
-   * Creates and accepts a websocket upgrade without double-accepting the server
-   * socket. Application attachment fields are shallow-merged with the adapter's
-   * metadata namespace.
-   */
+
+  /** Shallow-merges application attachment fields with the adapter's metadata namespace. */
   readonly acceptUpgrade: <Attachment extends RpcWebSocketAttachment = RpcWebSocketAttachment>(
     options?: AcceptUpgradeOptions<Attachment>,
   ) => Effect.Effect<AcceptedUpgrade<Attachment>, DurableWebSocketAttachmentError>;
@@ -211,9 +198,6 @@ const ResumableAttachmentMetadataSchema = Schema.Struct({
 
 const decodeResumableAttachment = Schema.decodeUnknownOption(ResumableAttachmentMetadataSchema);
 
-/**
- * Context tag for the Durable Object RPC websocket service.
- */
 export class DurableObjectRpcWebSocket extends Context.Service<
   DurableObjectRpcWebSocket,
   DurableObjectRpcWebSocketService

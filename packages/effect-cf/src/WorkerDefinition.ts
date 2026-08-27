@@ -37,7 +37,6 @@ export namespace Method {
       ? [S.Schema.Type<Head>, ...ArgsFromSchemas<Tail>]
       : Array<S.Schema.Type<Args[number]>>;
 
-  /** Method schemas cross the wire through their canonical JSON codec. */
   type EncodedArgsFromSchemas<Args extends ReadonlyArray<ServiceFreeSchema>> = {
     [Index in keyof Args]: S.Json;
   };
@@ -236,19 +235,6 @@ export const method: {
   }): Method<Args, Success>;
 } = RpcDefinition.method;
 
-/**
- * Creates a typed worker RPC definition plus helpers for implementation and bindings.
- *
- * @example
- * ```ts
- * const CounterWorker = WorkerDefinition.make("CounterWorker", {
- *   increment: WorkerDefinition.method({
- *     args: [Schema.Number],
- *     success: Schema.Number,
- *   }),
- * });
- * ```
- */
 const makeDefinition = <Id extends string, const MethodDefinitions extends Methods>(
   id: Id,
   methods: MethodDefinitions & NoReservedMethods<MethodDefinitions>,

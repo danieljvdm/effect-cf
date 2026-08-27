@@ -10,18 +10,14 @@ const TypeId = "~effect-cf/D1" as const;
 export type TypeId = typeof TypeId;
 const expectedD1Database = "D1 database binding with prepare(), batch(), and exec()";
 
-/** Typed D1 binding definition. */
 export interface D1Definition {
-  /** Binding name as configured in `wrangler.jsonc`. */
   readonly binding: string;
 }
 
-/** Options forwarded to `@effect/sql-d1` when building a SQL client layer. */
 export type D1SqlLayerOptions = Omit<D1Client.D1ClientConfig, "db">;
 
 declare const D1ServiceTypeId: unique symbol;
 
-/** Nominal service marker for D1 services created with {@link make}. */
 export interface D1Service<Id extends string> {
   readonly [D1ServiceTypeId]: {
     readonly id: Id;
@@ -36,27 +32,9 @@ const isD1Database = <Candidate>(value: Candidate): value is Candidate & D1Datab
   Predicate.hasProperty(value, "exec") &&
   Predicate.isFunction(value.exec);
 
-/**
- * Creates a typed D1 service tag plus Effect helpers.
- */
 export const make = <Id extends string>(id: Id, definition: D1Definition) =>
   Service<D1Service<Id>>()(id, definition);
 
-/**
- * Builds a D1 service around a Cloudflare D1 database binding.
- *
- * The returned service exposes the raw `D1Database` binding and `sqlLayer(...)`
- * for providing `effect/unstable/sql` via `@effect/sql-d1`.
- *
- * @example
- * ```ts
- * class TodoDatabase extends D1.Service<TodoDatabase>()("TodoDatabase", {
- *   binding: "TODO_DB",
- * }) {}
- *
- * const SqlLive = TodoDatabase.sqlLayer();
- * ```
- */
 export const Service =
   <Self>() =>
   <Id extends string>(id: Id, definition: D1Definition) => {

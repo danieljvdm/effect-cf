@@ -42,11 +42,8 @@ import { Data, Effect, Option, Predicate, Result, Schema as S } from "effect";
  * `Record<string, unknown>` side of `request.cf`.
  */
 export class InboundTransport extends S.Class<InboundTransport>("InboundTransport")({
-  /** The HTTP protocol the client used, e.g. `"HTTP/2"` or `"HTTP/3"`. */
   httpProtocol: S.String,
-  /** Client round-trip time; only present for QUIC (HTTP/3) connections. */
   clientQuicRtt: S.optional(S.Number),
-  /** Client round-trip time; only present for TCP (HTTP/1.x, HTTP/2) connections. */
   clientTcpRtt: S.optional(S.Number),
 }) {}
 
@@ -63,18 +60,9 @@ export const inboundTransport = (
   request: Pick<CloudflareRequest, "cf">,
 ): Option.Option<InboundTransport> => Result.getSuccess(decodeInboundTransport(request.cf));
 
-/**
- * Returns `true` when the client reached Cloudflare's edge over QUIC
- * (HTTP/3). Prefers the documented QUIC signal (`clientQuicRtt` is only
- * present for QUIC connections) and falls back to the `httpProtocol` string.
- *
- * Note this describes the browser→edge hop only: the edge always terminates
- * QUIC, and the Worker still handles an ordinary `fetch` Request.
- */
 export const isHttp3 = (transport: InboundTransport): boolean =>
   transport.clientQuicRtt !== undefined || transport.httpProtocol === "HTTP/3";
 
-/** WebTransport-related capabilities of the current Workers runtime. */
 export interface Capabilities {
   /**
    * Whether Worker code can accept inbound WebTransport sessions. Typed as
@@ -91,7 +79,6 @@ export interface Capabilities {
   readonly outboundSessions: boolean;
 }
 
-/** Feature-detects the WebTransport capabilities of the current runtime. */
 export const capabilities: Effect.Effect<Capabilities> = Effect.sync(() => {
   const runtime = globalThis;
 
@@ -103,10 +90,8 @@ export const capabilities: Effect.Effect<Capabilities> = Effect.sync(() => {
   };
 });
 
-/** WebTransport capability missing from the current Workers runtime. */
 export type WebTransportCapability = "inbound-sessions" | "outbound-sessions";
 
-/** Raised when a WebTransport capability is unavailable in this runtime. */
 export class WebTransportUnsupportedError extends Data.TaggedError("WebTransportUnsupportedError")<{
   readonly capability: WebTransportCapability;
 }> {

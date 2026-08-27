@@ -26,7 +26,6 @@ export const makeEntrypointRuntime = <ROut, LayerError, Services>(
   return ManagedRuntime.make(provideEntrypointServices(layer, entrypointServices));
 };
 
-/** Runs an event effect whose requirements are already available in the runtime. */
 export function runEventPromise<A, E, R, LayerError>(
   runtime: ManagedRuntime.ManagedRuntime<R, LayerError>,
   effect: Effect.Effect<A, E, NoInfer<R> | Scope.Scope>,

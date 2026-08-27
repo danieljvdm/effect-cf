@@ -65,7 +65,6 @@ export const AnalyticsEngineDataPointSchema = S.Struct({
 const decodeQueryResponse = S.decodeUnknownEffect(queryResponseSchema);
 const decodeDataPoint = S.decodeUnknownEffect(AnalyticsEngineDataPointSchema);
 
-/** Error raised when an Analytics Engine operation fails. */
 export class AnalyticsEngineOperationError extends Data.TaggedError(
   "AnalyticsEngineOperationError",
 )<{
@@ -85,7 +84,6 @@ export interface AnalyticsEngineWriteViolation {
   readonly actual?: number;
 }
 
-/** Error raised when an Analytics Engine write input violates Cloudflare limits. */
 export class AnalyticsEngineWriteValidationError extends Data.TaggedError(
   "AnalyticsEngineWriteValidationError",
 )<{
@@ -99,7 +97,6 @@ export class AnalyticsEngineWriteValidationError extends Data.TaggedError(
   }
 }
 
-/** Error raised when an Analytics Engine SQL API query fails. */
 export class AnalyticsEngineQueryError extends Data.TaggedError("AnalyticsEngineQueryError")<{
   readonly operation: string;
   readonly accountId: string;
@@ -109,9 +106,7 @@ export class AnalyticsEngineQueryError extends Data.TaggedError("AnalyticsEngine
   readonly cause?: unknown;
 }> {}
 
-/** Typed Analytics Engine dataset binding definition. */
 export interface AnalyticsEngineDefinition {
-  /** Binding name as configured in `wrangler.jsonc`. */
   readonly binding: string;
 }
 
@@ -142,11 +137,9 @@ export interface AnalyticsEngineQueryResult<Row = AnalyticsEngineQueryRow> {
 }
 
 export interface AnalyticsEngineQueryDefinition {
-  /** Cloudflare account id that owns the Analytics Engine datasets. */
   readonly accountId: string;
   /** API token with Account Analytics Read permission. */
   readonly apiToken: Redacted.Redacted<string>;
-  /** Base Cloudflare API URL. Defaults to `https://api.cloudflare.com/client/v4`. */
   readonly apiBaseUrl?: string | URL;
 }
 
@@ -202,14 +195,12 @@ export interface AnalyticsEngineQueryClient {
 declare const AnalyticsEngineServiceTypeId: unique symbol;
 declare const AnalyticsEngineQueryServiceTypeId: unique symbol;
 
-/** Nominal service marker for Analytics Engine services created with {@link make}. */
 export interface AnalyticsEngineService<Id extends string> {
   readonly [AnalyticsEngineServiceTypeId]: {
     readonly id: Id;
   };
 }
 
-/** Nominal service marker for Analytics Engine query services created with {@link makeQuery}. */
 export interface AnalyticsEngineQueryService<Id extends string> {
   readonly [AnalyticsEngineQueryServiceTypeId]: {
     readonly id: Id;

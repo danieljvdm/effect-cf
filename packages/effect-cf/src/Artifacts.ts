@@ -18,7 +18,6 @@ const expectedArtifactsBinding =
 const expectedArtifactsRepo =
   "Artifacts repo handle with createToken(), listTokens(), revokeToken(), fork(), log(), readCommit(), and readTree()";
 
-/** Artifacts operation represented by {@link ArtifactsOperationError}. */
 export type ArtifactsOperation =
   | "createClient"
   | "create"
@@ -37,7 +36,6 @@ export type ArtifactsOperation =
   | "readTree"
   | "cli";
 
-/** Documented string error codes returned by Cloudflare Artifacts. */
 export const artifactsErrorCodes = [
   "ALREADY_EXISTS",
   "NOT_FOUND",
@@ -53,7 +51,6 @@ export const artifactsErrorCodes = [
   "INTERNAL_ERROR",
 ] as const satisfies ReadonlyArray<CloudflareArtifactsErrorCode>;
 
-/** Documented numeric error codes returned by Cloudflare Artifacts. */
 export const artifactsErrorNumericCodes = {
   ALREADY_EXISTS: 10201,
   NOT_FOUND: 10200,
@@ -69,17 +66,13 @@ export const artifactsErrorNumericCodes = {
   INTERNAL_ERROR: 10400,
 } as const satisfies Readonly<Record<CloudflareArtifactsErrorCode, number>>;
 
-/** A documented Cloudflare Artifacts string error code. */
 export type ArtifactsErrorCode = CloudflareArtifactsErrorCode;
 
-/** Error raised when a Cloudflare Artifacts operation fails. */
 export class ArtifactsOperationError extends Data.TaggedError("ArtifactsOperationError")<{
   readonly binding: string;
   readonly operation: ArtifactsOperation;
   readonly cause: unknown;
-  /** Cloudflare string error code, when retained by the runtime. */
   readonly code?: ArtifactsErrorCode | (string & {});
-  /** Cloudflare REST-compatible numeric error code, when retained by the runtime. */
   readonly numericCode?: number;
 }> {
   override get message(): string {
@@ -89,16 +82,12 @@ export class ArtifactsOperationError extends Data.TaggedError("ArtifactsOperatio
   }
 }
 
-/** Typed Cloudflare Artifacts binding definition. */
 export interface ArtifactsDefinition {
-  /** Binding name from an `artifacts` entry in `wrangler.jsonc`. */
   readonly binding: string;
 }
 
-/** Repository name containing alphanumeric characters, dots, hyphens, or underscores. */
 export type RepoName = string;
 
-/** Cursor used by repository list pagination. */
 export type Cursor = string;
 
 /** Scope granted to a repository token. */
@@ -107,21 +96,16 @@ export type ArtifactsTokenScope = "read" | "write";
 /** Lifecycle state of a repository token. */
 export type ArtifactsTokenState = "active" | "expired" | "revoked";
 
-/** Lifecycle state included with repositories returned by `list()`. */
 export type ArtifactsRepoStatus = "ready" | "importing" | "forking";
 
-/** Stable repository metadata returned by Cloudflare Artifacts. */
 export type ArtifactsRepoInfo = CloudflareArtifactsRepoInfo;
 
-/** Result of creating, importing, or forking a repository. */
 export type ArtifactsCreateRepoResult = Readonly<CloudflareArtifactsCreateRepoResult>;
 
-/** Repository metadata returned by `list()`. */
 export interface ArtifactsRepoListEntry extends ArtifactsRepoInfo {
   readonly status: ArtifactsRepoStatus;
 }
 
-/** Cursor-paginated repository list result. */
 export interface ArtifactsRepoListResult {
   readonly repos: ReadonlyArray<ArtifactsRepoListEntry>;
   readonly total: number;
@@ -151,13 +135,10 @@ export interface ArtifactsCommit {
   readonly author: ArtifactsCommitIdentity;
   readonly committer: ArtifactsCommitIdentity;
   readonly parents: ReadonlyArray<string>;
-  /** Unix timestamp in seconds. */
   readonly authoredAt: number;
-  /** Unix timestamp in seconds. */
   readonly committedAt: number;
 }
 
-/** Bare commit array returned by `log()`. */
 export type ArtifactsLogResult = ReadonlyArray<ArtifactsCommit>;
 
 /**
@@ -170,20 +151,14 @@ export interface ArtifactsTree<Field = unknown> {
   readonly [field: string]: Field;
 }
 
-/** Options for `Artifacts.create()`. */
 export interface ArtifactsCreateOptions {
-  /** Prevent pushes to the repository. */
   readonly readOnly?: boolean;
   readonly description?: string;
-  /** Initial default branch name. */
   readonly setDefaultBranch?: string;
 }
 
-/** Options for cursor-paginating `Artifacts.list()`. */
 export interface ArtifactsListOptions {
-  /** Page size from 1 through 200. Defaults to 50. */
   readonly limit?: number;
-  /** Cursor returned by a previous list result. */
   readonly cursor?: Cursor;
 }
 
@@ -191,47 +166,37 @@ export interface ArtifactsListOptions {
 export interface ArtifactsImportSource {
   /** Full HTTPS URL of the Git repository. */
   readonly url: string;
-  /** Source branch. Defaults to the remote's default branch. */
   readonly branch?: string;
-  /** Shallow clone depth. */
   readonly depth?: number;
 }
 
-/** Options for the target of `Artifacts.import()`. */
 export interface ArtifactsImportTargetOptions {
   readonly description?: string;
   readonly readOnly?: boolean;
 }
 
-/** Target repository used by `Artifacts.import()`. */
 export interface ArtifactsImportTarget {
   readonly name: RepoName;
   readonly opts?: ArtifactsImportTargetOptions;
 }
 
-/** Parameters for `Artifacts.import()`. */
 export interface ArtifactsImportParams {
   readonly source: ArtifactsImportSource;
   readonly target: ArtifactsImportTarget;
 }
 
-/** Options for `ArtifactsRepoClient.fork()`. */
 export interface ArtifactsForkOptions {
   readonly description?: string;
   readonly readOnly?: boolean;
-  /** Only copy the default branch. Defaults to `true`. */
   readonly defaultBranchOnly?: boolean;
 }
 
-/** Options for `ArtifactsRepoClient.log()`. */
 export interface ArtifactsLogOptions {
-  /** Branch, tag, or commit hash. */
   readonly ref?: string;
   readonly limit?: number;
   readonly offset?: number;
 }
 
-/** Runtime repository handle, including methods absent from current shipped Workers types. */
 export interface ArtifactsRepoBinding extends Partial<ArtifactsRepoInfo> {
   /**
    * Read repository metadata.
@@ -262,7 +227,6 @@ export interface ArtifactsRepoBinding extends Partial<ArtifactsRepoInfo> {
   readonly readTree: (hash: string) => Promise<ArtifactsTree>;
 }
 
-/** Cloudflare Artifacts namespace binding. */
 export interface ArtifactsBinding {
   readonly create: (
     name: RepoName,
@@ -274,14 +238,7 @@ export interface ArtifactsBinding {
   readonly delete: (name: RepoName) => Promise<boolean>;
 }
 
-/**
- * Effect wrapper around a repository handle returned by `Artifacts.get()`.
- *
- * The inherited metadata is the snapshot read while resolving the client.
- * Use `info()` to refresh it from the repository handle.
- */
 export interface ArtifactsRepoClient extends ArtifactsRepoInfo {
-  /** Read and validate the repository's current metadata. */
   readonly info: () => Effect.Effect<ArtifactsRepoInfo, ArtifactsOperationError>;
   /**
    * Create a Git token for the repository.
@@ -307,7 +264,6 @@ export interface ArtifactsRepoClient extends ArtifactsRepoInfo {
   readonly raw: ArtifactsRepoBinding;
 }
 
-/** Effect wrapper around a Cloudflare Artifacts namespace binding. */
 export interface ArtifactsClient {
   readonly create: (
     name: RepoName,
@@ -327,7 +283,6 @@ export interface ArtifactsClient {
 
 declare const ArtifactsServiceTypeId: unique symbol;
 
-/** Nominal service marker for Artifacts services created with {@link make}. */
 export interface ArtifactsService<Id extends string> {
   readonly [ArtifactsServiceTypeId]: {
     readonly id: Id;
@@ -440,7 +395,6 @@ const readRepoInfo = (
   );
 };
 
-/** Tests whether a value exposes the complete documented Artifacts repo handle API. */
 export const isArtifactsRepoBinding = <Candidate>(
   value: Candidate,
 ): value is Candidate & ArtifactsRepoBinding =>
@@ -452,7 +406,6 @@ export const isArtifactsRepoBinding = <Candidate>(
   hasFunction(value, "readCommit") &&
   hasFunction(value, "readTree");
 
-/** Tests whether a value exposes the complete documented Artifacts namespace API. */
 export const isArtifactsBinding = <Candidate>(
   value: Candidate,
 ): value is Candidate & ArtifactsBinding =>

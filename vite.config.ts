@@ -40,7 +40,7 @@ const recommendedOxlintConfig = {
     { name: "effect", specifier: new URL("./oxlint/plugin-effect.js", import.meta.url).pathname },
     { name: "stylistic", specifier: new URL("./oxlint/plugin-style.js", import.meta.url).pathname },
   ],
-  plugins: ["import", "react", "vitest"],
+  plugins: ["import", "vitest"],
   rules: {
     "anti-slop/no-chained-type-assertions": "error",
     "anti-slop/no-conditional-empty-object-spread": "error",
@@ -63,8 +63,6 @@ const recommendedOxlintConfig = {
     "import/no-cycle": "error",
     "import/no-duplicates": ["error", { preferInline: true }],
     "import/no-self-import": "error",
-    "react/exhaustive-deps": "error",
-    "react/rules-of-hooks": "error",
     "stylistic/padding-line-between-statements": [
       "error",
       { blankLine: "always", prev: ["const", "let", "var"], next: "*" },
@@ -110,39 +108,6 @@ const testExcludes = [
   ".worktrees/**",
 ];
 
-// Every workspace package exposes a pure `typecheck` script backed by the
-// Effect-patched TypeScript-Go compiler.
-const typecheckPackages = [
-  "packages/effect-cf",
-  "packages/effect-webtransport",
-  "examples/chat/durable-objects/chat-room",
-  "examples/chat/packages/contracts",
-  "examples/chat/web",
-  "examples/chat/workers/analytics",
-  "examples/chat/workers/api",
-  "examples/queue-workflow/workers/app",
-  "examples/todo-http/packages/domain",
-  "examples/todo-http/web",
-  "examples/todo-http/workers/api",
-  "examples/todo-rpc-http/packages/domain",
-  "examples/todo-rpc-http/web",
-  "examples/todo-rpc-http/workers/api",
-  "examples/todo-rpc-ws/durable-objects/todo-store",
-  "examples/todo-rpc-ws/packages/domain",
-  "examples/todo-rpc-ws/web",
-  "examples/todo-rpc-ws/workers/api",
-  "examples/todos/packages/domain",
-  "examples/todos/web",
-  "examples/todos/workers/api",
-  "examples/todos/workers/web",
-];
-
-const typecheckCommand = [
-  "vp run --cache --concurrency-limit 4",
-  ...typecheckPackages.map((packageDir) => `--filter './${packageDir}'`),
-  "--fail-if-no-match typecheck",
-].join(" ");
-
 const recommended = {
   staged: {
     "*": "vp check --fix",
@@ -157,7 +122,10 @@ const recommended = {
     tasks: {
       check: ["vp fmt --check", "vp lint", "vp test", "vp run typecheck"],
       typecheck: {
-        command: ["vp exec tsc --noEmit -p scripts/tsconfig.json", typecheckCommand],
+        command: [
+          "vp exec tsc --noEmit -p scripts/tsconfig.json",
+          "vp run --cache --filter './packages/*' --filter './examples/*' --fail-if-no-match typecheck",
+        ],
         cache: false,
       },
     },

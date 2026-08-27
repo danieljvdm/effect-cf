@@ -6,6 +6,7 @@ import * as WorkerEntrypoint from "./Worker";
 import type { WorkerRpcHandler } from "./Worker";
 import type * as Rpc from "./Rpc";
 import * as RpcDefinition from "./RpcDefinition";
+import { recordDecodedArgs } from "./internal/RpcInvocation";
 import * as ServiceBinding from "./ServiceBinding";
 
 /**
@@ -152,6 +153,7 @@ export type Options<
 
 export type LayerOptions = {
   readonly binding: string;
+  readonly rpcTracing?: boolean;
 };
 
 export type TagClass<
@@ -400,6 +402,9 @@ const wrapHandlers = <ROut, const Self extends Definition.Any>(
     wrapped[key] = (...args: Array<unknown>) =>
       Effect.gen(function* () {
         const decodedArgs = yield* RpcDefinition.decodeArgs(definition, key, args);
+
+        yield* recordDecodedArgs(decodedArgs);
+
         const value = yield* handler(...decodedArgs);
 
         return yield* RpcDefinition.encodeSuccess(definition, key, value);

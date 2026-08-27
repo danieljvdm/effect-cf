@@ -26,6 +26,8 @@ import {
 } from "../src/index";
 import { withComputerWorkspace } from "../src/ComputerWorkspaceHost";
 
+export { TestTracingDurableObject, TestTracingWorker } from "./rpc-tracing-fixture";
+
 export const TestWorkerDefinition = WorkerDefinition.make("TestWorker", {
   parseNumber: WorkerDefinition.method({
     args: [S.NumberFromString] as const,

@@ -1,5 +1,5 @@
 import { DurableObject as CloudflareDurableObject } from "cloudflare:workers";
-import { Effect, Layer, type ManagedRuntime, type Scope } from "effect";
+import { Effect, Layer, type ManagedRuntime, type Scope, Tracer } from "effect";
 
 import { NativeRequest } from "./Worker";
 import { WorkerEnvironment, type WorkerEnv } from "./Environment";
@@ -8,6 +8,7 @@ import { fromWebSocket, type DurableWebSocket } from "./DurableObjectWebSocket";
 import * as Entrypoint from "./internal/Entrypoint";
 import * as Runtime from "./internal/Runtime";
 import * as Telemetry from "./internal/Telemetry";
+import type { ReceiverOptions, RpcInvocationInfo } from "./RpcTracing";
 
 const reservedMethodNames = new Set<string>([
   "constructor",
@@ -24,11 +25,21 @@ type RuntimeContext<ROut> = DurableObjectState | WorkerEnvironment | ROut;
 type HandlerContext<ROut> = RuntimeContext<ROut> | Scope.Scope;
 
 type FetchContext<ROut> = HandlerContext<ROut> | NativeRequest;
-type RunOptions = {
+/** Metadata available before an event effect or its event layer starts. */
+export interface RunOptions {
   readonly eventLayer?: boolean;
-};
+  readonly event?:
+    | "fetch"
+    | "rpc"
+    | "alarm"
+    | "webSocketMessage"
+    | "webSocketClose"
+    | "webSocketError";
+  readonly rpc?: RpcInvocationInfo;
+}
 
-const RunSymbol = Symbol.for("effect-cf/DurableObject/run");
+/** Override to instrument the whole event, then call super[RunSymbol]. */
+export const RunSymbol = Symbol.for("effect-cf/DurableObject/run");
 
 const scheduleTelemetryFlush: Effect.Effect<void, never, DurableObjectState> =
   Telemetry.scheduleTelemetryFlush((flush) =>
@@ -110,6 +121,8 @@ export interface DurableObjectOptions<
    * does not.
    */
   readonly rpc?: Rpc;
+  /** Accept live native trace metadata. The client must also enable rpcTracing. */
+  readonly rpcTracing?: ReceiverOptions;
   readonly fetch?: Effect.Effect<Response, unknown, FetchContext<RRuntime | REvent>>;
 
   readonly alarms?: Effect.Effect<unknown, unknown, HandlerContext<RRuntime | REvent>>;
@@ -146,7 +159,13 @@ export interface DurableObjectOptions<
 export type DurableObjectClass<Rpc extends DurableObjectRpc<ROut>, ROut> = new (
   state: globalThis.DurableObjectState,
   env: WorkerEnv,
-) => CloudflareDurableObject<WorkerEnv> & DurableObjectRpcApi<Rpc, ROut>;
+) => CloudflareDurableObject<WorkerEnv> &
+  DurableObjectRpcApi<Rpc, ROut> & {
+    [RunSymbol]<A, E>(
+      effect: Effect.Effect<A, E, HandlerContext<ROut>>,
+      options?: RunOptions,
+    ): Promise<A>;
+  };
 
 export const make = <
   ROut,
@@ -182,6 +201,8 @@ export const make = <
       runOptions: RunOptions = {},
     ): Promise<A> {
       const eventLayer = runOptions.eventLayer === false ? undefined : options.eventLayer;
+      const parent = runOptions.rpc?.parent;
+      const parentSpan = parent === undefined ? undefined : Tracer.externalSpan(parent);
 
       if (eventLayer === undefined) {
         // SAFETY: event-layer bypass is used only for initialize; otherwise an absent layer means REvent is never.
@@ -189,6 +210,8 @@ export const make = <
           this.runtime,
           // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off
           effect as Effect.Effect<A, E, HandlerContext<ROut>>,
+          undefined,
+          parentSpan,
         );
       }
 
@@ -199,7 +222,7 @@ export const make = <
         REvent,
         EventLayerError,
         LayerError
-      >(this.runtime, effect, eventLayer);
+      >(this.runtime, effect, eventLayer, parentSpan);
     }
 
     fetch(request: Request): Promise<Response> {
@@ -209,7 +232,9 @@ export const make = <
         return Promise.resolve(new Response("Not Found", { status: 404 }));
       }
 
-      return this[RunSymbol](Effect.provideService(fetchHandler, NativeRequest, request));
+      return this[RunSymbol](Effect.provideService(fetchHandler, NativeRequest, request), {
+        event: "fetch",
+      });
     }
 
     alarm(alarmInfo?: globalThis.AlarmInvocationInfo): Promise<void> | void {
@@ -224,13 +249,17 @@ export const make = <
           : (logicalAlarms ?? rawAlarm);
 
       if (alarmEffect !== undefined) {
-        return this[RunSymbol](alarmEffect.pipe(Effect.onExit(() => scheduleTelemetryFlush)));
+        return this[RunSymbol](alarmEffect.pipe(Effect.onExit(() => scheduleTelemetryFlush)), {
+          event: "alarm",
+        });
       }
     }
 
     webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> | void {
       if (options.webSocketMessage !== undefined) {
-        return this[RunSymbol](options.webSocketMessage(fromWebSocket(socket), message));
+        return this[RunSymbol](options.webSocketMessage(fromWebSocket(socket), message), {
+          event: "webSocketMessage",
+        });
       }
     }
 
@@ -243,13 +272,16 @@ export const make = <
       if (options.webSocketClose !== undefined) {
         return this[RunSymbol](
           options.webSocketClose(fromWebSocket(socket), code, reason, wasClean),
+          { event: "webSocketClose" },
         );
       }
     }
 
     webSocketError(socket: WebSocket, cause: unknown): Promise<void> | void {
       if (options.webSocketError !== undefined) {
-        return this[RunSymbol](options.webSocketError(fromWebSocket(socket), cause));
+        return this[RunSymbol](options.webSocketError(fromWebSocket(socket), cause), {
+          event: "webSocketError",
+        });
       }
     }
   }
@@ -259,8 +291,9 @@ export const make = <
     EffectDurableObject.prototype,
     options.rpc,
     reservedMethodNames,
-    (self, effect) => self[RunSymbol](effect),
+    (self, effect, rpc) => self[RunSymbol](effect, { event: "rpc", rpc }),
     () => scheduleTelemetryFlush,
+    options.rpcTracing,
   );
 
   return Entrypoint.assumeEntrypointClass<DurableObjectClass<Rpc, ROut | REvent>>(

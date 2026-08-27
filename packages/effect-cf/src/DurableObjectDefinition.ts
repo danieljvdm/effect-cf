@@ -7,6 +7,7 @@ import * as DurableObjectNamespace from "./DurableObjectNamespace";
 import type { DurableObjectState } from "./DurableObjectState";
 import type * as Rpc from "./Rpc";
 import * as RpcDefinition from "./RpcDefinition";
+import { recordDecodedArgs } from "./internal/RpcInvocation";
 import type { WorkerEnvironment } from "./Environment";
 
 type ErasedInvoke<E> = (...args: ReadonlyArray<unknown>) => Effect.Effect<unknown, E>;
@@ -136,6 +137,7 @@ export interface Options<
 
 export type LayerOptions = {
   readonly binding: string;
+  readonly rpcTracing?: boolean;
 };
 
 export type TagClass<
@@ -304,7 +306,7 @@ export const Tag =
       return yield* namespace.fetch(stub, input, init);
     });
 
-    const rpc = Effect.fn("DurableObject.rpc")(function* <MethodName extends keyof ClientApi>(
+    const rpc = Effect.fnUntraced(function* <MethodName extends keyof ClientApi>(
       stub: DurableObjectNamespace.DurableObjectStubClient<ClientApi>,
       methodName: MethodName,
       ...args: ClientApi[MethodName] extends (...args: infer Args) => Promise<any> ? Args : never
@@ -318,7 +320,7 @@ export const Tag =
       return yield* invokeRpc(stub, methodName, ...args);
     });
 
-    const call = Effect.fn("DurableObject.call")(function* <MethodName extends keyof ClientApi>(
+    const call = Effect.fnUntraced(function* <MethodName extends keyof ClientApi>(
       stub: DurableObjectNamespace.DurableObjectStubClient<ClientApi>,
       methodName: MethodName,
       ...args: ClientApi[MethodName] extends (...args: infer Args) => Promise<any> ? Args : never
@@ -333,9 +335,7 @@ export const Tag =
       return yield* invokeCall(stub, methodName, ...args);
     });
 
-    const scopedCall = Effect.fn("DurableObject.scopedCall")(function* <
-      MethodName extends keyof ClientApi,
-    >(
+    const scopedCall = Effect.fnUntraced(function* <MethodName extends keyof ClientApi>(
       stub: DurableObjectNamespace.DurableObjectStubClient<ClientApi>,
       methodName: MethodName,
       ...args: ClientApi[MethodName] extends (...args: infer Args) => Promise<any> ? Args : never
@@ -410,6 +410,9 @@ const wrapHandlers = <ROut, const Self extends Definition.Any>(
     wrapped[key] = (...args: Array<unknown>) =>
       Effect.gen(function* () {
         const decodedArgs = yield* RpcDefinition.decodeArgs(definition, key, args);
+
+        yield* recordDecodedArgs(decodedArgs);
+
         const value = yield* handler(...decodedArgs);
 
         return yield* RpcDefinition.encodeSuccess(definition, key, value);

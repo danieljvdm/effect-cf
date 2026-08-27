@@ -1,8 +1,25 @@
-import { Effect, Predicate, Schema } from "effect";
+import { Context, Effect, Option, Predicate, Schema } from "effect";
 
 import type * as CloudflareRpc from "../Rpc";
+import type { RpcInvocationInfo } from "../RpcTracing";
 
 type AnyArgs = Array<any>;
+
+interface Invocation extends RpcInvocationInfo {
+  decodedArgs?: ReadonlyArray<unknown>;
+}
+
+/** Scoped to the incoming event effect, never the instance runtime or storage. */
+export class CurrentInvocation extends Context.Service<CurrentInvocation, Invocation>()(
+  "effect-cf/internal/RpcInvocation",
+) {}
+
+export const recordDecodedArgs = (args: ReadonlyArray<unknown>): Effect.Effect<void> =>
+  Effect.map(Effect.serviceOption(CurrentInvocation), (invocation) => {
+    if (Option.isSome(invocation)) {
+      invocation.value.decodedArgs = args;
+    }
+  });
 
 export type AsyncMethodKey<Api> = {
   [Key in keyof Api]-?: Key extends string

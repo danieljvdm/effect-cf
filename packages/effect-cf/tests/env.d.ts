@@ -9,6 +9,7 @@ declare global {
       TEST_COUNTER_DO?: DurableObjectNamespace<TestWorkerModule.TestCounterDurableObject>;
       TEST_COMPUTER_DO?: DurableObjectNamespace<TestWorkerModule.TestComputerWorkspaceDurableObject>;
       TEST_HIBERNATION_RPC_DO?: DurableObjectNamespace<TestWorkerModule.TestHibernationRpcDurableObject>;
+      TRACE_OBJECTS?: DurableObjectNamespace<TestWorkerModule.TestTracingDurableObject>;
       TEST_KV?: KVNamespace;
       TEST_DB?: D1Database;
       TEST_SECRET?: SecretsStoreSecret;
@@ -40,6 +41,7 @@ declare global {
       durableNamespaces:
         | "TestComputerWorkspaceDurableObject"
         | "TestCounterDurableObject"
+        | "TestTracingDurableObject"
         | "TestHibernationRpcDurableObject";
     }
   }

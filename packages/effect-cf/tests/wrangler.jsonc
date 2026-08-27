@@ -46,6 +46,10 @@
         "name": "TEST_HIBERNATION_RPC_DO",
         "class_name": "TestHibernationRpcDurableObject",
       },
+      {
+        "name": "TRACE_OBJECTS",
+        "class_name": "TestTracingDurableObject",
+      },
     ],
   },
   "migrations": [
@@ -55,6 +59,7 @@
         "TestCounterDurableObject",
         "TestComputerWorkspaceDurableObject",
         "TestHibernationRpcDurableObject",
+        "TestTracingDurableObject",
       ],
     },
   ],

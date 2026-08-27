@@ -6,6 +6,7 @@ import * as RpcDefinition from "./RpcDefinition";
 import type * as WorkerDefinition from "./WorkerDefinition";
 import * as ErrorMessage from "./internal/ErrorMessage";
 import * as RpcInvocation from "./internal/RpcInvocation";
+import * as RpcTracing from "./RpcTracing";
 
 const TypeId = "effect-cf/ServiceBinding" as const;
 const expectedServiceBinding = "Worker service binding with fetch()";
@@ -43,6 +44,8 @@ export interface ServiceBindingDefinition<
 > {
   readonly binding: string;
   readonly definition?: Definition;
+  /** Append live trace context only when the receiver also enables rpcTracing. */
+  readonly rpcTracing?: boolean;
 }
 
 /**
@@ -220,10 +223,10 @@ export const makeClient = <
       });
     });
 
-    const rpc = Effect.fn("ServiceBinding.rpc")(function* <Method extends ServiceMethodKey<Api>>(
+    const rpc = Effect.fnUntraced(function* <Method extends ServiceMethodKey<Api>>(
       method: Method,
       ...args: ServiceMethodArgs<Api, Method>
-    ) {
+    ): Effect.fn.Return<ServiceMethodCloudflareReturn<Api, Method>, ServiceBindingRpcError> {
       const methodName = String(method);
       // SAFETY: definition-backed clients derive Method and Args from this exact RPC definition.
       const encodedArgs =
@@ -244,11 +247,15 @@ export const makeClient = <
               ),
             );
 
-      // SAFETY: encoding preserves the selected API method's positional argument contract.
+      const nativeArgs = definition.rpcTracing
+        ? yield* RpcTracing.withRpcTraceContext(encodedArgs)
+        : encodedArgs;
+
+      // SAFETY: domain arguments retain their encoded order; an opted-in receiver strips only valid trace metadata.
       return yield* RpcInvocation.invokeRpcMethod(
         service,
         method,
-        encodedArgs as ServiceMethodArgs<Api, Method>,
+        nativeArgs as ServiceMethodArgs<Api, Method>,
         (cause) =>
           new ServiceBindingRpcError({
             binding: definition.binding,
@@ -261,7 +268,7 @@ export const makeClient = <
     const decodeSuccess = Effect.fnUntraced(function* <Method extends ServiceMethodKey<Api>>(
       methodName: string,
       value: Awaited<ServiceMethodCloudflareReturn<Api, Method>>,
-    ) {
+    ): Effect.fn.Return<ServiceMethodSuccess<Api, Method>, ServiceBindingRpcError> {
       if (definition.definition === undefined) {
         // SAFETY: without a definition the resolved native RPC value is the API method's declared success.
         return value as ServiceMethodSuccess<Api, Method>;
@@ -287,43 +294,52 @@ export const makeClient = <
       return decoded as ServiceMethodSuccess<Api, Method>;
     });
 
-    const call = Effect.fn("ServiceBinding.call")(function* <Method extends ServiceMethodKey<Api>>(
-      method: Method,
-      ...args: ServiceMethodArgs<Api, Method>
-    ) {
-      const methodName = String(method);
-      const value = yield* CloudflareRpc.resolve(yield* rpc(method, ...args)).pipe(
-        Effect.mapError(
-          (cause) =>
-            new ServiceBindingRpcError({
-              binding: definition.binding,
-              method: methodName,
-              cause,
-            }),
-        ),
-      );
+    const call = Effect.fnUntraced(
+      function* <Method extends ServiceMethodKey<Api>>(
+        method: Method,
+        ...args: ServiceMethodArgs<Api, Method>
+      ): Effect.fn.Return<ServiceMethodSuccess<Api, Method>, ServiceBindingRpcError> {
+        const methodName = String(method);
+        const value = yield* CloudflareRpc.resolve(yield* rpc(method, ...args)).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ServiceBindingRpcError({
+                binding: definition.binding,
+                method: methodName,
+                cause,
+              }),
+          ),
+        );
 
-      return yield* decodeSuccess<Method>(methodName, value);
-    });
+        return yield* decodeSuccess<Method>(methodName, value);
+      },
+      (effect, ...args) =>
+        RpcTracing.withRpcClientSpan(effect, definition.binding, String(args[0])),
+    );
 
-    const scopedCall = Effect.fn("ServiceBinding.scopedCall")(function* <
-      Method extends ServiceMethodKey<Api>,
-    >(method: Method, ...args: ServiceMethodArgs<Api, Method>) {
-      const methodName = String(method);
-      const result = yield* rpc(method, ...args);
-      const value = yield* CloudflareRpc.scoped(result).pipe(
-        Effect.mapError(
-          (cause) =>
-            new ServiceBindingRpcError({
-              binding: definition.binding,
-              method: methodName,
-              cause,
-            }),
-        ),
-      );
+    const scopedCall = Effect.fnUntraced(
+      function* <Method extends ServiceMethodKey<Api>>(
+        method: Method,
+        ...args: ServiceMethodArgs<Api, Method>
+      ): Effect.fn.Return<ServiceMethodSuccess<Api, Method>, ServiceBindingRpcError, Scope.Scope> {
+        const methodName = String(method);
+        const result = yield* rpc(method, ...args);
+        const value = yield* CloudflareRpc.scoped(result).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ServiceBindingRpcError({
+                binding: definition.binding,
+                method: methodName,
+                cause,
+              }),
+          ),
+        );
 
-      return yield* decodeSuccess<Method>(methodName, value);
-    });
+        return yield* decodeSuccess<Method>(methodName, value);
+      },
+      (effect, ...args) =>
+        RpcTracing.withRpcClientSpan(effect, definition.binding, String(args[0])),
+    );
 
     const directMethods = makeDirectMethods<never, Api, Definition>(definition.definition, call);
 

@@ -7,6 +7,7 @@ import {
   type ManagedRuntime,
   References,
   type Scope,
+  Tracer,
 } from "effect";
 import {
   HttpEffect,
@@ -18,6 +19,7 @@ import {
 import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 import { fromMessage, fromMessageBatch, type QueueHandler } from "./Queue";
 import * as RpcDefinition from "./RpcDefinition";
+import type { ReceiverOptions, RpcInvocationInfo } from "./RpcTracing";
 import * as Entrypoint from "./internal/Entrypoint";
 import * as Runtime from "./internal/Runtime";
 import * as Telemetry from "./internal/Telemetry";
@@ -97,8 +99,15 @@ type WorkerFetchContext<ROut> =
 type WorkerRpcContext<ROut> = WorkerBaseContext<ROut> | Scope.Scope;
 
 type RuntimeContext<ROut> = WorkerBaseContext<ROut>;
-const RunSymbol = Symbol.for("effect-cf/Worker/run");
+/** Override to instrument the whole event, then call super[RunSymbol]. */
+export const RunSymbol = Symbol.for("effect-cf/Worker/run");
 const FetchSymbol = Symbol.for("effect-cf/Worker/fetch");
+
+/** Metadata available before an event effect or its event layer starts. */
+export interface RunOptions {
+  readonly event?: "fetch" | "rpc" | "queue";
+  readonly rpc?: RpcInvocationInfo;
+}
 
 export type WorkerFetchSuccess = Response | HttpServerResponse.HttpServerResponse;
 
@@ -176,6 +185,8 @@ export interface WorkerOptions<
    * flush silently settles within two seconds even if the exporter does not.
    */
   readonly rpc?: Rpc;
+  /** Accept live native trace metadata. The client must also enable rpcTracing. */
+  readonly rpcTracing?: ReceiverOptions;
 }
 
 type WorkerOptionsWithEventLayer<
@@ -210,6 +221,10 @@ export type WorkerClass<Rpc extends WorkerRpc<ROut>, ROut> = new (
 ) => CloudflareWorkerEntrypoint<WorkerEnv> & {
   fetch(request: Request): Promise<Response>;
   queue(batch: globalThis.MessageBatch): Promise<void>;
+  [RunSymbol]<A, E>(
+    effect: Effect.Effect<A, E, WorkerRpcContext<ROut>>,
+    options?: RunOptions,
+  ): Promise<A>;
   [FetchSymbol](request: Request, requestContext: globalThis.ExecutionContext): Promise<Response>;
 } & WorkerRpcContract<Rpc, ROut>;
 
@@ -390,15 +405,22 @@ export function make<
 
     [RunSymbol]<A, E>(
       effect: Effect.Effect<A, E, RuntimeContext<ROut> | REvent | Scope.Scope>,
+      runOptions: RunOptions = {},
     ): Promise<A> {
-      const eventLayer = options.eventLayer;
+      // Fetch builds its event layer in the HTTP scope transferred to the body.
+      const eventLayer = runOptions.event === "fetch" ? undefined : options.eventLayer;
+      const parent = runOptions.rpc?.parent;
+      const parentSpan = parent === undefined ? undefined : Tracer.externalSpan(parent);
 
       if (eventLayer === undefined) {
-        // SAFETY: the public make overloads permit an absent event layer only when REvent is never.
+        // SAFETY: fetch provides REvent inside its HTTP middleware; otherwise the
+        // public make overloads permit an absent event layer only when REvent is never.
         return Runtime.runEventPromise(
           this.runtime,
           // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off
           effect as Effect.Effect<A, E, RuntimeContext<ROut> | Scope.Scope>,
+          undefined,
+          parentSpan,
         );
       }
 
@@ -409,7 +431,7 @@ export function make<
         REvent,
         EventLayerError,
         LayerError
-      >(this.runtime, effect, eventLayer);
+      >(this.runtime, effect, eventLayer, parentSpan);
     }
 
     fetch(request: Request): Promise<Response> {
@@ -439,11 +461,11 @@ export function make<
       // HttpEffect owns the inner scope and transfers it to streaming response bodies.
       // SAFETY: requestServices and the middleware-built eventLayer provide every
       // fetch-only context removed from the runtime effect below.
-      return Runtime.runEventPromise(
-        this.runtime,
+      return this[RunSymbol](
         renderFetchSuccess(fetchHandler, options.eventLayer).pipe(
           Effect.provide(requestServices),
         ) as Effect.Effect<Response, unknown, RuntimeContext<ROut> | Scope.Scope>,
+        { event: "fetch" },
       );
     }
 
@@ -460,6 +482,7 @@ export function make<
         queueHandler(fromMessageBatch(batch, messages)).pipe(
           Effect.onExit(() => scheduleTelemetryFlush),
         ),
+        { event: "queue" },
       );
     }
   }
@@ -469,8 +492,9 @@ export function make<
     EffectWorker.prototype,
     options.rpc,
     reservedMethodNames,
-    (self, effect) => self[RunSymbol](effect),
+    (self, effect, rpc) => self[RunSymbol](effect, { event: "rpc", rpc }),
     () => scheduleTelemetryFlush,
+    options.rpcTracing,
   );
 
   return Entrypoint.assumeEntrypointClass<WorkerClass<Rpc, ROut | REvent>>(EffectWorker);

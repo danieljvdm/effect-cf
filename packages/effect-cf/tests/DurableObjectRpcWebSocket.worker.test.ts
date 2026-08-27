@@ -46,6 +46,12 @@ const RpcClientAttachment = Schema.Struct({
 
 const readRpcClientAttachment = Schema.decodeUnknownSync(RpcClientAttachment);
 
+const PendingFlagAttachment = Schema.Struct({
+  effectCloudflareRpcClientId: Schema.Struct({ hasPendingRequests: Schema.Boolean }),
+});
+
+const isPendingFlagAttachment = Schema.is(PendingFlagAttachment);
+
 test("a declared RPC stream resumes on the original client stream after hibernation", async () => {
   const namespace = env.TEST_HIBERNATION_RPC_DO;
 
@@ -438,14 +444,32 @@ test("a hibernated in-flight finite RPC is reset without replay", async () => {
   client.accept();
   client.send(request("lost-request", "never", "HibernationNever"));
 
-  const pending = await runInDurableObject(stub, async (_instance, state) => {
-    const neverStarts = await state.storage.get<number>("hibernation-never-starts");
+  const readPendingSnapshot = () =>
+    runInDurableObject(stub, async (_instance, state) => {
+      const neverStarts = await state.storage.get<number>("hibernation-never-starts");
 
-    return {
-      attachments: state.getWebSockets().map((socket) => socket.deserializeAttachment()),
-      neverStarts,
-    };
-  });
+      return {
+        attachments: state.getWebSockets().map((socket) => socket.deserializeAttachment()),
+        neverStarts,
+      };
+    });
+  const hasRegisteredPendingRequest = (
+    snapshot: Awaited<ReturnType<typeof readPendingSnapshot>>,
+  ) =>
+    snapshot.neverStarts === 1 &&
+    snapshot.attachments.length === 1 &&
+    isPendingFlagAttachment(snapshot.attachments[0]) &&
+    snapshot.attachments[0].effectCloudflareRpcClientId.hasPendingRequests;
+
+  // The websocket message is delivered to the Durable Object asynchronously,
+  // so poll until the handler has started and the in-flight RPC is recorded in
+  // the socket attachment.
+  let pending = await readPendingSnapshot();
+
+  for (let attempt = 0; attempt < 100 && !hasRegisteredPendingRequest(pending); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    pending = await readPendingSnapshot();
+  }
 
   expect(pending.attachments).toMatchObject([
     {

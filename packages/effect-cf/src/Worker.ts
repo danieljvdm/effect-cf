@@ -459,12 +459,8 @@ export function make<
       // The request services wrap eventLayer construction so cached object handlers
       // never build an event layer against a previous request's ExecutionContext.
       // HttpEffect owns the inner scope and transfers it to streaming response bodies.
-      // SAFETY: requestServices and the middleware-built eventLayer provide every
-      // fetch-only context removed from the runtime effect below.
       return this[RunSymbol](
-        renderFetchSuccess(fetchHandler, options.eventLayer).pipe(
-          Effect.provide(requestServices),
-        ) as Effect.Effect<Response, unknown, RuntimeContext<ROut> | Scope.Scope>,
+        renderFetchSuccess(fetchHandler, options.eventLayer).pipe(Effect.provide(requestServices)),
         { event: "fetch" },
       );
     }

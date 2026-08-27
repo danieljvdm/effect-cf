@@ -200,7 +200,7 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
           ),
           fetch: (status === 200
             ? Effect.succeed(new Response("ok"))
-            : Effect.fail(new Error("expected handler failure"))
+            : Effect.fail("expected handler failure")
           ).pipe(Effect.withSpan("test.fetch", { attributes: { route: "/" } })),
         });
 

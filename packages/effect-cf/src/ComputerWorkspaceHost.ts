@@ -47,7 +47,6 @@ export type {
   WorkspaceSpan,
 };
 
-/** The value of a `worker_loaders` binding. */
 export type DynamicWorkerLoader = WorkerShellLoader;
 
 /** Default author and committer identity for workspace Git operations. */
@@ -75,21 +74,14 @@ export interface ComputerWorkspaceShellOptions extends Omit<
   "source" | "loader" | "workspace" | "ctx" | "egress"
 > {
   readonly loader: DynamicWorkerLoader;
-  /** Durable Object namespace binding that points back to the wrapped class. */
   readonly hostBinding: string;
-  /** Current Durable Object id, normally `ctx.id.toString()`. */
   readonly hostId: string;
-  /** Current Durable Object execution context, normally `ctx`. */
   readonly executionContext: unknown;
-  /** Dynamic Worker egress policy. Defaults to `{ mode: "none" }`. */
   readonly egress?: WorkspaceEgressPolicy;
 }
 
-/** Configuration accepted by {@link withComputerWorkspace}. */
 export interface ComputerWorkspaceHostConfig {
-  /** Native SQLite-backed Durable Object storage (`ctx.storage`). */
   readonly storage: globalThis.DurableObjectStorage | DurableObjectStorageLike;
-  /** Stable workspace id used by mounts and as the default Artifacts session. */
   readonly sessionId?: string;
   readonly gitIdentity?: ComputerWorkspaceGitIdentity;
   /** Override the default `createGitClient()` factory. */

@@ -1,6 +1,5 @@
 import { Config, ConfigProvider, Context, Effect, type Layer, Predicate } from "effect";
 
-/** Cloudflare worker environment object (`env`). */
 export type WorkerEnv = Cloudflare.Env;
 
 /**
@@ -23,38 +22,9 @@ type ScalarConfigKey = Extract<
   string
 >;
 
-/**
- * Effect `Config` helpers for scalar Cloudflare vars and secrets declared on
- * `Cloudflare.Env`.
- *
- * Users still author their app config explicitly with Effect `Config`:
- *
- * ```ts
- * import { Config, Effect } from "effect";
- * import { WorkerConfig } from "effect-cf";
- *
- * const AppConfig = Config.all({
- *   databaseUrl: WorkerConfig.redacted("DATABASE_URL"),
- *   port: WorkerConfig.integer("PORT").pipe(Config.withDefault(8787)),
- * });
- *
- * const program = Effect.gen(function* () {
- *   const config = yield* AppConfig;
- *   // ...
- * }).pipe(Effect.provide(WorkerConfig.providerLayer));
- * ```
- *
- * Keys are constrained to scalar `Cloudflare.Env` properties (`string`,
- * `number`, or `boolean`, including optional scalar properties). Binding
- * objects such as `KVNamespace`, `DurableObjectNamespace`, and service
- * bindings are intentionally excluded; keep using the package binding helpers
- * for those live resources.
- */
 export namespace WorkerConfig {
-  /** Scalar env value types supported by the typed config key helpers. */
   export type Scalar = ScalarConfigValue;
 
-  /** Scalar keys available on the current consumer's `Cloudflare.Env`. */
   export type Key = ScalarConfigKey;
 
   /** Read a scalar Cloudflare var or secret as a string. */
@@ -72,7 +42,6 @@ export namespace WorkerConfig {
   /** Read a scalar Cloudflare var or secret as a boolean. */
   export const boolean = <const Name extends Key>(name: Name) => Config.boolean(name);
 
-  /** Options for building a `ConfigProvider` from a Cloudflare worker `env` object. */
   export interface ProviderOptions {
     /**
      * Keep empty-string env values as explicit `""` config values.
@@ -104,14 +73,9 @@ export namespace WorkerConfig {
     return ConfigProvider.fromEnvRecord(record, options);
   };
 
-  /**
-   * Build a `ConfigProvider` from the current `WorkerEnvironment` with a custom
-   * conversion function.
-   */
   export const providerWith = (makeProvider: (env: WorkerEnv) => ConfigProvider.ConfigProvider) =>
     Effect.map(WorkerEnvironment, makeProvider);
 
-  /** Build a `ConfigProvider` from the current `WorkerEnvironment`. */
   export const provider = providerWith(providerFromEnv);
 
   /**
@@ -121,7 +85,6 @@ export namespace WorkerConfig {
   export const providerLayer: Layer.Layer<never, never, WorkerEnvironment> =
     ConfigProvider.layer(provider);
 
-  /** Build a `ConfigProvider` layer with a custom `env` conversion function. */
   export const layerWith = (
     makeProvider: (env: WorkerEnv) => ConfigProvider.ConfigProvider,
   ): Layer.Layer<never, never, WorkerEnvironment> =>

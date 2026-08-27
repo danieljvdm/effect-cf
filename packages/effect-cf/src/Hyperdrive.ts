@@ -5,9 +5,7 @@ import type { WorkerEnvironment } from "./Environment";
 
 const expectedHyperdrive = "Hyperdrive binding with connectionString";
 
-/** Typed Hyperdrive binding definition. */
 export interface HyperdriveDefinition {
-  /** Binding name as configured in `wrangler.jsonc`. */
   readonly binding: string;
 }
 
@@ -19,7 +17,6 @@ export interface HyperdriveClient {
 
 declare const HyperdriveServiceTypeId: unique symbol;
 
-/** Nominal service marker for Hyperdrive services created with {@link make}. */
 export interface HyperdriveService<Id extends string> {
   readonly [HyperdriveServiceTypeId]: {
     readonly id: Id;

@@ -13,17 +13,13 @@ import * as ErrorMessage from "./internal/ErrorMessage";
 const expectedSendEmailBinding = "Send Email binding with send()";
 const textEncoder = new TextEncoder();
 
-/** Documented Cloudflare Email Sending limits. */
 export const sendLimits = {
-  /** Combined `to`, `cc`, and `bcc` addresses per message. */
   maxRecipients: 50,
   maxAttachments: 32,
-  /** Total message size, including attachments. Not enforced client side. */
   maxMessageBytes: 5 * 1024 * 1024,
   maxHeaderNameBytes: 100,
   maxHeaderValueBytes: 2048,
   maxHeadersBytes: 16 * 1024,
-  /** Allowlisted custom headers, excluding `X-` prefixed headers. */
   maxAllowlistHeaders: 20,
 } as const;
 
@@ -58,10 +54,8 @@ export const emailErrorCodes = [
   "E_HEADERS_TOO_MANY",
 ] as const;
 
-/** A documented Cloudflare Email Sending error code. */
 export type EmailErrorCode = (typeof emailErrorCodes)[number];
 
-/** Error raised when a Cloudflare Send Email operation fails. */
 export class EmailOperationError extends Data.TaggedError("EmailOperationError")<{
   readonly binding: string;
   readonly operation: string;
@@ -82,7 +76,6 @@ export class EmailOperationError extends Data.TaggedError("EmailOperationError")
   }
 }
 
-/** A single message field that violates a documented Email Sending limit. */
 export interface EmailViolation {
   readonly path: string;
   readonly message: string;
@@ -90,7 +83,6 @@ export interface EmailViolation {
   readonly actual?: number;
 }
 
-/** Error raised when a message violates documented Cloudflare Email Sending limits. */
 export class EmailValidationError extends Data.TaggedError("EmailValidationError")<{
   readonly binding: string;
   readonly operation: string;
@@ -101,9 +93,7 @@ export class EmailValidationError extends Data.TaggedError("EmailValidationError
   }
 }
 
-/** Typed Cloudflare Send Email binding definition. */
 export interface EmailDefinition {
-  /** Binding name as configured in `wrangler.jsonc`. */
   readonly binding: string;
 }
 
@@ -117,7 +107,6 @@ export type EmailSendError = EmailOperationError | EmailValidationError;
 type EmailFieldCandidate = Parameters<typeof Predicate.isUnknown>[0];
 
 export interface EmailSendOptions {
-  /** Validates builder messages against documented limits. Defaults to `true`. */
   readonly validate?: boolean;
 }
 
@@ -133,7 +122,6 @@ export interface EmailClient {
 
 declare const EmailServiceTypeId: unique symbol;
 
-/** Nominal service marker for Send Email services created with {@link make}. */
 export interface EmailService<Id extends string> {
   readonly [EmailServiceTypeId]: {
     readonly id: Id;

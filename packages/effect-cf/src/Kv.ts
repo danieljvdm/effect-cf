@@ -11,10 +11,8 @@ import * as ErrorMessage from "./internal/ErrorMessage";
 const expectedKvNamespace =
   "KV namespace binding with get(), put(), delete(), getWithMetadata(), and list()";
 
-/** KV operation represented by {@link KvOperationError}. */
 export type KvOperation = "put" | "get" | "getWithMetadata" | "list" | "delete";
 
-/** Error raised when a KV operation fails. */
 export class KvOperationError extends Data.TaggedError("KvOperationError")<{
   readonly binding: string;
   readonly operation: KvOperation;
@@ -25,28 +23,23 @@ export class KvOperationError extends Data.TaggedError("KvOperationError")<{
   }
 }
 
-/** `KVNamespace.put` options. */
 export type KvPutOptions = CloudflareKVNamespacePutOptions;
-/** `KVNamespace.list` options with optional metadata decoding schema. */
 export type KvListOptions<Metadata = unknown> = CloudflareKVNamespaceListOptions & {
   readonly metadataSchema?: S.Codec<Metadata, unknown>;
 };
 
-/** Successful value returned by `getWithMetadata`. */
 export interface KvWithMetadata<Value, Metadata> {
   readonly value: Value;
   readonly metadata: Option.Option<Metadata>;
   readonly cacheStatus: Option.Option<string>;
 }
 
-/** Decoded key entry returned by `list`. */
 export interface KvListKey<Key, Metadata = unknown> {
   readonly name: Key;
   readonly expiration: Option.Option<number>;
   readonly metadata: Option.Option<Metadata>;
 }
 
-/** Decoded result returned by `list`. */
 export interface KvListResult<Key, Metadata = unknown> {
   readonly keys: ReadonlyArray<KvListKey<Key, Metadata>>;
   readonly listComplete: boolean;
@@ -54,15 +47,9 @@ export interface KvListResult<Key, Metadata = unknown> {
   readonly cacheStatus: Option.Option<string>;
 }
 
-/**
- * Typed KV binding definition.
- */
 export interface KvDefinition<Key, Value, EncodedValue> {
-  /** Binding name as configured in `wrangler.jsonc`. */
   readonly binding: string;
-  /** Codec used to encode/decode keys. */
   readonly key: S.Codec<Key, string>;
-  /** Codec used to encode/decode values. */
   readonly value: S.Codec<Value, EncodedValue>;
 }
 
@@ -76,9 +63,7 @@ export interface Definition<
   EncodedValue = unknown,
 > {
   readonly id: Id;
-  /** Codec used to encode/decode keys. */
   readonly key: S.Codec<Key, string>;
-  /** Codec used to encode/decode values. */
   readonly value: S.Codec<Value, EncodedValue>;
 }
 

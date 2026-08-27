@@ -3,10 +3,8 @@ import { Data, Effect, Option, Result, Schema as S } from "effect";
 import { DurableObjectState } from "./DurableObjectState";
 import * as ErrorMessage from "./internal/ErrorMessage";
 
-/** Data supported by Cloudflare websocket `send`. */
 export type DurableWebSocketSendData = string | ArrayBuffer | ArrayBufferView;
 
-/** Error raised when sending on a Durable Object websocket fails. */
 export class DurableWebSocketSendError extends Data.TaggedError("DurableWebSocketSendError")<{
   readonly cause: unknown;
 }> {
@@ -15,7 +13,6 @@ export class DurableWebSocketSendError extends Data.TaggedError("DurableWebSocke
   }
 }
 
-/** Error raised when closing a Durable Object websocket fails. */
 export class DurableWebSocketCloseError extends Data.TaggedError("DurableWebSocketCloseError")<{
   readonly cause: unknown;
 }> {
@@ -36,13 +33,9 @@ export class DurableWebSocketAttachmentError extends Data.TaggedError(
   }
 }
 
-/** Effect-native wrapper around a hibernatable Durable Object websocket. */
 export interface DurableWebSocket<Attachment = unknown> {
-  /** Underlying Cloudflare websocket. */
   readonly raw: WebSocket;
-  /** Sends a message through the socket. */
   send(data: DurableWebSocketSendData): Effect.Effect<void, DurableWebSocketSendError>;
-  /** Closes the socket. */
   close(code?: number, reason?: string): Effect.Effect<void, DurableWebSocketCloseError>;
   /** Serializes hibernation attachment metadata onto the socket. */
   serializeAttachment<A = Attachment>(
@@ -54,7 +47,6 @@ export interface DurableWebSocket<Attachment = unknown> {
 
 const wrappers = new WeakMap<WebSocket, DurableWebSocket<unknown>>();
 
-/** Wraps a native Cloudflare websocket in the Effect-native Durable Object API. */
 export const fromWebSocket = <Attachment = unknown>(
   raw: WebSocket,
 ): DurableWebSocket<Attachment> => {
@@ -94,37 +86,18 @@ export const fromWebSocket = <Attachment = unknown>(
   return socket as DurableWebSocket<Attachment>;
 };
 
-/**
- * Options for accepting an incoming websocket request in a Durable Object.
- */
 export interface AcceptUpgradeOptions<Attachment = unknown> {
-  /** Optional websocket tags for Durable Object hibernation filtering. */
   readonly tags?: ReadonlyArray<string> | undefined;
   /** Optional attachment serialized onto the server socket. */
   readonly attachment?: Attachment | undefined;
 }
 
-/**
- * Result of a websocket upgrade accepted by {@link acceptUpgrade}.
- */
 export interface AcceptedUpgrade<Attachment = unknown> {
   readonly client: WebSocket;
   readonly server: DurableWebSocket<Attachment>;
   readonly response: Response;
 }
 
-/**
- * Accepts a websocket upgrade and registers the server socket on `DurableObjectState`.
- *
- * @example
- * ```ts
- * const response = yield* DurableObjectWebSocket.acceptUpgrade({
- *   tags: ["room:general"],
- * });
- *
- * return response.response;
- * ```
- */
 export const acceptUpgrade = Effect.fn("DurableObjectWebSocket.acceptUpgrade")(function* <
   Attachment = unknown,
 >(
@@ -158,9 +131,7 @@ export const acceptUpgrade = Effect.fn("DurableObjectWebSocket.acceptUpgrade")(f
 export type AttachmentInvalidPolicy = "ignore" | "ignore-and-close" | "fail";
 
 export interface AttachmentRehydrateOptions {
-  /** Optional Durable Object websocket tag filter. */
   readonly tag?: string | undefined;
-  /** Invalid attachment behavior. Defaults to skipping invalid sockets. */
   readonly onInvalid?: AttachmentInvalidPolicy | undefined;
 }
 
@@ -187,7 +158,6 @@ export interface DurableWebSocketAttachment<Attachment, Encoded> {
   readonly schema: S.Codec<Attachment, Encoded, never, never>;
 }
 
-/** Creates typed attachment helpers for accepted and rehydrated sockets. */
 export const attachment = <const AttachmentSchema extends S.Codec<any, any, never, never>>(
   schema: AttachmentSchema,
 ): DurableWebSocketAttachment<
@@ -267,7 +237,6 @@ export interface DurableWebSocketHandlers<R = never, E = unknown> {
   readonly error?: (socket: DurableWebSocket, cause: unknown) => Effect.Effect<void, E, R>;
 }
 
-/** Maps compact websocket lifecycle handler names to `DurableObject.make` options. */
 export const handlers = <R = never, E = unknown>(options: DurableWebSocketHandlers<R, E>) => ({
   webSocketMessage: options.message,
   webSocketClose: options.close,

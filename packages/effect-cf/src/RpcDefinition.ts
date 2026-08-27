@@ -106,7 +106,6 @@ export const encodeWireError = (error: WireValue): WireValue => {
   }
 };
 
-/** Restores package RPC errors from the {@link encodeWireError} envelope. */
 export const decodeWireError = (cause: WireValue): WireValue => {
   if (!(cause instanceof Error)) {
     return cause;
@@ -184,7 +183,6 @@ export namespace Method {
       ? [S.Schema.Type<Head>, ...ArgsFromSchemas<Tail>]
       : Array<S.Schema.Type<Args[number]>>;
 
-  /** Method schemas cross the wire through their canonical JSON codec. */
   type EncodedArgsFromSchemas<Args extends ReadonlyArray<ServiceFreeSchema>> = {
     [Index in keyof Args]: S.Json;
   };

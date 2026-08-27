@@ -2,10 +2,8 @@ import { Clock, Data, Duration, Effect, Exit, Option, Predicate, Schema as S } f
 
 import * as ErrorMessage from "./internal/ErrorMessage";
 
-/** Supported primitive value types for Durable Object SQL APIs. */
 export type SqlStorageValue = globalThis.SqlStorageValue;
 
-/** Error type used when a storage operation throws or rejects. */
 export class StorageOperationError extends Data.TaggedError("StorageOperationError")<{
   readonly operation: string;
   readonly cause: unknown;
@@ -17,9 +15,6 @@ export class StorageOperationError extends Data.TaggedError("StorageOperationErr
 
 type StorageEffect<A> = Effect.Effect<A, StorageOperationError>;
 
-/**
- * Effect wrapper for Cloudflare SQL cursor operations.
- */
 export interface SqlCursor<T extends Record<string, SqlStorageValue>> {
   next(): StorageEffect<{ done?: false; value: T } | { done: true; value?: never }>;
   toArray(): StorageEffect<Array<T>>;
@@ -30,11 +25,7 @@ export interface SqlCursor<T extends Record<string, SqlStorageValue>> {
   readonly rowsWritten: StorageEffect<number>;
 }
 
-/**
- * Effect wrapper for Durable Object SQLite APIs.
- */
 export interface SqlStorage {
-  /** Executes a SQL statement and returns a typed cursor. */
   exec<T extends Record<string, SqlStorageValue>>(
     query: string,
     ...bindings: Array<SqlStorageValue>
@@ -42,9 +33,6 @@ export interface SqlStorage {
   readonly databaseSize: number;
 }
 
-/**
- * Schema pair used by `SyncKvStorage.schema(...)`.
- */
 export interface SyncKvDefinition<Key, Value, EncodedValue> {
   readonly key: S.Codec<Key, string>;
   readonly value: S.Codec<Value, EncodedValue>;
@@ -60,9 +48,6 @@ export interface SchemaBackedSyncKvStorage<Key, Value> {
   list(options?: globalThis.SyncKvListOptions): Effect.Effect<Array<[Key, Value]>, unknown>;
 }
 
-/**
- * Effect wrapper for synchronous KV attached to Durable Object SQLite storage.
- */
 export interface SyncKvStorage {
   get<T = unknown>(key: string): StorageEffect<T | undefined>;
   put<T>(key: string, value: T): StorageEffect<void>;
@@ -99,7 +84,6 @@ export interface DurableObjectTransaction {
     scheduledTime: number | Date,
     options?: globalThis.DurableObjectSetAlarmOptions,
   ): StorageEffect<void>;
-  /** Schedules the alarm after a delay measured by the Effect clock. */
   setAlarmAfter(
     delay: Duration.Input,
     options?: globalThis.DurableObjectSetAlarmOptions,
@@ -107,19 +91,6 @@ export interface DurableObjectTransaction {
   deleteAlarm(options?: globalThis.DurableObjectSetAlarmOptions): StorageEffect<void>;
 }
 
-/**
- * Effect wrapper around Cloudflare Durable Object storage.
- *
- * @example
- * ```ts
- * const program = Effect.gen(function* () {
- *   const state = yield* DurableObjectState;
- *   yield* state.storage.put("counter", 1);
- *   const value = yield* state.storage.get<number>("counter");
- *   return value;
- * });
- * ```
- */
 export interface DurableObjectStorage {
   get<T = unknown>(
     key: string,
@@ -137,7 +108,6 @@ export interface DurableObjectStorage {
     scheduledTime: number | Date,
     options?: globalThis.DurableObjectSetAlarmOptions,
   ): StorageEffect<void>;
-  /** Schedules the alarm after a delay measured by the Effect clock. */
   setAlarmAfter(
     delay: Duration.Input,
     options?: globalThis.DurableObjectSetAlarmOptions,
@@ -161,9 +131,9 @@ export interface DurableObjectStorage {
   ): Effect.Effect<A, E | StorageOperationError, R>;
   /** Flushes pending writes to disk. */
   sync(): StorageEffect<void>;
-  /** SQLite-backed Durable Object storage point-in-time recovery API only. */
+  /** Requires SQLite-backed Durable Object storage. */
   getCurrentBookmark(): StorageEffect<string>;
-  /** SQLite-backed Durable Object storage point-in-time recovery API only. */
+  /** Requires SQLite-backed Durable Object storage. */
   onNextSessionRestoreBookmark(bookmark: string): StorageEffect<string>;
   readonly sql: SqlStorage;
   readonly kv: SyncKvStorage;
@@ -329,9 +299,6 @@ const fromDurableObjectTransaction = (
       tryStoragePromise("transaction.deleteAlarm", () => txn.deleteAlarm(options)),
   }) as DurableObjectTransaction;
 
-/**
- * Wraps native Cloudflare storage APIs as Effect-returning helpers.
- */
 export const fromDurableObjectStorage = (
   storage: globalThis.DurableObjectStorage,
 ): DurableObjectStorage => ({

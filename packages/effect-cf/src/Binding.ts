@@ -2,10 +2,8 @@ import { Context, Data, Effect, Layer, Predicate } from "effect";
 
 import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 
-/** Internal type id marker used by binding helper services. */
 export const TypeId = "~effect-cf/Binding" as const;
 
-/** Internal type id marker used by binding helper services. */
 export type TypeId = typeof TypeId;
 
 /** Error raised when a configured binding does not exist on `env`. */
@@ -171,12 +169,6 @@ const getBinding = <Resource>(
     return resource;
   });
 
-/**
- * Creates a Context tag + layer for reading and validating a Cloudflare binding.
- *
- * The Context key is namespaced as `effect-cf/Binding/<id>`; `id` stays the
- * bare user-supplied identifier.
- */
 export interface BindingService<Self, Id extends string, Service> extends Context.ServiceClass<
   Self,
   `effect-cf/Binding/${Id}`,

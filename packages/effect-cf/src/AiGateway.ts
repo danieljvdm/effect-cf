@@ -8,7 +8,6 @@ import * as ErrorMessage from "./internal/ErrorMessage";
 
 const expectedAiGatewayBinding = "Workers AI binding with gateway()";
 
-/** Error raised when an AI Gateway operation fails. */
 export class AiGatewayOperationError extends Data.TaggedError("AiGatewayOperationError")<{
   readonly binding: string;
   readonly operation: string;
@@ -19,13 +18,9 @@ export class AiGatewayOperationError extends Data.TaggedError("AiGatewayOperatio
   }
 }
 
-/** Typed AI Gateway client definition. */
 export interface AiGatewayDefinition {
-  /** Binding name as configured in `wrangler.jsonc`. */
   readonly binding: string;
-  /** Gateway id/name passed to `env.AI.gateway(id)`. */
   readonly gatewayId: string;
-  /** Optional account id used by the HTTP-only helper. */
   readonly accountId?: string;
 }
 
@@ -104,7 +99,6 @@ export interface AiGatewayClient {
 
 declare const AiGatewayServiceTypeId: unique symbol;
 
-/** Nominal service marker for AI Gateway services created with {@link make}. */
 export interface AiGatewayService<Id extends string> {
   readonly [AiGatewayServiceTypeId]: {
     readonly id: Id;

@@ -1,0 +1,20 @@
+{
+  "name": "counter-example",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vp exec wrangler dev",
+    "build": "vp run effect-cf#build && vp exec wrangler deploy --dry-run --outdir dist",
+    "typecheck": "vp exec tsc --noEmit"
+  },
+  "dependencies": {
+    "effect": "catalog:",
+    "effect-cf": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:",
+    "vite-plus": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

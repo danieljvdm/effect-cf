@@ -1,28 +1,7 @@
 /**
- * OTLP telemetry layers for Cloudflare Workers and Durable Objects.
- *
- * Every layer exposes {@link OtlpExporter.Flusher}, which drains buffered
- * telemetry on demand. Cloudflare isolates can freeze before the periodic
- * export interval fires. Effect-backed Worker fetch handlers, Worker or
- * Durable Object native RPC handlers, and Durable Object alarm handlers
- * schedule this flusher automatically. These automatic flushes are capped at
- * two seconds and silently discard timeouts and failures so telemetry cannot
- * extend or fail the user event, or recursively log through an unhealthy
- * exporter.
- *
- * Other entrypoint lifecycles, including queue handlers, do not flush
- * automatically. Applications can flush explicitly or hand the flush to their
- * `waitUntil` mechanism, and own the timeout and failure policy at that call
- * site:
- *
- * ```ts
- * const flusher = yield* OtlpExporter.Flusher;
- *
- * yield* flusher.flush.pipe(
- *   Effect.timeoutOption("2 seconds"),
- *   Effect.ignoreCause,
- * );
- * ```
+ * Worker fetch/RPC and Durable Object alarm/RPC handlers schedule a best-effort
+ * flusher. It settles within two seconds; queues and other lifecycles must
+ * flush explicitly. Failures are ignored so telemetry cannot fail user events.
  */
 import { ConfigProvider, Effect, Layer, Option } from "effect";
 import type * as Tracer from "effect/Tracer";
@@ -76,32 +55,18 @@ export interface LayerOptions {
   readonly signals?: ReadonlyArray<Signal>;
   /** OTLP payload serialization. Defaults to protobuf. */
   readonly serialization?: Serialization;
-  /** Resource metadata forwarded to Effect's OTLP resource resolver. */
   readonly resource?: ResourceOptions;
-  /**
-   * Explicit headers for every selected signal.
-   *
-   * When omitted, Effect reads `OTEL_EXPORTER_OTLP_HEADERS` and the
-   * signal-specific `OTEL_EXPORTER_OTLP_*_HEADERS` variables.
-   */
   readonly headers?: Headers.Input;
-  /** Exclude log records emitted for spans when exporting logs. */
   readonly loggerExcludeLogSpans?: boolean;
-  /** Merge the OTLP logger with existing loggers instead of replacing them. */
   readonly loggerMergeWithExisting?: boolean;
-  /** Custom trace context lookup used by the Effect OTLP tracer. */
   readonly tracerContext?: <X>(primitive: Tracer.EffectPrimitive<X>, span: Tracer.AnySpan) => X;
 }
 
-/** Resource metadata specific to Cloudflare Workers. */
 export interface WorkerLayerOptions extends LayerOptions {
-  /** Cloudflare Worker name to attach as `cloudflare.worker.name`. */
   readonly workerName?: string;
 }
 
-/** Resource metadata specific to Cloudflare Durable Objects. */
 export interface DurableObjectLayerOptions extends LayerOptions {
-  /** Durable Object class name to attach as `cloudflare.durable_object.class`. */
   readonly className?: string;
   /**
    * Include the Durable Object id as `cloudflare.durable_object.id`.
@@ -154,7 +119,6 @@ const serializationLayer = (serialization: Serialization | undefined) =>
 
 type SignalLayer = ReturnType<typeof OtlpLogger.layerFromConfig>;
 
-/** Merges a non-empty signal layer list; callers handle the empty case. */
 const mergeSignalLayers = (layers: ReadonlyArray<SignalLayer>): SignalLayer => {
   let merged = layers[0]!;
 

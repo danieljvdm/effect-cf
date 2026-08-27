@@ -24,21 +24,8 @@
         "wrangler": "catalog:",
       },
     },
-    "examples/chat/durable-objects/chat-room": {
-      "name": "chat-room-do",
-      "version": "0.0.0",
-      "dependencies": {
-        "@effect-cf/example-contracts": "workspace:*",
-        "effect": "catalog:",
-        "effect-cf": "workspace:*",
-      },
-      "devDependencies": {
-        "@cloudflare/workers-types": "catalog:",
-        "vite-plus": "catalog:",
-      },
-    },
-    "examples/chat/packages/contracts": {
-      "name": "@effect-cf/example-contracts",
+    "examples/counter": {
+      "name": "counter-example",
       "version": "0.0.0",
       "dependencies": {
         "effect": "catalog:",
@@ -47,249 +34,7 @@
       "devDependencies": {
         "@cloudflare/workers-types": "catalog:",
         "vite-plus": "catalog:",
-      },
-    },
-    "examples/chat/web": {
-      "name": "chat-web",
-      "version": "0.0.0",
-      "dependencies": {
-        "@effect-cf/example-contracts": "workspace:*",
-        "react": "^19.2.5",
-        "react-dom": "^19.2.5",
-      },
-      "devDependencies": {
-        "@types/react": "^19.2.14",
-        "@types/react-dom": "^19.2.3",
-        "@vitejs/plugin-react": "^6.0.1",
-        "vite-plus": "catalog:",
-      },
-    },
-    "examples/chat/workers/analytics": {
-      "name": "chat-analytics-worker",
-      "version": "0.0.0",
-      "dependencies": {
-        "@effect-cf/example-contracts": "workspace:*",
-        "effect": "catalog:",
-        "effect-cf": "workspace:*",
-      },
-      "devDependencies": {
-        "@cloudflare/workers-types": "catalog:",
-        "vite-plus": "catalog:",
-      },
-    },
-    "examples/chat/workers/api": {
-      "name": "chat-api-worker",
-      "version": "0.0.0",
-      "dependencies": {
-        "@effect-cf/example-contracts": "workspace:*",
-        "effect": "catalog:",
-        "effect-cf": "workspace:*",
-      },
-      "devDependencies": {
-        "@cloudflare/workers-types": "catalog:",
-        "vite-plus": "catalog:",
-      },
-    },
-    "examples/queue-workflow/workers/app": {
-      "name": "queue-workflow-app",
-      "version": "0.0.0",
-      "dependencies": {
-        "effect": "catalog:",
-        "effect-cf": "workspace:*",
-      },
-      "devDependencies": {
-        "@cloudflare/workers-types": "catalog:",
-        "@effect/vitest": "catalog:",
-        "vite-plus": "catalog:",
-        "vitest": "catalog:",
-      },
-    },
-    "examples/todo-http/packages/domain": {
-      "name": "@effect-cf/todo-http-domain",
-      "version": "0.0.0",
-      "dependencies": {
-        "effect": "catalog:",
-      },
-      "devDependencies": {
-        "@cloudflare/workers-types": "catalog:",
-        "vite-plus": "catalog:",
-      },
-    },
-    "examples/todo-http/web": {
-      "name": "todo-http-web",
-      "version": "0.0.0",
-      "dependencies": {
-        "@effect-cf/todo-http-domain": "workspace:*",
-        "@vitejs/plugin-react": "^6.0.1",
-        "effect": "catalog:",
-        "react": "^19.2.5",
-        "react-dom": "^19.2.5",
-      },
-      "devDependencies": {
-        "@types/react": "^19.2.14",
-        "@types/react-dom": "^19.2.3",
-        "vite-plus": "catalog:",
-      },
-    },
-    "examples/todo-http/workers/api": {
-      "name": "todo-http-api-worker",
-      "version": "0.0.0",
-      "dependencies": {
-        "@effect-cf/todo-http-domain": "workspace:*",
-        "effect": "catalog:",
-        "effect-cf": "workspace:*",
-      },
-      "devDependencies": {
-        "@cloudflare/workers-types": "catalog:",
-        "vite-plus": "catalog:",
-      },
-    },
-    "examples/todo-rpc-http/packages/domain": {
-      "name": "@effect-cf/todo-rpc-http-domain",
-      "version": "0.0.0",
-      "dependencies": {
-        "effect": "catalog:",
-      },
-      "devDependencies": {
-        "@cloudflare/workers-types": "catalog:",
-        "vite-plus": "catalog:",
-      },
-    },
-    "examples/todo-rpc-http/web": {
-      "name": "todo-rpc-http-web",
-      "version": "0.0.0",
-      "dependencies": {
-        "@effect-cf/todo-rpc-http-domain": "workspace:*",
-        "@vitejs/plugin-react": "^6.0.1",
-        "effect": "catalog:",
-        "react": "^19.2.5",
-        "react-dom": "^19.2.5",
-      },
-      "devDependencies": {
-        "@types/react": "^19.2.14",
-        "@types/react-dom": "^19.2.3",
-        "vite-plus": "catalog:",
-      },
-    },
-    "examples/todo-rpc-http/workers/api": {
-      "name": "todo-rpc-http-api-worker",
-      "version": "0.0.0",
-      "dependencies": {
-        "@effect-cf/todo-rpc-http-domain": "workspace:*",
-        "effect": "catalog:",
-        "effect-cf": "workspace:*",
-      },
-      "devDependencies": {
-        "@cloudflare/workers-types": "catalog:",
-        "vite-plus": "catalog:",
-      },
-    },
-    "examples/todo-rpc-ws/durable-objects/todo-store": {
-      "name": "todo-rpc-ws-store-do",
-      "version": "0.0.0",
-      "dependencies": {
-        "@effect-cf/todo-rpc-ws-domain": "workspace:*",
-        "effect": "catalog:",
-        "effect-cf": "workspace:*",
-      },
-      "devDependencies": {
-        "@cloudflare/workers-types": "catalog:",
-        "vite-plus": "catalog:",
-      },
-    },
-    "examples/todo-rpc-ws/packages/domain": {
-      "name": "@effect-cf/todo-rpc-ws-domain",
-      "version": "0.0.0",
-      "dependencies": {
-        "effect": "catalog:",
-        "effect-cf": "workspace:*",
-      },
-      "devDependencies": {
-        "@cloudflare/workers-types": "catalog:",
-        "vite-plus": "catalog:",
-      },
-    },
-    "examples/todo-rpc-ws/web": {
-      "name": "todo-rpc-ws-web",
-      "version": "0.0.0",
-      "dependencies": {
-        "@effect-cf/todo-rpc-ws-domain": "workspace:*",
-        "@vitejs/plugin-react": "^6.0.1",
-        "effect": "catalog:",
-        "effect-webtransport": "workspace:*",
-        "react": "^19.2.5",
-        "react-dom": "^19.2.5",
-      },
-      "devDependencies": {
-        "@types/react": "^19.2.14",
-        "@types/react-dom": "^19.2.3",
-        "vite-plus": "catalog:",
-      },
-    },
-    "examples/todo-rpc-ws/workers/api": {
-      "name": "todo-rpc-ws-api-worker",
-      "version": "0.0.0",
-      "dependencies": {
-        "@effect-cf/todo-rpc-ws-domain": "workspace:*",
-        "effect": "catalog:",
-        "effect-cf": "workspace:*",
-      },
-      "devDependencies": {
-        "@cloudflare/workers-types": "catalog:",
-        "vite-plus": "catalog:",
-      },
-    },
-    "examples/todos/packages/domain": {
-      "name": "@effect-cf/todos-domain",
-      "version": "0.0.0",
-      "dependencies": {
-        "effect": "catalog:",
-      },
-      "devDependencies": {
-        "@cloudflare/workers-types": "catalog:",
-        "vite-plus": "catalog:",
-      },
-    },
-    "examples/todos/web": {
-      "name": "todos-web",
-      "version": "0.0.0",
-      "dependencies": {
-        "@effect-cf/todos-domain": "workspace:*",
-        "@vitejs/plugin-react": "^6.0.1",
-        "effect": "catalog:",
-        "react": "^19.2.5",
-        "react-dom": "^19.2.5",
-      },
-      "devDependencies": {
-        "@types/react": "^19.2.14",
-        "@types/react-dom": "^19.2.3",
-        "vite-plus": "catalog:",
-      },
-    },
-    "examples/todos/workers/api": {
-      "name": "todos-api-worker",
-      "version": "0.0.0",
-      "dependencies": {
-        "@effect-cf/todos-domain": "workspace:*",
-        "effect": "catalog:",
-        "effect-cf": "workspace:*",
-      },
-      "devDependencies": {
-        "@cloudflare/workers-types": "catalog:",
-        "vite-plus": "catalog:",
-      },
-    },
-    "examples/todos/workers/web": {
-      "name": "todos-web-worker",
-      "version": "0.0.0",
-      "dependencies": {
-        "@effect-cf/todos-domain": "workspace:*",
-        "effect": "catalog:",
-        "effect-cf": "workspace:*",
-      },
-      "devDependencies": {
-        "@cloudflare/workers-types": "catalog:",
-        "vite-plus": "catalog:",
+        "wrangler": "catalog:",
       },
     },
     "packages/effect-cf": {
@@ -448,17 +193,7 @@
 
     "@cspotcode/source-map-support": ["@cspotcode/source-map-support@0.8.1", "", { "dependencies": { "@jridgewell/trace-mapping": "0.3.9" } }, "sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw=="],
 
-    "@effect-cf/example-contracts": ["@effect-cf/example-contracts@workspace:examples/chat/packages/contracts"],
-
     "@effect-cf/repo": ["@effect-cf/repo@workspace:tools/effect-cf-repo"],
-
-    "@effect-cf/todo-http-domain": ["@effect-cf/todo-http-domain@workspace:examples/todo-http/packages/domain"],
-
-    "@effect-cf/todo-rpc-http-domain": ["@effect-cf/todo-rpc-http-domain@workspace:examples/todo-rpc-http/packages/domain"],
-
-    "@effect-cf/todo-rpc-ws-domain": ["@effect-cf/todo-rpc-ws-domain@workspace:examples/todo-rpc-ws/packages/domain"],
-
-    "@effect-cf/todos-domain": ["@effect-cf/todos-domain@workspace:examples/todos/packages/domain"],
 
     "@effect/platform-node": ["@effect/platform-node@4.0.0-rc.110", "", { "dependencies": { "@effect/platform-node-shared": "^4.0.0-rc.110", "mime": "^4.1.0", "undici": "^8.7.0" }, "peerDependencies": { "effect": "^4.0.0-rc.110", "redis": ">=5.0.0 <7.0.0" } }, "sha512-poj6VxTc2kRDowUHgjGXAZL2nWHTyGi/18607jK+pV9A9CH/wqZ4NeYj38rij95j5SiZ3U7Y1iOsk2Vfnr4GEw=="],
 
@@ -780,8 +515,6 @@
 
     "@redis/time-series": ["@redis/time-series@6.2.1", "", { "peerDependencies": { "@redis/client": "^6.2.1" } }, "sha512-kiYniph04dJOole+L359B6C9E+jYS2uDP7hca6Onj0xF38ZIpyxARO0Iq0W4ZRn1e8Q6vqW00QFZVSMRA/2Ijw=="],
 
-    "@rolldown/pluginutils": ["@rolldown/pluginutils@1.0.1", "", {}, "sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw=="],
-
     "@sindresorhus/is": ["@sindresorhus/is@7.2.0", "", {}, "sha512-P1Cz1dWaFfR4IR+U13mqqiGsLFf1KbayybWwdd2vfctdV6hDpUkgCY0nKOLLTMSoRd/jJNjtbqzf13K8DCCXQw=="],
 
     "@speed-highlight/core": ["@speed-highlight/core@1.2.17", "", {}, "sha512-Z92FwKpCtfaW1V0jTU/fh3QzYEZN8wDwrzRIBoADCJfn4mJCNcJN/XegifX7BDrQ8/h9Xh/JnbyMchL0FqXrkg=="],
@@ -813,10 +546,6 @@
     "@types/json-schema": ["@types/json-schema@7.0.15", "", {}, "sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA=="],
 
     "@types/node": ["@types/node@25.9.3", "", { "dependencies": { "undici-types": ">=7.24.0 <7.24.7" } }, "sha512-603BddQMv3pUcr4U2dhujk83N2tTDVr/34wII2B6bJy6g+8WD6yUb11jszNs0gdi4PesVWl7ABt8nYMVpnLUcg=="],
-
-    "@types/react": ["@types/react@19.2.17", "", { "dependencies": { "csstype": "^3.2.2" } }, "sha512-MXfmqaVPEVgkBT/aY0aGCkRWWtByiYQXo3xdQ8r5RzuFrPiRn8Gar2tQdXSUQ2GKV3bkXckek89V8wQBY2Q/Aw=="],
-
-    "@types/react-dom": ["@types/react-dom@19.2.3", "", { "peerDependencies": { "@types/react": "^19.2.0" } }, "sha512-jp2L/eY6fn+KgVVQAOqYItbF0VY/YApe5Mz2F0aykSO8gx31bYCZyvSeYxCHKvzHG5eZjc+zyaS5BrBWya2+kQ=="],
 
     "@types/ws": ["@types/ws@8.18.1", "", { "dependencies": { "@types/node": "*" } }, "sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg=="],
 
@@ -861,8 +590,6 @@
     "@typescript/typescript-win32-arm64": ["@typescript/typescript-win32-arm64@7.0.2", "", { "os": "win32", "cpu": "arm64" }, "sha512-Gyl1Vy6OsWesLzmq+EP0Fb7b4Nid5232AvcA2SFcdYreldpNtYFFofPjnt62y9hQy7VTaZp65ICJjuAQRaVcIQ=="],
 
     "@typescript/typescript-win32-x64": ["@typescript/typescript-win32-x64@7.0.2", "", { "os": "win32", "cpu": "x64" }, "sha512-0BQ3HkAHHlKLSp1qRvf3SUhGpGsDuhB/jgFw75guyqbxJqEaS0Cw/VFO8i2nHglJUzQCRtMMR/IBAKE3ETMC4g=="],
-
-    "@vitejs/plugin-react": ["@vitejs/plugin-react@6.0.2", "", { "dependencies": { "@rolldown/pluginutils": "^1.0.0" }, "peerDependencies": { "@rolldown/plugin-babel": "^0.1.7 || ^0.2.0", "babel-plugin-react-compiler": "^1.0.0", "vite": "^8.0.0" }, "optionalPeers": ["@rolldown/plugin-babel", "babel-plugin-react-compiler"] }, "sha512-DlSMqo4WhThw4vB8Mpn0Woe9J+Jfq1geJ61AKW0QEgLzGMNwtIMdxbDUzLxcun8W7NbJO0e2Jg/Nxm3cCSVzzg=="],
 
     "@vitest/browser": ["@vitest/browser@4.1.10", "", { "dependencies": { "@blazediff/core": "1.9.1", "@vitest/mocker": "4.1.10", "@vitest/utils": "4.1.10", "magic-string": "^0.30.21", "pngjs": "^7.0.0", "sirv": "^3.0.2", "tinyrainbow": "^3.1.0", "ws": "^8.19.0" }, "peerDependencies": { "vitest": "4.1.10" } }, "sha512-UDwuWGwXj646CBx/bQHOaJSX7np0I8JL/UKQYa1e4QrVHH8VdWtx8eaOuf8sy0ShwDgR6NjJAsp5eF6vjF6qng=="],
 
@@ -994,14 +721,6 @@
 
     "chardet": ["chardet@2.1.1", "", {}, "sha512-PsezH1rqdV9VvyNhxxOW32/d75r01NY7TQCmOqomRo15ZSOKbpTFVsfjghxo6JloQUCGnH4k1LGu0R4yCLlWQQ=="],
 
-    "chat-analytics-worker": ["chat-analytics-worker@workspace:examples/chat/workers/analytics"],
-
-    "chat-api-worker": ["chat-api-worker@workspace:examples/chat/workers/api"],
-
-    "chat-room-do": ["chat-room-do@workspace:examples/chat/durable-objects/chat-room"],
-
-    "chat-web": ["chat-web@workspace:examples/chat/web"],
-
     "chownr": ["chownr@1.1.4", "", {}, "sha512-jJ0bqzaylmJtVnNgzTeSOs8DPavpbYgEr/b0YL8/2GO3xJEhInFmhKMUnEJQjZumK7KXGFhUy89PrsJWlakBVg=="],
 
     "cjs-module-lexer": ["cjs-module-lexer@1.2.3", "", {}, "sha512-0TNiGstbQmCFwt4akjjBg5pLRTSyj/PkWQ1ZoO2zntmg9yLqSRxwEa4iCfQLGjqhiqBfOJa7W/E8wfGrTDmlZQ=="],
@@ -1014,9 +733,9 @@
 
     "cookie": ["cookie@1.1.1", "", {}, "sha512-ei8Aos7ja0weRpFzJnEA9UHJ/7XQmqglbRwnf2ATjcB9Wq874VKH9kfjjirM6UhU2/E5fFYadylyhFldcqSidQ=="],
 
-    "cross-spawn": ["cross-spawn@7.0.6", "", { "dependencies": { "path-key": "^3.1.0", "shebang-command": "^2.0.0", "which": "^2.0.1" } }, "sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA=="],
+    "counter-example": ["counter-example@workspace:examples/counter"],
 
-    "csstype": ["csstype@3.2.3", "", {}, "sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ=="],
+    "cross-spawn": ["cross-spawn@7.0.6", "", { "dependencies": { "path-key": "^3.1.0", "shebang-command": "^2.0.0", "which": "^2.0.1" } }, "sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA=="],
 
     "dataloader": ["dataloader@1.4.0", "", {}, "sha512-68s5jYdlvasItOJnCuI2Q9s4q98g0pCyL3HrcKJu8KNugUl8ahgmZYg38ysLTgQjjXX3H8CJLkAvWrclWfcalw=="],
 
@@ -1358,8 +1077,6 @@
 
     "queue-microtask": ["queue-microtask@1.2.3", "", {}, "sha512-NuaNSa6flKT5JaSYQzJok04JzTL1CA6aGhv5rfLW3PgqA+M2ChpZQnAC8h8i4ZFkBS8X5RqkDBHA7r4hej3K9A=="],
 
-    "queue-workflow-app": ["queue-workflow-app@workspace:examples/queue-workflow/workers/app"],
-
     "quickjs-emscripten": ["quickjs-emscripten@0.32.0", "", { "dependencies": { "@jitl/quickjs-wasmfile-debug-asyncify": "0.32.0", "@jitl/quickjs-wasmfile-debug-sync": "0.32.0", "@jitl/quickjs-wasmfile-release-asyncify": "0.32.0", "@jitl/quickjs-wasmfile-release-sync": "0.32.0", "quickjs-emscripten-core": "0.32.0" } }, "sha512-So0Sqw869y/S2oE3Nuc0uT3Dhqgvsj8FSrwBdsuTosVsG8ME5/OcudU1GxsrIFdFABgy17GHnTVO9TYV/bLQcA=="],
 
     "quickjs-emscripten-core": ["quickjs-emscripten-core@0.32.0", "", { "dependencies": { "@jitl/quickjs-ffi-types": "0.32.0" } }, "sha512-QFnPfjFey8EqknSrSxe1hZrf1/8z7/6s1QzGOmKo6++02r7QRRX7ZoyNaZh7JuVjWsVW87KnQrbZqnHkOAzUyg=="],
@@ -1367,10 +1084,6 @@
     "rc": ["rc@1.2.8", "", { "dependencies": { "deep-extend": "^0.6.0", "ini": "~1.3.0", "minimist": "^1.2.0", "strip-json-comments": "~2.0.1" }, "bin": { "rc": "./cli.js" } }, "sha512-y3bGgqKj3QBdxLbLkomlohkvsA8gdAiUQlSBJnBhfn+BPxg4bc62d8TcBW15wavDfgexCgccckhcZvywyQYPOw=="],
 
     "re2js": ["re2js@1.4.0", "", {}, "sha512-KTOIcZTSOpOxbu3i0+T6mFQ6tkxXKlTxfcMFs1trQbsMnG84qNq+DjXr8Afu+FEFjvF1NNlldpC7roPyazFI8g=="],
-
-    "react": ["react@19.2.7", "", {}, "sha512-HNe9WslTbXmFK8o8cmwgAeJFSBvt1bPdHCVKtaaV+WlAN36mpT4hcRpwbf3fY56ar2oIXzsBpOAiIRHAdY0OlQ=="],
-
-    "react-dom": ["react-dom@19.2.7", "", { "dependencies": { "scheduler": "^0.27.0" }, "peerDependencies": { "react": "^19.2.7" } }, "sha512-t0BRVXvbiE/o20Hfw669rLbMCDWtYZLvmJigy2f0MxsXF+71pxhR3xOkspmsO8h3ZlNzyibAmtCa3l4lYKk6gQ=="],
 
     "react-is": ["react-is@17.0.2", "", {}, "sha512-w2GsyukL62IJnlaff/nRegPQR94C/XXamvMWmSHRJ4y7Ts/4ocGRmTHvOs8PSE6pB3dWOrD/nueuU5sduBsQ4w=="],
 
@@ -1389,8 +1102,6 @@
     "safe-buffer": ["safe-buffer@5.2.1", "", {}, "sha512-rp3So07KcdmmKbGvgaNxQSJr7bGVSVk5S9Eq1F+ppbRo70+YeaDxkw5Dd8NPN+GD6bjnYm2VuPuCXmpuYvmCXQ=="],
 
     "safer-buffer": ["safer-buffer@2.1.2", "", {}, "sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg=="],
-
-    "scheduler": ["scheduler@0.27.0", "", {}, "sha512-eNv+WrVbKu1f3vbYJT/xtiF5syA5HPIMtf9IgY/nKg0sWqzAUEvqY/xm7OcZc/qafLx/iO9FgOmeSAp4v5ti/Q=="],
 
     "seek-bzip": ["seek-bzip@2.0.0", "", { "dependencies": { "commander": "^6.0.0" }, "bin": { "seek-bunzip": "bin/seek-bunzip", "seek-table": "bin/seek-bzip-table" } }, "sha512-SMguiTnYrhpLdk3PwfzHeotrcwi8bNV4iemL9tx9poR/yeaMYwB9VzR1w7b57DuWpuqR8n6oZboi0hj3AxZxQg=="],
 
@@ -1461,26 +1172,6 @@
     "tinyrainbow": ["tinyrainbow@3.1.0", "", {}, "sha512-Bf+ILmBgretUrdJxzXM0SgXLZ3XfiaUuOj/IKQHuTXip+05Xn+uyEYdVg0kYDipTBcLrCVyUzAPz7QmArb0mmw=="],
 
     "to-regex-range": ["to-regex-range@5.0.1", "", { "dependencies": { "is-number": "^7.0.0" } }, "sha512-65P7iz6X5yEr1cwcgvQxbbIw7Uk3gOy5dIdtZ4rDveLqhrdJP+Li/Hx6tyK0NEb+2GCyneCMJiGqrADCSNk8sQ=="],
-
-    "todo-http-api-worker": ["todo-http-api-worker@workspace:examples/todo-http/workers/api"],
-
-    "todo-http-web": ["todo-http-web@workspace:examples/todo-http/web"],
-
-    "todo-rpc-http-api-worker": ["todo-rpc-http-api-worker@workspace:examples/todo-rpc-http/workers/api"],
-
-    "todo-rpc-http-web": ["todo-rpc-http-web@workspace:examples/todo-rpc-http/web"],
-
-    "todo-rpc-ws-api-worker": ["todo-rpc-ws-api-worker@workspace:examples/todo-rpc-ws/workers/api"],
-
-    "todo-rpc-ws-store-do": ["todo-rpc-ws-store-do@workspace:examples/todo-rpc-ws/durable-objects/todo-store"],
-
-    "todo-rpc-ws-web": ["todo-rpc-ws-web@workspace:examples/todo-rpc-ws/web"],
-
-    "todos-api-worker": ["todos-api-worker@workspace:examples/todos/workers/api"],
-
-    "todos-web": ["todos-web@workspace:examples/todos/web"],
-
-    "todos-web-worker": ["todos-web-worker@workspace:examples/todos/workers/web"],
 
     "token-types": ["token-types@6.1.2", "", { "dependencies": { "@borewit/text-codec": "^0.2.1", "@tokenizer/token": "^0.3.0", "ieee754": "^1.2.1" } }, "sha512-dRXchy+C0IgK8WPC6xvCHFRIWYUbqqdEIKPaKo/AcTUNzwLTK6AH7RjdLWsEZcAN/TBdtfUw3PYEgPr5VPr6ww=="],
 

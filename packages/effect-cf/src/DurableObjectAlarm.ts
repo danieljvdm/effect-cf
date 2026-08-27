@@ -34,13 +34,6 @@ const DEFAULT_PROCESS_DUE_ALARMS_FAILURE_RESCHEDULE_AFTER = "30 seconds" satisfi
 const getScheduledEventId = (input: { readonly id: string; readonly tag: string }) =>
   `effect-cf-alarm:${encodeURIComponent(input.tag)}:${encodeURIComponent(input.id)}`;
 
-/**
- * JSON-serializable alarm payload stored with each scheduled alarm.
- *
- * Payloads are intentionally opaque to `DurableObjectAlarm`. Consumers should use
- * stable `tag` values to route due alarms and then decode the payload for that
- * tag in their own domain layer.
- */
 export type AlarmPayload = S.Json;
 
 interface AlarmRow extends Record<string, SqlStorageValue> {
@@ -107,52 +100,17 @@ export type DurableObjectAlarmError =
   | StorageOperationError
   | StoredAlarmDecodeError;
 
-/**
- * Events handled by `processDueAlarms`.
- *
- * `AlarmDue` represents one durable alarm whose scheduled time is now due. The
- * `tag` is the consumer-owned routing key, while `id` is the stable alarm id
- * within that tag.
- *
- * `scheduledAt` is the logical due-after timestamp from durable storage. It is
- * not expected to match the current Durable Object alarm invocation time,
- * especially during retries. Retries re-scan durable rows with `run_at <= now`
- * and identify logical events by `{ tag, id }`.
- *
- * @example Handling events by tag
- * ```ts
- * yield* durableObjectAlarm.processDueAlarms((event) =>
- *   event.tag === "heartbeat"
- *     ? heartbeatManager.handleAlarmEvent(event).pipe(Effect.asVoid)
- *     : Effect.void
- * );
- * ```
- */
 export const DurableObjectAlarmEvent = S.TaggedUnion({
   AlarmDue: {
     id: S.NonEmptyString,
     payload: S.Json,
+    /** Persisted due time, which can differ from the invocation time during retries. */
     scheduledAt: S.DateTimeUtc,
     tag: S.NonEmptyString,
   },
 });
 export type DurableObjectAlarmEvent = typeof DurableObjectAlarmEvent.Type;
 
-/**
- * Stable reference for a scheduled alarm.
- *
- * The pair of `tag` and `id` is the durable identity. Scheduling another alarm
- * with the same pair replaces the previous alarm, and cancellation uses the
- * same pair.
- *
- * @example Cancel an alarm
- * ```ts
- * yield* durableObjectAlarm.cancelAlarm({
- *   tag: "connection-reconnect-grace",
- *   id: "reconnect-grace-check",
- * });
- * ```
- */
 export type AlarmRef<Tag extends string = string> = {
   readonly id: string;
   readonly tag: Tag;
@@ -168,38 +126,7 @@ const decodeAlarmRef = (input: AlarmRef) =>
     Effect.mapError((cause) => new InvalidAlarmRefError({ cause })),
   );
 
-/**
- * Input for scheduling or replacing an alarm.
- *
- * `runAt` is the absolute first fire time. `repeatEvery` can be any Effect
- * `Duration.Input`, including strings like `"5 seconds"`, numbers interpreted
- * as milliseconds, or `Duration` values.
- *
- * @example One-shot alarm
- * ```ts
- * const now = yield* DateTime.now;
- *
- * yield* durableObjectAlarm.scheduleAlarm({
- *   tag: "connection-reconnect-grace",
- *   id: "reconnect-grace-check",
- *   runAt: DateTime.add(now, { seconds: 15 }),
- *   payload: { reason: "socket-closed" },
- * });
- * ```
- *
- * @example Repeating alarm
- * ```ts
- * const now = yield* DateTime.now;
- *
- * yield* durableObjectAlarm.scheduleAlarm({
- *   tag: "heartbeat",
- *   id: "heartbeat-check",
- *   runAt: DateTime.add(now, { seconds: 5 }),
- *   repeatEvery: "5 seconds",
- *   payload: null,
- * });
- * ```
- */
+/** Reusing `{tag, id}` replaces an alarm. Repeats run after success, never as fixed-cadence catch-up. */
 export type ScheduleAlarmInput<Tag extends string = string> = AlarmRef<Tag> & {
   readonly payload: AlarmPayload;
   readonly repeatEvery?: Duration.Input;
@@ -237,107 +164,26 @@ export type ProcessDueAlarmsFailureAction =
     };
 
 export interface ProcessDueAlarmsOptions<OnFailureR = never, OnFailureE = never> {
-  /** Maximum due rows to load and process in one invocation. Defaults to 100. */
   readonly limit?: number;
-  /**
-   * Failure isolation mode. Defaults to `isolated` so one poison logical alarm
-   * does not block unrelated maintenance work.
-   */
+  /** `isolated` retries only the failed row; `ordered` stops before later rows. */
   readonly mode?: ProcessDueAlarmsMode;
-  /**
-   * Callback for logical handler/decode failures. Return a failure action to
-   * override the global failure behavior for this row.
-   */
   readonly onFailure?: (
     failure: ProcessDueAlarmsFailure,
   ) => Effect.Effect<ProcessDueAlarmsFailureAction | void, OnFailureE, OnFailureR>;
-  /**
-   * Delay before retrying a failed logical row in isolated mode. Defaults to 30
-   * seconds. Ignored by ordered mode unless supplied explicitly.
-   *
-   * Retrying updates only the selected occurrence, so replacements scheduled by
-   * a long-running handler are not clobbered by failure handling.
-   */
   readonly retryFailedAfter?: Duration.Input;
 }
 
-/**
- * Handler invoked for each due alarm before that alarm is acknowledged.
- *
- * If the handler fails, `DurableObjectAlarm` leaves the row due and fails the alarm
- * processing effect. Cloudflare can then retry the Durable Object alarm handler,
- * and the scheduler will find the same logical row again because `run_at` is
- * still less than or equal to the retry time.
- */
 export type ProcessDueAlarmsHandler<R = never, E = never> = (
   event: DurableObjectAlarmEvent,
 ) => Effect.Effect<void, E, R>;
 
-/**
- * Durable alarm scheduler API.
- *
- * This service only owns scheduling semantics. It does not publish, subscribe,
- * or dispatch events to consumers. Durable Object alarm handlers should pass a
- * domain handler to `processDueAlarms`; rows are acknowledged only after that
- * handler succeeds.
- *
- * This service must be the only code path that owns `storage.setAlarm()` inside
- * a Durable Object instance. Cloudflare exposes one platform alarm timestamp per
- * object, so another scheduler in the same object can clobber this service's
- * reconciled alarm timestamp.
- *
- * @example Durable Object alarm handler
- * ```ts
- * const onAlarm = Effect.gen(function* () {
- *   const durableObjectAlarm = yield* DurableObjectAlarm;
- *
- *   yield* durableObjectAlarm.processDueAlarms((event) =>
- *     Effect.gen(function* () {
- *       if (event.tag === "heartbeat") {
- *         yield* heartbeatManager.handleAlarmEvent(event);
- *         return;
- *       }
- *
- *       if (event.tag === "connection-reconnect-grace") {
- *         yield* connectionManager.expireReconnectGracePeriods();
- *       }
- *     })
- *   );
- * });
- * ```
- */
+/** Own `storage.setAlarm()` exclusively: a Durable Object has one platform alarm timestamp. */
 export type AlarmScheduler = {
-  /**
-   * Cancel a scheduled alarm by `{ tag, id }`.
-   *
-   * This is idempotent. Cancelling a missing alarm is a no-op. The underlying
-   * Durable Object alarm is reconciled afterward.
-   */
   readonly cancelAlarm: (
     input: AlarmRef,
   ) => Effect.Effect<void, InvalidAlarmRefError | StorageOperationError>;
 
-  /**
-   * Process due alarms according to `Clock.currentTimeMillis`.
-   *
-   * Each row is acknowledged only after `handle` succeeds. One-shot alarms are
-   * then deleted. Repeating alarms are rescheduled to `acknowledgedAt +
-   * repeatEvery`, which intentionally behaves as delay-after-success rather
-   * than fixed-cadence catch-up. Acknowledgements are conditional on the stored
-   * row still matching the selected occurrence, so a handler that reschedules
-   * the same `{ tag, id }` will not have its replacement clobbered by the old
-   * acknowledgement.
-   *
-   * Processing is ordered by `runAt` and stable alarm id. By default, logical
-   * handler/decode failures are isolated to the failing row: the row is retried
-   * after `retryFailedAfter`, later due rows still run, and the result reports
-   * both handled and failed rows. Use `mode: "ordered"` when a workflow
-   * intentionally requires strict head-of-line blocking.
-   *
-   * Handlers must still be idempotent: Cloudflare alarms are at-least-once, and
-   * if a handler succeeds but the acknowledgement write fails, the logical event
-   * can be delivered again.
-   */
+  /** Acknowledge after handling. Conditional writes preserve handler replacements; alarms are at-least-once. */
   readonly processDueAlarms: <R = never, E = never, OnFailureR = never, OnFailureE = never>(
     handle: ProcessDueAlarmsHandler<R, E>,
     options?: ProcessDueAlarmsOptions<OnFailureR, OnFailureE>,
@@ -347,13 +193,7 @@ export type AlarmScheduler = {
     R | OnFailureR
   >;
 
-  /**
-   * Schedule or replace an alarm by `{ tag, id }`.
-   *
-   * The durable row write and underlying platform alarm reconciliation are run
-   * in one Durable Object storage transaction, so a failed `setAlarm` rolls back
-   * the logical schedule instead of leaving a stored-but-unarmed alarm.
-   */
+  /** A failed platform setAlarm rolls back the logical schedule in the same transaction. */
   readonly scheduleAlarm: (
     input: ScheduleAlarmInput,
   ) => Effect.Effect<
@@ -578,50 +418,6 @@ export const define = <const Definitions extends AlarmDefinitions>(definitions: 
     ),
 });
 
-/**
- * SQLite-backed Durable Object alarm scheduler.
- *
- * `DurableObjectAlarm` stores alarms in the current Durable Object's SQLite storage
- * and keeps the platform alarm set to the earliest pending scheduled alarm. The
- * platform alarm timestamp is only a wake-up hint; logical event identity comes
- * from persisted `{ tag, id }` rows.
- *
- * Retry safety depends on acknowledgement ordering. `processDueAlarms` runs the
- * caller's handler first and only then conditionally deletes or advances the
- * same selected row. By default, handler failures are isolated: the failed row
- * is retried after a delay, later due rows continue, and the platform alarm is
- * reconciled once at the end. Use `mode: "ordered"` for strict workflows where
- * one failed logical alarm should block later due alarms.
- *
- * Provide `DurableObjectAlarm.layer` anywhere `DurableObjectState` is available.
- *
- * @example Providing the service
- * ```ts
- * const program = Effect.gen(function* () {
- *   const durableObjectAlarm = yield* DurableObjectAlarm;
- *   const now = yield* DateTime.now;
- *
- *   yield* durableObjectAlarm.scheduleAlarm({
- *     tag: "heartbeat",
- *     id: "heartbeat-check",
- *     runAt: DateTime.add(now, { seconds: 5 }),
- *     repeatEvery: Duration.seconds(5),
- *     payload: null,
- *   });
- * }).pipe(Effect.provide(DurableObjectAlarm.layer));
- * ```
- *
- * @example Processing due alarms
- * ```ts
- * const handledEvents = yield* durableObjectAlarm.processDueAlarms((event) =>
- *   Effect.gen(function* () {
- *     if (event.tag === "heartbeat") {
- *       yield* heartbeatManager.handleAlarmEvent(event);
- *     }
- *   })
- * );
- * ```
- */
 export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, AlarmScheduler>()(
   "effect-cf/DurableObjectAlarm",
 ) {

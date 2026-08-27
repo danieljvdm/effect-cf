@@ -9,13 +9,9 @@ import { makeWaitUntilScheduler } from "./internal/WorkerContext";
  * Effect-friendly wrapper around Cloudflare `DurableObjectState`.
  */
 export interface DurableObjectStateService {
-  /** Underlying Cloudflare state instance. */
   readonly raw: globalThis.DurableObjectState;
-  /** Durable Object id for the current instance. */
   readonly id: globalThis.DurableObjectId;
-  /** Wrapped storage API. */
   readonly storage: DurableObjectStorage;
-  /** Registers background work with Cloudflare's lifecycle. */
   waitUntil(promise: Promise<unknown>): Effect.Effect<void>;
   /**
    * Runs a background Effect via Cloudflare's `waitUntil` with the caller's
@@ -47,21 +43,13 @@ export interface DurableObjectStateService {
    * documented timeout (currently 30 seconds).
    */
   blockConcurrencyWhileOrReset<A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>;
-  /** Accepts a websocket connection for hibernation-capable Durable Objects. */
   acceptWebSocket(ws: DurableWebSocket, tags?: Array<string>): Effect.Effect<void>;
-  /** Lists active sockets, optionally filtered by tag. */
   getWebSockets(tag?: string): Effect.Effect<Array<DurableWebSocket>>;
-  /** Configures automatic request/response handling for sockets. */
   setWebSocketAutoResponse(pair?: WebSocketRequestResponsePair): Effect.Effect<void>;
-  /** Gets the configured websocket auto-response pair. */
   getWebSocketAutoResponse: Effect.Effect<WebSocketRequestResponsePair | null>;
-  /** Timestamp of the last automatic websocket response for a socket. */
   getWebSocketAutoResponseTimestamp(ws: DurableWebSocket): Effect.Effect<Date | null>;
-  /** Sets the timeout for hibernatable websocket events. */
   setHibernatableWebSocketEventTimeout(timeoutMs?: number): Effect.Effect<void>;
-  /** Gets the timeout for hibernatable websocket events. */
   getHibernatableWebSocketEventTimeout: Effect.Effect<number | null>;
-  /** Reads tags attached to a websocket. */
   getTags(ws: DurableWebSocket): Effect.Effect<Array<string>>;
   /**
    * Forcibly resets the Durable Object. Cloudflare logs an uncaught Error using
@@ -73,17 +61,11 @@ export interface DurableObjectStateService {
   abort(reason?: string, options?: globalThis.DurableObjectAbortOptions): Effect.Effect<void>;
 }
 
-/**
- * Context tag for accessing the current Durable Object state service.
- */
 export class DurableObjectState extends Context.Service<
   DurableObjectState,
   DurableObjectStateService
 >()("effect-cf/DurableObjectState") {}
 
-/**
- * Wraps a native Cloudflare `DurableObjectState` as a {@link DurableObjectStateService}.
- */
 export const fromDurableObjectState = (
   state: globalThis.DurableObjectState,
 ): DurableObjectStateService => {

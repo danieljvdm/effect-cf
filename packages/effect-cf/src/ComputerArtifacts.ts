@@ -35,7 +35,6 @@ export type ComputerArtifactsCliResult = Readonly<CloudflareComputerArtifactsCli
 
 /** Options used when wrapping a session-scoped Artifacts client. */
 export interface ComputerArtifactsClientOptions {
-  /** Binding name attached to errors and tracing spans. Defaults to `ARTIFACTS`. */
   readonly binding?: string;
 }
 
@@ -136,7 +135,6 @@ const spanOptions = (
   operation: Artifacts.ArtifactsOperation,
 ) => ({ attributes: { binding, sessionId, operation } });
 
-/** Wraps an already-created upstream session client. */
 export const fromClient = (
   client: CloudflareComputerArtifactClient,
   options: ComputerArtifactsClientOptions = {},

@@ -33,7 +33,6 @@ export type TypeId = typeof TypeId;
 
 const expectedImagesBinding = "Images binding with info() and input()";
 
-/** Error raised when a Cloudflare Images operation fails. */
 export class ImagesOperationError extends Data.TaggedError("ImagesOperationError")<{
   readonly binding: string;
   readonly operation: string;
@@ -44,9 +43,7 @@ export class ImagesOperationError extends Data.TaggedError("ImagesOperationError
   }
 }
 
-/** Typed Cloudflare Images binding definition. */
 export interface ImagesDefinition {
-  /** Binding name as configured in `wrangler.jsonc`. */
   readonly binding: string;
 }
 
@@ -175,7 +172,6 @@ export interface ImagesClient {
 
 declare const ImagesServiceTypeId: unique symbol;
 
-/** Nominal service marker for Images services created with {@link make}. */
 export interface ImagesService<Id extends string> {
   readonly [ImagesServiceTypeId]: {
     readonly id: Id;
@@ -206,7 +202,6 @@ const makeSteps = (steps: ReadonlyArray<Step>): Steps => ({
   steps,
 });
 
-/** Empty Images transformation pipeline. */
 export const empty: Steps = makeSteps([]);
 
 export const transform: {

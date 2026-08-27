@@ -67,11 +67,8 @@ export interface WorkflowBindingDefinition<
   Payload extends RpcDefinition.ServiceFreeSchema,
   Result extends RpcDefinition.ServiceFreeSchema,
 > {
-  /** Binding name as configured in `wrangler.jsonc`. */
   readonly binding: string;
-  /** Codec used to encode payloads passed to `Workflow.create`. */
   readonly payload: Payload;
-  /** Codec used to decode completed workflow status output. */
   readonly result: Result;
 }
 

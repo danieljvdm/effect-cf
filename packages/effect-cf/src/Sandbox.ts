@@ -77,13 +77,10 @@ export type {
 const expectedSandboxNamespace =
   "Sandbox Durable Object namespace binding with idFromName() and get()";
 
-/** Sandbox namespace binding metadata. */
 export interface SandboxDefinition {
-  /** Binding name as configured in `wrangler.jsonc`. */
   readonly binding: string;
 }
 
-/** Failure raised when invoking a sandbox operation. */
 export class SandboxOperationError extends Data.TaggedError("SandboxOperationError")<{
   readonly binding: string;
   readonly instance: string;
@@ -110,55 +107,42 @@ export interface SandboxNamespaceResource {
   ): globalThis.DurableObjectStub;
 }
 
-/** Result of `writeFile` as reported by the sandbox client. */
 export type WriteFileResult = Awaited<ReturnType<ISandbox["writeFile"]>>;
 
-/** Result of `readFile` as reported by the sandbox client. */
 export type ReadFileResult = Awaited<ReturnType<ISandbox["readFile"]>>;
 
-/** Result of `mkdir` as reported by the sandbox client. */
 export type MkdirResult = Awaited<ReturnType<ISandbox["mkdir"]>>;
 
-/** Result of `deleteFile` as reported by the sandbox client. */
 export type DeleteFileResult = Awaited<ReturnType<ISandbox["deleteFile"]>>;
 
-/** Result of `renameFile` as reported by the sandbox client. */
 export type RenameFileResult = Awaited<ReturnType<ISandbox["renameFile"]>>;
 
-/** Result of `moveFile` as reported by the sandbox client. */
 export type MoveFileResult = Awaited<ReturnType<ISandbox["moveFile"]>>;
 
-/** Result of `listFiles` as reported by the sandbox client. */
 export type ListFilesResult = Awaited<ReturnType<ISandbox["listFiles"]>>;
 
-/** Result of `exists` as reported by the sandbox client. */
 export type FileExistsResult = Awaited<ReturnType<ISandbox["exists"]>>;
 
-/** Text encodings accepted by `readFile`. */
 export type ReadFileEncoding = "utf-8" | "utf8" | "base64";
 
-/** Options accepted by `exposePort`. */
 export interface ExposePortOptions {
   readonly name?: string;
   readonly hostname: string;
   readonly token?: string;
 }
 
-/** Preview URL information returned by `exposePort`. */
 export interface ExposedPort {
   readonly url: string;
   readonly port: number;
   readonly name?: string;
 }
 
-/** Currently forwardable preview URL returned by `getExposedPorts`. */
 export interface ExposedPortStatus {
   readonly url: string;
   readonly port: number;
   readonly status: "active";
 }
 
-/** Structural tunnel API surface exposed by a sandbox client. */
 export interface SandboxTunnelsResource {
   get(port: number, options?: TunnelOptions): Promise<TunnelInfo>;
   list(): Promise<Array<TunnelInfo>>;
@@ -183,7 +167,6 @@ export interface SandboxClientResource extends ISandbox {
   readonly tunnels: SandboxTunnelsResource;
 }
 
-/** Effect-wrapped handle for one process started inside a sandbox. */
 export interface SandboxProcessHandle {
   readonly id: string;
   readonly pid: number;
@@ -213,7 +196,6 @@ export interface SandboxProcessHandle {
   readonly kill: (signal?: number) => Effect.Effect<void, SandboxOperationError>;
 }
 
-/** Effect-wrapped handle for one interactive terminal inside a sandbox. */
 export interface SandboxTerminalHandle {
   readonly id: string;
   readonly rawUnsafe: Effect.Effect<Terminal>;
@@ -238,7 +220,6 @@ export interface SandboxTerminalHandle {
   ) => Effect.Effect<Response, SandboxOperationError>;
 }
 
-/** Effect-wrapped tunnel operations for one sandbox instance. */
 export interface SandboxTunnelsClient {
   readonly get: (
     port: number,
@@ -248,7 +229,6 @@ export interface SandboxTunnelsClient {
   readonly destroy: (portOrInfo: number | TunnelInfo) => Effect.Effect<void, SandboxOperationError>;
 }
 
-/** Effect-wrapped client for one named sandbox instance. */
 export interface SandboxInstanceClient {
   readonly rawUnsafe: Effect.Effect<SandboxClientResource>;
   readonly exec: (
@@ -344,7 +324,6 @@ export interface SandboxInstanceClient {
   readonly destroy: Effect.Effect<void, SandboxOperationError>;
 }
 
-/** Effect client for a Sandbox Durable Object namespace binding. */
 export interface SandboxNamespaceClient<
   Namespace extends SandboxNamespaceResource = SandboxNamespaceResource,
 > {
@@ -616,13 +595,6 @@ const makeTerminalHandle = (
   };
 };
 
-/**
- * Wraps an already-created sandbox client (the value returned by
- * `getSandbox()` from `@cloudflare/sandbox`) into an Effect client.
- *
- * Prefer {@link Tag}/{@link make} with a layer for application code; this
- * entry point exists for advanced composition and testing.
- */
 export const fromSandboxClient = (
   client: SandboxClientResource,
   definition: SandboxDefinition,
@@ -1029,14 +1001,12 @@ export const make = <Id extends string>(id: Id) => Tag<SandboxNamespaceService<I
 
 declare const SandboxNamespaceServiceTypeId: unique symbol;
 
-/** Nominal service marker for Sandbox namespaces created with {@link make}. */
 export interface SandboxNamespaceService<Id extends string> {
   readonly [SandboxNamespaceServiceTypeId]: {
     readonly id: Id;
   };
 }
 
-/** Creates a typed Effect service for a Cloudflare Sandbox namespace. */
 export const Tag =
   <Self, Namespace extends SandboxNamespaceResource = SandboxNamespaceResource>() =>
   <Id extends string>(id: Id) => {

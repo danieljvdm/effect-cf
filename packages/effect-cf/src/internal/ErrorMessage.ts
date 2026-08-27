@@ -18,7 +18,6 @@ export const causeMessage = (cause: unknown): string => {
   }
 };
 
-/** Renders a violation list as a single `path: message; ...` line. */
 export const violationsMessage = (
   violations: ReadonlyArray<{ readonly path: string; readonly message: string }>,
 ): string => violations.map((violation) => `${violation.path}: ${violation.message}`).join("; ");

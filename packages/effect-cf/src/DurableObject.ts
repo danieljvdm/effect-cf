@@ -74,9 +74,6 @@ export type RpcHandlers<ROut, Api> = {
     : never;
 };
 
-/**
- * Options for creating a Durable Object class backed by Effect handlers.
- */
 export interface DurableObjectOptions<
   RRuntime,
   REvent = never,
@@ -113,15 +110,8 @@ export interface DurableObjectOptions<
    * does not.
    */
   readonly rpc?: Rpc;
-  /** Optional fetch handler for HTTP/WebSocket requests. */
   readonly fetch?: Effect.Effect<Response, unknown, FetchContext<RRuntime | REvent>>;
-  /**
-   * Optional logical alarm processing effect.
-   *
-   * This runs before `alarm` and should be built with helpers such as
-   * `DurableObjectAlarm.processDue(...)` so the reusable scheduler stays inside
-   * the Durable Object's single managed runtime boundary.
-   */
+
   readonly alarms?: Effect.Effect<unknown, unknown, HandlerContext<RRuntime | REvent>>;
   /**
    * Optional raw alarm handler.
@@ -158,9 +148,6 @@ export type DurableObjectClass<Rpc extends DurableObjectRpc<ROut>, ROut> = new (
   env: WorkerEnv,
 ) => CloudflareDurableObject<WorkerEnv> & DurableObjectRpcApi<Rpc, ROut>;
 
-/**
- * Creates a Durable Object class backed by a single managed Effect runtime.
- */
 export const make = <
   ROut,
   LayerError,

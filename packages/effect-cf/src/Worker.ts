@@ -10,17 +10,11 @@ import * as Runtime from "./internal/Runtime";
 import * as Telemetry from "./internal/Telemetry";
 import { fromExecutionContext } from "./internal/WorkerContext";
 
-/**
- * Access to Cloudflare's native `ExecutionContext`.
- */
 export class ExecutionContext extends Context.Service<
   ExecutionContext,
   globalThis.ExecutionContext
 >()("effect-cf/ExecutionContext") {}
 
-/**
- * Options for {@link WorkerContextService.waitUntil}.
- */
 export interface WorkerContextWaitUntilOptions<E, R> {
   /**
    * Failure mode for the background effect: `"observe"` (default) logs or
@@ -28,13 +22,9 @@ export interface WorkerContextWaitUntilOptions<E, R> {
    * native `waitUntil` promise.
    */
   readonly mode?: "observe" | "propagate";
-  /** Custom failure handler for the background effect. */
   readonly onFailure?: (cause: Cause.Cause<E>) => Effect.Effect<void, never, R>;
 }
 
-/**
- * Effect wrapper around `ExecutionContext` background APIs.
- */
 export interface WorkerContextService {
   readonly raw: globalThis.ExecutionContext;
   waitUntil<A, E, R, R2 = never>(
@@ -46,36 +36,17 @@ export interface WorkerContextService {
     options?: Omit<WorkerContextWaitUntilOptions<E, R2>, "mode">,
   ): Effect.Effect<void, never, R | R2>;
   readonly passThroughOnException: Effect.Effect<void>;
-  /** Abort the current stateless Worker invocation (`ExecutionContext.abort`). */
   abort(reason?: string): Effect.Effect<void>;
 }
 
-/**
- * Service used inside handlers to schedule background work via `waitUntil`.
- *
- * @example
- * ```ts
- * const handler = Effect.gen(function* () {
- *   const ctx = yield* Worker.WorkerContext;
- *   yield* ctx.waitUntil(Effect.log("flush analytics"));
- *   return new Response("ok");
- * });
- * ```
- */
 export class WorkerContext extends Context.Service<WorkerContext, WorkerContextService>()(
   "effect-cf/WorkerContext",
 ) {}
 
-/**
- * Access to the incoming `Request` currently handled by a worker or Durable Object fetch.
- */
 export class NativeRequest extends Context.Service<NativeRequest, Request>()(
   "effect-cf/NativeRequest",
 ) {}
 
-/**
- * Returns `true` when the request is a websocket upgrade request.
- */
 export const isWebSocketUpgrade = (request: Request): boolean =>
   request.headers.get("Upgrade")?.toLowerCase() === "websocket";
 
@@ -123,11 +94,6 @@ type RuntimeContext<ROut> = WorkerBaseContext<ROut>;
 const RunSymbol = Symbol.for("effect-cf/Worker/run");
 const FetchSymbol = Symbol.for("effect-cf/Worker/fetch");
 
-/**
- * Successful result of a worker fetch handler: either a native `Response`
- * (returned to Cloudflare untouched) or an Effect `HttpServerResponse`
- * (rendered through the Effect HTTP pipeline).
- */
 export type WorkerFetchSuccess = Response | HttpServerResponse.HttpServerResponse;
 
 /**
@@ -173,9 +139,6 @@ export type RpcHandlers<ROut, Api> = {
     : never;
 };
 
-/**
- * Options for creating a worker class with Effect handlers.
- */
 export interface WorkerOptions<
   RRuntime,
   REvent = never,
@@ -191,13 +154,11 @@ export interface WorkerOptions<
    * flush capped at two seconds; queue handlers do not flush automatically.
    */
   readonly eventLayer?: Layer.Layer<REvent, EventLayerError, WorkerBaseContext<RRuntime>>;
-  /** Main request handler. */
   readonly fetch?: Effect.Effect<
     WorkerFetchSuccess,
     unknown,
     WorkerFetchContext<RRuntime | REvent>
   >;
-  /** Queue consumer handler invoked per message batch. */
   readonly queue?: QueueHandler<RRuntime | REvent>;
   /**
    * Optional RPC methods exposed as class instance methods.
@@ -313,19 +274,8 @@ const scheduleTelemetryFlush: Effect.Effect<void, never, WorkerContext> =
   );
 
 /**
- * Creates a Cloudflare worker class backed by a single managed Effect runtime.
- *
- * The runtime layer is built when Cloudflare constructs the class and reused
- * for every event the instance handles. Layer finalizers do not run when the
- * isolate is evicted; Cloudflare provides no shutdown hook. Use `eventLayer`
- * for resources that must be finalized per event.
- *
- * @example
- * ```ts
- * export default Worker.make(Layer.empty, {
- *   fetch: Effect.succeed(new Response("ok")),
- * });
- * ```
+ * The layer is built once per Worker instance and reused for its events.
+ * Eviction skips finalizers, so use `eventLayer` for per-event resources.
  */
 export function make<ROut, LayerError>(
   layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,

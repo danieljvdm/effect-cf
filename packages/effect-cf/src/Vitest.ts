@@ -36,24 +36,15 @@ import type { WorkflowInstanceStatusName } from "./WorkflowBinding";
 
 const currentEnv: WorkerEnv = env;
 
-/**
- * Provides the Workers test environment as both {@link WorkerEnvironment} and
- * the active Effect `ConfigProvider`.
- */
 export const layer: Layer.Layer<WorkerEnvironment> = Layer.mergeAll(
   Layer.succeed(WorkerEnvironment, currentEnv),
   ConfigProvider.layer(WorkerConfig.providerFromEnv(currentEnv)),
 );
 
-/** Constructor shape shared by Effect-backed Worker entrypoints. */
 export interface WorkerConstructor<Instance> {
   new (context: globalThis.ExecutionContext, env: WorkerEnv): Instance;
 }
 
-/**
- * Creates an `ExecutionContext` and drains all `waitUntil` work before the
- * returned effect completes, including when `use` fails or is interrupted.
- */
 export const withExecutionContext = Effect.fn("effect-cf/vitest/withExecutionContext")(function* <
   A,
   E,
@@ -86,10 +77,8 @@ export const fetch = Effect.fn("effect-cf/vitest/fetch")(function* <Instance ext
   );
 });
 
-/** Modules-format scheduled handler accepted by {@link scheduled}. */
 export type ScheduledHandler = NonNullable<globalThis.ExportedHandler<WorkerEnv>["scheduled"]>;
 
-/** Options used to construct a scheduled event controller. */
 export interface ScheduledOptions {
   readonly scheduledTime?: number | Date;
   readonly cron?: string;
@@ -134,7 +123,6 @@ type PagesEventContextInitData<Context> =
       : { readonly data: Data }
     : never;
 
-/** Initialization accepted by the Workers Vitest plugin for a Pages Function. */
 export type PagesEventContextInit<Function extends AnyPagesFunction> = PagesEventContextInitBase &
   PagesEventContextInitParams<Parameters<Function>[0]> &
   PagesEventContextInitData<Parameters<Function>[0]>;
@@ -162,7 +150,6 @@ interface QueueWorker {
   queue(batch: globalThis.MessageBatch): Promise<void>;
 }
 
-/** Input message accepted by the Workers Vitest plugin's `createMessageBatch` helper. */
 export type QueueMessage<Body> = {
   readonly id: string;
   readonly timestamp: Date;
@@ -172,7 +159,6 @@ export type QueueMessage<Body> = {
 /** Acknowledgement and retry result returned by the Workers Vitest plugin. */
 export type QueueResult = Awaited<ReturnType<typeof getQueueResult>>;
 
-/** Result of invoking a queue consumer through {@link queue}. */
 export interface QueueRunResult<Body> {
   readonly batch: globalThis.MessageBatch<Body>;
   readonly result: QueueResult;
@@ -234,19 +220,16 @@ export const runInDurableObject = Effect.fn("effect-cf/vitest/runInDurableObject
   return yield* exit;
 });
 
-/** Immediately runs and removes a scheduled Durable Object alarm. */
 export const runDurableObjectAlarm = Effect.fn("effect-cf/vitest/runDurableObjectAlarm")(function* (
   stub: globalThis.DurableObjectStub<RpcDurableObject>,
 ) {
   return yield* Effect.promise(() => runDurableObjectAlarmPromise(stub));
 });
 
-/** Options controlling how Durable Object eviction handles WebSockets. */
 export interface DurableObjectEvictionOptions {
   readonly webSockets?: "close" | "hibernate";
 }
 
-/** Gracefully evicts one running Durable Object while preserving durable storage. */
 export const evictDurableObject = Effect.fn("effect-cf/vitest/evictDurableObject")(function* (
   stub: globalThis.DurableObjectStub<RpcDurableObject>,
   options?: DurableObjectEvictionOptions,
@@ -254,39 +237,33 @@ export const evictDurableObject = Effect.fn("effect-cf/vitest/evictDurableObject
   yield* Effect.promise(() => evictDurableObjectPromise(stub, options));
 });
 
-/** Lists all IDs created in a Durable Object namespace. */
 export const listDurableObjectIds = Effect.fn("effect-cf/vitest/listDurableObjectIds")(function* <
   Object extends RpcDurableObject | undefined,
 >(namespace: globalThis.DurableObjectNamespace<Object>) {
   return yield* Effect.promise(() => listDurableObjectIdsPromise(namespace));
 });
 
-/** Deletes data from all bindings attached to the current test Worker. */
 export const reset = Effect.fn("effect-cf/vitest/reset")(function* () {
   yield* Effect.promise(resetPromise);
 });
 
-/** Aborts all Durable Object instances without deleting their persisted data. */
 export const abortAllDurableObjects = Effect.fn("effect-cf/vitest/abortAllDurableObjects")(
   function* () {
     yield* Effect.promise(abortAllDurableObjectsPromise);
   },
 );
 
-/** Gracefully evicts all running Durable Objects while preserving durable storage. */
 export const evictAllDurableObjects = Effect.fn("effect-cf/vitest/evictAllDurableObjects")(
   function* (options?: DurableObjectEvictionOptions) {
     yield* Effect.promise(() => evictAllDurableObjectsPromise(options));
   },
 );
 
-/** A D1 migration accepted by the Workers Vitest plugin. */
 export interface D1Migration {
   readonly name: string;
   readonly queries: ReadonlyArray<string>;
 }
 
-/** Applies all D1 migrations that have not already been recorded. */
 export const applyD1Migrations = Effect.fn("effect-cf/vitest/applyD1Migrations")(function* (
   database: globalThis.D1Database,
   migrations: ReadonlyArray<D1Migration>,
@@ -347,19 +324,16 @@ type NativeWorkflowInstanceModifier = Parameters<
   Parameters<NativeWorkflowInstanceIntrospector["modify"]>[0]
 >[0];
 
-/** Identifies one occurrence of a Workflow step or sleep. */
 export interface WorkflowStepTarget {
   readonly name: string;
   readonly index?: number;
 }
 
-/** Event delivered to a mocked Workflow `waitForEvent` operation. */
 export interface WorkflowMockEvent {
   readonly type: string;
   readonly payload: unknown;
 }
 
-/** Effect-native Workflow behavior modifier. */
 export interface WorkflowInstanceModifier {
   readonly disableSleeps: (steps?: ReadonlyArray<WorkflowStepTarget>) => Effect.Effect<void>;
   readonly disableRetryDelays: (steps?: ReadonlyArray<WorkflowStepTarget>) => Effect.Effect<void>;
@@ -379,7 +353,6 @@ export interface WorkflowInstanceModifier {
 
 type WorkflowMockResult = Schema.Schema.Type<typeof Schema.Unknown>;
 
-/** Effect-native introspector for one Workflow instance. */
 export interface WorkflowInstanceIntrospector {
   readonly raw: NativeWorkflowInstanceIntrospector;
   readonly modify: <A, E, R>(
@@ -391,7 +364,6 @@ export interface WorkflowInstanceIntrospector {
   readonly getError: Effect.Effect<{ readonly name: string; readonly message: string }>;
 }
 
-/** Effect-native introspector for subsequently created Workflow instances. */
 export interface WorkflowIntrospector {
   readonly raw: NativeWorkflowIntrospector;
   readonly modifyAll: <A, E, R>(

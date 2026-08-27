@@ -1,11 +1,16 @@
 import {
+  createMcpHandler,
+  hostHeaderValidationResponse,
+  localhostAllowedHostnames,
+  localhostAllowedOrigins,
   McpServer,
+  originValidationResponse,
   type CallToolResult,
+  type CreateMcpHandlerOptions,
   type JSONObject,
   type ServerOptions,
   type StandardSchemaWithJSON,
 } from "@modelcontextprotocol/server";
-import { createMcpHandler, type CreateMcpHandlerOptions } from "agents/mcp/server";
 import {
   Cause,
   Context,
@@ -20,16 +25,27 @@ import {
 } from "effect";
 import { AiError, Tool, type Toolkit } from "effect/unstable/ai";
 
-import { WorkerEnvironment } from "./Environment";
-import { ExecutionContext, NativeRequest } from "./Worker";
+import { NativeRequest } from "./Worker";
 import { runNativeCallback } from "./internal/NativeCallback";
+
+/**
+ * CORS headers applied to MCP responses.
+ */
+export interface CorsOptions {
+  readonly origin?: string;
+  readonly methods?: string;
+  readonly headers?: string;
+  readonly maxAge?: number;
+  readonly exposeHeaders?: string;
+}
 
 /**
  * Options for {@link fromToolkit}.
  *
- * Extends Cloudflare's stateless MCP handler options (`route`, `corsOptions`,
- * `allowedHostnames`, `allowedOriginHostnames`, `authContext`, and the MCP SDK
- * handler options) with the server identity advertised to MCP clients.
+ * Extends the MCP SDK `createMcpHandler` options (`legacy`, `responseMode`,
+ * `onerror`, ...) with the server identity advertised to MCP clients and the
+ * Worker edge options (`route`, `corsOptions`, `allowedHostnames`,
+ * `allowedOriginHostnames`).
  */
 export interface FromToolkitOptions extends CreateMcpHandlerOptions {
   /** Server name advertised in the MCP implementation info. */
@@ -43,6 +59,24 @@ export interface FromToolkitOptions extends CreateMcpHandlerOptions {
    * instructions, ...).
    */
   readonly serverOptions?: ServerOptions;
+  /** Pathname served by the MCP handler. @default "/mcp" */
+  readonly route?: string;
+  /** CORS headers applied to every MCP response. Pass `false` to disable. */
+  readonly corsOptions?: CorsOptions | false;
+  /**
+   * Restrict `Host` headers to these hostnames. Localhost and `workers.dev`
+   * endpoints receive matching defaults; custom domains rely on Cloudflare
+   * routing unless this option is set.
+   */
+  readonly allowedHostnames?: ReadonlyArray<string>;
+  /**
+   * Restrict present browser `Origin` headers to these hostnames. Requests
+   * without an Origin (including non-browser MCP clients) remain valid. The
+   * default includes localhost-class Origins, the endpoint's `workers.dev`
+   * hostname, and a concrete `corsOptions.origin` hostname. Pass `"*"` only
+   * when equivalent Origin validation runs in trusted middleware upstream.
+   */
+  readonly allowedOriginHostnames?: ReadonlyArray<string> | "*";
 }
 
 /**
@@ -55,13 +89,125 @@ export type ToolkitServices<Tools extends Record<string, Tool.Any>> =
 
 /**
  * Context required by the Effect returned from {@link fromToolkit}: the native
- * fetch-event services provided by `Worker.make` plus the toolkit services.
+ * request provided by `Worker.make` plus the toolkit services.
  */
 export type FromToolkitContext<Tools extends Record<string, Tool.Any>> =
   | NativeRequest
-  | ExecutionContext
-  | WorkerEnvironment
   | ToolkitServices<Tools>;
+
+const DEFAULT_CORS_OPTIONS: Required<CorsOptions> = {
+  origin: "*",
+  headers:
+    "Content-Type, Accept, Authorization, mcp-session-id, MCP-Protocol-Version, Mcp-Method, Mcp-Name",
+  methods: "GET, POST, DELETE, OPTIONS",
+  exposeHeaders: "mcp-session-id",
+  maxAge: 86400,
+};
+
+const corsHeaders = (options: CorsOptions): Headers => {
+  const merged = { ...DEFAULT_CORS_OPTIONS, ...options };
+
+  return new Headers({
+    "Access-Control-Allow-Headers": merged.headers,
+    "Access-Control-Allow-Methods": merged.methods,
+    "Access-Control-Allow-Origin": merged.origin,
+    "Access-Control-Expose-Headers": merged.exposeHeaders,
+    "Access-Control-Max-Age": String(merged.maxAge),
+  });
+};
+
+const withCors = (response: Response, options: CorsOptions | false | undefined): Response => {
+  if (options === false) {
+    return response;
+  }
+
+  const headers = new Headers(response.headers);
+
+  for (const [headerName, value] of corsHeaders(options ?? {})) {
+    headers.set(headerName, value);
+  }
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+};
+
+const corsOriginHostname = (corsOptions: CorsOptions | false | undefined): string | undefined => {
+  const origin = corsOptions === false ? undefined : corsOptions?.origin;
+
+  if (origin === undefined || !URL.canParse(origin)) {
+    return undefined;
+  }
+
+  const url = new URL(origin);
+
+  return (url.protocol === "http:" || url.protocol === "https:") && url.hostname !== ""
+    ? url.hostname
+    : undefined;
+};
+
+interface EdgeGuardOptions {
+  readonly corsOptions: CorsOptions | false | undefined;
+  readonly allowedHostnames: ReadonlyArray<string> | undefined;
+  readonly allowedOriginHostnames: ReadonlyArray<string> | "*" | undefined;
+}
+
+/**
+ * `Host` and `Origin` validation for the MCP route, using the MCP SDK's
+ * validation primitives with the same defaults Cloudflare applies: localhost
+ * and `workers.dev` endpoints validate the `Host` header against themselves,
+ * and present browser `Origin` headers must match localhost-class Origins, the
+ * endpoint's `workers.dev` hostname, or a concrete configured CORS origin.
+ */
+const edgeGuardResponse = (
+  request: Request,
+  requestUrl: URL,
+  options: EdgeGuardOptions,
+): Response | undefined => {
+  const localEndpoint = localhostAllowedHostnames().includes(requestUrl.hostname);
+  const workersDevEndpoint = requestUrl.hostname.endsWith(".workers.dev");
+  const acceptedHostnames =
+    options.allowedHostnames ??
+    (localEndpoint
+      ? localhostAllowedHostnames()
+      : workersDevEndpoint
+        ? [requestUrl.hostname]
+        : undefined);
+
+  if (acceptedHostnames !== undefined) {
+    const hostRejection = hostHeaderValidationResponse(request, [...acceptedHostnames]);
+
+    if (hostRejection !== undefined) {
+      return hostRejection;
+    }
+  }
+
+  if (options.allowedOriginHostnames === "*") {
+    return undefined;
+  }
+
+  let acceptedOriginHostnames = options.allowedOriginHostnames;
+
+  if (acceptedOriginHostnames === undefined) {
+    const defaults = new Set(localhostAllowedOrigins());
+
+    if (workersDevEndpoint) {
+      defaults.add(requestUrl.hostname);
+    }
+
+    const configuredOriginHostname = corsOriginHostname(options.corsOptions);
+
+    if (configuredOriginHostname !== undefined) {
+      defaults.add(configuredOriginHostname);
+    }
+
+    acceptedOriginHostnames = [...defaults];
+  }
+
+  return originValidationResponse(request, [...acceptedOriginHostnames]);
+};
 
 const INTERNAL_TOOL_ERROR_MESSAGE = "Tool execution failed due to an internal server error.";
 
@@ -247,8 +393,11 @@ const registerToolkitTool = <Tools extends Record<string, Tool.Any>>(
 };
 
 /**
- * Creates an Effect that serves a toolkit over MCP with Cloudflare's stateless
- * Streamable HTTP handler (`createMcpHandler` from `agents/mcp/server`).
+ * Creates an Effect that serves a toolkit over MCP with the MCP SDK's
+ * stateless Streamable HTTP handler (`createMcpHandler` from
+ * `@modelcontextprotocol/server`), plus the Worker edge concerns Cloudflare's
+ * remote MCP deployments expect: CORS, `Host` header validation, and browser
+ * `Origin` validation.
  *
  * **Details**
  *
@@ -302,18 +451,41 @@ export const fromToolkit = <Tools extends Record<string, Tool.Any>>(
   toolkit: Toolkit.Toolkit<Tools>,
   options: FromToolkitOptions,
 ): Effect.Effect<Option.Option<Response>, unknown, FromToolkitContext<Tools>> => {
-  const { name, version, title, serverOptions, route = "/mcp", ...handlerOptions } = options;
+  const {
+    name,
+    version,
+    title,
+    serverOptions,
+    route = "/mcp",
+    corsOptions,
+    allowedHostnames,
+    allowedOriginHostnames,
+    ...handlerOptions
+  } = options;
   const serverInfo = { name, version, title };
 
   return Effect.gen(function* () {
     const request = yield* NativeRequest;
+    const requestUrl = new URL(request.url);
 
-    if (new URL(request.url).pathname !== route) {
+    if (requestUrl.pathname !== route) {
       return Option.none();
     }
 
-    const env = yield* WorkerEnvironment;
-    const executionContext = yield* ExecutionContext;
+    const rejection = edgeGuardResponse(request, requestUrl, {
+      corsOptions,
+      allowedHostnames,
+      allowedOriginHostnames,
+    });
+
+    if (rejection !== undefined) {
+      return Option.some(withCors(rejection, corsOptions));
+    }
+
+    if (request.method === "OPTIONS" && corsOptions !== false) {
+      return Option.some(new Response(null, { headers: corsHeaders(corsOptions ?? {}) }));
+    }
+
     const built = yield* toolkit;
 
     const response = yield* runNativeCallback<
@@ -322,7 +494,7 @@ export const fromToolkit = <Tools extends Record<string, Tool.Any>>(
       Tool.HandlerServices<Tools[keyof Tools]>,
       Response
     >(async (run) => {
-      // Some transport lanes (e.g. the 2025-era compatibility lane) resolve
+      // Some transport lanes (e.g. the 2025-era stateless fallback) resolve
       // the HTTP response before in-flight tool handlers settle and stream the
       // results into the response body afterwards. Track every tool-call
       // effect and drain them before resolving, so the fetch Effect scope does
@@ -336,19 +508,16 @@ export const fromToolkit = <Tools extends Record<string, Tool.Any>>(
 
         return promise;
       };
-      const handler = createMcpHandler(
-        () => {
-          const server = new McpServer(serverInfo, serverOptions);
+      const handler = createMcpHandler(() => {
+        const server = new McpServer(serverInfo, serverOptions);
 
-          for (const tool of Object.values(built.tools)) {
-            registerToolkitTool(server, built, tool, trackedRun);
-          }
+        for (const tool of Object.values(built.tools)) {
+          registerToolkitTool(server, built, tool, trackedRun);
+        }
 
-          return server;
-        },
-        { ...handlerOptions, route },
-      );
-      const response = await handler(request, env, executionContext);
+        return server;
+      }, handlerOptions);
+      const response = await handler.fetch(request);
 
       while (pending.size > 0) {
         await Promise.allSettled([...pending]);
@@ -357,6 +526,6 @@ export const fromToolkit = <Tools extends Record<string, Tool.Any>>(
       return response;
     });
 
-    return Option.some(response);
+    return Option.some(withCors(response, corsOptions));
   });
 };

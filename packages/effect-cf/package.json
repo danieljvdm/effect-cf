@@ -83,7 +83,6 @@
     "@modelcontextprotocol/client": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
     "@platformatic/vfs": "^0.4.0",
-    "agents": "^0.22.0",
     "effect": "catalog:",
     "esbuild": "^0.28.1",
     "vite-plus": "catalog:",
@@ -98,7 +97,6 @@
     "@effect/sql-pg": "^4.0.0-rc.110",
     "@effect/sql-sqlite-do": "^4.0.0-rc.110",
     "@modelcontextprotocol/server": "^2.0.0",
-    "agents": "^0.22.0",
     "effect": "^4.0.0-rc.110"
   },
   "peerDependenciesMeta": {
@@ -118,9 +116,6 @@
       "optional": true
     },
     "@modelcontextprotocol/server": {
-      "optional": true
-    },
-    "agents": {
       "optional": true
     }
   }

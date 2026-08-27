@@ -58,6 +58,7 @@ export const makeFakeBidi = (options?: { readonly echo?: boolean }): FakeBidi =>
 
 export interface FakeDatagrams {
   readonly native: WebTransport.NativeDatagramDuplexStream;
+  readonly writable: WritableStream<Uint8Array>;
   readonly sent: Array<Uint8Array>;
   readonly push: (chunk: Uint8Array) => void;
   readonly end: () => void;
@@ -69,6 +70,8 @@ export interface FakeDatagrams {
 export const makeFakeDatagrams = (options?: {
   readonly maxDatagramSize?: number;
   readonly gated?: boolean;
+  readonly createWritableOnly?: boolean;
+  readonly bufferApi?: "modern" | "legacy" | "both";
 }): FakeDatagrams => {
   let controller!: ReadableStreamDefaultController<Uint8Array>;
   let ended = false;
@@ -87,13 +90,27 @@ export const makeFakeDatagrams = (options?: {
       sent.push(chunk);
     },
   });
+  const bufferApi = options?.bufferApi ?? "modern";
+  const bufferFields =
+    bufferApi === "legacy"
+      ? { incomingHighWaterMark: 0, outgoingHighWaterMark: 0 }
+      : bufferApi === "both"
+        ? {
+            incomingMaxBufferedDatagrams: 0,
+            outgoingMaxBufferedDatagrams: 0,
+            incomingHighWaterMark: 0,
+            outgoingHighWaterMark: 0,
+          }
+        : { incomingMaxBufferedDatagrams: 0, outgoingMaxBufferedDatagrams: 0 };
 
   return {
     native: {
       readable,
-      writable,
+      ...(options?.createWritableOnly ? { createWritable: () => writable } : { writable }),
       maxDatagramSize: options?.maxDatagramSize ?? 1200,
+      ...bufferFields,
     },
+    writable,
     sent,
     push: (chunk) => controller.enqueue(chunk),
     end: () => {
@@ -136,6 +153,8 @@ export interface FakeWebTransportOptions {
   readonly datagrams?: {
     readonly maxDatagramSize?: number;
     readonly gated?: boolean;
+    readonly createWritableOnly?: boolean;
+    readonly bufferApi?: "modern" | "legacy" | "both";
   };
   readonly failBidiOpen?: unknown;
 }

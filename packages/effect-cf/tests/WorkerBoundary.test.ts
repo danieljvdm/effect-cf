@@ -32,6 +32,11 @@ class EventValue extends Context.Service<EventValue, string>()(
   "effect-cf/test/WorkerBoundary/EventValue",
 ) {}
 
+class StreamResource extends Context.Service<
+  StreamResource,
+  { readonly read: Effect.Effect<string>; readonly release: () => void }
+>()("effect-cf/test/WorkerBoundary/StreamResource") {}
+
 class BoomError extends Data.TaggedError("BoomError") {}
 
 interface HeadersWithSetCookie extends Headers {
@@ -155,6 +160,29 @@ test("Worker.makeFetchHandler builds the runtime once per env and rebinds reques
   expect(second.waitUntilPromises).toHaveLength(1);
 });
 
+test("Worker.makeFetchHandler builds eventLayer with the current request context", async () => {
+  const eventLayer = Layer.effectDiscard(
+    Effect.gen(function* () {
+      const ctx = yield* Worker.WorkerContext;
+
+      yield* ctx.waitUntil(Effect.void);
+    }),
+  );
+  const handler = Worker.makeFetchHandler(Layer.empty, {
+    eventLayer,
+    fetch: Effect.succeed(new Response("ok")),
+  });
+  const env = makePartialTestDouble<Cloudflare.Env>({});
+  const first = makeWaitUntilContext();
+  const second = makeWaitUntilContext();
+
+  await handler.fetch(new Request("https://worker.test/one"), env, first.executionContext);
+  await handler.fetch(new Request("https://worker.test/two"), env, second.executionContext);
+
+  expect(first.waitUntilPromises).toHaveLength(1);
+  expect(second.waitUntilPromises).toHaveLength(1);
+});
+
 test("Worker.fetch flushes runtime OTLP telemetry through waitUntil", async () => {
   const flushes: Array<string> = [];
   const flusherProbe = Layer.effectDiscard(
@@ -183,6 +211,31 @@ test("Worker.fetch flushes runtime OTLP telemetry through waitUntil", async () =
   await Promise.all(waitUntilPromises);
 
   expect(flushes).toEqual(["flush"]);
+});
+
+test("Worker.queue flushes event telemetry after success and failure", async () => {
+  const outcomes: Array<"fulfilled" | "rejected"> = [];
+
+  for (const handler of [Effect.void, Effect.fail(new BoomError())]) {
+    const flushes: Array<string> = [];
+    const Live = Worker.make(Layer.empty, {
+      eventLayer: makeFlusherProbeLayer(flushes),
+      queue: () => handler,
+    });
+    const { executionContext, waitUntilPromises } = makeWaitUntilContext();
+    const worker = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
+    const outcome = await Promise.resolve(worker.queue(makeMessageBatch("telemetry"))).then(
+      () => "fulfilled" as const,
+      () => "rejected" as const,
+    );
+
+    outcomes.push(outcome);
+    expect(waitUntilPromises).toHaveLength(1);
+    await expect(Promise.all(waitUntilPromises)).resolves.toEqual([undefined]);
+    expect(flushes).toEqual(["flush"]);
+  }
+
+  expect(outcomes).toEqual(["fulfilled", "rejected"]);
 });
 
 test("WorkerDefinition RPC schedules event-scoped OTLP telemetry after success", async () => {
@@ -340,6 +393,16 @@ test("Worker.make accepts a fetch Effect shorthand", async () => {
   const response = await worker.fetch(new Request("https://worker.test/"));
 
   await expect(response.text()).resolves.toBe("from-shorthand");
+});
+
+test("Worker.make rejects reserved RPC protocol methods at runtime", () => {
+  expect(() =>
+    Worker.make(Layer.empty, {
+      rpc: {
+        then: () => Effect.void,
+      },
+    }),
+  ).toThrow(/reserved/i);
 });
 
 test("Worker.fetch renders Effect HttpServerResponse values", async () => {
@@ -502,6 +565,87 @@ test("Worker.fetch keeps request-scoped resources alive while streaming bodies",
   await expect(response.text()).resolves.toBe("chunk-1chunk-2");
   await expect.poll(() => events).toEqual(["acquire", "chunk-1", "chunk-2", "release"]);
 });
+
+test.each(["finish", "cancel"] as const)(
+  "Worker.fetch keeps eventLayer resources alive until streaming bodies %s",
+  async (outcome) => {
+    const events: Array<string> = [];
+    const flushes: Array<string> = [];
+    const continueBody = Promise.withResolvers<void>();
+    const resourceReleased = Promise.withResolvers<void>();
+    const streamResourceLayer = Layer.effect(
+      StreamResource,
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          let released = false;
+
+          events.push("acquire");
+
+          return StreamResource.of({
+            read: Effect.sync(() => (released ? "closed" : "open")),
+            release: () => {
+              released = true;
+            },
+          });
+        }),
+        (resource) =>
+          Effect.sync(() => {
+            resource.release();
+            events.push("release");
+            resourceReleased.resolve();
+          }),
+      ),
+    );
+    const eventLayer = Layer.merge(streamResourceLayer, makeFlusherProbeLayer(flushes));
+    const Live = Worker.make(Layer.empty, {
+      eventLayer,
+      fetch: Effect.gen(function* () {
+        const resource = yield* StreamResource;
+
+        return HttpServerResponse.stream(
+          Stream.fromEffect(
+            Effect.promise(() => continueBody.promise).pipe(Effect.andThen(resource.read)),
+          ).pipe(Stream.encodeText),
+        );
+      }),
+    });
+    const { executionContext, waitUntilPromises } = makeWaitUntilContext();
+    const worker = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
+
+    const response = await worker.fetch(new Request("https://worker.test/stream"));
+
+    if (response.body === null) {
+      throw new Error("Expected a streaming response body");
+    }
+
+    let body: string | undefined;
+
+    try {
+      expect(events).toEqual(["acquire"]);
+      expect(waitUntilPromises).toHaveLength(0);
+
+      if (outcome === "finish") {
+        continueBody.resolve();
+        body = await response.text();
+      } else {
+        await response.body.cancel();
+      }
+
+      expect(body).toBe(outcome === "finish" ? "open" : undefined);
+      await resourceReleased.promise;
+      expect(events).toEqual(["acquire", "release"]);
+      expect(waitUntilPromises).toHaveLength(1);
+      await expect(Promise.all(waitUntilPromises)).resolves.toEqual([undefined]);
+      expect(flushes).toEqual(["flush"]);
+    } finally {
+      continueBody.resolve();
+      if (!response.body.locked) {
+        await response.body.cancel();
+      }
+      await Promise.all(waitUntilPromises);
+    }
+  },
+);
 
 test("Worker.fetch renders handler failures as HTTP error responses", async () => {
   const Live = Worker.make(Layer.empty, {

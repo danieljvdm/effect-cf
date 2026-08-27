@@ -230,7 +230,6 @@ export const layer = (
       const disconnects = yield* Queue.make<number>();
       const connectionsBySocket = new Map<WebSocket, RpcConnection>();
       const connectionsById = new Map<number, RpcConnection>();
-      const clientIds = new Set<number>();
       const resetSockets = new WeakSet<WebSocket>();
       const declarationsById = new Map<string, AnyResumableStreamDeclaration>();
       const declarationsByTag = new Map<string, AnyResumableStreamDeclaration>();
@@ -268,21 +267,6 @@ export const layer = (
       }
 
       const reserveClientId = (socket: DurableWebSocket): AttachmentMetadata => {
-        const attachment = readAttachment(socket.raw, attachmentKey);
-
-        if (attachment._tag === "Invalid") {
-          throw new Error("Invalid Durable Object RPC websocket attachment metadata");
-        }
-
-        if (attachment._tag === "Valid") {
-          const metadata = attachment.metadata;
-
-          nextClientId = Math.max(nextClientId, metadata.clientId + 1);
-          writeAttachment(socket.raw, attachmentKey, metadata);
-
-          return metadata;
-        }
-
         const id = nextClientId++;
         const created: LegacyAttachmentMetadata = {
           version: legacyAttachmentVersion,
@@ -377,7 +361,6 @@ export const layer = (
 
         connectionsBySocket.set(socket.raw, connection);
         connectionsById.set(connection.id, connection);
-        clientIds.add(connection.id);
         nextClientId = Math.max(nextClientId, connection.id + 1);
 
         return connection;
@@ -434,7 +417,6 @@ export const layer = (
 
         connectionsBySocket.delete(socket.raw);
         connectionsById.delete(connection.id);
-        clientIds.delete(connection.id);
         activeNonResumableRequestCount -= connection.nonResumableRequestIds.size;
         connection.requestIds.clear();
         connection.nonResumableRequestIds.clear();
@@ -847,7 +829,7 @@ export const layer = (
 
               connection?.socket.raw.close();
             }),
-          clientIds: Effect.sync(() => clientIds),
+          clientIds: Effect.sync(() => new Set(connectionsById.keys())),
           initialMessage: Effect.succeedNone,
           supportsAck: true,
           supportsTransferables: false,
@@ -1141,17 +1123,10 @@ const writeAttachment = (socket: WebSocket, key: string, metadata: AttachmentMet
   }
 
   const attachment = Predicate.isObject(current) ? current : {};
-  const currentMetadata =
-    Predicate.hasProperty(attachment, key) && Predicate.isObject(attachment[key])
-      ? attachment[key]
-      : {};
 
   socket.serializeAttachment({
     ...attachment,
-    [key]: {
-      ...currentMetadata,
-      ...metadata,
-    },
+    [key]: metadata,
   });
 };
 

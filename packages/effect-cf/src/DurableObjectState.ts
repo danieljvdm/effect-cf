@@ -3,6 +3,7 @@ import { Cause, Context, Effect, Exit } from "effect";
 import { fromDurableObjectStorage, type DurableObjectStorage } from "./DurableObjectStorage";
 import { fromWebSocket, type DurableWebSocket } from "./DurableObjectWebSocket";
 import type { WorkerContextWaitUntilOptions } from "./Worker";
+import { runNativeCallback } from "./internal/NativeCallback";
 import { makeWaitUntilScheduler } from "./internal/WorkerContext";
 
 /**
@@ -87,24 +88,21 @@ export const fromDurableObjectState = (
     storage: fromDurableObjectStorage(state.storage),
     waitUntil,
     blockConcurrencyWhile: <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-      Effect.context<R>().pipe(
-        Effect.flatMap((context) =>
-          Effect.promise(() =>
-            state.blockConcurrencyWhile(() =>
-              runPromiseExitPreservingTypedFailures(context, effect),
-            ),
-          ),
-        ),
-        Effect.flatten,
-      ),
+      runNativeCallback<A, E, R, Exit.Exit<A, E>>((run) =>
+        state.blockConcurrencyWhile(() => runExitPreservingTypedFailures(run, effect)),
+      ).pipe(Effect.orDie, Effect.flatten),
     blockConcurrencyWhileOrReset: <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-      Effect.context<R>().pipe(
-        Effect.flatMap((context) =>
-          Effect.promise(() =>
-            state.blockConcurrencyWhile(() => Effect.runPromiseWith(context)(effect)),
-          ),
-        ),
-      ),
+      runNativeCallback<A, E, R, A>((run) =>
+        state.blockConcurrencyWhile(async () => {
+          const exit = await run(effect);
+
+          if (Exit.isFailure(exit)) {
+            throw Cause.squash(exit.cause);
+          }
+
+          return exit.value;
+        }),
+      ).pipe(Effect.orDie),
     acceptWebSocket: (ws: DurableWebSocket, tags?: Array<string>) =>
       Effect.sync(() => state.acceptWebSocket(ws.raw, tags)),
     getWebSockets: (tag?: string) =>
@@ -125,11 +123,11 @@ export const fromDurableObjectState = (
   };
 };
 
-const runPromiseExitPreservingTypedFailures = async <A, E, R>(
-  context: Context.Context<R>,
+const runExitPreservingTypedFailures = async <A, E, R>(
+  run: (effect: Effect.Effect<A, E, R>) => Promise<Exit.Exit<A, E>>,
   effect: Effect.Effect<A, E, R>,
 ): Promise<Exit.Exit<A, E>> => {
-  const exit = await Effect.runPromiseExitWith(context)(effect);
+  const exit = await run(effect);
 
   if (Exit.isFailure(exit) && (Cause.hasDies(exit.cause) || Cause.hasInterrupts(exit.cause))) {
     throw Cause.squash(exit.cause);

@@ -14,31 +14,17 @@ class TestService extends Context.Service<
 
 const makeExecutionContext = () => {
   const waitUntilPromises: Array<Promise<unknown>> = [];
-  let passThroughCalls = 0;
-  const abortReasons: Array<unknown> = [];
-
   const executionContext = makePartialTestDouble<globalThis.ExecutionContext>({
     props: undefined,
     waitUntil: (promise: Promise<unknown>) => {
       waitUntilPromises.push(promise);
     },
-    passThroughOnException: () => {
-      passThroughCalls++;
-    },
-    abort: (reason?: string) => {
-      abortReasons.push(reason);
-    },
+    passThroughOnException: () => {},
   });
 
   return {
     executionContext,
     waitUntilPromises,
-    get passThroughCalls() {
-      return passThroughCalls;
-    },
-    get abortReasons() {
-      return abortReasons;
-    },
   };
 };
 
@@ -74,6 +60,47 @@ test("WorkerContext.waitUntil preserves Effect context through the worker runtim
   expect(state.completed).toEqual(["done"]);
 });
 
+test("WorkerContext.waitUntil owns resources acquired by background work", async () => {
+  const events: Array<string> = [];
+  const started = Promise.withResolvers<void>();
+  const complete = Promise.withResolvers<void>();
+  const { executionContext, waitUntilPromises } = makeExecutionContext();
+  const Live = Worker.make(Layer.empty, {
+    fetch: Effect.gen(function* () {
+      const ctx = yield* Worker.WorkerContext;
+
+      yield* ctx.waitUntil(
+        Effect.acquireRelease(
+          Effect.sync(() => events.push("acquire")),
+          () => Effect.sync(() => events.push("release")),
+        ).pipe(
+          Effect.andThen(
+            Effect.promise(() => {
+              started.resolve();
+
+              return complete.promise;
+            }),
+          ),
+        ),
+      );
+
+      return new Response("ok");
+    }),
+  });
+  const worker = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
+
+  await worker.fetch(new Request("https://example.com/"));
+  await started.promise;
+
+  try {
+    expect(events).toEqual(["acquire"]);
+  } finally {
+    complete.resolve();
+    await expect(Promise.all(waitUntilPromises)).resolves.toEqual([undefined]);
+  }
+  expect(events).toEqual(["acquire", "release"]);
+});
+
 test("WorkerContext.waitUntil routes failures to onFailure with preserved context", async () => {
   const state: TestService["Service"] = { completed: [], failures: [] };
   const Live = Worker.make(Layer.succeed(TestService, state), {
@@ -101,6 +128,71 @@ test("WorkerContext.waitUntil routes failures to onFailure with preserved contex
   await expect(Promise.all(waitUntilPromises)).resolves.toEqual([undefined]);
   expect(state.failures).toHaveLength(1);
   expect(state.failures[0]).toContain("expected waitUntil failure");
+});
+
+test("WorkerContext.waitUntil owns resources acquired by onFailure", async () => {
+  const events: Array<string> = [];
+  const started = Promise.withResolvers<void>();
+  const complete = Promise.withResolvers<void>();
+  const { executionContext, waitUntilPromises } = makeExecutionContext();
+  const Live = Worker.make(Layer.empty, {
+    fetch: Effect.gen(function* () {
+      const ctx = yield* Worker.WorkerContext;
+
+      yield* ctx.waitUntil(Effect.fail("expected"), {
+        onFailure: () =>
+          Effect.acquireRelease(
+            Effect.sync(() => events.push("acquire")),
+            () => Effect.sync(() => events.push("release")),
+          ).pipe(
+            Effect.andThen(
+              Effect.promise(() => {
+                started.resolve();
+
+                return complete.promise;
+              }),
+            ),
+          ),
+      });
+
+      return new Response("ok");
+    }),
+  });
+  const worker = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
+
+  await worker.fetch(new Request("https://example.com/"));
+  await started.promise;
+
+  try {
+    expect(events).toEqual(["acquire"]);
+  } finally {
+    complete.resolve();
+    await expect(Promise.all(waitUntilPromises)).resolves.toEqual([undefined]);
+  }
+  expect(events).toEqual(["acquire", "release"]);
+});
+
+test("WorkerContext.waitUntil observes synchronous onFailure throws", async () => {
+  const { executionContext, waitUntilPromises } = makeExecutionContext();
+  const Live = Worker.make(Layer.empty, {
+    fetch: Effect.gen(function* () {
+      const ctx = yield* Worker.WorkerContext;
+
+      yield* ctx.waitUntil(Effect.fail("expected"), {
+        onFailure: () => {
+          throw new Error("failure handler construction failed");
+        },
+      });
+
+      return new Response("ok");
+    }),
+  });
+  const worker = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
+
+  await worker.fetch(new Request("https://example.com/"));
+
+  expect(waitUntilPromises).toHaveLength(1);
+  await expect(Promise.all(waitUntilPromises)).resolves.toEqual([undefined]);
 });
 
 test("WorkerContext.waitUntil can propagate failures to native waitUntil", async () => {
@@ -148,42 +240,6 @@ test("WorkerContext.waitUntilPropagating rejects native waitUntil promises", asy
 
   expect(waitUntilPromises).toHaveLength(1);
   await expect(Promise.all(waitUntilPromises)).rejects.toThrow("expected propagating failure");
-});
-
-test("WorkerContext.passThroughOnException delegates to the raw ExecutionContext", async () => {
-  const Live = Worker.make(Layer.empty, {
-    fetch: Effect.gen(function* () {
-      const ctx = yield* Worker.WorkerContext;
-
-      yield* ctx.passThroughOnException;
-
-      return new Response("ok");
-    }),
-  });
-  const context = makeExecutionContext();
-  const worker = new Live(context.executionContext, makePartialTestDouble<Cloudflare.Env>({}));
-
-  await worker.fetch!(new Request("https://example.com/"));
-
-  expect(context.passThroughCalls).toBe(1);
-});
-
-test("WorkerContext.abort delegates to the raw ExecutionContext", async () => {
-  const Live = Worker.make(Layer.empty, {
-    fetch: Effect.gen(function* () {
-      const ctx = yield* Worker.WorkerContext;
-
-      yield* ctx.abort("shutdown");
-
-      return new Response("ok");
-    }),
-  });
-  const context = makeExecutionContext();
-  const worker = new Live(context.executionContext, makePartialTestDouble<Cloudflare.Env>({}));
-
-  await worker.fetch!(new Request("https://example.com/"));
-
-  expect(context.abortReasons).toEqual(["shutdown"]);
 });
 
 const makeMessageBatch = (queue: string): globalThis.MessageBatch<unknown> =>

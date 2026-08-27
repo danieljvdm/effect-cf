@@ -113,3 +113,28 @@ test("Workers AI wraps operation failures", async () => {
     cause,
   });
 });
+
+test("Workers AI rejects malformed embedding responses", async () => {
+  await expect(
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const ai = yield* TestAi;
+
+        yield* ai.runEmbedding("@cf/qwen/qwen3-embedding-0.6b", { text: "tomato soup" });
+      }).pipe(
+        Effect.provide(
+          aiLayer(
+            makeFakeAi({
+              // SAFETY: this fixture deliberately crosses the foreign Workers AI output boundary.
+              run: async () => ({ data: "not an embedding" }) as UnknownModelOutput,
+            }),
+          ),
+        ),
+      ),
+    ),
+  ).rejects.toMatchObject({
+    _tag: "WorkersAiOperationError",
+    binding: "AI",
+    operation: "runEmbedding",
+  });
+});

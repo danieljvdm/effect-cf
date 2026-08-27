@@ -124,7 +124,7 @@ export const decodeWireError = (cause: WireValue): WireValue => {
   }
 };
 
-export const reservedMethodNames = new Set([
+const reservedMethodNameValues = [
   "constructor",
   "fetch",
   "connect",
@@ -137,21 +137,11 @@ export const reservedMethodNames = new Set([
   "dispose",
   "serialize",
   "deserialize",
-]);
+] as const;
 
-export type ReservedMethodName =
-  | "constructor"
-  | "fetch"
-  | "connect"
-  | "alarm"
-  | "webSocketMessage"
-  | "webSocketClose"
-  | "webSocketError"
-  | "then"
-  | "dup"
-  | "dispose"
-  | "serialize"
-  | "deserialize";
+export const reservedMethodNames = new Set<string>(reservedMethodNameValues);
+
+export type ReservedMethodName = (typeof reservedMethodNameValues)[number];
 
 export type ServiceFreeSchema = S.Codec<any, any, never, never>;
 

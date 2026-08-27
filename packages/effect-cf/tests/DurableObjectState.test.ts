@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest";
-import { Cause, Context, Effect, Exit } from "effect";
+import { Cause, Context, Deferred, Effect, Exit, Fiber } from "effect";
 
-import { DurableObjectState, DurableObjectWebSocket } from "../src/index";
+import { DurableObjectState } from "../src/index";
 import { makePartialTestDouble } from "./TestDoubles";
 
 const FailureMessage = Context.Service<{ readonly message: string }>(
@@ -70,6 +70,44 @@ it.effect("blockConcurrencyWhileOrReset intentionally rejects the callback on fa
   }),
 );
 
+it.effect("blockConcurrencyWhile joins interrupted callback finalizers before returning", () =>
+  Effect.gen(function* () {
+    const { state, tracker } = makeRawDurableObjectState();
+    const service = DurableObjectState.fromDurableObjectState(state);
+    const started = yield* Deferred.make<void>();
+    const continueCallback = yield* Deferred.make<void>();
+    const releaseFinalizer = yield* Deferred.make<void>();
+    const finalized = yield* Deferred.make<void>();
+
+    const callback = Deferred.succeed(started, undefined).pipe(
+      Effect.andThen(Deferred.await(continueCallback)),
+      Effect.onInterrupt(() =>
+        Deferred.await(releaseFinalizer).pipe(
+          Effect.andThen(Deferred.succeed(finalized, undefined)),
+        ),
+      ),
+    );
+    const fiber = yield* Effect.forkChild(service.blockConcurrencyWhile(callback));
+
+    yield* Deferred.await(started);
+    fiber.interruptUnsafe();
+    yield* Effect.yieldNow;
+
+    yield* Effect.sync(() => assert.isUndefined(fiber.pollUnsafe())).pipe(
+      Effect.ensuring(
+        Deferred.succeed(continueCallback, undefined).pipe(
+          Effect.andThen(Deferred.succeed(releaseFinalizer, undefined)),
+        ),
+      ),
+    );
+    yield* Fiber.awaitAll([fiber]);
+
+    assert.isTrue(yield* Deferred.isDone(finalized));
+    assert.strictEqual(tracker.resolved.length, 0);
+    assert.strictEqual(tracker.rejected.length, 1);
+  }),
+);
+
 it.effect("waitUntil runs background Effects with the caller's context", () =>
   Effect.gen(function* () {
     const { state, tracker } = makeRawDurableObjectState();
@@ -117,56 +155,10 @@ it.effect("waitUntil propagate mode rejects the native waitUntil promise", () =>
   }),
 );
 
-it.effect("wraps hibernation metadata and abort helpers", () =>
-  Effect.gen(function* () {
-    const { state, tracker } = makeRawDurableObjectState();
-    const service = DurableObjectState.fromDurableObjectState(state);
-    const ws = makePartialTestDouble<WebSocket>({});
-    const timestamp = new Date("2026-04-25T00:00:00.000Z");
-
-    tracker.tags.set(ws, ["room:general", "user:1"]);
-    tracker.autoResponseTimestamps.set(ws, timestamp);
-    tracker.sockets = [ws];
-    const socket = DurableObjectWebSocket.fromWebSocket(ws);
-
-    assert.deepStrictEqual(yield* service.getTags(socket), ["room:general", "user:1"]);
-    assert.strictEqual(yield* service.getWebSocketAutoResponseTimestamp(socket), timestamp);
-    yield* service.acceptWebSocket(socket, ["room:general"]);
-    assert.deepStrictEqual(tracker.acceptedSockets, [{ socket: ws, tags: ["room:general"] }]);
-    assert.deepStrictEqual(
-      (yield* service.getWebSockets()).map((socket) => socket.raw),
-      [ws],
-    );
-
-    assert.strictEqual(yield* service.getHibernatableWebSocketEventTimeout, null);
-    yield* service.setHibernatableWebSocketEventTimeout(1_000);
-    assert.strictEqual(yield* service.getHibernatableWebSocketEventTimeout, 1_000);
-    yield* service.setHibernatableWebSocketEventTimeout();
-    assert.strictEqual(yield* service.getHibernatableWebSocketEventTimeout, null);
-
-    yield* service.abort("cleanup complete", { retryAlarm: false });
-    assert.deepStrictEqual(tracker.aborts, [
-      { reason: "cleanup complete", options: { retryAlarm: false } },
-    ]);
-  }),
-);
-
 interface BlockConcurrencyTracker {
   calls: number;
   readonly resolved: Array<unknown>;
   readonly rejected: Array<unknown>;
-  readonly tags: Map<WebSocket, Array<string>>;
-  readonly autoResponseTimestamps: Map<WebSocket, Date>;
-  readonly acceptedSockets: Array<{
-    readonly socket: WebSocket;
-    readonly tags: Array<string> | undefined;
-  }>;
-  sockets: Array<WebSocket>;
-  hibernatableTimeout: number | null;
-  readonly aborts: Array<{
-    readonly reason: string | undefined;
-    readonly options: globalThis.DurableObjectAbortOptions | undefined;
-  }>;
   readonly waitUntilPromises: Array<Promise<unknown>>;
 }
 
@@ -180,12 +172,6 @@ function makeRawDurableObjectState(): RawStateFixture {
     calls: 0,
     resolved: [],
     rejected: [],
-    tags: new Map(),
-    autoResponseTimestamps: new Map(),
-    acceptedSockets: [],
-    sockets: [],
-    hibernatableTimeout: null,
-    aborts: [],
     waitUntilPromises: [],
   };
 
@@ -208,22 +194,6 @@ function makeRawDurableObjectState(): RawStateFixture {
         tracker.rejected.push(error);
         throw error;
       }
-    },
-    acceptWebSocket: (socket: WebSocket, tags?: Array<string>) => {
-      tracker.acceptedSockets.push({ socket, tags });
-    },
-    getWebSockets: () => tracker.sockets,
-    setWebSocketAutoResponse: () => {},
-    getWebSocketAutoResponse: () => null,
-    getWebSocketAutoResponseTimestamp: (ws: WebSocket) =>
-      tracker.autoResponseTimestamps.get(ws) ?? null,
-    setHibernatableWebSocketEventTimeout: (timeoutMs?: number) => {
-      tracker.hibernatableTimeout = timeoutMs && timeoutMs > 0 ? timeoutMs : null;
-    },
-    getHibernatableWebSocketEventTimeout: () => tracker.hibernatableTimeout,
-    getTags: (ws: WebSocket) => tracker.tags.get(ws) ?? [],
-    abort: (reason?: string, options?: globalThis.DurableObjectAbortOptions) => {
-      tracker.aborts.push({ reason, options });
     },
   });
 

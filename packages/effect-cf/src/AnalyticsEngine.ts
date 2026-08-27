@@ -572,7 +572,14 @@ const executeQueryRequest = (
   options?: AnalyticsEngineQueryOptions,
 ) =>
   Effect.gen(function* () {
-    const response = yield* httpClient.execute(queryRequest(definition, sql, options)).pipe(
+    const request = yield* Effect.try({
+      try: () => queryRequest(definition, sql, options),
+      catch: (cause) =>
+        analyticsEngineQueryError(definition, "query", "Invalid Analytics Engine SQL API URL", {
+          cause,
+        }),
+    });
+    const response = yield* httpClient.execute(request).pipe(
       Effect.mapError((cause) =>
         analyticsEngineQueryError(definition, "query", "Analytics Engine SQL API request failed", {
           cause,

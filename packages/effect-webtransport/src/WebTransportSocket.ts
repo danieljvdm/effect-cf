@@ -47,8 +47,6 @@ const toSocketOpenError = (cause: unknown): Socket.SocketError =>
 
 const encoder = new TextEncoder();
 
-const swallow = () => undefined;
-
 /**
  * Builds a `Socket` from a scoped acquisition of one reliable bidirectional
  * WebTransport stream. The acquisition runs once per `Socket.run`, so a
@@ -85,7 +83,19 @@ export const fromBidirectionalStream = <R>(
 
           yield* Scope.addFinalizer(
             scope,
-            Effect.promise(() => reader.cancel().then(swallow, swallow)),
+            Effect.promise(async () => {
+              try {
+                await reader.cancel();
+              } catch {
+                // already closed or errored
+              } finally {
+                try {
+                  reader.releaseLock();
+                } catch {
+                  // lock already released
+                }
+              }
+            }),
           );
           const writer = yield* Effect.try({
             try: () => stream.writable.getWriter(),
@@ -93,12 +103,19 @@ export const fromBidirectionalStream = <R>(
           });
 
           yield* Scope.addFinalizerExit(scope, (exit) =>
-            Effect.promise(() =>
-              (Exit.isSuccess(exit) ? writer.close() : writer.abort(exit.cause)).then(
-                swallow,
-                swallow,
-              ),
-            ),
+            Effect.promise(async () => {
+              try {
+                await (Exit.isSuccess(exit) ? writer.close() : writer.abort(exit.cause));
+              } catch {
+                // already closed or errored
+              } finally {
+                try {
+                  writer.releaseLock();
+                } catch {
+                  // lock already released
+                }
+              }
+            }),
           );
           const fiberSet = yield* FiberSet.make<any, E | Socket.SocketError>().pipe(
             Scope.provide(scope),

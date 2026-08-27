@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Data, Effect } from "effect";
+import { Data, Deferred, Effect, Exit, Fiber, Option, Scope } from "effect";
 import { Socket } from "effect/unstable/socket";
 
 import * as Fallback from "../src/Fallback";
@@ -100,6 +100,34 @@ describe("Fallback", () => {
 
       assert.strictEqual(selected.name, "fallback");
     }),
+  );
+
+  it.effect("releases an interrupted candidate before selection returns", () =>
+    Effect.acquireUseRelease(
+      Scope.make(),
+      (scope) =>
+        Effect.gen(function* () {
+          const acquired = yield* Deferred.make<void>();
+          const released = yield* Deferred.make<void>();
+          const candidate: Fallback.Candidate<never, Scope.Scope> = {
+            name: "interrupted",
+            socket: Effect.acquireRelease(Deferred.succeed(acquired, undefined), () =>
+              Deferred.succeed(released, undefined),
+            ).pipe(Effect.andThen(Effect.never)),
+          };
+
+          const selection = yield* Fallback.select([candidate]).pipe(
+            Scope.provide(scope),
+            Effect.forkChild,
+          );
+
+          yield* Deferred.await(acquired);
+          yield* Fiber.interrupt(selection);
+
+          assert.isTrue(Option.isSome(yield* Deferred.poll(released)));
+        }),
+      (scope) => Scope.close(scope, Exit.void),
+    ),
   );
 
   it.effect("webSocket candidates acquire lazily and carry their name", () =>

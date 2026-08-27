@@ -84,6 +84,10 @@ describe("WebTransportSocket", () => {
       // cancellation of the readable half.
       assert.isTrue(fake.bidis[0]!.writableClosed());
       assert.isTrue(fake.bidis[1]!.writableClosed());
+      assert.isFalse(fake.bidis[0]!.native.readable.locked);
+      assert.isFalse(fake.bidis[0]!.native.writable.locked);
+      assert.isFalse(fake.bidis[1]!.native.readable.locked);
+      assert.isFalse(fake.bidis[1]!.native.writable.locked);
     }),
   );
 

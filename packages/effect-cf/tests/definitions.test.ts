@@ -14,12 +14,13 @@ import {
 } from "effect";
 
 import {
-  type DurableObjectNamespace,
   type QueueBinding,
   type Rpc,
   type ServiceBinding,
   ContainerNamespace,
+  DurableObject,
   DurableObjectDefinition,
+  DurableObjectNamespace,
   DurableObjectStorage,
   Queue,
   RpcDefinition,
@@ -525,7 +526,9 @@ test("definition-backed Worker RPC validates encoded success values", async () =
       expectType<Effect.Effect<number, ServiceBinding.ServiceBindingRpcError>>(
         service.call("increment", 41),
       );
-      expectType<Effect.Effect<number, unknown, Scope.Scope>>(service.scopedCall("increment", 41));
+      expectType<Effect.Effect<number, ServiceBinding.ServiceBindingRpcError, Scope.Scope>>(
+        service.scopedCall("increment", 41),
+      );
     });
 
     void program;
@@ -647,10 +650,14 @@ test("definition-backed Worker RPC validates encoded success values", async () =
   });
   const NumberRooms = NumberRoom;
   let received: unknown;
+  const remoteError = new Error("room unavailable");
   const stub = {
     id: makeDurableObjectId(),
     fetch: async () => new Response("ok"),
     increment: async (value: string) => {
+      if (value === "0") {
+        throw remoteError;
+      }
       received = value;
 
       return String(Number(value) + 1);
@@ -679,7 +686,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
       expectType<Effect.Effect<number, DurableObjectNamespace.DurableObjectRpcError>>(
         rooms.call(room, "increment", 41),
       );
-      expectType<Effect.Effect<number, unknown, Scope.Scope>>(
+      expectType<Effect.Effect<number, DurableObjectNamespace.DurableObjectRpcError, Scope.Scope>>(
         rooms.scopedCall(room, "increment", 41),
       );
     });
@@ -714,6 +721,25 @@ test("definition-backed Worker RPC validates encoded success values", async () =
 
         assert.strictEqual(received, "41");
         assert.strictEqual(value, 42);
+      }),
+    );
+
+    it.effect("maps scoped RPC resolution failures to DurableObjectRpcError", () =>
+      Effect.gen(function* () {
+        const room = yield* NumberRooms.getByName("room");
+        const exit = yield* Effect.exit(
+          Effect.scoped(NumberRooms.scopedCall(room, "increment", 0)),
+        );
+
+        assert.strictEqual(exit._tag, "Failure");
+        if (exit._tag === "Failure") {
+          const error = Cause.squash(exit.cause);
+
+          assert.instanceOf(error, DurableObjectNamespace.DurableObjectRpcError);
+          assert.strictEqual(error.binding, "NUMBER_ROOMS");
+          assert.strictEqual(error.method, "increment");
+          assert.strictEqual(error.cause, remoteError);
+        }
       }),
     );
   });
@@ -1007,6 +1033,16 @@ test("reserved RPC method names are rejected", () => {
     // @ts-expect-error This runtime test deliberately supplies a statically reserved method.
     WorkerDefinition.make("BadWorker", {
       fetch: WorkerDefinition.method({ success: S.String }),
+    }),
+  ).toThrow(/reserved/i);
+});
+
+test("raw Durable Object RPC methods use the shared Cloudflare reserved-name set", () => {
+  expect(() =>
+    DurableObject.make(Layer.empty, {
+      rpc: {
+        connect: () => Effect.void,
+      },
     }),
   ).toThrow(/reserved/i);
 });

@@ -126,6 +126,9 @@ export const select = <const Candidates extends Arr.NonEmptyReadonlyArray<Candid
       const selected = yield* candidate.socket.pipe(
         Scope.provide(candidateScope),
         Effect.map((socket): SelectedTransport => ({ name: candidate.name, socket })),
+        Effect.onExit((exit) =>
+          Exit.isSuccess(exit) ? Effect.void : Scope.close(candidateScope, exit),
+        ),
         Effect.catch((error) => {
           failures.push({ name: candidate.name, cause: error });
 
@@ -136,7 +139,6 @@ export const select = <const Candidates extends Arr.NonEmptyReadonlyArray<Candid
       if (selected !== undefined) {
         return selected;
       }
-      yield* Scope.close(candidateScope, Exit.void);
     }
 
     return yield* new TransportSelectionError({ failures });

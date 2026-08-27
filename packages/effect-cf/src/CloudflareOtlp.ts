@@ -1,7 +1,8 @@
 /**
- * Worker fetch/RPC and Durable Object alarm/RPC handlers schedule a best-effort
- * flusher. It settles within two seconds; queues and other lifecycles must
- * flush explicitly. Failures are ignored so telemetry cannot fail user events.
+ * Worker fetch/queue/RPC and Durable Object alarm/RPC handlers schedule a
+ * best-effort flusher. It settles within two seconds; other lifecycles must
+ * flush explicitly. Scheduled flush failures cannot fail user events. Exporter
+ * layer finalizers run separately and follow their configured shutdown timeout.
  */
 import { ConfigProvider, Effect, Layer, Option } from "effect";
 import type * as Tracer from "effect/Tracer";
@@ -207,6 +208,8 @@ export const layerProtobuf = (
  *
  * Provide this layer at runtime scope for long-lived metrics aggregation, or at
  * handler scope when traces/logs should flush as the Cloudflare event finishes.
+ * A handler-scoped exporter can delay scope closure while its own finalizer
+ * flushes; the two-second background flush limit does not bound layer shutdown.
  */
 export const layerWorker = (options: WorkerLayerOptions = {}): Layer.Layer<OtlpExporter.Flusher> =>
   makeLayer(options, {

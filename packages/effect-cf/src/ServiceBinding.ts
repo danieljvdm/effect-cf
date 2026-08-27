@@ -142,7 +142,11 @@ export type ServiceBindingEffectClient<
   readonly scopedCall: <Method extends ServiceMethodKey<Api>>(
     method: Method,
     ...args: ServiceMethodArgs<Api, Method>
-  ) => Effect.Effect<Awaited<ServiceMethodSuccess<Api, Method>>, unknown, Scope.Scope>;
+  ) => Effect.Effect<
+    Awaited<ServiceMethodSuccess<Api, Method>>,
+    ServiceBindingRpcError,
+    Scope.Scope
+  >;
 };
 
 export type ServiceBindingStaticClient<
@@ -165,7 +169,11 @@ export type ServiceBindingStaticClient<
   readonly scopedCall: <Method extends ServiceMethodKey<Api>>(
     method: Method,
     ...args: ServiceMethodArgs<Api, Method>
-  ) => Effect.Effect<Awaited<ServiceMethodSuccess<Api, Method>>, unknown, Scope.Scope | R>;
+  ) => Effect.Effect<
+    Awaited<ServiceMethodSuccess<Api, Method>>,
+    ServiceBindingRpcError,
+    Scope.Scope | R
+  >;
 };
 
 type ServiceBindingValue = Schema.Schema.Type<typeof Schema.Unknown>;
@@ -192,7 +200,22 @@ export const makeClient = <
       init?: RequestInit,
     ) {
       return yield* Effect.tryPromise({
-        try: () => service.fetch(input, init),
+        try: (signal) => {
+          const callerSignal =
+            init?.signal !== undefined
+              ? init.signal
+              : input instanceof Request
+                ? input.signal
+                : undefined;
+
+          return service.fetch(input, {
+            ...init,
+            signal:
+              callerSignal === null || callerSignal === undefined
+                ? signal
+                : AbortSignal.any([callerSignal, signal]),
+          });
+        },
         catch: (cause) => new ServiceBindingFetchError({ binding: definition.binding, cause }),
       });
     });
@@ -288,7 +311,16 @@ export const makeClient = <
     >(method: Method, ...args: ServiceMethodArgs<Api, Method>) {
       const methodName = String(method);
       const result = yield* rpc(method, ...args);
-      const value = yield* CloudflareRpc.scoped(result);
+      const value = yield* CloudflareRpc.scoped(result).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ServiceBindingRpcError({
+              binding: definition.binding,
+              method: methodName,
+              cause,
+            }),
+        ),
+      );
 
       return yield* decodeSuccess<Method>(methodName, value);
     });

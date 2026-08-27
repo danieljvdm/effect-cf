@@ -5,7 +5,7 @@ import type {
 } from "@cloudflare/computer";
 import type { GitClient } from "@cloudflare/computer/git";
 import { expectTypeOf } from "vitest";
-import { Effect, type Scope } from "effect";
+import { Effect, type Layer, type Scope } from "effect";
 
 import * as ComputerArtifacts from "effect-cf/computer-artifacts";
 import * as ComputerWorkspace from "effect-cf/computer-workspace";
@@ -32,6 +32,13 @@ expectTypeOf<MissingFilesystemMethods>().toEqualTypeOf<never>();
 expectTypeOf<MissingGitMethods>().toEqualTypeOf<never>();
 expectTypeOf<MissingRuntimeMethods>().toEqualTypeOf<never>();
 expectTypeOf<MissingThinkMethods>().toEqualTypeOf<never>();
+expectTypeOf(ComputerWorkspace.ComputerWorkspace.layer).toEqualTypeOf<
+  Layer.Layer<
+    ComputerWorkspace.ComputerWorkspace,
+    ComputerWorkspace.WorkspaceAcquireError,
+    import("../src/DurableObjectState").DurableObjectState
+  >
+>();
 
 const program = Effect.gen(function* () {
   const workspace = yield* ComputerWorkspace.ComputerWorkspace;

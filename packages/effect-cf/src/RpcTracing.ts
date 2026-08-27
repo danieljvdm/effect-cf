@@ -1,6 +1,10 @@
 import { Cause, Clock, Context, Effect, Exit, Option, References, Schema, Tracer } from "effect";
 
-/** Live native RPC metadata. Never store this in durable messages or envelopes. */
+/**
+ * Live native RPC metadata. Opted-in receivers reserve a valid trailing value
+ * with this tag for transport context; do not use it as a final domain argument.
+ * Never store this in durable messages or envelopes.
+ */
 export const RpcTraceContext = Schema.Struct({
   _tag: Schema.Literal("effect-cf/RpcTraceContext/v1"),
   traceId: Schema.String.check(Schema.isPattern(/^(?!0{32}$)[0-9a-f]{32}$/)),

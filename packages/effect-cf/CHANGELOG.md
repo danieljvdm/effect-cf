@@ -1,5 +1,17 @@
 # effect-cf
 
+## 0.34.0
+
+### Minor Changes
+
+- [#129](https://github.com/danieljvdm/effect-cf/pull/129) [`f84afd3`](https://github.com/danieljvdm/effect-cf/commit/f84afd32a36b9a56b0a33f392989c88711bd3951) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add opt-in live trace propagation for native Durable Object and Worker RPC. Enable `rpcTracing: true` on namespace or service binding clients and `rpcTracing: { service: "binding-name" }` on receivers. Clients without this option keep their argument lists unchanged. Opted-in receivers reserve a valid trailing `effect-cf/RpcTraceContext/v1` value for transport metadata; do not use that shape as a final domain argument.
+
+  Resolved RPC calls now produce one CLIENT span named for the binding and method. Export `RpcTracing` helpers and typed Worker/DurableObject run boundaries so applications can create SERVER spans around decoding, handling, and encoding. Native event metadata and live parent context are available before instrumentation starts; no trace context is persisted. RPC span helpers preserve error status without exporting argument or error payloads, and leave typed failures unchanged.
+
+### Patch Changes
+
+- [#127](https://github.com/danieljvdm/effect-cf/pull/127) [`40b64e3`](https://github.com/danieljvdm/effect-cf/commit/40b64e3411adc959393733fe25f2752b6a11b635) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Trim package guides and API comments to setup, core usage, and behavioral constraints. Public APIs and runtime behavior are unchanged.
+
 ## 0.33.0
 
 ### Minor Changes

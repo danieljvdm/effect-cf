@@ -186,7 +186,7 @@ export const embeddingResponse = (value: {
   [embeddingDimensionsKey]: value[embeddingDimensionsKey] ?? [],
 });
 
-const decodeEmbeddingResponse = S.decodeUnknownOption(
+const decodeEmbeddingResponse = S.decodeUnknownEffect(
   S.Struct({
     data: S.optional(S.Array(S.Array(S.Number))),
     [embeddingDimensionsKey]: S.optional(S.Array(S.Number)),
@@ -212,21 +212,28 @@ export const makeClient =
         () => ai.aiGatewayLogId,
       ),
       run,
-      runEmbedding: Effect.fn("WorkersAi.runEmbedding")(
-        (model: string, input: WorkersAiEmbeddingInput, options?: WorkersAiOptions) => {
-          // SAFETY: every WorkersAiEmbeddingInput variant is a string-keyed Workers AI payload.
-          const modelInput = input as Parameters<WorkersAiBinding["run"]>[1];
+      runEmbedding: Effect.fn("WorkersAi.runEmbedding")(function* (
+        model: string,
+        input: WorkersAiEmbeddingInput,
+        options?: WorkersAiOptions,
+      ) {
+        // SAFETY: every WorkersAiEmbeddingInput variant is a string-keyed Workers AI payload.
+        const modelInput = input as Parameters<WorkersAiBinding["run"]>[1];
 
-          return run(model, modelInput, options).pipe(
-            Effect.map((response) =>
-              Option.match(decodeEmbeddingResponse(response), {
-                onNone: () => embeddingResponse({}),
-                onSome: embeddingResponse,
+        const response = yield* run(model, modelInput, options);
+        const decoded = yield* decodeEmbeddingResponse(response).pipe(
+          Effect.mapError(
+            (cause) =>
+              new WorkersAiOperationError({
+                binding: definition.binding,
+                operation: "runEmbedding",
+                cause,
               }),
-            ),
-          );
-        },
-      ),
+          ),
+        );
+
+        return embeddingResponse(decoded);
+      }),
       models: Effect.fn("WorkersAi.models")((params?: WorkersAiModelsSearchParams) =>
         tryWorkersAiPromise(definition.binding, "models", () => ai.models(params)),
       ),

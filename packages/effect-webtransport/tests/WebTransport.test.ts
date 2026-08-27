@@ -103,7 +103,7 @@ describe("connect", () => {
     }),
   );
 
-  it.effect("applies datagram buffer options", () =>
+  it.effect("maps legacy buffer aliases to modern fields with modern precedence", () =>
     Effect.gen(function* () {
       const fake = makeFakeWebTransport();
 
@@ -111,7 +111,8 @@ describe("connect", () => {
         Effect.gen(function* () {
           yield* WebTransport.connect("https://example.com", {
             datagrams: {
-              incomingHighWaterMark: 5,
+              incomingMaxBufferedDatagrams: 5,
+              incomingHighWaterMark: 50,
               outgoingHighWaterMark: 7,
               incomingMaxAge: 100,
               outgoingMaxAge: null,
@@ -119,23 +120,39 @@ describe("connect", () => {
           });
           const datagrams = fake.datagrams!.native;
 
-          assert.strictEqual(datagrams.incomingHighWaterMark, 5);
-          assert.strictEqual(datagrams.outgoingHighWaterMark, 7);
+          assert.strictEqual(datagrams.incomingMaxBufferedDatagrams, 5);
+          assert.strictEqual(datagrams.outgoingMaxBufferedDatagrams, 7);
+          assert.isFalse("incomingHighWaterMark" in datagrams);
+          assert.isFalse("outgoingHighWaterMark" in datagrams);
           assert.strictEqual(datagrams.incomingMaxAge, 100);
           assert.strictEqual(datagrams.outgoingMaxAge, null);
         }),
       ).pipe(provideConstructor(fake));
     }),
   );
+
+  it.effect("maps modern buffer options to legacy platform fields", () =>
+    Effect.gen(function* () {
+      const fake = makeFakeWebTransport({ datagrams: { bufferApi: "legacy" } });
+
+      yield* Effect.scoped(
+        WebTransport.connect("https://example.com", {
+          datagrams: {
+            incomingMaxBufferedDatagrams: 9,
+            outgoingMaxBufferedDatagrams: 11,
+          },
+        }),
+      ).pipe(provideConstructor(fake));
+
+      assert.strictEqual(fake.datagrams!.native.incomingHighWaterMark, 9);
+      assert.strictEqual(fake.datagrams!.native.outgoingHighWaterMark, 11);
+      assert.isFalse("incomingMaxBufferedDatagrams" in fake.datagrams!.native);
+      assert.isFalse("outgoingMaxBufferedDatagrams" in fake.datagrams!.native);
+    }),
+  );
 });
 
 describe("feature detection", () => {
-  it.effect("isSupported is false without a global constructor", () =>
-    Effect.gen(function* () {
-      assert.isFalse(yield* WebTransport.isSupported);
-    }),
-  );
-
   it.effect("layerConstructorGlobal fails typed without a global constructor", () =>
     Effect.gen(function* () {
       const error = yield* Effect.scoped(WebTransport.connect("https://example.com")).pipe(
@@ -281,6 +298,7 @@ describe("streams", () => {
       releaseWrite();
       yield* Fiber.join(interruptFiber);
       assert.isTrue(wasAborted);
+      assert.isFalse(writable.locked);
     }),
   );
 
@@ -387,6 +405,7 @@ describe("streams", () => {
       const collected = yield* Stream.runCollect(WebTransport.readStream(bidi.native.readable));
 
       assert.deepStrictEqual(collected, [bytes(1), bytes(2, 3)]);
+      assert.isFalse(bidi.native.readable.locked);
     }),
   );
 
@@ -428,6 +447,68 @@ describe("datagrams", () => {
       assert.deepStrictEqual(fake.datagrams!.sent, [bytes(1, 2)]);
       fake.datagrams!.push(bytes(9));
       assert.deepStrictEqual(yield* session.datagrams.take, bytes(9));
+    }),
+  );
+
+  it.effect("send supports datagrams exposed through createWritable", () =>
+    Effect.gen(function* () {
+      const fake = makeFakeWebTransport({ datagrams: { createWritableOnly: true } });
+      const session = WebTransport.fromNative(fake.native);
+
+      yield* session.datagrams.send(bytes(1, 2));
+
+      assert.deepStrictEqual(fake.datagrams!.sent, [bytes(1, 2)]);
+    }),
+  );
+
+  it.effect("close releases the cached datagram writer", () =>
+    Effect.gen(function* () {
+      const fake = makeFakeWebTransport();
+      const session = WebTransport.fromNative(fake.native);
+
+      yield* session.datagrams.send(bytes(1));
+      assert.isTrue(fake.datagrams!.native.writable!.locked);
+      yield* session.close();
+
+      assert.isFalse(fake.datagrams!.native.writable!.locked);
+    }),
+  );
+
+  it.effect("peer closure releases the cached writer and rejects later sends", () =>
+    Effect.gen(function* () {
+      const fake = makeFakeWebTransport();
+      const session = WebTransport.fromNative(fake.native);
+
+      yield* session.datagrams.send(bytes(1));
+      assert.isTrue(fake.datagrams!.writable.locked);
+      fake.resolveClosed({ closeCode: 0, reason: "peer closed" });
+      yield* Effect.promise(() => fake.native.closed.then(() => undefined));
+
+      assert.isFalse(fake.datagrams!.writable.locked);
+      expectReason(
+        yield* session.datagrams.send(bytes(2)).pipe(Effect.flip),
+        WebTransport.SessionClosedError,
+      );
+      assert.isFalse(fake.datagrams!.writable.locked);
+    }),
+  );
+
+  it.effect("abrupt peer closure releases the cached writer", () =>
+    Effect.gen(function* () {
+      const fake = makeFakeWebTransport();
+      const session = WebTransport.fromNative(fake.native);
+
+      yield* session.datagrams.send(bytes(1));
+      assert.isTrue(fake.datagrams!.writable.locked);
+      fake.rejectClosed(new Error("connection lost"));
+      yield* Effect.promise(() =>
+        fake.native.closed.then(
+          () => undefined,
+          () => undefined,
+        ),
+      );
+
+      assert.isFalse(fake.datagrams!.writable.locked);
     }),
   );
 

@@ -33,6 +33,7 @@ import {
 } from "./DurableObjectState";
 import { WorkerConfig, WorkerEnvironment, type WorkerEnv } from "./Environment";
 import type { WorkflowInstanceStatusName } from "./WorkflowBinding";
+import { runNativeCallback } from "./internal/NativeCallback";
 
 const currentEnv: WorkerEnv = env;
 
@@ -207,15 +208,20 @@ export const runInDurableObject = Effect.fn("effect-cf/vitest/runInDurableObject
   stub: globalThis.DurableObjectStub<Object>,
   use: (instance: Object, state: DurableObjectStateService) => Effect.Effect<A, E, R>,
 ): Effect.fn.Return<A, E, Exclude<R, DurableObjectState>> {
-  const context = yield* Effect.context<Exclude<R, DurableObjectState>>();
-  const exit = yield* Effect.promise(() =>
-    runInDurableObjectPromise(stub, (instance, nativeState) => {
-      const state = fromDurableObjectState(nativeState);
-      const effect = Effect.provideService(use(instance, state), DurableObjectState, state);
+  const exit = yield* runNativeCallback<A, E, Exclude<R, DurableObjectState>, Exit.Exit<A, E>>(
+    (run) =>
+      runInDurableObjectPromise(stub, (instance, nativeState) => {
+        const state = fromDurableObjectState(nativeState);
 
-      return Effect.runPromiseExitWith(context)(effect);
-    }),
-  );
+        return run(
+          Effect.provideService(
+            Effect.suspend(() => use(instance, state)),
+            DurableObjectState,
+            state,
+          ),
+        );
+      }),
+  ).pipe(Effect.orDie);
 
   return yield* exit;
 });
@@ -394,15 +400,12 @@ const runWorkflowModifier = Effect.fnUntraced(function* <A, E, R>(
   register: (use: (modifier: NativeWorkflowInstanceModifier) => Promise<void>) => Promise<any>,
   use: (modifier: WorkflowInstanceModifier) => Effect.Effect<A, E, R>,
 ): Effect.fn.Return<A, E, R> {
-  const context = yield* Effect.context<R>();
-  const exit = yield* Effect.promise(async () => {
+  const exit = yield* runNativeCallback<A, E, R, Exit.Exit<A, E>>(async (run) => {
     let callbackExit: Exit.Exit<A, E> | undefined;
 
     try {
       await register(async (modifier) => {
-        callbackExit = await Effect.runPromiseExitWith(context)(
-          use(wrapWorkflowModifier(modifier)),
-        );
+        callbackExit = await run(Effect.suspend(() => use(wrapWorkflowModifier(modifier))));
 
         if (Exit.isFailure(callbackExit)) {
           throw callbackExit;
@@ -421,7 +424,7 @@ const runWorkflowModifier = Effect.fnUntraced(function* <A, E, R>(
     }
 
     return callbackExit;
-  });
+  }).pipe(Effect.orDie);
 
   return yield* exit;
 });

@@ -5,14 +5,20 @@ import {
   Effect,
   Layer,
   type ManagedRuntime,
+  References,
   type Scope,
   Tracer,
 } from "effect";
-import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import {
+  HttpEffect,
+  HttpMiddleware,
+  HttpServerRequest,
+  HttpServerResponse,
+} from "effect/unstable/http";
 
 import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 import { fromMessage, fromMessageBatch, type QueueHandler } from "./Queue";
-import type * as RpcDefinition from "./RpcDefinition";
+import * as RpcDefinition from "./RpcDefinition";
 import type { ReceiverOptions, RpcInvocationInfo } from "./RpcTracing";
 import * as Entrypoint from "./internal/Entrypoint";
 import * as Runtime from "./internal/Runtime";
@@ -75,20 +81,13 @@ export type ReservedMethodName =
   | "webSocketError";
 
 const reservedMethodNames = new Set<string>([
-  "constructor",
-  "dup",
-  "fetch",
-  "connect",
+  ...RpcDefinition.reservedMethodNames,
   "queue",
   "scheduled",
   "tail",
   "tailStream",
   "test",
   "trace",
-  "alarm",
-  "webSocketMessage",
-  "webSocketClose",
-  "webSocketError",
 ]);
 
 type WorkerBaseContext<ROut> = ExecutionContext | WorkerContext | WorkerEnvironment | ROut;
@@ -164,10 +163,12 @@ export interface WorkerOptions<
   /**
    * Layer provided around each Cloudflare event handled by this Worker.
    *
-   * The layer is built inside the event's Effect scope and finalized when the
-   * event effect completes. Use this for event-scoped resources such as OTLP
-   * trace/log exporters. Worker fetch and RPC handlers schedule a best-effort
-   * flush capped at two seconds; queue handlers do not flush automatically.
+   * The layer is built inside the event's Effect scope. For fetch handlers that
+   * return an Effect `HttpServerResponse` stream, its scope remains open until
+   * the response body finishes or is canceled. Native `Response` values pass
+   * through unchanged, so their body streams do not carry this scoped-lifetime
+   * guarantee. Fetch, queue, and RPC handlers schedule a best-effort telemetry
+   * flush capped at two seconds.
    */
   readonly eventLayer?: Layer.Layer<REvent, EventLayerError, WorkerBaseContext<RRuntime>>;
   readonly fetch?: Effect.Effect<
@@ -238,9 +239,14 @@ export interface FetchHandler<Env extends WorkerEnv = WorkerEnv> {
   ) => Promise<Response>;
 }
 
-const renderFetchSuccess = <E, R>(
+const renderFetchSuccess = <E, R, REvent, EventLayerError, EventLayerRequirements>(
   effect: Effect.Effect<WorkerFetchSuccess, E, R>,
-): Effect.Effect<Response, E, Exclude<R, Scope.Scope> | HttpServerRequest.HttpServerRequest> =>
+  eventLayer: Layer.Layer<REvent, EventLayerError, EventLayerRequirements> | undefined,
+): Effect.Effect<
+  Response,
+  E | EventLayerError,
+  Exclude<R | EventLayerRequirements, Scope.Scope> | HttpServerRequest.HttpServerRequest
+> =>
   Effect.suspend(() => {
     // Native `Response` values bypass all HTTP response processing: WebSocket
     // upgrade responses and app-level `HttpEffect.toHandled` results pass
@@ -249,26 +255,64 @@ const renderFetchSuccess = <E, R>(
     let nativeResponse: Response | undefined;
     let webResponse: Response | undefined;
 
-    const handled = HttpEffect.toHandled(
-      Effect.flatMap(effect, (response) => {
-        if (response instanceof Response) {
-          nativeResponse = response;
+    const httpApp = Effect.flatMap(effect, (response) => {
+      if (response instanceof Response) {
+        nativeResponse = response;
 
-          return Effect.succeed(HttpServerResponse.empty());
-        }
+        return Effect.succeed(HttpServerResponse.empty());
+      }
 
-        return Effect.succeed(response);
+      return Effect.succeed(response);
+    });
+    const handleResponse = (
+      request: HttpServerRequest.HttpServerRequest,
+      response: HttpServerResponse.HttpServerResponse,
+    ) =>
+      nativeResponse !== undefined
+        ? Effect.void
+        : Effect.map(Effect.context<never>(), (context) => {
+            webResponse = HttpServerResponse.toWeb(HttpEffect.scopeTransferToStream(response), {
+              withoutBody: request.method === "HEAD",
+              context,
+            });
+          });
+    const telemetryMiddleware = HttpMiddleware.make((self) =>
+      Effect.gen(function* () {
+        yield* Effect.addFinalizer(() => scheduleTelemetryFlush);
+
+        return yield* self;
       }),
-      (request, response) =>
-        nativeResponse !== undefined
-          ? Effect.void
-          : Effect.map(Effect.context<never>(), (context) => {
-              webResponse = HttpServerResponse.toWeb(HttpEffect.scopeTransferToStream(response), {
-                withoutBody: request.method === "HEAD",
-                context,
-              });
-            }),
     );
+    const handled =
+      eventLayer === undefined
+        ? HttpEffect.toHandled(httpApp, handleResponse, telemetryMiddleware)
+        : Effect.flatMap(References.TracerEnabled, (tracerEnabled) =>
+            HttpEffect.toHandled(
+              httpApp,
+              handleResponse,
+              HttpMiddleware.make((self) =>
+                Effect.provideService(
+                  Effect.gen(function* () {
+                    const context = yield* Layer.build(Layer.fresh(eventLayer));
+
+                    yield* Effect.addFinalizer(() =>
+                      Effect.provideContext(scheduleTelemetryFlush, context),
+                    );
+
+                    return yield* HttpMiddleware.tracer(self).pipe(
+                      // The tracer schedules span completion. Let it publish on
+                      // every exit with event references still installed, before
+                      // the exporter scope finalizes.
+                      Effect.onExit(() => Effect.yieldNow),
+                      Effect.provideContext(context),
+                    );
+                  }),
+                  References.TracerEnabled,
+                  tracerEnabled,
+                ),
+              ),
+            ).pipe(Effect.withTracerEnabled(false)),
+          );
 
     // `toHandled` re-fails with the original cause after rendering the error
     // response, so both branches return the response captured above.
@@ -282,13 +326,13 @@ const isWorkerOptions = <ROut, REvent, EventLayerError, Rpc extends WorkerRpc<RO
 ): options is WorkerOptions<ROut, REvent, EventLayerError, Rpc> => !Effect.isEffect(options);
 
 /**
- * Drains buffered OTLP telemetry once the fetch handler has produced its
- * response.
+ * Drains buffered OTLP telemetry when the fetch Effect scope closes. Effect
+ * response streams transfer that scope to the body and schedule the flush when
+ * the body finishes or is canceled.
  *
- * The flush is handed to `ctx.waitUntil` so it never delays the response
- * (including streaming bodies still being consumed). It is a no-op when the
- * context does not contain an `OtlpExporter.Flusher`. The handed-off effect is
- * best-effort and silently settles within two seconds.
+ * The flush is handed to `ctx.waitUntil` instead of being awaited by the
+ * handler. It is a no-op when the context does not contain an
+ * `OtlpExporter.Flusher`, and silently settles within two seconds.
  */
 const scheduleTelemetryFlush: Effect.Effect<void, never, WorkerContext> =
   Telemetry.scheduleTelemetryFlush((flush) =>
@@ -296,8 +340,10 @@ const scheduleTelemetryFlush: Effect.Effect<void, never, WorkerContext> =
   );
 
 /**
- * The layer is built once per Worker instance and reused for its events.
- * Eviction skips finalizers, so use `eventLayer` for per-event resources.
+ * Cloudflare creates a new `WorkerEntrypoint` instance for each native
+ * invocation, so this base layer is not shared across invocations. Its managed
+ * runtime has no deterministic disposal point in this adapter; use
+ * `eventLayer` for resources whose finalizers must run with an event.
  */
 export function make<ROut, LayerError>(
   layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
@@ -361,12 +407,14 @@ export function make<
       effect: Effect.Effect<A, E, RuntimeContext<ROut> | REvent | Scope.Scope>,
       runOptions: RunOptions = {},
     ): Promise<A> {
-      const eventLayer = options.eventLayer;
+      // Fetch builds its event layer in the HTTP scope transferred to the body.
+      const eventLayer = runOptions.event === "fetch" ? undefined : options.eventLayer;
       const parent = runOptions.rpc?.parent;
       const parentSpan = parent === undefined ? undefined : Tracer.externalSpan(parent);
 
       if (eventLayer === undefined) {
-        // SAFETY: the public make overloads permit an absent event layer only when REvent is never.
+        // SAFETY: fetch provides REvent inside its HTTP middleware; otherwise the
+        // public make overloads permit an absent event layer only when REvent is never.
         return Runtime.runEventPromise(
           this.runtime,
           // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off
@@ -408,12 +456,11 @@ export function make<
         Layer.succeed(WorkerContext, fromExecutionContext(ctx)),
       );
 
-      // SAFETY: requestServices provides the HTTP/request contexts introduced by renderFetchSuccess.
+      // The request services wrap eventLayer construction so cached object handlers
+      // never build an event layer against a previous request's ExecutionContext.
+      // HttpEffect owns the inner scope and transfers it to streaming response bodies.
       return this[RunSymbol](
-        renderFetchSuccess(fetchHandler).pipe(
-          Effect.tap(() => scheduleTelemetryFlush),
-          Effect.provide(requestServices),
-        ) as Effect.Effect<Response, unknown, RuntimeContext<ROut> | REvent | Scope.Scope>,
+        renderFetchSuccess(fetchHandler, options.eventLayer).pipe(Effect.provide(requestServices)),
         { event: "fetch" },
       );
     }
@@ -427,7 +474,12 @@ export function make<
 
       const messages = batch.messages.map((message) => fromMessage(message, message.body));
 
-      return this[RunSymbol](queueHandler(fromMessageBatch(batch, messages)), { event: "queue" });
+      return this[RunSymbol](
+        queueHandler(fromMessageBatch(batch, messages)).pipe(
+          Effect.onExit(() => scheduleTelemetryFlush),
+        ),
+        { event: "queue" },
+      );
     }
   }
 
@@ -452,12 +504,13 @@ interface FetchCapableInstance {
  * Creates an `ExportedHandler`-compatible `{ fetch }` object backed by
  * {@link make}.
  *
- * The Effect runtime is cached per `env` identity, so the user layer builds
- * once per isolate instead of once per request. `ExecutionContext`-backed
- * services (`Worker.ExecutionContext`, `Worker.WorkerContext`) are still
- * provided fresh for every request. Layer finalizers do not run when the
- * isolate is evicted; Cloudflare provides no shutdown hook. Use `eventLayer`
- * for resources that must be finalized per event.
+ * The Effect runtime is cached per `env` identity, so the base layer builds
+ * once for that cached handler. Request handlers and `eventLayer` receive fresh
+ * `ExecutionContext` and `WorkerContext` services. A service constructed by the
+ * cached base layer from either context instead captures the first request's
+ * value, so construct invocation-bound services in `eventLayer`. Cloudflare
+ * provides no isolate shutdown hook, so cached base-layer finalizers are not
+ * guaranteed to run.
  */
 export function makeFetchHandler<
   ROut,

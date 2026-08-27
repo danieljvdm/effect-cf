@@ -100,6 +100,17 @@ export class WorkspaceAssetsError extends Schema.TaggedError<WorkspaceAssetsErro
   },
 ) {}
 
+/** Schema-serializable error while acquiring the Computer workspace client. */
+export class WorkspaceAcquireError extends Schema.TaggedError<WorkspaceAcquireError>()(
+  "WorkspaceAcquireError",
+  {
+    operation: Schema.String,
+    message: Schema.String,
+    code: Schema.optionalKey(Schema.String),
+    cause: Schema.optionalKey(Schema.Defect({ includeStack: true })),
+  },
+) {}
+
 export type WorkspaceReadFileOptions = Omit<CloudflareReadFileOptions, "encoding">;
 export type ReadTextFileOptions = WorkspaceReadFileOptions;
 export type ListDirectoryOptions = CloudflareReaddirOptions;
@@ -467,6 +478,21 @@ const execError = (operation: string, cause: unknown) => {
   }
 
   return WorkspaceExecError.make(properties);
+};
+
+const acquireError = (operation: string, cause: unknown) => {
+  const properties: WorkspaceOperationErrorProperties = {
+    operation,
+    message: errorMessage(cause),
+    cause,
+  };
+  const code = errorCode(cause);
+
+  if (code !== undefined) {
+    properties.code = code;
+  }
+
+  return WorkspaceAcquireError.make(properties);
 };
 
 const assetsError = (operation: string, path: string, cause: unknown) => {
@@ -887,9 +913,6 @@ const wrapRun = <Encoding extends WorkspaceExecEncoding>(
   return { id: handle.id, backend: handle.backend, events, result, kill };
 };
 
-const releaseRun = (handle: CloudflareWorkspaceRuntimeExecHandle<"utf8" | undefined>) =>
-  Effect.sync(() => handle[Symbol.dispose]());
-
 const makeRuntime = (client: CloudflareWorkspaceClient): ComputerWorkspaceRuntime => {
   const execImplementation = Effect.fn("ComputerWorkspace.runtime.exec", {
     attributes: { family: "runtime", operation: "exec" },
@@ -905,7 +928,7 @@ const makeRuntime = (client: CloudflareWorkspaceClient): ComputerWorkspaceRuntim
       : undefined;
 
     yield* Effect.annotateCurrentSpan({ backend: options?.backend, runId: options?.id });
-    const handle = yield* Effect.acquireRelease(
+    const handle = yield* Effect.acquireDisposable(
       Effect.tryPromise({
         try: () => {
           if (Predicate.isString(source)) {
@@ -926,7 +949,6 @@ const makeRuntime = (client: CloudflareWorkspaceClient): ComputerWorkspaceRuntim
         },
         catch: (cause) => execError("exec", cause),
       }),
-      releaseRun,
     );
 
     // SAFETY: runtimeExecOptions carries Encoding to Cloudflare's corresponding handle overload.
@@ -945,12 +967,11 @@ const makeRuntime = (client: CloudflareWorkspaceClient): ComputerWorkspaceRuntim
     options?: WorkspaceGetExecOptions<Encoding>,
   ) {
     yield* Effect.annotateCurrentSpan({ backend: options?.backend, runId: id });
-    const handle = yield* Effect.acquireRelease(
+    const handle = yield* Effect.acquireDisposable(
       Effect.tryPromise({
         try: () => client.runtime.getExec(id, runtimeGetOptions(options)),
         catch: (cause) => execError("getExec", cause),
       }),
-      releaseRun,
     );
 
     // SAFETY: runtimeGetOptions carries Encoding to Cloudflare's corresponding handle overload.
@@ -1169,25 +1190,31 @@ export class ComputerWorkspace extends Context.Service<
    * Acquires the single workspace registered by `withComputerWorkspace` and
    * releases its RPC client when the layer scope closes.
    */
-  static readonly layer: Layer.Layer<ComputerWorkspace, never, DurableObjectState> = Layer.effect(
-    ComputerWorkspace,
-    Effect.gen(function* () {
-      const state = yield* DurableObjectState;
-      const host = HostRegistry.lookup(state.raw);
+  static readonly layer: Layer.Layer<ComputerWorkspace, WorkspaceAcquireError, DurableObjectState> =
+    Layer.effect(
+      ComputerWorkspace,
+      Effect.gen(function* () {
+        const state = yield* DurableObjectState;
+        const host = HostRegistry.lookup(state.raw);
 
-      if (host === undefined) {
-        return yield* Effect.die(
-          "ComputerWorkspace.layer requires a Durable Object class built with withComputerWorkspace",
+        if (host === undefined) {
+          return yield* Effect.die(
+            "ComputerWorkspace.layer requires a Durable Object class built with withComputerWorkspace",
+          );
+        }
+
+        const computer = yield* Effect.tryPromise({
+          try: () => import("@cloudflare/computer"),
+          catch: (cause) => acquireError("import", cause),
+        });
+        const client = yield* Effect.acquireDisposable(
+          Effect.tryPromise({
+            try: () => computer.getWorkspace(host),
+            catch: (cause) => acquireError("getWorkspace", cause),
+          }),
         );
-      }
 
-      const computer = yield* Effect.promise(() => import("@cloudflare/computer"));
-      const client = yield* Effect.acquireRelease(
-        Effect.promise(() => computer.getWorkspace(host)),
-        (workspace) => Effect.sync(() => workspace[Symbol.dispose]()),
-      );
-
-      return ComputerWorkspace.of(fromWorkspaceClient(client));
-    }),
-  );
+        return ComputerWorkspace.of(fromWorkspaceClient(client));
+      }),
+    );
 }

@@ -42,9 +42,15 @@ export interface NativeBidirectionalStream {
 
 export interface NativeDatagramDuplexStream {
   readonly readable: ReadableStream<Uint8Array>;
-  readonly writable: WritableStream<Uint8Array>;
+  readonly createWritable?: (() => WritableStream<Uint8Array>) | undefined;
+  /** @deprecated Use `createWritable()` where the platform provides it. */
+  readonly writable?: WritableStream<Uint8Array> | undefined;
   readonly maxDatagramSize: number;
+  incomingMaxBufferedDatagrams?: number;
+  outgoingMaxBufferedDatagrams?: number;
+  /** @deprecated Use `incomingMaxBufferedDatagrams`. */
   incomingHighWaterMark?: number;
+  /** @deprecated Use `outgoingMaxBufferedDatagrams`. */
   outgoingHighWaterMark?: number;
   incomingMaxAge?: number | null;
   outgoingMaxAge?: number | null;
@@ -281,14 +287,17 @@ export interface WebTransport {
   readonly native: NativeWebTransport;
   /**
    * Opens an outgoing reliable bidirectional stream. Releasing the scope
-   * closes the writable half (FIN) and cancels the readable half.
+   * closes the writable half (FIN) and cancels the readable half when they
+   * are unlocked. A caller that acquires either raw stream lock owns its
+   * release and termination.
    */
   readonly openBidirectionalStream: (
     options?: NativeSendStreamOptions,
   ) => Effect.Effect<NativeBidirectionalStream, WebTransportError, Scope.Scope>;
   /**
    * Opens an outgoing reliable unidirectional (send) stream where the
-   * platform supports it. Releasing the scope closes the stream.
+   * platform supports it. Releasing the scope closes an unlocked stream; a
+   * caller that acquires its raw writer lock owns release and termination.
    */
   readonly openUnidirectionalStream: (
     options?: NativeSendStreamOptions,
@@ -337,8 +346,26 @@ const streamFromReadable = <A>(options: {
         yield* Scope.addFinalizer(
           scope,
           options.releaseLockOnEnd
-            ? Effect.sync(() => reader.releaseLock())
-            : Effect.promise(() => reader.cancel().then(constVoid, constVoid)),
+            ? Effect.sync(() => {
+                try {
+                  reader.releaseLock();
+                } catch {
+                  // lock already released
+                }
+              })
+            : Effect.promise(async () => {
+                try {
+                  await reader.cancel();
+                } catch {
+                  // already closed or errored
+                } finally {
+                  try {
+                    reader.releaseLock();
+                  } catch {
+                    // lock already released
+                  }
+                }
+              }),
         );
 
         return Effect.tryPromise({
@@ -374,8 +401,26 @@ const makeDatagrams = (native: NativeWebTransport): Datagrams => {
       : Effect.succeed(native.datagrams),
   );
   let cachedWriter: WritableStreamDefaultWriter<Uint8Array> | undefined;
+  let closed = false;
+  const markClosed = () => {
+    closed = true;
+    try {
+      cachedWriter?.releaseLock();
+    } catch {
+      // lock already released
+    }
+    cachedWriter = undefined;
+  };
+
+  native.closed.then(markClosed, markClosed);
+
   const send = (data: Uint8Array): Effect.Effect<void, WebTransportError> =>
     Effect.flatMap(requireDatagrams, (datagrams) => {
+      if (closed) {
+        return Effect.fail(
+          wtError(new SessionClosedError({ cause: "datagram send after session closure" })),
+        );
+      }
       if (data.byteLength > datagrams.maxDatagramSize) {
         return Effect.fail(
           wtError(
@@ -389,7 +434,16 @@ const makeDatagrams = (native: NativeWebTransport): Datagrams => {
 
       return Effect.tryPromise({
         try: async () => {
-          cachedWriter ??= datagrams.writable.getWriter();
+          if (cachedWriter === undefined) {
+            const writable = Predicate.isFunction(datagrams.createWritable)
+              ? datagrams.createWritable.call(datagrams)
+              : datagrams.writable;
+
+            if (writable === undefined) {
+              throw new Error("the platform does not expose a writable datagram stream");
+            }
+            cachedWriter = writable.getWriter();
+          }
           const writer = cachedWriter;
 
           await writer.ready;
@@ -524,7 +578,19 @@ export const fromNative = (native: NativeWebTransport): WebTransport => ({
 });
 
 export interface DatagramBufferOptions {
+  /** Maximum number of incoming datagrams buffered by the platform. */
+  readonly incomingMaxBufferedDatagrams?: number | undefined;
+  /** Maximum number of outgoing datagrams buffered by the platform. */
+  readonly outgoingMaxBufferedDatagrams?: number | undefined;
+  /**
+   * @deprecated Use `incomingMaxBufferedDatagrams`. The modern option takes
+   * precedence when both are supplied.
+   */
   readonly incomingHighWaterMark?: number | undefined;
+  /**
+   * @deprecated Use `outgoingMaxBufferedDatagrams`. The modern option takes
+   * precedence when both are supplied.
+   */
   readonly outgoingHighWaterMark?: number | undefined;
   readonly incomingMaxAge?: number | null | undefined;
   readonly outgoingMaxAge?: number | null | undefined;
@@ -542,21 +608,14 @@ export const connect = Effect.fn("WebTransport.connect")(function* (
 ): Effect.fn.Return<WebTransport, WebTransportError, WebTransportConstructor | Scope.Scope> {
   const makeNative = yield* WebTransportConstructor;
   const resolvedUrl = Predicate.isString(url) ? url : yield* url;
-  const native = yield* Effect.acquireRelease(
+  const session = yield* Effect.acquireRelease(
     Effect.try({
-      try: () => makeNative(resolvedUrl, options),
+      try: () => fromNative(makeNative(resolvedUrl, options)),
       catch: (cause) => wtError(new ConnectError({ kind: "OpenFailed", cause })),
     }),
-    (native) =>
-      Effect.promise(async () => {
-        try {
-          native.close(options?.closeInfo);
-        } catch {
-          // session already closed or failed
-        }
-        await native.closed.then(constVoid, constVoid);
-      }),
+    (session) => session.close(options?.closeInfo),
   );
+  const native = session.native;
 
   yield* Effect.tryPromise({
     try: () => native.ready,
@@ -579,12 +638,24 @@ export const connect = Effect.fn("WebTransport.connect")(function* (
 
   if (datagramOptions !== undefined && native.datagrams !== undefined) {
     const datagrams = native.datagrams;
+    const incomingMaxBufferedDatagrams =
+      datagramOptions.incomingMaxBufferedDatagrams ?? datagramOptions.incomingHighWaterMark;
+    const outgoingMaxBufferedDatagrams =
+      datagramOptions.outgoingMaxBufferedDatagrams ?? datagramOptions.outgoingHighWaterMark;
 
-    if (datagramOptions.incomingHighWaterMark !== undefined) {
-      datagrams.incomingHighWaterMark = datagramOptions.incomingHighWaterMark;
+    if (incomingMaxBufferedDatagrams !== undefined) {
+      if ("incomingMaxBufferedDatagrams" in datagrams) {
+        datagrams.incomingMaxBufferedDatagrams = incomingMaxBufferedDatagrams;
+      } else if ("incomingHighWaterMark" in datagrams) {
+        datagrams.incomingHighWaterMark = incomingMaxBufferedDatagrams;
+      }
     }
-    if (datagramOptions.outgoingHighWaterMark !== undefined) {
-      datagrams.outgoingHighWaterMark = datagramOptions.outgoingHighWaterMark;
+    if (outgoingMaxBufferedDatagrams !== undefined) {
+      if ("outgoingMaxBufferedDatagrams" in datagrams) {
+        datagrams.outgoingMaxBufferedDatagrams = outgoingMaxBufferedDatagrams;
+      } else if ("outgoingHighWaterMark" in datagrams) {
+        datagrams.outgoingHighWaterMark = outgoingMaxBufferedDatagrams;
+      }
     }
     if (datagramOptions.incomingMaxAge !== undefined) {
       datagrams.incomingMaxAge = datagramOptions.incomingMaxAge;
@@ -594,7 +665,7 @@ export const connect = Effect.fn("WebTransport.connect")(function* (
     }
   }
 
-  return fromNative(native);
+  return session;
 });
 
 export const layer = (
@@ -629,12 +700,19 @@ export const writer = (
       catch: (cause) => wtError(new WriteError({ source: "stream", cause })),
     }),
     (writer, exit) =>
-      Effect.promise(() =>
-        (Exit.isSuccess(exit) ? writer.close() : writer.abort(exit.cause)).then(
-          constVoid,
-          constVoid,
-        ),
-      ),
+      Effect.promise(async () => {
+        try {
+          await (Exit.isSuccess(exit) ? writer.close() : writer.abort(exit.cause));
+        } catch {
+          // already closed or errored
+        } finally {
+          try {
+            writer.releaseLock();
+          } catch {
+            // lock already released
+          }
+        }
+      }),
   ).pipe(
     Effect.map(
       (writer) =>

@@ -1,7 +1,13 @@
 import { NodeHttpServer } from "@effect/platform-node";
 import { expect, it, layer } from "@effect/vitest";
 import { ConfigProvider, Context, Effect, Layer, Queue, Schema as S } from "effect";
-import { HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import {
+  Headers,
+  HttpMiddleware,
+  HttpServer,
+  HttpServerRequest,
+  HttpServerResponse,
+} from "effect/unstable/http";
 import { OtlpExporter } from "effect/unstable/observability";
 import process from "node:process";
 
@@ -176,56 +182,70 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
     }),
   );
 
-  it.effect("exports Worker spans through the public fetch handler", () =>
-    Effect.gen(function* () {
-      const collector = yield* OtlpCollector;
-      const handler = Worker.makeFetchHandler(Layer.empty, {
-        eventLayer: CloudflareOtlp.layerWorker({
-          signals: ["traces"],
-          serialization: "json",
-          resource: { serviceName: "effect-cf-test" },
-          workerName: "api-worker",
-        }),
-        fetch: Effect.succeed(new Response("ok")).pipe(
-          Effect.withSpan("test.fetch", { attributes: { route: "/" } }),
-        ),
-      });
+  it.effect.each([200, 500])(
+    "exports Worker spans through the public fetch handler (%s)",
+    (status) =>
+      Effect.gen(function* () {
+        const collector = yield* OtlpCollector;
+        const handler = Worker.makeFetchHandler(Layer.empty, {
+          eventLayer: Layer.mergeAll(
+            CloudflareOtlp.layerWorker({
+              signals: ["traces"],
+              serialization: "json",
+              resource: { serviceName: "effect-cf-test" },
+              workerName: "api-worker",
+            }),
+            Layer.succeed(HttpMiddleware.SpanNameGenerator)(() => "event.server"),
+            Layer.succeed(Headers.CurrentRedactedNames)(["x-event-secret"]),
+          ),
+          fetch: (status === 200
+            ? Effect.succeed(new Response("ok"))
+            : Effect.fail("expected handler failure")
+          ).pipe(Effect.withSpan("test.fetch", { attributes: { route: "/" } })),
+        });
 
-      const response = yield* Effect.promise(() =>
-        handler.fetch(
-          new Request("https://worker.test/"),
-          makeEnv({
-            OTEL_TRACES_EXPORTER: "otlp",
-            OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.endpoint}/v1/traces`,
-            OTEL_EXPORTER_OTLP_HEADERS: "x-api-key=test-secret,x-shared=common",
-            OTEL_EXPORTER_OTLP_TRACES_HEADERS: "x-api-key=trace-secret,x-trace-key=trace-only",
-          }),
-          makeExecutionContext(),
-        ),
-      );
+        const response = yield* Effect.promise(() =>
+          handler.fetch(
+            new Request("https://worker.test/", {
+              headers: { "x-event-secret": "redaction-test-value" },
+            }),
+            makeEnv({
+              OTEL_TRACES_EXPORTER: "otlp",
+              OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.endpoint}/v1/traces`,
+              OTEL_EXPORTER_OTLP_HEADERS: "x-api-key=test-secret,x-shared=common",
+              OTEL_EXPORTER_OTLP_TRACES_HEADERS: "x-api-key=trace-secret,x-trace-key=trace-only",
+            }),
+            makeExecutionContext(),
+          ),
+        );
 
-      expect(response.status).toBe(200);
+        expect(response.status).toBe(status);
 
-      const request = yield* collector.nextRequest;
+        const request = yield* collector.nextRequest;
 
-      expect(request.path).toBe("/v1/traces");
-      expect(request.headers["x-api-key"]).toBe("trace-secret");
-      expect(request.headers["x-trace-key"]).toBe("trace-only");
-      expect(request.headers["x-shared"]).toBeUndefined();
+        expect(request.path).toBe("/v1/traces");
+        expect(request.headers["x-api-key"]).toBe("trace-secret");
+        expect(request.headers["x-trace-key"]).toBe("trace-only");
+        expect(request.headers["x-shared"]).toBeUndefined();
+        expect(request.body).not.toContain("redaction-test-value");
 
-      const payload = decodeOtlpPayload(request.body);
-      const firstResourceSpan = payload.resourceSpans[0];
-      const resourceAttributes = firstResourceSpan.resource.attributes;
-      const spans = firstResourceSpan.scopeSpans[0].spans;
-      const firstSpan = spans[0];
-      const spanAttributes = firstSpan.attributes;
+        const payload = decodeOtlpPayload(request.body);
+        const firstResourceSpan = payload.resourceSpans[0];
+        const resourceAttributes = firstResourceSpan.resource.attributes;
+        const spans = firstResourceSpan.scopeSpans[0].spans;
 
-      expect(getStringAttribute(resourceAttributes, "service.name")).toBe("effect-cf-test");
-      expect(getStringAttribute(resourceAttributes, "cloudflare.resource_type")).toBe("worker");
-      expect(getStringAttribute(resourceAttributes, "cloudflare.worker.name")).toBe("api-worker");
-      expect(spans.map((span) => span.name)).toContain("test.fetch");
-      expect(getStringAttribute(spanAttributes, "route")).toBe("/");
-    }),
+        expect(getStringAttribute(resourceAttributes, "service.name")).toBe("effect-cf-test");
+        expect(getStringAttribute(resourceAttributes, "cloudflare.resource_type")).toBe("worker");
+        expect(getStringAttribute(resourceAttributes, "cloudflare.worker.name")).toBe("api-worker");
+        expect(spans.map((span) => span.name)).toContain("test.fetch");
+        expect(spans.map((span) => span.name)).toContain("event.server");
+        expect(
+          spans.some(
+            (span) =>
+              span.name === "test.fetch" && getStringAttribute(span.attributes, "route") === "/",
+          ),
+        ).toBe(true);
+      }),
   );
 
   it.effect("exports WorkerDefinition RPC spans through waitUntil", () =>

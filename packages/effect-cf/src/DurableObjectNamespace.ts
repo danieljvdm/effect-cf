@@ -250,7 +250,7 @@ export type DurableObjectNamespaceEffectClient<
     stub: DurableObjectStubClient<Api>,
     method: Method,
     ...args: StubMethodArgs<Api, Method>
-  ) => Effect.Effect<Awaited<StubMethodSuccess<Api, Method>>, unknown, Scope.Scope>;
+  ) => Effect.Effect<Awaited<StubMethodSuccess<Api, Method>>, DurableObjectRpcError, Scope.Scope>;
   /**
    * Exposes the underlying native Durable Object namespace binding.
    *
@@ -300,7 +300,11 @@ export type DurableObjectNamespaceStaticClient<
     stub: DurableObjectStubClient<Api>,
     method: Method,
     ...args: StubMethodArgs<Api, Method>
-  ) => Effect.Effect<Awaited<StubMethodSuccess<Api, Method>>, unknown, Scope.Scope | R>;
+  ) => Effect.Effect<
+    Awaited<StubMethodSuccess<Api, Method>>,
+    DurableObjectRpcError,
+    Scope.Scope | R
+  >;
   readonly rawUnsafe: () => Effect.Effect<DurableObjectNamespaceClient<Api>, never, R>;
 };
 
@@ -351,7 +355,22 @@ export const makeClient = <
 
     const fetch = (stub: StubClient, input: RequestInfo | URL, init?: RequestInit) =>
       Effect.tryPromise({
-        try: () => stub.fetch(input, init),
+        try: (signal) => {
+          const callerSignal =
+            init?.signal !== undefined
+              ? init.signal
+              : input instanceof Request
+                ? input.signal
+                : undefined;
+
+          return stub.fetch(input, {
+            ...init,
+            signal:
+              callerSignal === null || callerSignal === undefined
+                ? signal
+                : AbortSignal.any([callerSignal, signal]),
+          });
+        },
         catch: (cause) => new DurableObjectFetchError({ binding: definition.binding, cause }),
       });
 
@@ -456,10 +475,19 @@ export const makeClient = <
         stub: StubClient,
         method: Method,
         ...args: StubMethodArgs<Api, Method>
-      ): Effect.fn.Return<StubMethodSuccess<Api, Method>, unknown, Scope.Scope> {
+      ): Effect.fn.Return<StubMethodSuccess<Api, Method>, DurableObjectRpcError, Scope.Scope> {
         const methodName = String(method);
         const result = yield* rpc(stub, method, ...args);
-        const value = yield* CloudflareRpc.scoped(result);
+        const value = yield* CloudflareRpc.scoped(result).pipe(
+          Effect.mapError(
+            (cause) =>
+              new DurableObjectRpcError({
+                binding: definition.binding,
+                method: methodName,
+                cause,
+              }),
+          ),
+        );
 
         return yield* decodeSuccess<Method>(methodName, value);
       },

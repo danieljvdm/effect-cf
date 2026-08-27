@@ -438,10 +438,14 @@ test("a hibernated in-flight finite RPC is reset without replay", async () => {
   client.accept();
   client.send(request("lost-request", "never", "HibernationNever"));
 
-  const pending = await runInDurableObject(stub, async (_instance, state) => ({
-    attachments: state.getWebSockets().map((socket) => socket.deserializeAttachment()),
-    neverStarts: await state.storage.get<number>("hibernation-never-starts"),
-  }));
+  const pending = await runInDurableObject(stub, async (_instance, state) => {
+    const neverStarts = await state.storage.get<number>("hibernation-never-starts");
+
+    return {
+      attachments: state.getWebSockets().map((socket) => socket.deserializeAttachment()),
+      neverStarts,
+    };
+  });
 
   expect(pending.attachments).toMatchObject([
     {

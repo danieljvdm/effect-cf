@@ -538,6 +538,22 @@ test("AnalyticsEngine query client maps non-2xx responses", async () => {
   });
 });
 
+test("AnalyticsEngine query client maps invalid API URLs to its typed error", async () => {
+  const client = await Effect.runPromise(
+    AnalyticsEngine.makeQueryClient({
+      accountId: "account-1",
+      apiToken: Redacted.make("secret-token"),
+      apiBaseUrl: "not a URL",
+    }).pipe(Effect.provide(fetchLayer(async () => new Response("unused")))),
+  );
+
+  await expect(Effect.runPromise(client.query("SELECT 1"))).rejects.toMatchObject({
+    _tag: "AnalyticsEngineQueryError",
+    operation: "query",
+    accountId: "account-1",
+  });
+});
+
 test("AnalyticsEngine query client surfaces schema failures", async () => {
   const client = await Effect.runPromise(
     AnalyticsEngine.makeQueryClient({

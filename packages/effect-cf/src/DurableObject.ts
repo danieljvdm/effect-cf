@@ -5,20 +5,13 @@ import { NativeRequest } from "./Worker";
 import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 import { DurableObjectState, fromDurableObjectState } from "./DurableObjectState";
 import { fromWebSocket, type DurableWebSocket } from "./DurableObjectWebSocket";
+import * as RpcDefinition from "./RpcDefinition";
 import * as Entrypoint from "./internal/Entrypoint";
 import * as Runtime from "./internal/Runtime";
 import * as Telemetry from "./internal/Telemetry";
 import type { ReceiverOptions, RpcInvocationInfo } from "./RpcTracing";
 
-const reservedMethodNames = new Set<string>([
-  "constructor",
-  "dup",
-  "fetch",
-  "alarm",
-  "webSocketMessage",
-  "webSocketClose",
-  "webSocketError",
-]);
+const reservedMethodNames: ReadonlySet<string> = RpcDefinition.reservedMethodNames;
 
 type RuntimeContext<ROut> = DurableObjectState | WorkerEnvironment | ROut;
 
@@ -167,6 +160,12 @@ export type DurableObjectClass<Rpc extends DurableObjectRpc<ROut>, ROut> = new (
     ): Promise<A>;
   };
 
+/**
+ * Builds a Durable Object whose base `layer` lives for the in-memory instance.
+ * Cloudflare does not expose an eviction or shutdown hook, so finalizers in
+ * that layer are not guaranteed to run. Put resources that require timely
+ * release in `eventLayer`, whose scope closes after each handled event.
+ */
 export const make = <
   ROut,
   LayerError,

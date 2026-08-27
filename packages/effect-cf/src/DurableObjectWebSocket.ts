@@ -38,53 +38,37 @@ export interface DurableWebSocket<Attachment = unknown> {
   send(data: DurableWebSocketSendData): Effect.Effect<void, DurableWebSocketSendError>;
   close(code?: number, reason?: string): Effect.Effect<void, DurableWebSocketCloseError>;
   /** Serializes hibernation attachment metadata onto the socket. */
-  serializeAttachment<A = Attachment>(
+  serializeAttachment<A extends Attachment = Attachment>(
     value: A,
   ): Effect.Effect<void, DurableWebSocketAttachmentError>;
   /** Deserializes hibernation attachment metadata from the socket. */
   readonly deserializeAttachment: Effect.Effect<unknown, DurableWebSocketAttachmentError>;
 }
 
-const wrappers = new WeakMap<WebSocket, DurableWebSocket<unknown>>();
-
 export const fromWebSocket = <Attachment = unknown>(
   raw: WebSocket,
-): DurableWebSocket<Attachment> => {
-  const existing = wrappers.get(raw);
-
-  if (existing !== undefined) {
-    // SAFETY: Attachment is phantom; a wrapper's runtime behavior is independent of that type.
-    return existing as DurableWebSocket<Attachment>;
-  }
-
-  const socket: DurableWebSocket<unknown> = {
-    raw,
-    send: (data) =>
-      Effect.try({
-        try: () => raw.send(data),
-        catch: (cause) => new DurableWebSocketSendError({ cause }),
-      }),
-    close: (code, reason) =>
-      Effect.try({
-        try: () => raw.close(code, reason),
-        catch: (cause) => new DurableWebSocketCloseError({ cause }),
-      }),
-    serializeAttachment: (value) =>
-      Effect.try({
-        try: () => raw.serializeAttachment(value),
-        catch: (cause) => new DurableWebSocketAttachmentError({ operation: "serialize", cause }),
-      }),
-    deserializeAttachment: Effect.try({
-      try: () => raw.deserializeAttachment(),
-      catch: (cause) => new DurableWebSocketAttachmentError({ operation: "deserialize", cause }),
+): DurableWebSocket<Attachment> => ({
+  raw,
+  send: (data) =>
+    Effect.try({
+      try: () => raw.send(data),
+      catch: (cause) => new DurableWebSocketSendError({ cause }),
     }),
-  };
-
-  wrappers.set(raw, socket);
-
-  // SAFETY: Attachment is phantom; the newly created wrapper supports values through its generic serializer.
-  return socket as DurableWebSocket<Attachment>;
-};
+  close: (code, reason) =>
+    Effect.try({
+      try: () => raw.close(code, reason),
+      catch: (cause) => new DurableWebSocketCloseError({ cause }),
+    }),
+  serializeAttachment: <A extends Attachment = Attachment>(value: A) =>
+    Effect.try({
+      try: () => raw.serializeAttachment(value),
+      catch: (cause) => new DurableWebSocketAttachmentError({ operation: "serialize", cause }),
+    }),
+  deserializeAttachment: Effect.try({
+    try: () => raw.deserializeAttachment(),
+    catch: (cause) => new DurableWebSocketAttachmentError({ operation: "deserialize", cause }),
+  }),
+});
 
 export interface AcceptUpgradeOptions<Attachment = unknown> {
   readonly tags?: ReadonlyArray<string> | undefined;
@@ -165,15 +149,13 @@ export const attachment = <const AttachmentSchema extends S.Codec<any, any, neve
   S.Codec.Encoded<AttachmentSchema>
 > => {
   type Attachment = S.Schema.Type<AttachmentSchema>;
-  type Encoded = S.Codec.Encoded<AttachmentSchema>;
 
   const serialize = (socket: DurableWebSocket<unknown>, value: Attachment) =>
     S.encodeEffect(schema)(value).pipe(
       Effect.mapError(
         (cause) => new DurableWebSocketAttachmentError({ operation: "serialize", cause }),
       ),
-      // SAFETY: S.encodeEffect returns this codec's declared Encoded representation.
-      Effect.flatMap((encoded) => socket.serializeAttachment(encoded as Encoded)),
+      Effect.flatMap((encoded) => socket.serializeAttachment(encoded)),
     );
 
   const deserialize = (socket: DurableWebSocket<unknown>) =>

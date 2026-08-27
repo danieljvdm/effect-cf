@@ -14,6 +14,7 @@ import {
   Context,
   Data,
   Effect,
+  FiberSet,
   Layer,
   type ManagedRuntime,
   Option,
@@ -39,8 +40,6 @@ export interface WorkflowEventService<Payload = unknown> {
 export class WorkflowEvent extends Context.Service<WorkflowEvent, WorkflowEventService>()(
   "effect-cf/WorkflowEvent",
 ) {}
-
-type RunWorkflowStepEffect = <A, E>(effect: Effect.Effect<A, E, never>) => Promise<A>;
 
 export class WorkflowStepError extends Data.TaggedError("WorkflowStepError")<{
   readonly step?: string;
@@ -135,52 +134,52 @@ const exposeCloudflareNonRetryableError = <A, E, R>(
       : Effect.failCause(cause);
   });
 
-const fromWorkflowStep = (
-  step: CloudflareWorkflowStep,
-  runPromise: RunWorkflowStepEffect,
-): WorkflowStepService => ({
+const fromWorkflowStep = (step: CloudflareWorkflowStep): WorkflowStepService => ({
   raw: step,
   do: <A, E, R>(name: string, effect: Effect.Effect<A, E, R>, config?: WorkflowStepConfig) =>
-    Effect.context<Exclude<R, WorkflowStepContext>>().pipe(
-      Effect.flatMap((context) =>
-        Effect.tryPromise({
-          try: () => {
-            const run = (stepContext: CloudflareWorkflowStepContext) =>
-              runPromise(
-                exposeCloudflareNonRetryableError(
-                  Effect.scoped(
-                    Effect.provideService(
-                      Effect.provideContext(
-                        // SAFETY: WorkflowStepContext is provided immediately below; context supplies every other R service.
-                        // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off
-                        effect as Effect.Effect<A, E, Exclude<R, WorkflowStepContext>>,
-                        context,
-                      ),
-                      WorkflowStepContext,
-                      stepContext,
-                    ),
-                  ),
-                ),
-              );
-            // SAFETY: these overloads reproduce the Cloudflare WorkflowStep.do runtime signatures used here.
-            const rawStep = step as {
-              do(
-                name: string,
-                callback: (context: CloudflareWorkflowStepContext) => Promise<A>,
-              ): Promise<A>;
-              do(
-                name: string,
-                config: WorkflowStepConfig,
-                callback: (context: CloudflareWorkflowStepContext) => Promise<A>,
-              ): Promise<A>;
-            };
+    Effect.gen(function* () {
+      const context = yield* Effect.context<Exclude<R, WorkflowStepContext>>();
 
-            return config === undefined ? rawStep.do(name, run) : rawStep.do(name, config, run);
-          },
-          catch: (cause) => new WorkflowStepError({ step: name, operation: "do", cause }),
+      return yield* Effect.scoped(
+        Effect.gen(function* () {
+          // Cloudflare owns retry timing and exposes no step cancellation API.
+          // Join the current callback on interruption and prevent later retry
+          // callbacks from starting, without waiting for native retry delays.
+          const runPromise = yield* FiberSet.makeRuntimePromise<never, A, E>();
+
+          return yield* Effect.tryPromise({
+            try: () => {
+              const run = (stepContext: CloudflareWorkflowStepContext) => {
+                const stepEffect: Effect.Effect<
+                  A,
+                  E,
+                  Exclude<R, WorkflowStepContext>
+                > = Effect.scoped(Effect.provideService(effect, WorkflowStepContext, stepContext));
+
+                return runPromise(
+                  exposeCloudflareNonRetryableError(Effect.provideContext(stepEffect, context)),
+                );
+              };
+              // SAFETY: these overloads reproduce the Cloudflare WorkflowStep.do runtime signatures used here.
+              const rawStep = step as {
+                do(
+                  name: string,
+                  callback: (context: CloudflareWorkflowStepContext) => Promise<A>,
+                ): Promise<A>;
+                do(
+                  name: string,
+                  config: WorkflowStepConfig,
+                  callback: (context: CloudflareWorkflowStepContext) => Promise<A>,
+                ): Promise<A>;
+              };
+
+              return config === undefined ? rawStep.do(name, run) : rawStep.do(name, config, run);
+            },
+            catch: (cause) => new WorkflowStepError({ step: name, operation: "do", cause }),
+          });
         }),
-      ),
-    ),
+      );
+    }),
   sleep: (name, duration) =>
     Effect.tryPromise({
       try: () => step.sleep(name, duration),
@@ -263,10 +262,7 @@ export const make = <ROut, LayerError, Payload = unknown, Result = unknown>(
     ): Promise<Result> {
       const workflowServices = Layer.mergeAll(
         Layer.succeed(WorkflowEvent, fromWorkflowEvent(event)),
-        Layer.succeed(
-          WorkflowStep,
-          fromWorkflowStep(step, (effect) => this.runtime.runPromise(effect)),
-        ),
+        Layer.succeed(WorkflowStep, fromWorkflowStep(step)),
       );
 
       return Runtime.runEventPromise(this.runtime, options.run(event.payload), workflowServices);

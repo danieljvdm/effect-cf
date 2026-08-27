@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { assert, it } from "@effect/vitest";
-import { Config, Context, Effect, Layer, Schema as S } from "effect";
+import { Config, Context, Deferred, Effect, Fiber, Layer, Schema as S } from "effect";
 
 import { DurableObjectState, QueueDefinition, Worker, WorkerEnvironment } from "../src/index";
 import * as PoolWorkers from "../src/Vitest";
@@ -215,6 +215,69 @@ it.effect("runs Effects inside Durable Objects with caller services and state", 
     assert.notStrictEqual(globallyEvictedInstanceId, evictedInstanceId);
   }).pipe(Effect.provideService(TestValue, "from-test-context"));
 });
+
+it.effect("interrupting a Durable Object callback waits for its cleanup", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(`callback-interruption-${crypto.randomUUID()}`);
+
+  return Effect.gen(function* () {
+    const started = yield* Deferred.make<void>();
+    const continueCallback = yield* Deferred.make<void>();
+    const finalized = yield* Deferred.make<void>();
+    const fiber = yield* Effect.forkChild(
+      PoolWorkers.runInDurableObject(stub, () =>
+        Deferred.succeed(started, undefined).pipe(
+          Effect.andThen(Deferred.await(continueCallback)),
+          Effect.ensuring(
+            Effect.yieldNow.pipe(Effect.andThen(Deferred.succeed(finalized, undefined))),
+          ),
+        ),
+      ),
+    );
+
+    yield* Deferred.await(started);
+    yield* Fiber.interrupt(fiber);
+
+    const joinedCleanup = yield* Deferred.isDone(finalized);
+
+    // Release the callback even if the wrapper regresses to a detached fiber.
+    yield* Deferred.succeed(continueCallback, undefined);
+    yield* Deferred.await(finalized);
+    assert.isTrue(joinedCleanup);
+  });
+});
+
+it.effect("interrupting a Workflow modifier waits for its cleanup", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const introspector = yield* PoolWorkers.introspectWorkflowInstance(
+        env.TEST_WORKFLOW!,
+        crypto.randomUUID(),
+      );
+      const started = yield* Deferred.make<void>();
+      const continueCallback = yield* Deferred.make<void>();
+      const finalized = yield* Deferred.make<void>();
+      const fiber = yield* Effect.forkChild(
+        introspector.modify(() =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Deferred.await(continueCallback)),
+            Effect.ensuring(
+              Effect.yieldNow.pipe(Effect.andThen(Deferred.succeed(finalized, undefined))),
+            ),
+          ),
+        ),
+      );
+
+      yield* Deferred.await(started);
+      yield* Fiber.interrupt(fiber);
+
+      const joinedCleanup = yield* Deferred.isDone(finalized);
+
+      yield* Deferred.succeed(continueCallback, undefined);
+      yield* Deferred.await(finalized);
+      assert.isTrue(joinedCleanup);
+    }),
+  ),
+);
 
 it.effect("introspects one Workflow instance with Effect-native modifiers", () => {
   const workflow = env.TEST_WORKFLOW!;

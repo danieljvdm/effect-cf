@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest";
-import { Cause, Context, Duration, Effect } from "effect";
+import { Cause, Context, Deferred, Duration, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 
 const TransactionMessage = Context.Service<{ readonly message: string }>(
@@ -7,26 +7,6 @@ const TransactionMessage = Context.Service<{ readonly message: string }>(
 );
 
 import { DurableObjectStorage } from "../src/index";
-
-it.effect("wraps deleteAll, sync, and bookmark APIs", () =>
-  Effect.gen(function* () {
-    const { raw, tracker } = makeRawDurableObjectStorage();
-    const storage = DurableObjectStorage.fromDurableObjectStorage(raw);
-
-    yield* storage.put("key", "value");
-    yield* storage.deleteAll({ allowUnconfirmed: true });
-    yield* storage.sync();
-
-    assert.deepStrictEqual(tracker.deleteAllOptions, [{ allowUnconfirmed: true }]);
-    assert.strictEqual(tracker.syncCalls, 1);
-    assert.strictEqual(yield* storage.get("key"), undefined);
-    assert.strictEqual(yield* storage.getCurrentBookmark(), "bookmark:current");
-    assert.strictEqual(
-      yield* storage.onNextSessionRestoreBookmark("bookmark:restore"),
-      "bookmark:undo:bookmark:restore",
-    );
-  }),
-);
 
 it.effect("wraps transaction with Effect-native callbacks", () =>
   Effect.gen(function* () {
@@ -84,6 +64,28 @@ it.effect("preserves Effect context inside transaction callbacks", () =>
   }),
 );
 
+it.effect("preserves the caller Scope inside transaction callbacks", () =>
+  Effect.gen(function* () {
+    const { raw } = makeRawDurableObjectStorage();
+    const storage = DurableObjectStorage.fromDurableObjectStorage(raw);
+    let releases = 0;
+
+    yield* Effect.scoped(
+      storage
+        .transaction(() =>
+          Effect.acquireRelease(Effect.void, () =>
+            Effect.sync(() => {
+              releases += 1;
+            }),
+          ),
+        )
+        .pipe(Effect.tap(() => Effect.sync(() => assert.strictEqual(releases, 0)))),
+    );
+
+    assert.strictEqual(releases, 1);
+  }),
+);
+
 it.effect("rolls back transaction on typed Effect failure", () =>
   Effect.gen(function* () {
     const { raw, tracker } = makeRawDurableObjectStorage();
@@ -130,6 +132,56 @@ it.effect("wraps transactionSync and preserves typed failures", () =>
     assert.strictEqual(exit._tag, "Failure");
     if (exit._tag === "Failure") {
       assert.strictEqual(Cause.squash(exit.cause), "sync rollback");
+    }
+  }),
+);
+
+it.effect("transactionSync interrupts and joins accidentally asynchronous callbacks", () =>
+  Effect.gen(function* () {
+    const { raw, tracker } = makeRawDurableObjectStorage();
+    const storage = DurableObjectStorage.fromDurableObjectStorage(raw);
+    const started = yield* Deferred.make<void>();
+    const continueCallback = yield* Deferred.make<void>();
+    const releaseFinalizer = yield* Deferred.make<void>();
+    const finalized = yield* Deferred.make<void>();
+    let resumed = false;
+
+    const fiber = yield* Effect.forkChild(
+      storage.transactionSync(() =>
+        Deferred.succeed(started, undefined).pipe(
+          Effect.andThen(Deferred.await(continueCallback)),
+          Effect.tap(() =>
+            Effect.sync(() => {
+              resumed = true;
+            }),
+          ),
+          Effect.ensuring(
+            Deferred.await(releaseFinalizer).pipe(
+              Effect.andThen(Deferred.succeed(finalized, undefined)),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    yield* Deferred.await(started);
+    yield* Effect.yieldNow;
+
+    yield* Effect.sync(() => assert.isUndefined(fiber.pollUnsafe())).pipe(
+      Effect.ensuring(
+        Deferred.succeed(continueCallback, undefined).pipe(
+          Effect.andThen(Deferred.succeed(releaseFinalizer, undefined)),
+        ),
+      ),
+    );
+    yield* Deferred.await(finalized);
+    const [exit] = yield* Fiber.awaitAll([fiber]);
+
+    assert.isFalse(resumed);
+    assert.strictEqual(tracker.transactionSyncRollbacks, 1);
+    assert.strictEqual(exit?._tag, "Failure");
+    if (exit?._tag === "Failure") {
+      assert.isTrue(Cause.isAsyncFiberError(Cause.squash(exit.cause)));
     }
   }),
 );
@@ -199,8 +251,6 @@ interface StorageTracker {
     readonly options: globalThis.DurableObjectSetAlarmOptions | undefined;
     readonly scheduledTime: number | Date;
   }>;
-  readonly deleteAllOptions: Array<globalThis.DurableObjectPutOptions | undefined>;
-  syncCalls: number;
   readonly transactionAlarms: Array<{
     readonly options: globalThis.DurableObjectSetAlarmOptions | undefined;
     readonly scheduledTime: number | Date;
@@ -227,8 +277,6 @@ function makeRawDurableObjectStorage(options: StorageOptions = {}): RawStorageFi
   const values = new Map<string, StorageFixtureValue>();
   const tracker: StorageTracker = {
     alarms: [],
-    deleteAllOptions: [],
-    syncCalls: 0,
     transactionAlarms: [],
     transactionCalls: 0,
     transactionRollbacks: 0,
@@ -242,10 +290,6 @@ function makeRawDurableObjectStorage(options: StorageOptions = {}): RawStorageFi
       values.set(key, value);
     },
     delete: async (key: string) => values.delete(key),
-    deleteAll: async (putOptions?: globalThis.DurableObjectPutOptions) => {
-      tracker.deleteAllOptions.push(putOptions);
-      values.clear();
-    },
     transaction: async <T>(closure: (txn: globalThis.DurableObjectTransaction) => Promise<T>) => {
       tracker.transactionCalls += 1;
       const snapshot = new Map(values);
@@ -271,7 +315,6 @@ function makeRawDurableObjectStorage(options: StorageOptions = {}): RawStorageFi
     },
     deleteAlarm: async () => undefined,
     sync: async () => {
-      tracker.syncCalls += 1;
       if (options.syncError !== undefined) {
         throw options.syncError;
       }
@@ -292,8 +335,6 @@ function makeRawDurableObjectStorage(options: StorageOptions = {}): RawStorageFi
         throw error;
       }
     },
-    getCurrentBookmark: async () => "bookmark:current",
-    onNextSessionRestoreBookmark: async (bookmark: string) => `bookmark:undo:${bookmark}`,
     sql: {
       exec: () => {
         throw new Error("not used");

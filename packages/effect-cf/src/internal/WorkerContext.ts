@@ -17,7 +17,9 @@ const failureHandler = <E, R>(
   cause: Cause.Cause<E>,
   options: WorkerContextWaitUntilOptions<E, R> | undefined,
 ) =>
-  (options?.onFailure?.(cause) ?? Effect.logError(`${label} failed`, Cause.pretty(cause))).pipe(
+  Effect.suspend(
+    () => options?.onFailure?.(cause) ?? Effect.logError(`${label} failed`, Cause.pretty(cause)),
+  ).pipe(
     Effect.catchCause((handlerCause) =>
       Effect.logError(
         `${label} failure handler failed`,
@@ -42,7 +44,7 @@ export const makeWaitUntilScheduler = (
         Effect.sync(() => {
           const runHandler = (cause: Cause.Cause<E>) =>
             runPromiseExit(
-              Effect.scoped(Effect.provideContext(failureHandler(label, cause, options), context)),
+              Effect.provideContext(Effect.scoped(failureHandler(label, cause, options)), context),
             ).then((exit) => {
               if (Exit.isFailure(exit)) {
                 console.error(`${label} failure handler failed`, Cause.pretty(exit.cause));
@@ -50,7 +52,7 @@ export const makeWaitUntilScheduler = (
             });
 
           register(
-            runPromiseExit(Effect.scoped(Effect.provideContext(effect, context))).then(
+            runPromiseExit(Effect.provideContext(Effect.scoped(effect), context)).then(
               async (exit) => {
                 if (Exit.isSuccess(exit)) {
                   return;

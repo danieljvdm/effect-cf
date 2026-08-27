@@ -9,6 +9,7 @@ import {
   Layer,
   Option,
   Schema,
+  type Scope,
   Tracer,
 } from "effect";
 
@@ -133,7 +134,11 @@ it.effect.each([
         definition,
         true,
       );
-      const call =
+      const call: Effect.Effect<
+        number,
+        ServiceBinding.ServiceBindingRpcError | DurableObjectNamespace.DurableObjectRpcError,
+        Scope.Scope
+      > =
         target === "service"
           ? clients.service[scoped ? "scopedCall" : "call"]("read", "private-argument")
           : clients.namespace[scoped ? "scopedCall" : "call"](
@@ -429,6 +434,7 @@ it.effect(
         Layer.succeed(Tracer.Tracer, tracer),
         {
           ...options,
+          fetch: Effect.succeed(new Response("ok")),
           queue: () => Effect.void,
         },
       );
@@ -500,6 +506,9 @@ it.effect(
       yield* Effect.promise(() =>
         Promise.resolve(durable.fetch!(new Request("https://receiver.test/"))),
       );
+      yield* Effect.promise(() =>
+        Promise.resolve(worker.fetch(new Request("https://receiver.test/"))),
+      );
       yield* Effect.promise(() => Promise.resolve(durable.alarm!()));
       const socket = makePartialTestDouble<WebSocket>({});
 
@@ -519,6 +528,7 @@ it.effect(
       expect(events).toEqual([
         "rpc",
         "rpc",
+        "fetch",
         "fetch",
         "alarm",
         "webSocketMessage",

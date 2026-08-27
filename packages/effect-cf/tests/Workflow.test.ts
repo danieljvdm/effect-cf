@@ -6,7 +6,7 @@ import type {
 } from "cloudflare:workers";
 import { NonRetryableError } from "cloudflare:workflows";
 import { assert, test } from "@effect/vitest";
-import { Effect, Layer, Predicate } from "effect";
+import { Deferred, Effect, Fiber, Layer, Predicate } from "effect";
 
 import { Workflow } from "../src/index";
 import { makePartialTestDouble } from "./TestDoubles";
@@ -23,7 +23,7 @@ const makeEvent = (): Readonly<CloudflareWorkflowEvent<undefined>> => ({
   workflowName: "TestWorkflow",
 });
 
-type FakeStepCallback = (context: CloudflareWorkflowStepContext) => Promise<never>;
+type FakeStepCallback = (context: CloudflareWorkflowStepContext) => Promise<number | void>;
 
 const makeExecutingStep = (onReject?: (cause: Error) => void): CloudflareWorkflowStep => {
   const implementation = {
@@ -107,6 +107,98 @@ test("non-retryable Effect failures reach Cloudflare as NonRetryableError", asyn
   assert.strictEqual(error.step, "validate source");
   assert.strictEqual(error.operation, "do");
   assert.strictEqual(error.cause, boundaryError);
+});
+
+test("Workflow.step releases its resources before the workflow continues", async () => {
+  const events: Array<string> = [];
+  const stepCompleted = Promise.withResolvers<void>();
+  const workflowCompleted = Promise.withResolvers<void>();
+  const Live = Workflow.make(Layer.empty, {
+    run: () =>
+      Effect.gen(function* () {
+        yield* Workflow.step(
+          "scoped resource",
+          Effect.acquireRelease(
+            Effect.sync(() => events.push("acquire")),
+            () => Effect.sync(() => events.push("release")),
+          ),
+        );
+
+        stepCompleted.resolve();
+        yield* Effect.promise(() => workflowCompleted.promise);
+      }),
+  });
+  const workflow = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
+  const running = workflow.run(makeEvent(), makeExecutingStep());
+
+  await stepCompleted.promise;
+
+  try {
+    assert.deepStrictEqual(events, ["acquire", "release"]);
+  } finally {
+    workflowCompleted.resolve();
+    await running;
+  }
+});
+
+test("Workflow.step uses the current native step context", async () => {
+  const Live = Workflow.make(Layer.empty, {
+    run: () =>
+      Workflow.step(
+        "current step",
+        Effect.gen(function* () {
+          const context = yield* Workflow.WorkflowStepContext;
+
+          assert.strictEqual(context.step.name, "current step");
+
+          return context.attempt;
+        }),
+      ).pipe(
+        Effect.provideService(Workflow.WorkflowStepContext, {
+          step: { name: "previous step", count: 99 },
+          attempt: 99,
+          config: {},
+        }),
+      ),
+  });
+  const workflow = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
+
+  assert.strictEqual(await workflow.run(makeEvent(), makeExecutingStep()), 1);
+});
+
+test("interrupting Workflow.step waits for the current callback's cleanup", async () => {
+  const Live = Workflow.make(Layer.empty, {
+    run: () =>
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>();
+        const continueCallback = yield* Deferred.make<void>();
+        const finalized = yield* Deferred.make<void>();
+        const fiber = yield* Effect.forkChild(
+          Workflow.step(
+            "interrupted step",
+            Deferred.succeed(started, undefined).pipe(
+              Effect.andThen(Deferred.await(continueCallback)),
+              Effect.ensuring(
+                Effect.yieldNow.pipe(Effect.andThen(Deferred.succeed(finalized, undefined))),
+              ),
+            ),
+          ),
+        );
+
+        yield* Deferred.await(started);
+        yield* Fiber.interrupt(fiber);
+
+        const joinedCleanup = yield* Deferred.isDone(finalized);
+
+        yield* Deferred.succeed(continueCallback, undefined);
+        yield* Deferred.await(finalized);
+
+        return joinedCleanup;
+      }),
+  });
+  const workflow = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
+
+  assert.isTrue(await workflow.run(makeEvent(), makeExecutingStep()));
 });
 
 test("failing sleeps surface WorkflowStepError with the sleep operation", async () => {

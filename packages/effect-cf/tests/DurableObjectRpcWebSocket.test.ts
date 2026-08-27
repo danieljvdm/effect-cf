@@ -197,6 +197,38 @@ Object.defineProperty(globalThis, "WebSocketRequestResponsePair", {
 }
 
 {
+  const socket = makeFakeWebSocket({
+    application: "preserved",
+    effectCloudflareRpcClientId: {
+      version: 1,
+      clientId: 99,
+      hasPendingRequests: true,
+    },
+  });
+  const durableSocket = DurableObjectWebSocket.fromWebSocket(socket);
+  const state = makeFakeDurableObjectState();
+
+  layer(makeAppLayer(state))("DurableObjectRpcWebSocket fresh attachment reservation", (it) => {
+    it.effect("replaces reserved metadata while preserving application fields", () =>
+      Effect.gen(function* () {
+        const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
+
+        yield* transport.accept(durableSocket);
+
+        assert.deepStrictEqual(socket.deserializeAttachment(), {
+          application: "preserved",
+          effectCloudflareRpcClientId: {
+            version: 1,
+            clientId: 0,
+            hasPendingRequests: false,
+          },
+        });
+      }),
+    );
+  });
+}
+
+{
   layer(Layer.empty)("DurableObjectRpcWebSocket restoration isolation", (it) => {
     it.effect("continues restoring healthy sockets when an invalid socket cannot close", () =>
       Effect.scoped(

@@ -12,7 +12,7 @@ import {
 } from "effect";
 
 import { DurableObjectState } from "./DurableObjectState";
-import type { SqlStorageValue, StorageOperationError } from "./DurableObjectStorage";
+import { type SqlStorageValue, StorageOperationError } from "./DurableObjectStorage";
 import * as ErrorMessage from "./internal/ErrorMessage";
 
 const INIT_TABLE_SQL = `
@@ -177,8 +177,28 @@ export type ProcessDueAlarmsHandler<R = never, E = never> = (
   event: DurableObjectAlarmEvent,
 ) => Effect.Effect<void, E, R>;
 
+/**
+ * Alarm mutations owned by one transaction callback. Run them in the callback's
+ * fiber; forked work and use after the callback ends fail with StorageOperationError.
+ */
+export type AlarmTransaction = Pick<AlarmScheduler, "scheduleAlarm" | "cancelAlarm">;
+
 /** Own `storage.setAlarm()` exclusively: a Durable Object has one platform alarm timestamp. */
 export type AlarmScheduler = {
+  /**
+   * Commits local application storage and logical alarms in one native SQLite
+   * Durable Object transaction, reconciling the native alarm before commit.
+   * Use the supplied mutations, not standalone alarm methods or nested transactions.
+   * SqlClient queries must use this same Durable Object's storage.
+   *
+   * Failure, defects and interruption before commit roll back. A lost reply or
+   * interruption after commit does not undo committed state. Keep RPC and other
+   * external effects outside; atomically pre-arm a later wake before fallible work.
+   */
+  readonly transaction: <A, E, R>(
+    closure: (alarms: AlarmTransaction) => Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E | StorageOperationError, R>;
+
   readonly cancelAlarm: (
     input: AlarmRef,
   ) => Effect.Effect<void, InvalidAlarmRefError | StorageOperationError>;
@@ -523,17 +543,9 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
       const cancelAlarm = Effect.fn("DurableObjectAlarm.cancelAlarm")(function* (input: AlarmRef) {
         const ref = yield* decodeAlarmRef(input);
 
-        yield* state.storage.transaction(() =>
-          Effect.gen(function* () {
-            yield* ensureTable(state);
-            yield* state.storage.sql
-              .exec(
-                `DELETE FROM effect_cf_scheduled_alarms WHERE storage_id = ?`,
-                getScheduledEventId(ref),
-              )
-              .pipe(Effect.asVoid);
-            yield* reconcileAlarm();
-          }),
+        yield* state.storage.sql.exec(
+          `DELETE FROM effect_cf_scheduled_alarms WHERE storage_id = ?`,
+          getScheduledEventId(ref),
         );
       });
 
@@ -545,26 +557,61 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         const payload = yield* encodeStoredPayload(input.payload);
         const runAt = DateTime.toEpochMillis(input.runAt);
 
-        yield* state.storage.transaction(() =>
-          Effect.gen(function* () {
-            yield* ensureTable(state);
-            yield* state.storage.sql
-              .exec(
-                `INSERT OR REPLACE INTO effect_cf_scheduled_alarms
+        yield* state.storage.sql.exec(
+          `INSERT OR REPLACE INTO effect_cf_scheduled_alarms
                    (storage_id, alarm_id, tag, run_at, repeat_every_ms, payload)
                  VALUES (?, ?, ?, ?, ?, ?)`,
-                getScheduledEventId(ref),
-                ref.id,
-                ref.tag,
-                runAt,
-                repeatEveryMillis,
-                payload,
-              )
-              .pipe(Effect.asVoid);
-            yield* reconcileAlarm();
-          }),
+          getScheduledEventId(ref),
+          ref.id,
+          ref.tag,
+          runAt,
+          repeatEveryMillis,
+          payload,
         );
       });
+
+      const transaction: AlarmScheduler["transaction"] = (closure) =>
+        state.storage.transaction(() =>
+          Effect.withFiber((owner) => {
+            let active = true;
+
+            // A callback-owned handle cannot escape via a returned Effect or a
+            // detached fiber and write after reconciliation or rollback.
+            const requireActive = <A, E>(effect: Effect.Effect<A, E>) =>
+              Effect.withFiber<A, E | StorageOperationError>((fiber) =>
+                active && fiber === owner
+                  ? effect
+                  : Effect.fail(
+                      new StorageOperationError({
+                        operation: "alarm.transaction",
+                        cause: new Error(
+                          "Alarm mutations require their active transaction callback",
+                        ),
+                      }),
+                    ),
+              );
+
+            return Effect.gen(function* () {
+              yield* ensureTable(state);
+              const result = yield* Effect.suspend(() =>
+                closure({
+                  cancelAlarm: (input) => requireActive(cancelAlarm(input)),
+                  scheduleAlarm: (input) => requireActive(scheduleAlarm(input)),
+                }),
+              ).pipe(
+                Effect.ensuring(
+                  Effect.sync(() => {
+                    active = false;
+                  }),
+                ),
+              );
+
+              yield* reconcileAlarm();
+
+              return result;
+            });
+          }),
+        );
 
       const processDueAlarms = Effect.fn("DurableObjectAlarm.processDueAlarms")(function* <
         R,
@@ -669,9 +716,10 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
       });
 
       return DurableObjectAlarm.of({
-        cancelAlarm,
+        cancelAlarm: (input) => transaction((alarms) => alarms.cancelAlarm(input)),
         processDueAlarms,
-        scheduleAlarm,
+        scheduleAlarm: (input) => transaction((alarms) => alarms.scheduleAlarm(input)),
+        transaction,
       });
     }).pipe(Effect.withSpan("DurableObjectAlarm.layer")),
   );

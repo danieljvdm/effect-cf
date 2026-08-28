@@ -194,6 +194,8 @@ export type AlarmScheduler = {
    * Failure, defects and interruption before commit roll back. A lost reply or
    * interruption after commit does not undo committed state. Keep RPC and other
    * external effects outside; atomically pre-arm a later wake before fallible work.
+   * Cloudflare's native retries are bounded; composition does not remove the
+   * pre-arm requirement or promise infinite retry liveness.
    */
   readonly transaction: <A, E, R>(
     closure: (alarms: AlarmTransaction) => Effect.Effect<A, E, R>,

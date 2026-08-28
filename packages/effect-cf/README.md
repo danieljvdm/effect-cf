@@ -47,44 +47,7 @@ Declare `SETTINGS` in `wrangler.jsonc` and pass `SettingsLive` to `Worker.make`.
 
 The [counter example](https://github.com/danieljvdm/effect-cf/tree/main/examples/counter) shows `DurableObject.Tag`, storage, a typed RPC call, and the complete Wrangler configuration.
 
-## Durable Object alarm transactions
-
-`DurableObjectAlarm` schedules logical alarms identified by `{ tag, id }`. Scheduling the same pair replaces it. To commit application rows and alarm changes together, use `alarms.transaction`. The callback receives `scheduleAlarm` and `cancelAlarm` methods that share one native SQLite Durable Object transaction.
-
-```ts
-import { DateTime, Effect, Layer } from "effect";
-import { SqlClient } from "effect/unstable/sql";
-import { DurableObjectAlarm, DurableObjectSqlite } from "effect-cf";
-
-export const AlarmStorageLive = Layer.merge(
-  DurableObjectAlarm.DurableObjectAlarm.layer,
-  DurableObjectSqlite.layer(),
-);
-
-export const scheduleJob = Effect.fn("scheduleJob")(function* (id: string, runAt: DateTime.Utc) {
-  const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
-  const sql = yield* SqlClient.SqlClient;
-
-  yield* sql`CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, run_at INTEGER NOT NULL)`;
-
-  return yield* alarms.transaction((tx) =>
-    Effect.gen(function* () {
-      yield* sql`INSERT OR REPLACE INTO jobs (id, run_at) VALUES (${id}, ${DateTime.toEpochMillis(runAt)})`;
-      yield* tx.scheduleAlarm({ tag: "job", id, runAt, payload: null });
-
-      return id;
-    }),
-  );
-});
-```
-
-Pass `AlarmStorageLive` to `DurableObject.make` and use `scheduleJob` in a handler. This [compiling example](tests/fixtures/alarm-transaction-consumer.ts) uses `@effect/sql-sqlite-do` through `DurableObjectSqlite.layer()`. An existing `SqlClient` backed by the same object's storage works too. Application operations through `DurableObjectState.storage`, including `storage.sql.exec`, also participate. Do not wrap this boundary in `SqlClient.withTransaction` or `storage.transaction`, or call standalone alarm methods inside it. Run the supplied mutations in the callback's fiber; forked work and escaped handles fail with `StorageOperationError`.
-
-The caller's success value, typed errors, and service requirements remain visible. Reconciliation adds `StorageOperationError`; schedule and cancel retain their existing validation errors. Before commit, an uncaught typed failure, defect, interruption, or native alarm failure rolls back application rows, logical alarms, and the native alarm together. Once committed, interruption or a lost reply does not undo that state. A failed observation alone does not prove rollback.
-
-The native alarm is reconciled once before commit to the earliest remaining deadline, or cleared when no logical alarms remain. Standalone scheduling and cancellation use the same implementation. A due handler may transactionally write application state and replace its own alarm; conditional acknowledgement preserves the replacement.
-
-Keep RPC, network requests, and other external effects outside the transaction. Before fallible external work, durably pre-arm a later wake together with the application state that requires it. Transaction composition makes that pre-arm atomic; it does not remove the pre-arm requirement or promise infinite retry liveness. [Cloudflare limits native alarm retries](https://developers.cloudflare.com/durable-objects/api/alarms/). The scheduler must exclusively own the object's native alarm.
+For atomic application writes and alarm changes, see the [alarm transaction example](tests/fixtures/alarm-transaction-consumer.ts) and [API contract](src/DurableObjectAlarm.ts).
 
 ## Native RPC tracing
 

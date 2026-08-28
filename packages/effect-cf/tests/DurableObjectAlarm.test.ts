@@ -1,8 +1,332 @@
 import { assert, expect, it, test } from "@effect/vitest";
-import { Cause, DateTime, Effect, Layer, Schema } from "effect";
+import { Cause, Context, DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema } from "effect";
 
-import { DurableObject, DurableObjectAlarm, DurableObjectState } from "../src/index";
+import {
+  DurableObject,
+  DurableObjectAlarm,
+  DurableObjectState,
+  DurableObjectStorage,
+} from "../src/index";
 import { makePartialTestDouble } from "./TestDoubles";
+
+const Application = Context.Service<{ readonly result: number }>("test/AlarmApplication");
+const writeJob = (storage: DurableObjectStorage.DurableObjectStorage, status: string) =>
+  storage.sql.exec(
+    "INSERT OR REPLACE INTO application_jobs (id, status) VALUES (?, ?)",
+    "job",
+    status,
+  );
+
+it.effect("commits application writes and mixed alarm mutations in one transaction", () =>
+  Effect.gen(function* () {
+    const fixture = makeAlarmFixture();
+
+    yield* fixture.run(
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+        const result = yield* alarms
+          .transaction((tx) =>
+            Effect.gen(function* () {
+              yield* writeJob(fixture.storage, "ready");
+              yield* tx.scheduleAlarm({
+                tag: "job",
+                id: "a",
+                runAt: atMillis(2_000),
+                payload: "old",
+              });
+              yield* tx.scheduleAlarm({
+                tag: "job",
+                id: "b",
+                runAt: atMillis(1_000),
+                payload: null,
+              });
+              yield* tx.scheduleAlarm({
+                tag: "job",
+                id: "a",
+                runAt: atMillis(3_000),
+                payload: "new",
+              });
+              yield* tx.scheduleAlarm({
+                tag: "other",
+                id: "a",
+                runAt: atMillis(4_000),
+                payload: null,
+              });
+              yield* tx.cancelAlarm({ tag: "job", id: "b" });
+
+              return (yield* Application).result;
+            }),
+          )
+          .pipe(Effect.provideService(Application, { result: 42 }));
+
+        assert.strictEqual(result, 42);
+        assert.strictEqual(fixture.tracker.transactionCalls, 1);
+        assert.strictEqual(fixture.job("job"), "ready");
+        assert.strictEqual(fixture.row("job", "a")?.payload, '"new"');
+        assert.strictEqual(fixture.row("job", "b"), undefined);
+        assert.strictEqual(fixture.row("other", "a")?.run_at, 4_000);
+        assert.strictEqual(fixture.currentAlarm(), 3_000);
+
+        yield* alarms.transaction((tx) =>
+          Effect.gen(function* () {
+            yield* writeJob(fixture.storage, "cancelled");
+            yield* tx.cancelAlarm({ tag: "job", id: "a" });
+            yield* tx.cancelAlarm({ tag: "other", id: "a" });
+          }),
+        );
+
+        assert.strictEqual(fixture.job("job"), "cancelled");
+        assert.strictEqual(fixture.row("job", "a"), undefined);
+        assert.strictEqual(fixture.row("other", "a"), undefined);
+        assert.strictEqual(fixture.currentAlarm(), null);
+      }),
+    );
+  }),
+);
+
+it.effect.each(["typed failure", "defect"] as const)(
+  "rolls back application and alarm changes on %s",
+  (kind) =>
+    Effect.gen(function* () {
+      const fixture = makeAlarmFixture();
+      const failure = new Error("caller failed");
+
+      yield* fixture.run(
+        Effect.gen(function* () {
+          const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
+          yield* writeJob(fixture.storage, "before");
+          yield* alarms.scheduleAlarm({
+            tag: "job",
+            id: "a",
+            runAt: atMillis(2_000),
+            payload: "before",
+          });
+          const exit = yield* alarms
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                yield* writeJob(fixture.storage, "during");
+                yield* tx.cancelAlarm({ tag: "job", id: "a" });
+                yield* tx.scheduleAlarm({
+                  tag: "job",
+                  id: "b",
+                  runAt: atMillis(1_000),
+                  payload: null,
+                });
+
+                return yield* kind === "typed failure" ? Effect.fail(failure) : Effect.die(failure);
+              }),
+            )
+            .pipe(Effect.exit);
+
+          assert.isTrue(Exit.isFailure(exit));
+          if (Exit.isFailure(exit)) {
+            assert.strictEqual(Cause.squash(exit.cause), failure);
+            assert.strictEqual(Cause.hasDies(exit.cause), kind === "defect");
+          }
+          assert.strictEqual(fixture.job("job"), "before");
+          assert.strictEqual(fixture.row("job", "a")?.payload, '"before"');
+          assert.strictEqual(fixture.row("job", "b"), undefined);
+          assert.strictEqual(fixture.currentAlarm(), 2_000);
+          assert.strictEqual(fixture.tracker.transactionRollbacks, 1);
+        }),
+      );
+    }),
+);
+
+it.effect("rolls back on interruption during native alarm reconciliation", () =>
+  Effect.gen(function* () {
+    const reconciled = yield* Deferred.make<void>();
+    const releaseNative = yield* Deferred.make<void>();
+    const fixture = makeAlarmFixture({
+      afterSetAlarm: () =>
+        Effect.runPromise(
+          Deferred.succeed(reconciled, undefined).pipe(
+            Effect.andThen(Deferred.await(releaseNative)),
+          ),
+        ),
+    });
+
+    const fiber = yield* fixture.run(
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
+        return yield* Effect.forkChild(
+          alarms.transaction((tx) =>
+            Effect.gen(function* () {
+              yield* writeJob(fixture.storage, "during");
+              yield* tx.scheduleAlarm({
+                tag: "job",
+                id: "a",
+                runAt: atMillis(1_000),
+                payload: null,
+              });
+            }),
+          ),
+        );
+      }),
+    );
+
+    yield* Deferred.await(reconciled);
+    fiber.interruptUnsafe();
+    yield* Deferred.succeed(releaseNative, undefined);
+    const [exit] = yield* Fiber.awaitAll([fiber]);
+
+    assert.isTrue(Exit.isFailure(exit!));
+    if (Exit.isFailure(exit!)) {
+      assert.isTrue(Cause.hasInterrupts(exit.cause));
+    }
+    assert.strictEqual(fixture.job("job"), undefined);
+    assert.strictEqual(fixture.row("job", "a"), undefined);
+    assert.strictEqual(fixture.currentAlarm(), null);
+    assert.strictEqual(fixture.tracker.transactionRollbacks, 1);
+  }),
+);
+
+it.effect.each(["setAlarm", "deleteAlarm"] as const)(
+  "rolls back application writes when %s fails",
+  (operation) =>
+    Effect.gen(function* () {
+      const fixture = makeAlarmFixture();
+
+      yield* fixture.run(
+        Effect.gen(function* () {
+          const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
+          yield* writeJob(fixture.storage, "before");
+          yield* alarms.scheduleAlarm({
+            tag: "job",
+            id: "a",
+            runAt: atMillis(2_000),
+            payload: "before",
+          });
+          if (operation === "setAlarm") {
+            fixture.failNextSetAlarm();
+          } else {
+            fixture.failNextDeleteAlarm();
+          }
+          const error = yield* alarms
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                yield* writeJob(fixture.storage, "during");
+                yield* tx.cancelAlarm({ tag: "job", id: "a" });
+                if (operation === "setAlarm") {
+                  yield* tx.scheduleAlarm({
+                    tag: "job",
+                    id: "b",
+                    runAt: atMillis(1_000),
+                    payload: null,
+                  });
+                }
+              }),
+            )
+            .pipe(Effect.flip);
+
+          assert.instanceOf(error, DurableObjectStorage.StorageOperationError);
+          assert.strictEqual(error.operation, operation);
+          assert.strictEqual(fixture.job("job"), "before");
+          assert.strictEqual(fixture.row("job", "a")?.payload, '"before"');
+          assert.strictEqual(fixture.row("job", "b"), undefined);
+          assert.strictEqual(fixture.currentAlarm(), 2_000);
+        }),
+      );
+    }),
+);
+
+it.effect.each(["lost reply", "interruption"] as const)(
+  "preserves committed state after %s",
+  (kind) =>
+    Effect.gen(function* () {
+      const committed = yield* Deferred.make<void>();
+      const releaseReply = yield* Deferred.make<void>();
+      const fixture = makeAlarmFixture({
+        afterCommit: () =>
+          Effect.runPromise(
+            Deferred.succeed(committed, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseReply)),
+              Effect.andThen(kind === "lost reply" ? Effect.fail("reply lost") : Effect.void),
+            ),
+          ),
+      });
+      const fiber = yield* fixture.run(
+        Effect.gen(function* () {
+          const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
+          return yield* Effect.forkChild(
+            alarms.transaction((tx) =>
+              Effect.gen(function* () {
+                yield* writeJob(fixture.storage, "committed");
+                yield* tx.scheduleAlarm({
+                  tag: "job",
+                  id: "a",
+                  runAt: atMillis(1_000),
+                  payload: null,
+                });
+              }),
+            ),
+          );
+        }),
+      );
+
+      yield* Deferred.await(committed);
+      if (kind === "interruption") {
+        fiber.interruptUnsafe();
+      }
+      yield* Deferred.succeed(releaseReply, undefined);
+      const [exit] = yield* Fiber.awaitAll([fiber]);
+
+      assert.isTrue(Exit.isFailure(exit!));
+      assert.strictEqual(fixture.job("job"), "committed");
+      assert.strictEqual(fixture.row("job", "a")?.run_at, 1_000);
+      assert.strictEqual(fixture.currentAlarm(), 1_000);
+      assert.strictEqual(fixture.tracker.transactionRollbacks, 0);
+    }),
+);
+
+it.effect("rejects escaped and forked transaction mutations without changing storage", () =>
+  Effect.gen(function* () {
+    const fixture = makeAlarmFixture();
+
+    yield* fixture.run(
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+        const input = { tag: "job", id: "a", runAt: atMillis(1_000), payload: null };
+        const escaped = yield* alarms.transaction((tx) => Effect.succeed(tx));
+        let aborted = escaped;
+
+        yield* alarms
+          .transaction((tx) =>
+            Effect.sync(() => {
+              aborted = tx;
+            }).pipe(Effect.andThen(Effect.fail("abort"))),
+          )
+          .pipe(Effect.exit);
+
+        for (const effect of [
+          escaped.scheduleAlarm(input),
+          escaped.cancelAlarm(input),
+          aborted.scheduleAlarm(input),
+          aborted.cancelAlarm(input),
+        ]) {
+          assert.instanceOf(yield* Effect.flip(effect), DurableObjectStorage.StorageOperationError);
+        }
+        yield* alarms.transaction((tx) =>
+          Effect.gen(function* () {
+            assert.instanceOf(
+              yield* Effect.flip(escaped.scheduleAlarm(input)),
+              DurableObjectStorage.StorageOperationError,
+            );
+            const fiber = yield* Effect.forkChild(tx.scheduleAlarm(input).pipe(Effect.flip));
+
+            assert.instanceOf(yield* Fiber.join(fiber), DurableObjectStorage.StorageOperationError);
+          }),
+        );
+        assert.strictEqual(fixture.row("job", "a"), undefined);
+        assert.strictEqual(fixture.currentAlarm(), null);
+      }),
+    );
+  }),
+);
 
 it.effect("schedules, replaces, and reconciles to the earliest logical alarm", () =>
   Effect.gen(function* () {
@@ -496,19 +820,29 @@ interface AlarmFixtureTracker {
   readonly setAlarms: Array<number>;
   readonly deletedAlarms: Array<null>;
   transactionRollbacks: number;
+  transactionCalls: number;
 }
 
-function makeAlarmFixture() {
+interface AlarmFixtureOptions {
+  readonly afterCommit?: () => Promise<void>;
+  readonly afterSetAlarm?: () => Promise<void>;
+}
+
+function makeAlarmFixture(options: AlarmFixtureOptions = {}) {
   const rows = new Map<string, StoredAlarmRow>();
+  const jobs = new Map<string, string>();
   const tracker: AlarmFixtureTracker = {
     setAlarms: [],
     deletedAlarms: [],
     transactionRollbacks: 0,
+    transactionCalls: 0,
   };
   let currentAlarm: number | null = null;
   let rejectNextSetAlarm = false;
+  let rejectNextDeleteAlarm = false;
+  let inTransaction = false;
 
-  const sql = makeSqlStorage(rows);
+  const sql = makeSqlStorage(rows, jobs);
   const rawStorageImplementation = {
     get: async () => undefined,
     put: async () => undefined,
@@ -523,19 +857,31 @@ function makeAlarmFixture() {
 
       currentAlarm = scheduledTime instanceof Date ? scheduledTime.getTime() : scheduledTime;
       tracker.setAlarms.push(currentAlarm);
+      await options.afterSetAlarm?.();
     },
     deleteAlarm: async () => {
+      if (rejectNextDeleteAlarm) {
+        rejectNextDeleteAlarm = false;
+        throw new Error("deleteAlarm failed");
+      }
       currentAlarm = null;
       tracker.deletedAlarms.push(null);
     },
     transaction: async <T>(closure: (txn: globalThis.DurableObjectTransaction) => Promise<T>) => {
+      tracker.transactionCalls += 1;
+      if (inTransaction) {
+        throw new Error("Nested transactions are not supported");
+      }
+      inTransaction = true;
       const rowsSnapshot = cloneRows(rows);
+      const jobsSnapshot = new Map(jobs);
       const alarmSnapshot = currentAlarm;
       const setAlarmsLength = tracker.setAlarms.length;
       const deletedAlarmsLength = tracker.deletedAlarms.length;
+      let result: T;
 
       try {
-        return await closure(
+        result = await closure(
           makePartialTestDouble<globalThis.DurableObjectTransaction>({ rollback: () => {} }),
         );
       } catch (error) {
@@ -543,12 +889,22 @@ function makeAlarmFixture() {
         for (const [key, value] of rowsSnapshot) {
           rows.set(key, value);
         }
+        jobs.clear();
+        for (const [key, value] of jobsSnapshot) {
+          jobs.set(key, value);
+        }
         currentAlarm = alarmSnapshot;
         tracker.setAlarms.length = setAlarmsLength;
         tracker.deletedAlarms.length = deletedAlarmsLength;
         tracker.transactionRollbacks += 1;
         throw error;
+      } finally {
+        inTransaction = false;
       }
+      // Commit is complete. A failed or interrupted reply cannot roll it back.
+      await options.afterCommit?.();
+
+      return result;
     },
     transactionSync: <T>(closure: () => T) => closure(),
     sync: async () => undefined,
@@ -592,10 +948,15 @@ function makeAlarmFixture() {
 
   return {
     state,
+    storage: DurableObjectStorage.fromDurableObjectStorage(rawStorage),
     tracker,
+    job: (id: string) => jobs.get(id),
     currentAlarm: () => currentAlarm,
     failNextSetAlarm: () => {
       rejectNextSetAlarm = true;
+    },
+    failNextDeleteAlarm: () => {
+      rejectNextDeleteAlarm = true;
     },
     row: (tag: string, id: string) => rows.get(storageId(tag, id)),
     run: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect.pipe(Effect.provide(layer)),
@@ -604,13 +965,26 @@ function makeAlarmFixture() {
   };
 }
 
-function makeSqlStorage(rows: Map<string, StoredAlarmRow>): globalThis.SqlStorage {
+function makeSqlStorage(
+  rows: Map<string, StoredAlarmRow>,
+  jobs: Map<string, string>,
+): globalThis.SqlStorage {
   const implementation = {
     exec: (query: string, ...bindings: Array<globalThis.SqlStorageValue>) => {
       const normalized = query.replaceAll(/\s+/g, " ").trim();
 
       if (normalized.startsWith("CREATE TABLE")) {
         return cursor([], 0);
+      }
+
+      if (normalized.startsWith("INSERT OR REPLACE INTO application_jobs")) {
+        const [id, status] = Schema.decodeUnknownSync(Schema.Tuple([Schema.String, Schema.String]))(
+          bindings,
+        );
+
+        jobs.set(id, status);
+
+        return cursor([], 1);
       }
 
       if (normalized.startsWith("SELECT run_at FROM")) {

@@ -244,9 +244,7 @@ it.effect.each(["lost reply", "interruption"] as const)(
           Effect.runPromise(
             Deferred.succeed(committed, undefined).pipe(
               Effect.andThen(Deferred.await(releaseReply)),
-              Effect.andThen(
-                kind === "lost reply" ? Effect.fail(new Error("reply lost")) : Effect.void,
-              ),
+              Effect.andThen(kind === "lost reply" ? Effect.fail("reply lost") : Effect.void),
             ),
           ),
       });

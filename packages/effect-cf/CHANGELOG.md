@@ -1,5 +1,13 @@
 # effect-cf
 
+## 0.37.0
+
+### Minor Changes
+
+- [#135](https://github.com/danieljvdm/effect-cf/pull/135) [`9dea62e`](https://github.com/danieljvdm/effect-cf/commit/9dea62e74818b7fc9da919e8bdbfcc49991aef36) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add `DurableObjectAlarm.transaction` to commit application storage and logical alarm schedule, replacement, or cancellation together in one native SQLite Durable Object transaction. Application queries can use the existing storage wrapper or a `SqlClient` from `@effect/sql-sqlite-do` backed by the same object. The callback receives transaction-only alarm mutations and preserves the caller's success value, typed errors, and service requirements.
+
+  Failures before commit roll back application rows, logical alarms, and native alarm reconciliation together. Interruption or a lost reply after commit does not undo committed state. Keep external effects outside the transaction and durably pre-arm a later wake before fallible external work; Cloudflare's native alarm retries remain bounded.
+
 ## 0.36.0
 
 ### Minor Changes

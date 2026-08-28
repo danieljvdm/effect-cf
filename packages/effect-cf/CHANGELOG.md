@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.36.0
+
+### Minor Changes
+
+- [#132](https://github.com/danieljvdm/effect-cf/pull/132) [`d2e53a9`](https://github.com/danieljvdm/effect-cf/commit/d2e53a9fab38432a472c9f46a74b87cc89474103) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add the `effect-cf/mcp` entry point for serving an Effect AI `Toolkit` over MCP from a Worker fetch handler. `Mcp.fromToolkit(toolkit, { name, version, route })` wraps the MCP SDK's stateless Streamable HTTP handler (`createMcpHandler` from `@modelcontextprotocol/server`) together with the Worker edge concerns remote MCP deployments expect (CORS plus `Host` and `Origin` validation with localhost/`workers.dev` defaults): requests on the configured route (default `/mcp`) are answered by a fresh MCP server exposing every toolkit tool, and other requests fall through with `Option.none()` so the rest of the fetch handler (for example an `HttpApi` router) keeps serving them. Tool input/output schemas are derived from each tool's Effect `Schema`, tool calls run through the Worker's Effect runtime with the toolkit handler layer, declared tool failures become `isError` tool results, and invalid arguments are rejected by the tool's parameters schema. The `@modelcontextprotocol/server` package is a new optional peer dependency, needed only when importing `effect-cf/mcp`.
+
 ## 0.35.0
 
 ### Minor Changes

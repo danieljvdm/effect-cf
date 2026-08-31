@@ -49,6 +49,51 @@ The [counter example](https://github.com/danieljvdm/effect-cf/tree/main/examples
 
 For atomic application writes and alarm changes, see the [alarm transaction example](tests/fixtures/alarm-transaction-consumer.ts) and [API contract](src/DurableObjectAlarm.ts).
 
+## Cloudflare Observability traces
+
+`CloudflareTracer.layer` sends existing `Effect.withSpan` and named `Effect.fn`
+spans to Cloudflare's trace waterfall, alongside automatic platform spans.
+
+```ts
+import { Effect, Layer } from "effect";
+import { CloudflareTracer, Worker } from "effect-cf";
+
+export default Worker.make(Layer.empty, {
+  eventLayer: CloudflareTracer.layer,
+  fetch: Effect.sync(() => new Response("Hello")).pipe(Effect.withSpan("greet")),
+});
+```
+
+Enable tracing in `wrangler.jsonc`:
+
+```jsonc
+{
+  "compatibility_date": "2026-08-25",
+  "observability": {
+    "traces": { "enabled": true },
+  },
+}
+```
+
+Build the layer per invocation with `eventLayer`. It captures the current
+Cloudflare async context, so do not put it in a runtime layer cached across
+requests. Standalone Effect programs can provide it around each invocation.
+Nested spans, concurrent fibers, and resumed work restore the appropriate span
+context. Cloudflare handles sampling and export; no exporter endpoint or flush
+is needed.
+
+String, number, and boolean attributes are forwarded. Other attributes, span
+events, and links remain Effect-local. Completion is recorded as `effect.exit`
+with `success`, `failure`, or `interrupted`; Cloudflare does not expose a setter
+for native outcome status. Effect IDs remain separate from Cloudflare's opaque
+trace/span IDs. Explicit external parents cannot join a Cloudflare trace by ID,
+and `root: true` starts under the invocation's captured context.
+
+This layer replaces the active Effect tracer. When combining it with
+`CloudflareOtlp`, select only `logs` and/or `metrics` in the OTLP layer. See
+[Cloudflare's custom span API](https://developers.cloudflare.com/workers/observability/traces/custom-spans/)
+for platform limitations.
+
 ## Native RPC tracing
 
 `call()`, `scopedCall()`, and definition methods create one CLIENT span named `binding/method`, covering argument encoding, the native RPC wait, and success decoding. Raw `rpc()` retains Cloudflare's pipelined result without creating a span. Wrap its complete lifetime with `RpcTracing.withRpcClientSpan` when tracing raw calls.

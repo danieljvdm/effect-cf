@@ -39,7 +39,7 @@
     },
     "packages/effect-cf": {
       "name": "effect-cf",
-      "version": "0.35.0",
+      "version": "0.37.0",
       "devDependencies": {
         "@cloudflare/computer": "0.2.0",
         "@cloudflare/containers": "catalog:",
@@ -56,6 +56,7 @@
         "@platformatic/vfs": "^0.4.0",
         "effect": "catalog:",
         "esbuild": "^0.28.1",
+        "miniflare": "catalog:",
         "vite-plus": "catalog:",
         "vitest": "catalog:",
       },

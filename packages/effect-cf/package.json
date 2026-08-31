@@ -85,6 +85,7 @@
     "@platformatic/vfs": "^0.4.0",
     "effect": "catalog:",
     "esbuild": "^0.28.1",
+    "miniflare": "catalog:",
     "vite-plus": "catalog:",
     "vitest": "catalog:"
   },

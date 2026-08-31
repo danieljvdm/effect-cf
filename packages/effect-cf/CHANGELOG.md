@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.38.0
+
+### Minor Changes
+
+- [#137](https://github.com/danieljvdm/effect-cf/pull/137) [`8e35961`](https://github.com/danieljvdm/effect-cf/commit/8e3596157732b487f8fef5fd983a6c56a32e74ec) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add `CloudflareTracer.layer` to send existing Effect spans to Cloudflare Workers Observability. Provide it per invocation through `Worker.make`'s `eventLayer` and enable tracing in Wrangler to see Effect operations alongside automatic platform spans, with context preserved across concurrent fibers.
+
 ## 0.37.0
 
 ### Minor Changes

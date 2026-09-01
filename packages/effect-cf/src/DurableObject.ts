@@ -65,15 +65,17 @@ export type DurableObjectRpcApi<Rpc extends DurableObjectRpc<ROut>, ROut> = {
 };
 
 export type RpcHandlers<ROut, Api> = {
-  readonly [Key in keyof Api as Key extends keyof CloudflareDurableObject<WorkerEnv>
-    ? never
-    : Key extends string
-      ? [Api[Key]] extends [never]
-        ? never
-        : Api[Key] extends (...args: Array<any>) => Promise<any>
-          ? Key
-          : never
-      : never]: Api[Key] extends (...args: infer Args) => Promise<infer A>
+  readonly [
+    Key in keyof Api as Key extends keyof CloudflareDurableObject<WorkerEnv>
+      ? never
+      : Key extends string
+        ? [Api[Key]] extends [never]
+          ? never
+          : Api[Key] extends (...args: Array<any>) => Promise<any>
+            ? Key
+            : never
+        : never
+  ]: Api[Key] extends (...args: infer Args) => Promise<infer A>
     ? (...args: Args) => DurableObjectHandler<ROut, A>
     : never;
 };

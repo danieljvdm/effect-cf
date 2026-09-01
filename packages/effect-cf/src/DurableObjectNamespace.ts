@@ -17,11 +17,13 @@ interface DurableObjectFetcher {
 }
 
 type RpcClient<Api> = {
-  readonly [Key in keyof Api as Key extends string
-    ? Api[Key] extends (...args: Array<any>) => any
-      ? Key
+  readonly [
+    Key in keyof Api as Key extends string
+      ? Api[Key] extends (...args: Array<any>) => any
+        ? Key
+        : never
       : never
-    : never]: Api[Key];
+  ]: Api[Key];
 };
 
 type ReservedMethodName = DurableObjectDefinition.ReservedMethodName | "fetch";

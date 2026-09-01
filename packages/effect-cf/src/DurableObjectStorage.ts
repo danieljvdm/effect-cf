@@ -399,11 +399,10 @@ export const fromDurableObjectStorage = (
           throw exit;
         }),
       ).pipe(
-        Effect.catch(
-          (cause): Effect.Effect<never, E | StorageOperationError> =>
-            aborted !== undefined && cause === aborted && Exit.isFailure(aborted)
-              ? Effect.failCause(aborted.cause)
-              : Effect.fail(storageError("transaction", cause)),
+        Effect.catch((cause): Effect.Effect<never, E | StorageOperationError> =>
+          aborted !== undefined && cause === aborted && Exit.isFailure(aborted)
+            ? Effect.failCause(aborted.cause)
+            : Effect.fail(storageError("transaction", cause)),
         ),
       );
     }),

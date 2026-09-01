@@ -207,19 +207,15 @@ export const empty: Steps = makeSteps([]);
 export const transform: {
   (transform: ImageTransform): (steps: Steps) => Steps;
   (steps: Steps, transform: ImageTransform): Steps;
-} = Function.dual(
-  2,
-  (steps: Steps, transformValue: ImageTransform): Steps =>
-    makeSteps([...steps.steps, Step.Transform({ transform: transformValue })]),
+} = Function.dual(2, (steps: Steps, transformValue: ImageTransform): Steps =>
+  makeSteps([...steps.steps, Step.Transform({ transform: transformValue })]),
 );
 
 export const draw: {
   (draw: DrawStepOptions): (steps: Steps) => Steps;
   (steps: Steps, draw: DrawStepOptions): Steps;
-} = Function.dual(
-  2,
-  (steps: Steps, drawValue: DrawStepOptions): Steps =>
-    makeSteps([...steps.steps, Step.Draw(drawValue)]),
+} = Function.dual(2, (steps: Steps, drawValue: DrawStepOptions): Steps =>
+  makeSteps([...steps.steps, Step.Draw(drawValue)]),
 );
 
 const imagesError = (binding: string, operation: string, cause: unknown) =>

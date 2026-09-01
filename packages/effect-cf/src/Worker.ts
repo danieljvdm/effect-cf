@@ -139,17 +139,19 @@ export type WorkerRpcContract<Rpc extends WorkerRpc<ROut>, ROut> = {
 };
 
 export type RpcHandlers<ROut, Api> = {
-  readonly [Key in keyof Api as Key extends keyof CloudflareWorkerEntrypoint
-    ? never
-    : Key extends string
-      ? Key extends ReservedMethodName
-        ? never
-        : [Api[Key]] extends [never]
+  readonly [
+    Key in keyof Api as Key extends keyof CloudflareWorkerEntrypoint
+      ? never
+      : Key extends string
+        ? Key extends ReservedMethodName
           ? never
-          : Api[Key] extends (...args: Array<any>) => Promise<any>
-            ? Key
-            : never
-      : never]: Api[Key] extends (...args: infer Args) => Promise<infer A>
+          : [Api[Key]] extends [never]
+            ? never
+            : Api[Key] extends (...args: Array<any>) => Promise<any>
+              ? Key
+              : never
+        : never
+  ]: Api[Key] extends (...args: infer Args) => Promise<infer A>
     ? (...args: Args) => WorkerRpcHandler<ROut, A>
     : never;
 };

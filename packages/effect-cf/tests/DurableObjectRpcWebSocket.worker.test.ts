@@ -86,6 +86,9 @@ test("a declared RPC stream resumes on the original client stream after hibernat
     Effect.scoped(
       Effect.gen(function* () {
         const rpc = yield* RpcClient.make(HibernationRpcs);
+
+        expect(yield* rpc.HibernationIncrement({ value: 41n })).toBe(42n);
+
         const subscriptionKey = "room:workerd";
         const events = yield* rpc.HibernationEvents(
           { after: 0, subscriptionKey, until: 3 },

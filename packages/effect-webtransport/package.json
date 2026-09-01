@@ -41,6 +41,6 @@
     "vitest": "catalog:"
   },
   "peerDependencies": {
-    "effect": "^4.0.0-rc.110"
+    "effect": "^4.0.0-rc.112"
   }
 }

@@ -3,7 +3,7 @@
 Cloudflare entrypoints and bindings as Effect services.
 
 ```sh
-npm install effect-cf "effect@^4.0.0-rc.110"
+npm install effect-cf "effect@^4.0.0-rc.112"
 ```
 
 The repository tests against workerd `1.20260825.1` and `@cloudflare/workers-types@5.20260825.1`. Use `compatibility_date: "2026-08-25"` in Wrangler.

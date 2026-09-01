@@ -227,6 +227,7 @@ export const layer = (
       const declarations = options.resumableStreams ?? [];
       const durableObjectState = yield* DurableObjectState;
       const serialization = yield* RpcSerialization.RpcSerialization;
+      const encodeDefect = Schema.encodeSync(serialization.codecFor(Schema.Defect()));
       const disconnects = yield* Queue.make<number>();
       const connectionsBySocket = new Map<WebSocket, RpcConnection>();
       const connectionsById = new Map<number, RpcConnection>();
@@ -777,7 +778,7 @@ export const layer = (
 
               return true;
             } catch (cause) {
-              delivered = RpcMessage.ResponseDefectEncoded(cause);
+              delivered = RpcMessage.ResponseDefectEncoded(encodeDefect(cause));
               const encoded = connection.parser.encode(delivered);
 
               if (encoded === undefined) {
@@ -834,6 +835,8 @@ export const layer = (
           supportsAck: true,
           supportsTransferables: false,
           supportsSpanPropagation: true,
+          supportsNotifications: true,
+          codecFor: serialization.codecFor,
         });
       });
 
@@ -976,7 +979,10 @@ export const layer = (
             const run = writeRequest;
 
             if (run === undefined) {
-              yield* send(connection, RpcMessage.ResponseDefectEncoded("RPC server is not ready"));
+              yield* send(
+                connection,
+                RpcMessage.ResponseDefectEncoded(encodeDefect("RPC server is not ready")),
+              );
 
               return;
             }
@@ -1021,7 +1027,7 @@ export const layer = (
 
               return Predicate.isTagged(cause, "MaxBufferSizeExceeded")
                 ? Effect.ignore(connection.socket.close(1009, String(cause)))
-                : send(connection, RpcMessage.ResponseDefectEncoded(cause));
+                : send(connection, RpcMessage.ResponseDefectEncoded(encodeDefect(cause)));
             }),
           ),
         close: unregister,

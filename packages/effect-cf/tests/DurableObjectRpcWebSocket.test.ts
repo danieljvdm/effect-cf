@@ -50,7 +50,12 @@ class Events extends Rpc.make("Events", {
   stream: true,
 }) {}
 
-class TestRpcs extends RpcGroup.make(Ping, Never, Events) {}
+class Increment extends Rpc.make("Increment", {
+  payload: { value: Schema.BigInt },
+  success: Schema.BigInt,
+}) {}
+
+class TestRpcs extends RpcGroup.make(Ping, Never, Events, Increment) {}
 
 const ResumableEventPayload = Schema.Struct({
   subscriptionKey: Schema.String,
@@ -112,6 +117,7 @@ const makeTestRpcHandlers = (options?: {
   TestRpcs.toLayer(
     Effect.succeed(
       TestRpcs.of({
+        Increment: ({ value }) => Effect.succeed(value + 1n),
         Ping: ({ nonce }) => Effect.succeed(new PingResult({ nonce })),
         Never: () =>
           (options?.neverStarted === undefined
@@ -151,6 +157,115 @@ Object.defineProperty(globalThis, "WebSocketRequestResponsePair", {
     ) {}
   },
 });
+
+for (const [format, serializationLayer] of [
+  ["JSON", RpcSerialization.layerJson],
+  ["SchemaBinary", RpcSerialization.layerSchemaBinary()],
+] as const) {
+  layer(Layer.empty)(`DurableObjectRpcWebSocket ${format} codecs`, (it) => {
+    it.effect(
+      "uses the selected codecs for RPC values, server notifications, and transport errors",
+      () =>
+        Effect.gen(function* () {
+          const serialization = yield* RpcSerialization.RpcSerialization;
+          const parser = serialization.makeUnsafe();
+          const responses = yield* Queue.unbounded<unknown>();
+          let failNextSend = false;
+          const socket = makeFakeWebSocket(null, (message) => {
+            if (failNextSend) {
+              failNextSend = false;
+              throw new Error("WebSocket send failed");
+            }
+
+            const bytes = Predicate.isString(message)
+              ? message
+              : message instanceof ArrayBuffer
+                ? new Uint8Array(message)
+                : new Uint8Array(message.buffer, message.byteOffset, message.byteLength);
+
+            for (const response of parser.decode(bytes)) {
+              Queue.offerUnsafe(responses, response);
+            }
+          });
+          const durableSocket = DurableObjectWebSocket.fromWebSocket(socket);
+          const state = makeFakeDurableObjectState();
+
+          yield* Effect.gen(function* () {
+            const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
+            const protocol = yield* RpcServer.Protocol;
+            const payload = Schema.encodeSync(serialization.codecFor(Increment.payloadSchema))({
+              value: 41n,
+            });
+            const request = parser.encode({
+              _tag: "Request",
+              id: "increment",
+              tag: "Increment",
+              payload,
+              headers: [],
+            });
+
+            assert.isDefined(request);
+            yield* transport.accept(durableSocket);
+            yield* transport.message(
+              durableSocket,
+              Predicate.isString(request) ? request : new Uint8Array(request!).buffer,
+            );
+
+            const response = yield* Queue.take(responses);
+            const envelope = Schema.decodeUnknownSync(
+              Schema.Struct({
+                _tag: Schema.Literal("Exit"),
+                requestId: Schema.Literal("increment"),
+                exit: Schema.Unknown,
+              }),
+            )(response);
+            const result = Schema.decodeUnknownSync(
+              serialization.codecFor(Rpc.exitSchema(Increment)),
+            )(envelope.exit);
+
+            assert.deepStrictEqual(result, Exit.succeed(42n));
+            if (format === "JSON") {
+              assert.deepStrictEqual(payload, { value: "41" });
+              assert.deepStrictEqual(envelope.exit, { _tag: "Success", value: "42" });
+            }
+
+            const notification: RpcMessage.RequestEncoded = {
+              _tag: "Request",
+              id: "notice",
+              tag: "Increment",
+              payload,
+              headers: [],
+              isNotification: true,
+            };
+
+            assert.isTrue(protocol.supportsNotifications);
+            yield* protocol.send(0, notification);
+            assert.deepStrictEqual(yield* Queue.take(responses), notification);
+            assert.isFalse(readRpcAttachment(socket).hasPendingRequests);
+
+            failNextSend = true;
+            yield* protocol.send(0, notification);
+
+            const failure = Schema.decodeUnknownSync(
+              Schema.Struct({ _tag: Schema.Literal("Defect"), defect: Schema.Unknown }),
+            )(yield* Queue.take(responses));
+            const defect = Schema.decodeUnknownSync(serialization.codecFor(Schema.Defect()))(
+              failure.defect,
+            );
+
+            assert.instanceOf(defect, Error);
+            assert.strictEqual(defect.message, "WebSocket send failed");
+          }).pipe(
+            Effect.provide(
+              makeAppLayer(state, serializationLayer, makeTestRpcHandlers(), {
+                heartbeat: "passthrough",
+              }),
+            ),
+          );
+        }).pipe(Effect.provide(serializationLayer)),
+    );
+  });
+}
 
 {
   const socket = makeFakeWebSocket();
@@ -1771,6 +1886,7 @@ function makeClientProtocolBridge(
         }),
       supportsAck: true,
       supportsTransferables: false,
+      codecFor: RpcSerialization.json.codecFor,
     }),
     get serverMessageCount() {
       return serverMessageCount;

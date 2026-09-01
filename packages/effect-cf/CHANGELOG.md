@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.39.1
+
+### Patch Changes
+
+- [#142](https://github.com/danieljvdm/effect-cf/pull/142) [`4ecf192`](https://github.com/danieljvdm/effect-cf/commit/4ecf192733193f4c3b5869abd992c1658f5ad7a6) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Rebuild with Vite+ 0.3.0 and apply its formatter's source layout updates. Public APIs and runtime behavior are unchanged.
+
 ## 0.39.0
 
 ### Minor Changes

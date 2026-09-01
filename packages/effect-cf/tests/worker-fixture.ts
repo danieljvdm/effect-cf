@@ -153,6 +153,11 @@ export class HibernationNever extends Rpc.make("HibernationNever", {
   success: S.Void,
 }) {}
 
+export class HibernationIncrement extends Rpc.make("HibernationIncrement", {
+  payload: { value: S.BigInt },
+  success: S.BigInt,
+}) {}
+
 export class HibernationEvent extends S.Class<HibernationEvent>("HibernationEvent")({
   cursor: S.Finite,
   value: S.String,
@@ -184,6 +189,7 @@ export class HibernationNonResumableEvents extends Rpc.make("HibernationNonResum
 
 export class HibernationRpcs extends RpcGroup.make(
   HibernationPing,
+  HibernationIncrement,
   HibernationNever,
   HibernationAppendEvent,
   HibernationEvents,
@@ -315,6 +321,7 @@ const HibernationRpcHandlers = HibernationRpcs.toLayer(
           Stream.rechunk(1),
         ),
       HibernationPing: ({ nonce }) => Effect.succeed(HibernationPingResult.make({ nonce })),
+      HibernationIncrement: ({ value }) => Effect.succeed(value + 1n),
       HibernationNever: () =>
         Effect.gen(function* () {
           const state = yield* DurableObjectState.DurableObjectState;

@@ -3,7 +3,7 @@
 WebTransport sessions, streams, and datagrams as Effect services.
 
 ```sh
-npm install effect-webtransport "effect@^4.0.0-rc.110"
+npm install effect-webtransport "effect@^4.0.0-rc.112"
 ```
 
 Requires a platform WebTransport implementation. The constructor is an injectable service for platforms and tests.

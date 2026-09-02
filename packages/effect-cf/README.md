@@ -49,9 +49,11 @@ The [document outbox example](https://github.com/danieljvdm/effect-cf/tree/main/
 
 For atomic application writes and alarm changes, see the [alarm transaction example](tests/fixtures/alarm-transaction-consumer.ts) and [API contract](src/DurableObjectAlarm.ts).
 
-`DurableObject.make` and tagged definitions' `.make` provide the alarm scheduler automatically, including to application layers. No alarm tables or native alarms are created until the scheduler is used. Outside these entrypoints, provide `DurableObjectAlarm.DurableObjectAlarm.layer` explicitly.
+Define a typed alarm service with `class Alarms extends DurableObjectAlarm.Tag<Alarms>()("Alarms", { ...schemas }) {}`. Pass `Alarms.handlers({ ...implementations })` to the DO's `alarms:` option, then `yield* Alarms` to schedule or cancel alarms and open transactions. All declared handlers are required. The registration provides the service to application layers, initialization, and event handlers; declaring schemas alone does not provide a scheduler.
 
-Use `DurableObjectAlarm.define({ ... })` for schema-bound `scheduleAlarm`, `cancelAlarm`, `transaction`, and `handlers`. Scheduling accepts decoded payloads, encodes them with the declared schema, and checks that the result is JSON before storage. Transaction callbacks expose the same typed mutations and retain the raw scheduler's rollback and callback-lifetime rules. The raw service remains available for dynamic tags and JSON payloads.
+Scheduling accepts decoded payloads, encodes them with the declared schema, and checks that the result is JSON before storage. Transaction callbacks expose the same typed mutations and retain the raw scheduler's rollback and callback-lifetime rules.
+
+`DurableObject.make` and tagged definitions' `.make` still provide the raw `DurableObjectAlarm` service automatically for dynamic tags and JSON payloads. `DurableObjectAlarm.define({ ... }).handlers(...)` remains a handler-only helper for raw scheduling. No alarm tables or native alarms are created until the scheduler is used. Outside these entrypoints, provide the raw scheduler layer explicitly. A typed registration exposes `layer` and `run` for custom runtimes and tests; custom runtimes must install both.
 
 Unknown stored tags produce `StoredAlarmDecodeError` and follow the configured delivery failure policy rather than being acknowledged silently. Use the raw scheduler's `cancelAlarm` to remove retired tags, including repeating alarms.
 

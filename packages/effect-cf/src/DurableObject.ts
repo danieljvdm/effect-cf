@@ -4,7 +4,11 @@ import { Effect, Layer, type ManagedRuntime, type Scope, Tracer } from "effect";
 import { NativeRequest } from "./Worker";
 import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 import { DurableObjectState, fromDurableObjectState } from "./DurableObjectState";
-import { DurableObjectAlarm } from "./DurableObjectAlarm";
+import {
+  DurableObjectAlarm,
+  type AlarmRegistration,
+  type AlarmService,
+} from "./DurableObjectAlarm";
 import { fromWebSocket, type DurableWebSocket } from "./DurableObjectWebSocket";
 import * as RpcDefinition from "./RpcDefinition";
 import * as Entrypoint from "./internal/Entrypoint";
@@ -85,11 +89,12 @@ export type RpcHandlers<ROut, Api> = {
     : never;
 };
 
-export interface DurableObjectOptions<
+interface DurableObjectOptionsBase<
   RRuntime,
   REvent = never,
   EventLayerError = never,
-  Rpc extends DurableObjectRpc<RRuntime | REvent> = Record<never, never>,
+  Rpc extends DurableObjectRpc<RRuntime | REvent | RAlarm> = Record<never, never>,
+  RAlarm = never,
 > {
   /**
    * Layer provided around each Cloudflare event handled by this Durable Object.
@@ -98,7 +103,11 @@ export interface DurableObjectOptions<
    * event effect completes. It is not applied to `initialize`, which is an
    * instance-load lifecycle hook rather than a platform event.
    */
-  readonly eventLayer?: Layer.Layer<REvent, EventLayerError, RuntimeContext<RRuntime>>;
+  readonly eventLayer?: Layer.Layer<
+    REvent,
+    EventLayerError,
+    RuntimeContext<NoInfer<RRuntime | RAlarm>>
+  >;
   /**
    * Effect run when Cloudflare loads this Durable Object instance into memory.
    *
@@ -107,7 +116,7 @@ export interface DurableObjectOptions<
    * the same Durable Object id again after eviction or restart; use Durable
    * Object storage if work must happen only once per id.
    */
-  readonly initialize?: Effect.Effect<void, unknown, HandlerContext<RRuntime>>;
+  readonly initialize?: Effect.Effect<void, unknown, HandlerContext<NoInfer<RRuntime | RAlarm>>>;
   /**
    * Optional RPC methods exposed as Durable Object instance methods.
    *
@@ -119,10 +128,20 @@ export interface DurableObjectOptions<
   readonly rpc?: Rpc;
   /** Accept live native trace metadata. The client must also enable rpcTracing. */
   readonly rpcTracing?: ReceiverOptions;
-  readonly fetch?: Effect.Effect<Response, unknown, FetchContext<RRuntime | REvent>>;
+  readonly fetch?: Effect.Effect<
+    Response,
+    unknown,
+    FetchContext<NoInfer<RRuntime | REvent | RAlarm>>
+  >;
 
-  /** The logical alarm scheduler is provided automatically, as it is for other handlers. */
-  readonly alarms?: Effect.Effect<unknown, unknown, HandlerContext<RRuntime | REvent>>;
+  /** Register handlers to provide their typed scheduler to application layers and all DO events. */
+  readonly alarms?:
+    | Effect.Effect<unknown, unknown, HandlerContext<NoInfer<RRuntime> | REvent | NoInfer<RAlarm>>>
+    | AlarmRegistration<
+        RAlarm,
+        HandlerContext<NoInfer<RRuntime> | REvent | NoInfer<RAlarm>>,
+        unknown
+      >;
   /**
    * Optional raw alarm handler.
    *
@@ -133,22 +152,57 @@ export interface DurableObjectOptions<
    */
   readonly alarm?: (
     alarmInfo?: globalThis.AlarmInvocationInfo,
-  ) => Effect.Effect<void, unknown, HandlerContext<RRuntime | REvent>>;
+  ) => Effect.Effect<void, unknown, HandlerContext<NoInfer<RRuntime> | REvent | NoInfer<RAlarm>>>;
   readonly webSocketMessage?: (
     socket: DurableWebSocket,
     message: string | ArrayBuffer,
-  ) => Effect.Effect<void, unknown, HandlerContext<RRuntime | REvent>>;
+  ) => Effect.Effect<void, unknown, HandlerContext<NoInfer<RRuntime> | REvent | NoInfer<RAlarm>>>;
   readonly webSocketClose?: (
     socket: DurableWebSocket,
     code: number,
     reason: string,
     wasClean: boolean,
-  ) => Effect.Effect<void, unknown, HandlerContext<RRuntime | REvent>>;
+  ) => Effect.Effect<void, unknown, HandlerContext<NoInfer<RRuntime> | REvent | NoInfer<RAlarm>>>;
   readonly webSocketError?: (
     socket: DurableWebSocket,
     cause: unknown,
-  ) => Effect.Effect<void, unknown, HandlerContext<RRuntime | REvent>>;
+  ) => Effect.Effect<void, unknown, HandlerContext<NoInfer<RRuntime> | REvent | NoInfer<RAlarm>>>;
 }
+
+// Providing a scheduler through an ordinary layer does not install its dispatcher.
+type CheckAlarmRegistration<RProvided, RAlarm> = [
+  Exclude<Extract<NoInfer<RProvided>, AlarmService>, NoInfer<RAlarm>>,
+] extends [never]
+  ? unknown
+  : never;
+
+/** A declared event or alarm service must have its corresponding provider. */
+export type DurableObjectOptions<
+  RRuntime,
+  REvent = never,
+  EventLayerError = never,
+  Rpc extends DurableObjectRpc<RRuntime | REvent | RAlarm> = Record<never, never>,
+  RAlarm = never,
+> = DurableObjectOptionsBase<RRuntime, REvent, EventLayerError, Rpc, RAlarm> &
+  CheckAlarmRegistration<RRuntime | REvent, RAlarm> &
+  ([Exclude<REvent, RuntimeContext<RRuntime | RAlarm> | Scope.Scope>] extends [never]
+    ? unknown
+    : {
+        readonly eventLayer: Layer.Layer<
+          REvent,
+          EventLayerError,
+          RuntimeContext<NoInfer<RRuntime | RAlarm>>
+        >;
+      }) &
+  ([RAlarm] extends [never]
+    ? unknown
+    : {
+        readonly alarms: AlarmRegistration<
+          RAlarm,
+          HandlerContext<NoInfer<RRuntime> | REvent | NoInfer<RAlarm>>,
+          unknown
+        >;
+      });
 
 /**
  * Cloudflare `DurableObject` constructor produced by {@link make}.
@@ -170,30 +224,61 @@ export type DurableObjectClass<Rpc extends DurableObjectRpc<ROut>, ROut> = new (
  * that layer are not guaranteed to run. Put resources that require timely
  * release in `eventLayer`, whose scope closes after each handled event.
  */
-export const make = <
+export function make<ROut, LayerError>(
+  layer: Layer.Layer<ROut, LayerError, RuntimeContext<never>> & CheckAlarmRegistration<ROut, never>,
+): DurableObjectClass<Record<never, never>, ROut>;
+export function make<
   ROut,
   LayerError,
   REvent = never,
   EventLayerError = never,
-  const Rpc extends DurableObjectRpc<ROut | REvent> = Record<never, never>,
+  const Rpc extends DurableObjectRpc<NoInfer<ROut> | REvent | NoInfer<RAlarm>> = Record<
+    never,
+    never
+  >,
+  RAlarm = never,
 >(
-  layer: Layer.Layer<ROut, LayerError, RuntimeContext<never>>,
-  options: DurableObjectOptions<ROut, REvent, EventLayerError, Rpc> = {},
-): DurableObjectClass<Rpc, ROut | REvent> => {
+  layer: Layer.Layer<ROut, LayerError, RuntimeContext<NoInfer<RAlarm>>>,
+  options: DurableObjectOptions<ROut, REvent, EventLayerError, Rpc, RAlarm>,
+): DurableObjectClass<Rpc, ROut | REvent | RAlarm>;
+export function make<
+  ROut,
+  LayerError,
+  REvent = never,
+  EventLayerError = never,
+  const Rpc extends DurableObjectRpc<NoInfer<ROut> | REvent | NoInfer<RAlarm>> = Record<
+    never,
+    never
+  >,
+  RAlarm = never,
+>(
+  layer: Layer.Layer<ROut, LayerError, RuntimeContext<NoInfer<RAlarm>>>,
+  options: DurableObjectOptionsBase<ROut, REvent, EventLayerError, Rpc, RAlarm> = {},
+): DurableObjectClass<Rpc, ROut | REvent | RAlarm> {
+  const registration =
+    options.alarms !== undefined && !Effect.isEffect(options.alarms) ? options.alarms : undefined;
+  const logicalAlarms = (
+    registration?.run ?? (Effect.isEffect(options.alarms) ? options.alarms : undefined)
+  )?.pipe(Effect.asVoid);
+
   class EffectDurableObject extends CloudflareDurableObject<WorkerEnv> {
-    readonly runtime: ManagedRuntime.ManagedRuntime<RuntimeContext<ROut>, LayerError>;
+    readonly runtime: ManagedRuntime.ManagedRuntime<RuntimeContext<ROut | RAlarm>, LayerError>;
 
     constructor(state: globalThis.DurableObjectState, env: WorkerEnv) {
       super(state, env);
 
-      const services = DurableObjectAlarm.layer.pipe(
+      const baseServices = DurableObjectAlarm.layer.pipe(
         Layer.provideMerge(Layer.succeed(DurableObjectState, fromDurableObjectState(state))),
       );
+      // SAFETY: RAlarm is inferred only from the registration's layer; without a registration it is never.
+      const services = (registration?.layer ?? Layer.empty).pipe(
+        Layer.provideMerge(baseServices),
+      ) as Layer.Layer<DurableObjectState | DurableObjectAlarm | RAlarm>;
 
       this.runtime = Runtime.makeEntrypointRuntime<
         ROut,
         LayerError,
-        DurableObjectState | DurableObjectAlarm
+        DurableObjectState | DurableObjectAlarm | RAlarm
       >(layer, env, services);
 
       const initialize = options.initialize;
@@ -204,7 +289,7 @@ export const make = <
     }
 
     [RunSymbol]<A, E>(
-      effect: Effect.Effect<A, E, HandlerContext<ROut | REvent>>,
+      effect: Effect.Effect<A, E, HandlerContext<ROut | REvent | RAlarm>>,
       runOptions: RunOptions = {},
     ): Promise<A> {
       const eventLayer = runOptions.eventLayer === false ? undefined : options.eventLayer;
@@ -212,11 +297,11 @@ export const make = <
       const parentSpan = parent === undefined ? undefined : Tracer.externalSpan(parent);
 
       if (eventLayer === undefined) {
-        // SAFETY: event-layer bypass is used only for initialize; otherwise an absent layer means REvent is never.
+        // SAFETY: initialize cannot require event services; without an event layer, all requirements are already provided.
         return Runtime.runEventPromise(
           this.runtime,
           // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off
-          effect as Effect.Effect<A, E, HandlerContext<ROut>>,
+          effect as Effect.Effect<A, E, HandlerContext<ROut | RAlarm>>,
           undefined,
           parentSpan,
         );
@@ -225,7 +310,7 @@ export const make = <
       return Runtime.runEventPromise<
         A,
         E,
-        RuntimeContext<ROut>,
+        RuntimeContext<ROut | RAlarm>,
         REvent,
         EventLayerError,
         LayerError
@@ -245,7 +330,6 @@ export const make = <
     }
 
     alarm(alarmInfo?: globalThis.AlarmInvocationInfo): Promise<void> | void {
-      const logicalAlarms = options.alarms?.pipe(Effect.asVoid);
       const rawAlarm = options.alarm?.(alarmInfo);
       const alarmEffect =
         logicalAlarms !== undefined && rawAlarm !== undefined
@@ -303,10 +387,10 @@ export const make = <
     options.rpcTracing,
   );
 
-  return Entrypoint.assumeEntrypointClass<DurableObjectClass<Rpc, ROut | REvent>>(
+  return Entrypoint.assumeEntrypointClass<DurableObjectClass<Rpc, ROut | REvent | RAlarm>>(
     EffectDurableObject,
   );
-};
+}
 
 export type {
   Api,

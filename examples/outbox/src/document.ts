@@ -10,16 +10,17 @@ export class Documents extends DurableObject.Tag<Documents>()("Documents", {
 
 export class Archive extends R2.Tag<Archive>()("Archive") {}
 
-const DocumentAlarms = DurableObjectAlarm.define({
+class DocumentAlarms extends DurableObjectAlarm.Tag<DocumentAlarms>()("DocumentAlarms", {
   archive: Schema.Struct({ key: Schema.String, body: Schema.String }),
-});
+}) {}
 
 const DocumentLive = Documents.make(Archive.layer({ binding: "ARCHIVE" }), {
   rpc: {
     save: Effect.fn("Documents.save")(function* (body) {
       const state = yield* DurableObjectState.DurableObjectState;
+      const alarms = yield* DocumentAlarms;
 
-      return yield* DocumentAlarms.transaction((tx) =>
+      return yield* alarms.transaction((tx) =>
         Effect.gen(function* () {
           const previous = yield* state.storage.get<typeof Snapshot.Type>("document");
           const revision = (previous?.revision ?? 0) + 1;
@@ -50,10 +51,11 @@ const DocumentLive = Documents.make(Archive.layer({ binding: "ARCHIVE" }), {
   alarms: DocumentAlarms.handlers({
     archive: Effect.fn("Documents.archive")(function* ({ tag, id, payload }) {
       const archive = yield* Archive;
+      const alarms = yield* DocumentAlarms;
       const now = yield* DateTime.now;
 
       // Persist another wake BEFORE the external write, in case execution stops.
-      yield* DocumentAlarms.scheduleAlarm({
+      yield* alarms.scheduleAlarm({
         tag,
         id,
         runAt: DateTime.add(now, { seconds: 30 }),
@@ -62,7 +64,7 @@ const DocumentLive = Documents.make(Archive.layer({ binding: "ARCHIVE" }), {
 
       // Outside the transaction. Replays write the same key and exact content.
       yield* archive.put(payload.key, payload.body);
-      yield* DocumentAlarms.cancelAlarm({ tag, id });
+      yield* alarms.cancelAlarm({ tag, id });
     }),
   }),
 });

@@ -636,17 +636,26 @@ it.effect("surfaces invalid input as typed scheduler errors", () =>
 it.effect("routes typed logical alarm definitions through decoded payload handlers", () =>
   Effect.gen(function* () {
     const fixture = makeAlarmFixture();
-    const roomAlarms = DurableObjectAlarm.define({
+
+    class RoomAlarms extends DurableObjectAlarm.Tag<RoomAlarms>()("RoomAlarms", {
       reconnectGrace: Schema.Struct({
         connectionId: Schema.String,
         userId: Schema.String,
         revision: Schema.FiniteFromString,
       }),
-    });
+    }) {}
     const handled: Array<string> = [];
+    const registration = RoomAlarms.handlers({
+      reconnectGrace: ({ payload }) =>
+        Effect.sync(() => {
+          handled.push(`${payload.userId}:${payload.connectionId}:${payload.revision + 1}`);
+        }),
+    });
 
     yield* fixture.run(
       Effect.gen(function* () {
+        const roomAlarms = yield* RoomAlarms;
+
         yield* roomAlarms.scheduleAlarm({
           tag: "reconnectGrace",
           id: "connection-1",
@@ -659,13 +668,8 @@ it.effect("routes typed logical alarm definitions through decoded payload handle
           '{"connectionId":"connection-1","userId":"user-1","revision":"2"}',
         );
 
-        yield* roomAlarms.handlers({
-          reconnectGrace: ({ payload }) =>
-            Effect.sync(() => {
-              handled.push(`${payload.userId}:${payload.connectionId}:${payload.revision + 1}`);
-            }),
-        });
-      }),
+        yield* registration.run;
+      }).pipe(Effect.provide(registration.layer)),
     );
 
     assert.deepStrictEqual(handled, ["user-1:connection-1:3"]);
@@ -677,24 +681,37 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const fixture = makeAlarmFixture();
-      const JobAlarms = DurableObjectAlarm.define({ job: Schema.NonEmptyString });
+
+      class JobAlarms extends DurableObjectAlarm.Tag<JobAlarms>()("JobAlarms", {
+        job: Schema.NonEmptyString,
+      }) {}
+      const registration = JobAlarms.handlers({ job: () => Effect.void });
 
       yield* fixture.run(
         Effect.gen(function* () {
-          yield* JobAlarms.scheduleAlarm({
+          const alarms = yield* JobAlarms;
+
+          yield* alarms.scheduleAlarm({
             tag: "job",
             id: "a",
             runAt: atMillis(2_000),
             payload: "before",
           });
           yield* writeJob(fixture.storage, "before");
-          const exit = yield* JobAlarms.transaction((tx) =>
-            Effect.gen(function* () {
-              yield* writeJob(fixture.storage, "during");
-              yield* tx.cancelAlarm({ tag: "job", id: "a" });
-              yield* tx.scheduleAlarm({ tag: "job", id: "b", runAt: atMillis(1_000), payload: "" });
-            }),
-          ).pipe(Effect.exit);
+          const exit = yield* alarms
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                yield* writeJob(fixture.storage, "during");
+                yield* tx.cancelAlarm({ tag: "job", id: "a" });
+                yield* tx.scheduleAlarm({
+                  tag: "job",
+                  id: "b",
+                  runAt: atMillis(1_000),
+                  payload: "",
+                });
+              }),
+            )
+            .pipe(Effect.exit);
 
           assert.isTrue(Exit.isFailure(exit));
           if (Exit.isFailure(exit)) {
@@ -707,7 +724,7 @@ it.effect(
           assert.strictEqual(fixture.row("job", "a")?.payload, '"before"');
           assert.isUndefined(fixture.row("job", "b"));
           assert.strictEqual(fixture.currentAlarm(), 2_000);
-        }),
+        }).pipe(Effect.provide(registration.layer)),
       );
     }),
 );
@@ -837,20 +854,37 @@ it.effect("supports per-tag ordered failure policies", () =>
   }),
 );
 
-test("DurableObject.make provides the scheduler to RPC and alarm handlers", async () => {
+test("DurableObject.make registers the typed scheduler for application layers, RPC and alarm handlers", async () => {
   const fixture = makeAlarmFixture();
   const calls: Array<string> = [];
-  const JobAlarms = DurableObjectAlarm.define({ jobs: Schema.Null });
-  const Live = DurableObject.make(Layer.empty, {
+
+  class JobAlarms extends DurableObjectAlarm.Tag<JobAlarms>()("JobAlarms", { jobs: Schema.Null }) {}
+  const applicationLayer = Layer.effect(
+    Application,
+    Effect.gen(function* () {
+      const alarms = yield* JobAlarms;
+
+      yield* alarms.scheduleAlarm({ tag: "jobs", id: "0", runAt: atMillis(0), payload: null });
+
+      return { result: 42 };
+    }),
+  );
+  const Live = DurableObject.make(applicationLayer, {
     rpc: {
-      schedule: () =>
-        JobAlarms.scheduleAlarm({ tag: "jobs", id: "a", runAt: atMillis(0), payload: null }),
+      schedule: Effect.fn("schedule")(function* () {
+        const alarms = yield* JobAlarms;
+
+        yield* alarms.scheduleAlarm({ tag: "jobs", id: "a", runAt: atMillis(0), payload: null });
+      }),
     },
-    alarms: DurableObjectAlarm.processDue((event) =>
-      Effect.sync(() => {
+    alarms: JobAlarms.handlers({
+      jobs: Effect.fn("jobs")(function* (event) {
+        const alarms = yield* JobAlarms;
+
+        yield* alarms.cancelAlarm(event);
         calls.push(`logical:${event.id}`);
       }),
-    ),
+    }),
     alarm: () =>
       Effect.sync(() => {
         calls.push("raw");
@@ -867,7 +901,7 @@ test("DurableObject.make provides the scheduler to RPC and alarm handlers", asyn
 
   await makePartialTestDouble<AlarmHandler>(instance).alarm();
 
-  expect(calls).toEqual(["logical:a", "raw"]);
+  expect(calls).toEqual(["logical:0", "logical:a", "raw"]);
 });
 
 type SqlFixtureRow = Record<string, globalThis.SqlStorageValue>;

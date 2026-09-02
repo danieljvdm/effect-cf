@@ -4,9 +4,9 @@ A Durable Object stores the current document. Each save also queues an immutable
 
 ## Why the transaction exists
 
-Without a shared transaction, execution can stop after saving a revision but before scheduling its delivery. The saved revision survives, but nothing wakes up to archive it. `DocumentAlarms.transaction` commits the document, delivery payload, and native wake together.
+Without a shared transaction, execution can stop after saving a revision but before scheduling its delivery. The saved revision survives, but nothing wakes up to archive it. `alarms.transaction` commits the document, delivery payload, and native wake together.
 
-`Documents.make` provides the scheduler automatically. `DocumentAlarms` binds scheduling, cancellation, and handlers to the declared tags and payload schemas. Payloads are schema-encoded before storage and decoded when delivered.
+`DocumentAlarms` is a typed Effect service. Registering `DocumentAlarms.handlers(...)` on `Documents.make` provides it to application layers and handlers. Scheduling requires `yield* DocumentAlarms`; the schema declaration alone cannot schedule work. Payloads are schema-encoded before storage and decoded when delivered.
 
 The alarm handler schedules a recovery wake before writing to R2. It cancels that wake only after R2 reports success. If the response is lost or execution stops after the upload, a retry writes the same key and content. Each revision has its own key, so retrying an old revision cannot overwrite a newer one.
 

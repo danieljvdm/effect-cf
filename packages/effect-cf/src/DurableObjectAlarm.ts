@@ -384,6 +384,47 @@ export interface DefinedAlarmTransaction<Definitions extends AlarmDefinitions> {
   ) => ReturnType<AlarmScheduler["cancelAlarm"]>;
 }
 
+const TypedAlarmSchedulerTypeId: unique symbol = Symbol.for(
+  "effect-cf/DurableObjectAlarm/TypedScheduler",
+);
+
+/** Identifies service requirements whose scheduler needs a registered dispatcher. */
+export interface AlarmService {
+  readonly Service: {
+    readonly [TypedAlarmSchedulerTypeId]: typeof TypedAlarmSchedulerTypeId;
+  };
+}
+
+export interface DefinedAlarmScheduler<
+  Definitions extends AlarmDefinitions,
+> extends DefinedAlarmTransaction<Definitions> {
+  readonly [TypedAlarmSchedulerTypeId]: typeof TypedAlarmSchedulerTypeId;
+  readonly transaction: <A, E, R>(
+    closure: (alarms: DefinedAlarmTransaction<Definitions>) => Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E | StorageOperationError, R>;
+}
+
+/** Registers a dispatcher and the service authorized to schedule its alarms. */
+export interface AlarmRegistration<Self, R = never, E = never> {
+  readonly layer: Layer.Layer<Self, never, DurableObjectAlarm>;
+  readonly run: Effect.Effect<
+    ProcessDueAlarmsResult,
+    E | DurableObjectAlarmError,
+    R | DurableObjectAlarm
+  >;
+}
+
+export interface AlarmTagClass<
+  Self,
+  Id extends string,
+  Definitions extends AlarmDefinitions,
+> extends Context.ServiceClass<Self, Id, DefinedAlarmScheduler<Definitions>> {
+  readonly handlers: <R = never, E = never>(
+    handlers: DefinedAlarmHandlers<Definitions, R, E>,
+    options?: ProcessDueAlarmsOptions<R, E>,
+  ) => AlarmRegistration<Self, R, E>;
+}
+
 const isAlarmDefinitionConfig = (
   definition: AlarmDefinitionEntry,
 ): definition is AlarmDefinitionConfig => Predicate.isObject(definition) && "payload" in definition;
@@ -407,7 +448,7 @@ const getAlarmDefinitionFailureAction = (
     : { mode: definition.failure };
 };
 
-export const define = <const Definitions extends AlarmDefinitions>(definitions: Definitions) => {
+const makeDefinition = <const Definitions extends AlarmDefinitions>(definitions: Definitions) => {
   const definitionFor = (tag: string) =>
     Object.hasOwn(definitions, tag) ? definitions[tag] : undefined;
 
@@ -449,26 +490,11 @@ export const define = <const Definitions extends AlarmDefinitions>(definitions: 
   });
 
   return {
-    /** Encodes and validates the payload before persisting it. */
-    scheduleAlarm: Effect.fn("DefinedAlarms.scheduleAlarm")(function* (
-      input: DefinedScheduleAlarmInput<Definitions>,
-    ) {
-      const alarms = yield* DurableObjectAlarm;
-
-      yield* bind(alarms).scheduleAlarm(input);
+    make: (alarms: AlarmScheduler): DefinedAlarmScheduler<Definitions> => ({
+      [TypedAlarmSchedulerTypeId]: TypedAlarmSchedulerTypeId,
+      ...bind(alarms),
+      transaction: (closure) => alarms.transaction((tx) => closure(bind(tx))),
     }),
-    cancelAlarm: Effect.fn("DefinedAlarms.cancelAlarm")(function* (
-      input: AlarmRef<keyof Definitions & string>,
-    ) {
-      const alarms = yield* DurableObjectAlarm;
-
-      yield* bind(alarms).cancelAlarm(input);
-    }),
-    /** Uses the same callback-owned transaction as the raw scheduler. */
-    transaction: <A, E, R>(
-      closure: (alarms: DefinedAlarmTransaction<Definitions>) => Effect.Effect<A, E, R>,
-    ): Effect.Effect<A, E | StorageOperationError, R | DurableObjectAlarm> =>
-      Effect.flatMap(DurableObjectAlarm, (alarms) => alarms.transaction((tx) => closure(bind(tx)))),
     handlers: <R = never, E = never>(
       handlers: DefinedAlarmHandlers<Definitions, R, E>,
       options?: ProcessDueAlarmsOptions<R, E>,
@@ -522,6 +548,32 @@ export const define = <const Definitions extends AlarmDefinitions>(definitions: 
       ),
   };
 };
+
+/** Handler-only definitions for applications using the raw scheduler. Prefer Tag for typed scheduling. */
+export const define = <const Definitions extends AlarmDefinitions>(definitions: Definitions) => ({
+  handlers: makeDefinition(definitions).handlers,
+});
+
+/** The typed scheduler becomes available when its handlers are registered on a Durable Object. */
+export const Tag =
+  <Self>() =>
+  <const Id extends string, const Definitions extends AlarmDefinitions>(
+    id: Id,
+    definitions: Definitions,
+  ): AlarmTagClass<Self, Id, Definitions> => {
+    const tag = Context.Service<Self, DefinedAlarmScheduler<Definitions>>()(id);
+    const definition = makeDefinition(definitions);
+
+    return Object.assign(tag, {
+      handlers: <R = never, E = never>(
+        handlers: DefinedAlarmHandlers<Definitions, R, E>,
+        options?: ProcessDueAlarmsOptions<R, E>,
+      ): AlarmRegistration<Self, R, E> => ({
+        layer: Layer.effect(tag, Effect.map(DurableObjectAlarm, definition.make)),
+        run: definition.handlers(handlers, options),
+      }),
+    });
+  };
 
 export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, AlarmScheduler>()(
   "effect-cf/DurableObjectAlarm",

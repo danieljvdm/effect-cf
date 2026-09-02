@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { assert, it } from "@effect/vitest";
-import { DateTime, Deferred, Effect, Exit, Fiber, Layer } from "effect";
+import { DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { SqlClient } from "effect/unstable/sql";
 
@@ -13,23 +13,24 @@ const services = Layer.merge(
 );
 // Far-future native deadlines keep these tests independent of the wall clock.
 const deadline = 4_000_000_000_000;
-const alarm = (id: string, offset: number): DurableObjectAlarm.ScheduleAlarmInput => ({
-  tag: "job",
-  id,
-  runAt: DateTime.makeUnsafe(deadline + offset),
-  payload: null,
-});
+const alarm = (id: string, offset: number) =>
+  ({
+    tag: "job",
+    id,
+    runAt: DateTime.makeUnsafe(deadline + offset),
+    payload: null,
+  }) satisfies DurableObjectAlarm.ScheduleAlarmInput<"job">;
 
 it.effect("commits application SQL and mixed alarms together in workerd", () => {
   const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+  const JobAlarms = DurableObjectAlarm.define({ job: Schema.Null, other: Schema.Null });
 
   return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
     Effect.gen(function* () {
-      const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
       const sql = yield* SqlClient.SqlClient;
 
       yield* sql`CREATE TABLE jobs (id TEXT PRIMARY KEY, status TEXT NOT NULL)`;
-      const result = yield* alarms.transaction((tx) =>
+      const result = yield* JobAlarms.transaction((tx) =>
         Effect.gen(function* () {
           yield* sql`INSERT INTO jobs VALUES ('sql-client', 'ready')`;
           yield* state.storage.sql.exec("INSERT INTO jobs VALUES (?, ?)", "storage", "ready");
@@ -59,7 +60,7 @@ it.effect("commits application SQL and mixed alarms together in workerd", () => 
         ],
       );
 
-      yield* alarms.transaction((tx) =>
+      yield* JobAlarms.transaction((tx) =>
         Effect.gen(function* () {
           yield* sql`UPDATE jobs SET status = 'cancelled'`;
           yield* tx.cancelAlarm({ tag: "job", id: "a" });

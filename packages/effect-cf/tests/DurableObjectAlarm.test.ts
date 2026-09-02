@@ -640,31 +640,97 @@ it.effect("routes typed logical alarm definitions through decoded payload handle
       reconnectGrace: Schema.Struct({
         connectionId: Schema.String,
         userId: Schema.String,
+        revision: Schema.FiniteFromString,
       }),
     });
     const handled: Array<string> = [];
 
     yield* fixture.run(
       Effect.gen(function* () {
-        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
-
-        yield* alarms.scheduleAlarm({
+        yield* roomAlarms.scheduleAlarm({
           tag: "reconnectGrace",
           id: "connection-1",
           runAt: atMillis(0),
-          payload: { connectionId: "connection-1", userId: "user-1" },
+          payload: { connectionId: "connection-1", userId: "user-1", revision: 2 },
         });
+
+        assert.strictEqual(
+          fixture.row("reconnectGrace", "connection-1")?.payload,
+          '{"connectionId":"connection-1","userId":"user-1","revision":"2"}',
+        );
 
         yield* roomAlarms.handlers({
           reconnectGrace: ({ payload }) =>
             Effect.sync(() => {
-              handled.push(`${payload.userId}:${payload.connectionId}`);
+              handled.push(`${payload.userId}:${payload.connectionId}:${payload.revision + 1}`);
             }),
         });
       }),
     );
 
-    assert.deepStrictEqual(handled, ["user-1:connection-1"]);
+    assert.deepStrictEqual(handled, ["user-1:connection-1:3"]);
+  }),
+);
+
+it.effect(
+  "rolls back application writes and typed alarm mutations when payload validation fails",
+  () =>
+    Effect.gen(function* () {
+      const fixture = makeAlarmFixture();
+      const JobAlarms = DurableObjectAlarm.define({ job: Schema.NonEmptyString });
+
+      yield* fixture.run(
+        Effect.gen(function* () {
+          yield* JobAlarms.scheduleAlarm({
+            tag: "job",
+            id: "a",
+            runAt: atMillis(2_000),
+            payload: "before",
+          });
+          yield* writeJob(fixture.storage, "before");
+          const exit = yield* JobAlarms.transaction((tx) =>
+            Effect.gen(function* () {
+              yield* writeJob(fixture.storage, "during");
+              yield* tx.cancelAlarm({ tag: "job", id: "a" });
+              yield* tx.scheduleAlarm({ tag: "job", id: "b", runAt: atMillis(1_000), payload: "" });
+            }),
+          ).pipe(Effect.exit);
+
+          assert.isTrue(Exit.isFailure(exit));
+          if (Exit.isFailure(exit)) {
+            assert.instanceOf(
+              Cause.squash(exit.cause),
+              DurableObjectAlarm.InvalidAlarmPayloadError,
+            );
+          }
+          assert.strictEqual(fixture.job("job"), "before");
+          assert.strictEqual(fixture.row("job", "a")?.payload, '"before"');
+          assert.isUndefined(fixture.row("job", "b"));
+          assert.strictEqual(fixture.currentAlarm(), 2_000);
+        }),
+      );
+    }),
+);
+
+it.effect("reports unknown stored tags without acknowledging their alarms", () =>
+  Effect.gen(function* () {
+    const fixture = makeAlarmFixture();
+    const JobAlarms = DurableObjectAlarm.define({ job: Schema.Null });
+    const result = yield* fixture.run(
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
+        yield* alarms.scheduleAlarm({ tag: "unknown", id: "a", runAt: atMillis(0), payload: null });
+
+        return yield* JobAlarms.handlers({ job: () => Effect.void });
+      }),
+    );
+
+    assert.deepStrictEqual(result.handled, []);
+    assert.strictEqual(result.failed.length, 1);
+    assert.strictEqual(result.failed[0]?.tag, "unknown");
+    assert.isDefined(fixture.row("unknown", "a"));
+    assert.ok((fixture.currentAlarm() ?? 0) > 0);
   }),
 );
 
@@ -771,10 +837,15 @@ it.effect("supports per-tag ordered failure policies", () =>
   }),
 );
 
-test("DurableObject.make composes logical alarms before raw alarm hook", async () => {
+test("DurableObject.make provides the scheduler to RPC and alarm handlers", async () => {
   const fixture = makeAlarmFixture();
   const calls: Array<string> = [];
-  const Live = DurableObject.make(DurableObjectAlarm.DurableObjectAlarm.layer, {
+  const JobAlarms = DurableObjectAlarm.define({ jobs: Schema.Null });
+  const Live = DurableObject.make(Layer.empty, {
+    rpc: {
+      schedule: () =>
+        JobAlarms.scheduleAlarm({ tag: "jobs", id: "a", runAt: atMillis(0), payload: null }),
+    },
     alarms: DurableObjectAlarm.processDue((event) =>
       Effect.sync(() => {
         calls.push(`logical:${event.id}`);
@@ -786,15 +857,9 @@ test("DurableObject.make composes logical alarms before raw alarm hook", async (
       }),
   });
 
-  await fixture.runPromise(
-    Effect.gen(function* () {
-      const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
-
-      yield* alarms.scheduleAlarm({ tag: "jobs", id: "a", runAt: atMillis(0), payload: null });
-    }),
-  );
-
   const instance = new Live(fixture.state, makePartialTestDouble<Cloudflare.Env>({}));
+
+  await instance.schedule();
 
   interface AlarmHandler {
     alarm(): Promise<void> | void;
@@ -960,8 +1025,6 @@ function makeAlarmFixture(options: AlarmFixtureOptions = {}) {
     },
     row: (tag: string, id: string) => rows.get(storageId(tag, id)),
     run: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect.pipe(Effect.provide(layer)),
-    runPromise: <A, E>(effect: Effect.Effect<A, E, DurableObjectAlarm.DurableObjectAlarm>) =>
-      Effect.runPromise(effect.pipe(Effect.provide(layer))),
   };
 }
 

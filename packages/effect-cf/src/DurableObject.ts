@@ -4,6 +4,7 @@ import { Effect, Layer, type ManagedRuntime, type Scope, Tracer } from "effect";
 import { NativeRequest } from "./Worker";
 import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 import { DurableObjectState, fromDurableObjectState } from "./DurableObjectState";
+import { DurableObjectAlarm } from "./DurableObjectAlarm";
 import { fromWebSocket, type DurableWebSocket } from "./DurableObjectWebSocket";
 import * as RpcDefinition from "./RpcDefinition";
 import * as Entrypoint from "./internal/Entrypoint";
@@ -13,7 +14,11 @@ import type { ReceiverOptions, RpcInvocationInfo } from "./RpcTracing";
 
 const reservedMethodNames: ReadonlySet<string> = RpcDefinition.reservedMethodNames;
 
-type RuntimeContext<ROut> = DurableObjectState | WorkerEnvironment | ROut;
+export type RuntimeContext<ROut> =
+  | DurableObjectState
+  | DurableObjectAlarm
+  | WorkerEnvironment
+  | ROut;
 
 type HandlerContext<ROut> = RuntimeContext<ROut> | Scope.Scope;
 
@@ -93,11 +98,7 @@ export interface DurableObjectOptions<
    * event effect completes. It is not applied to `initialize`, which is an
    * instance-load lifecycle hook rather than a platform event.
    */
-  readonly eventLayer?: Layer.Layer<
-    REvent,
-    EventLayerError,
-    DurableObjectState | WorkerEnvironment | RRuntime
-  >;
+  readonly eventLayer?: Layer.Layer<REvent, EventLayerError, RuntimeContext<RRuntime>>;
   /**
    * Effect run when Cloudflare loads this Durable Object instance into memory.
    *
@@ -120,6 +121,7 @@ export interface DurableObjectOptions<
   readonly rpcTracing?: ReceiverOptions;
   readonly fetch?: Effect.Effect<Response, unknown, FetchContext<RRuntime | REvent>>;
 
+  /** The logical alarm scheduler is provided automatically, as it is for other handlers. */
   readonly alarms?: Effect.Effect<unknown, unknown, HandlerContext<RRuntime | REvent>>;
   /**
    * Optional raw alarm handler.
@@ -175,7 +177,7 @@ export const make = <
   EventLayerError = never,
   const Rpc extends DurableObjectRpc<ROut | REvent> = Record<never, never>,
 >(
-  layer: Layer.Layer<ROut, LayerError, DurableObjectState | WorkerEnvironment>,
+  layer: Layer.Layer<ROut, LayerError, RuntimeContext<never>>,
   options: DurableObjectOptions<ROut, REvent, EventLayerError, Rpc> = {},
 ): DurableObjectClass<Rpc, ROut | REvent> => {
   class EffectDurableObject extends CloudflareDurableObject<WorkerEnv> {
@@ -184,11 +186,15 @@ export const make = <
     constructor(state: globalThis.DurableObjectState, env: WorkerEnv) {
       super(state, env);
 
-      this.runtime = Runtime.makeEntrypointRuntime<ROut, LayerError, DurableObjectState>(
-        layer,
-        env,
-        Layer.succeed(DurableObjectState, fromDurableObjectState(state)),
+      const services = DurableObjectAlarm.layer.pipe(
+        Layer.provideMerge(Layer.succeed(DurableObjectState, fromDurableObjectState(state))),
       );
+
+      this.runtime = Runtime.makeEntrypointRuntime<
+        ROut,
+        LayerError,
+        DurableObjectState | DurableObjectAlarm
+      >(layer, env, services);
 
       const initialize = options.initialize;
 

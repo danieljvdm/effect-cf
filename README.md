@@ -13,12 +13,12 @@ Save a document now and archive each revision to R2 in the background. The failu
 save document → process stops → scheduling never runs
 ```
 
-`alarms.transaction` commits the document and its delivery alarm together. Before commit, neither is saved; after commit, both survive a restart. Scheduling does not need to throw for this to matter.
+`DocumentAlarms.transaction` commits the document and its delivery alarm together. Before commit, neither is saved; after commit, both survive a restart. Scheduling does not need to throw for this to matter.
 
 Here is the Durable Object from the [runnable outbox example](examples/outbox/src/index.ts). The alarm's persisted payload is the outbox entry: it keeps the exact revision to deliver, even after the document changes again.
 
 ```ts
-import { DateTime, Effect, Layer, Schema } from "effect";
+import { DateTime, Effect, Schema } from "effect";
 import { DurableObject, DurableObjectAlarm, DurableObjectState, R2 } from "effect-cf";
 
 const Snapshot = Schema.Struct({ revision: Schema.Int, body: Schema.String });
@@ -34,66 +34,63 @@ const DocumentAlarms = DurableObjectAlarm.define({
   archive: Schema.Struct({ key: Schema.String, body: Schema.String }),
 });
 
-const DocumentLive = Documents.make(
-  Layer.merge(DurableObjectAlarm.DurableObjectAlarm.layer, Archive.layer({ binding: "ARCHIVE" })),
-  {
-    rpc: {
-      save: Effect.fn("Documents.save")(function* (body) {
-        const state = yield* DurableObjectState.DurableObjectState;
-        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+const DocumentLive = Documents.make(Archive.layer({ binding: "ARCHIVE" }), {
+  rpc: {
+    save: Effect.fn("Documents.save")(function* (body) {
+      const state = yield* DurableObjectState.DurableObjectState;
 
-        return yield* alarms.transaction((tx) =>
-          Effect.gen(function* () {
-            const previous = yield* state.storage.get<typeof Snapshot.Type>("document");
-            const revision = (previous?.revision ?? 0) + 1;
-            const name = state.id.name ?? state.id.toString();
-            const key = `${name}/${revision}.txt`;
-            const now = yield* DateTime.now;
+      return yield* DocumentAlarms.transaction((tx) =>
+        Effect.gen(function* () {
+          const previous = yield* state.storage.get<typeof Snapshot.Type>("document");
+          const revision = (previous?.revision ?? 0) + 1;
+          const name = state.id.name ?? state.id.toString();
+          const key = `${name}/${revision}.txt`;
+          const now = yield* DateTime.now;
 
-            // A restart cannot leave a saved revision with no delivery alarm.
-            yield* state.storage.put("document", { revision, body });
-            yield* tx.scheduleAlarm({
-              tag: "archive",
-              id: key,
-              // The demo leaves time to stop Wrangler before delivery.
-              runAt: DateTime.add(now, { seconds: 30 }),
-              payload: { key, body },
-            });
+          // A restart cannot leave a saved revision with no delivery alarm.
+          yield* state.storage.put("document", { revision, body });
+          yield* tx.scheduleAlarm({
+            tag: "archive",
+            id: key,
+            // The demo leaves time to stop Wrangler before delivery.
+            runAt: DateTime.add(now, { seconds: 30 }),
+            payload: { key, body },
+          });
 
-            return key;
-          }),
-        );
-      }),
-      read: Effect.fn("Documents.read")(function* () {
-        const state = yield* DurableObjectState.DurableObjectState;
+          return key;
+        }),
+      );
+    }),
+    read: Effect.fn("Documents.read")(function* () {
+      const state = yield* DurableObjectState.DurableObjectState;
 
-        return (yield* state.storage.get<typeof Snapshot.Type>("document")) ?? null;
-      }),
-    },
-    alarms: DocumentAlarms.handlers({
-      archive: Effect.fn("Documents.archive")(function* ({ tag, id, payload }) {
-        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
-        const archive = yield* Archive;
-        const now = yield* DateTime.now;
-
-        // Persist another wake BEFORE the external write, in case execution stops.
-        yield* alarms.scheduleAlarm({
-          tag,
-          id,
-          runAt: DateTime.add(now, { seconds: 30 }),
-          payload,
-        });
-
-        // Outside the transaction. Replays write the same key and exact content.
-        yield* archive.put(payload.key, payload.body);
-        yield* alarms.cancelAlarm({ tag, id });
-      }),
+      return (yield* state.storage.get<typeof Snapshot.Type>("document")) ?? null;
     }),
   },
-);
+  alarms: DocumentAlarms.handlers({
+    archive: Effect.fn("Documents.archive")(function* ({ tag, id, payload }) {
+      const archive = yield* Archive;
+      const now = yield* DateTime.now;
+
+      // Persist another wake BEFORE the external write, in case execution stops.
+      yield* DocumentAlarms.scheduleAlarm({
+        tag,
+        id,
+        runAt: DateTime.add(now, { seconds: 30 }),
+        payload,
+      });
+
+      // Outside the transaction. Replays write the same key and exact content.
+      yield* archive.put(payload.key, payload.body);
+      yield* DocumentAlarms.cancelAlarm({ tag, id });
+    }),
+  }),
+});
 
 export class DocumentDurableObject extends DocumentLive {}
 ```
+
+`Documents.make` provides the alarm scheduler automatically. `DocumentAlarms` types both scheduling and handling from the same schemas, including the transaction's `tx.scheduleAlarm`.
 
 The Worker routes `PUT /notes` and `GET /notes` through the typed `Documents` RPC binding. `GET /archive/notes/1.txt` reads R2. [Worker wiring](examples/outbox/src/index.ts) and [Wrangler bindings](examples/outbox/wrangler.jsonc) complete the application.
 

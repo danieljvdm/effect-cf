@@ -24,8 +24,8 @@
         "wrangler": "catalog:",
       },
     },
-    "examples/counter": {
-      "name": "counter-example",
+    "examples/outbox": {
+      "name": "outbox-example",
       "version": "0.0.0",
       "dependencies": {
         "effect": "catalog:",
@@ -39,7 +39,7 @@
     },
     "packages/effect-cf": {
       "name": "effect-cf",
-      "version": "0.38.0",
+      "version": "0.39.1",
       "devDependencies": {
         "@cloudflare/computer": "0.2.0",
         "@cloudflare/containers": "catalog:",
@@ -82,7 +82,7 @@
     },
     "packages/effect-webtransport": {
       "name": "effect-webtransport",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "devDependencies": {
         "@effect/vitest": "catalog:",
         "effect": "catalog:",
@@ -744,8 +744,6 @@
 
     "cookie": ["cookie@1.1.1", "", {}, "sha512-ei8Aos7ja0weRpFzJnEA9UHJ/7XQmqglbRwnf2ATjcB9Wq874VKH9kfjjirM6UhU2/E5fFYadylyhFldcqSidQ=="],
 
-    "counter-example": ["counter-example@workspace:examples/counter"],
-
     "cross-spawn": ["cross-spawn@7.0.6", "", { "dependencies": { "path-key": "^3.1.0", "shebang-command": "^2.0.0", "which": "^2.0.1" } }, "sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA=="],
 
     "dataloader": ["dataloader@1.4.0", "", {}, "sha512-68s5jYdlvasItOJnCuI2Q9s4q98g0pCyL3HrcKJu8KNugUl8ahgmZYg38ysLTgQjjXX3H8CJLkAvWrclWfcalw=="],
@@ -1001,6 +999,8 @@
     "once": ["once@1.4.0", "", { "dependencies": { "wrappy": "1" } }, "sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w=="],
 
     "optionator": ["optionator@0.9.4", "", { "dependencies": { "deep-is": "^0.1.3", "fast-levenshtein": "^2.0.6", "levn": "^0.4.1", "prelude-ls": "^1.2.1", "type-check": "^0.4.0", "word-wrap": "^1.2.5" } }, "sha512-6IpQ7mKUxRcZNLIObR0hz7lxsapSSIYNZJwXPGeF0mTVqGKFIXj1DQcMoT22S3ROcLyY/rz0PWaWZ9ayWmad9g=="],
+
+    "outbox-example": ["outbox-example@workspace:examples/outbox"],
 
     "outdent": ["outdent@0.5.0", "", {}, "sha512-/jHxFIzoMXdqPzTaCpFzAAWhpkSjZPF4Vsn6jAfNpmbH/ymsmd7Qc6VE9BGn0L6YMj6uwpQLxCECpus4ukKS9Q=="],
 

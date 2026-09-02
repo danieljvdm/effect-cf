@@ -7,75 +7,115 @@ Effect services for Cloudflare Workers and Durable Objects.
 
 ## Worker + Durable Object
 
-Each URL path names a counter. The Worker calls its Durable Object through a typed RPC method. The object persists the count and schedules a report for 30 seconds later. Keep hitting it and the report moves back; stop and the object wakes up to log the count.
+Save a document now and archive each revision to R2 in the background. The failure to handle is a restart between saving the document and arranging its delivery:
 
-```ts
-import { DateTime, Effect, Schema } from "effect";
-import { DurableObject, DurableObjectAlarm, DurableObjectState, Worker } from "effect-cf";
-
-class Counter extends DurableObject.Tag<Counter>()("Counter", {
-  increment: DurableObject.method({ success: Schema.Number }),
-}) {}
-
-const CounterAlarms = DurableObjectAlarm.define({
-  report: Schema.Struct({ count: Schema.Number }),
-});
-
-const CounterLive = Counter.make(DurableObjectAlarm.DurableObjectAlarm.layer, {
-  rpc: {
-    increment: Effect.fn("Counter.increment")(function* () {
-      const state = yield* DurableObjectState.DurableObjectState;
-      const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
-
-      // Save the count and schedule its alarm atomically: both commit or both roll back.
-      return yield* alarms.transaction((tx) =>
-        Effect.gen(function* () {
-          const count = ((yield* state.storage.get<number>("count")) ?? 0) + 1;
-          const now = yield* DateTime.now;
-
-          yield* state.storage.put("count", count);
-          yield* tx.scheduleAlarm({
-            tag: "report",
-            id: "idle",
-            runAt: DateTime.add(now, { seconds: 30 }),
-            payload: { count },
-          });
-
-          return count;
-        }),
-      );
-    }),
-  },
-  alarms: CounterAlarms.handlers({
-    report: ({ payload }) => Effect.log(`Counter went quiet at ${payload.count} visits`),
-  }),
-});
-
-export class CounterDurableObject extends CounterLive {}
-
-export default Worker.make(Counter.layer({ binding: "COUNTERS" }), {
-  fetch: Effect.gen(function* () {
-    const request = yield* Worker.NativeRequest;
-    const counters = yield* Counter;
-    const count = yield* counters.byName(new URL(request.url).pathname).increment();
-
-    return Response.json({ count });
-  }),
-});
+```text
+save document → process stops → scheduling never runs
 ```
 
-`Counter` defines the RPC contract; `Counter.make` implements it. `Counter.layer` connects the client to the `COUNTERS` Wrangler binding. `Worker.make` owns the Effect runtime, so handlers can yield services and return native `Response` objects.
+`alarms.transaction` commits the document and its delivery alarm together. Before commit, neither is saved; after commit, both survive a restart. Scheduling does not need to throw for this to matter.
 
-`DurableObjectAlarm` stores named alarms in SQLite and manages the DO's single native alarm. Reusing `{ tag: "report", id: "idle" }` replaces the pending report. `transaction` commits the count and alarm together; `define` decodes the payload before dispatching to its typed handler. Delivery is [at least once](https://developers.cloudflare.com/durable-objects/api/alarms/), so this log can repeat on retries.
+Here is the Durable Object from the [runnable outbox example](examples/outbox/src/index.ts). The alarm's persisted payload is the outbox entry: it keeps the exact revision to deliver, even after the document changes again.
 
-This is the complete [counter example](examples/counter/src/index.ts). Its [Wrangler config](examples/counter/wrangler.jsonc) declares the binding and SQLite storage migration. Run it from this repository:
+```ts
+import { DateTime, Effect, Layer, Schema } from "effect";
+import { DurableObject, DurableObjectAlarm, DurableObjectState, R2 } from "effect-cf";
+
+const Snapshot = Schema.Struct({ revision: Schema.Int, body: Schema.String });
+
+export class Documents extends DurableObject.Tag<Documents>()("Documents", {
+  save: DurableObject.method({ args: [Schema.String], success: Schema.String }),
+  read: DurableObject.method({ success: Schema.NullOr(Snapshot) }),
+}) {}
+
+export class Archive extends R2.Tag<Archive>()("Archive") {}
+
+const DocumentAlarms = DurableObjectAlarm.define({
+  archive: Schema.Struct({ key: Schema.String, body: Schema.String }),
+});
+
+const DocumentLive = Documents.make(
+  Layer.merge(DurableObjectAlarm.DurableObjectAlarm.layer, Archive.layer({ binding: "ARCHIVE" })),
+  {
+    rpc: {
+      save: Effect.fn("Documents.save")(function* (body) {
+        const state = yield* DurableObjectState.DurableObjectState;
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
+        return yield* alarms.transaction((tx) =>
+          Effect.gen(function* () {
+            const previous = yield* state.storage.get<typeof Snapshot.Type>("document");
+            const revision = (previous?.revision ?? 0) + 1;
+            const name = state.id.name ?? state.id.toString();
+            const key = `${name}/${revision}.txt`;
+            const now = yield* DateTime.now;
+
+            // A restart cannot leave a saved revision with no delivery alarm.
+            yield* state.storage.put("document", { revision, body });
+            yield* tx.scheduleAlarm({
+              tag: "archive",
+              id: key,
+              // The demo leaves time to stop Wrangler before delivery.
+              runAt: DateTime.add(now, { seconds: 30 }),
+              payload: { key, body },
+            });
+
+            return key;
+          }),
+        );
+      }),
+      read: Effect.fn("Documents.read")(function* () {
+        const state = yield* DurableObjectState.DurableObjectState;
+
+        return (yield* state.storage.get<typeof Snapshot.Type>("document")) ?? null;
+      }),
+    },
+    alarms: DocumentAlarms.handlers({
+      archive: Effect.fn("Documents.archive")(function* ({ tag, id, payload }) {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+        const archive = yield* Archive;
+        const now = yield* DateTime.now;
+
+        // Persist another wake BEFORE the external write, in case execution stops.
+        yield* alarms.scheduleAlarm({
+          tag,
+          id,
+          runAt: DateTime.add(now, { seconds: 30 }),
+          payload,
+        });
+
+        // Outside the transaction. Replays write the same key and exact content.
+        yield* archive.put(payload.key, payload.body);
+        yield* alarms.cancelAlarm({ tag, id });
+      }),
+    }),
+  },
+);
+
+export class DocumentDurableObject extends DocumentLive {}
+```
+
+The Worker routes `PUT /notes` and `GET /notes` through the typed `Documents` RPC binding. `GET /archive/notes/1.txt` reads R2. [Worker wiring](examples/outbox/src/index.ts) and [Wrangler bindings](examples/outbox/wrangler.jsonc) complete the application.
+
+R2 is outside the local transaction. Before uploading, the handler persists a recovery alarm. If it stops before recording success, another attempt writes the same key and content. After a successful upload, cancellation removes the pending entry and its wake. No permanent polling is needed when there is no work.
+
+Run locally, with emulated R2 and no Cloudflare account:
 
 ```sh
 vp install
 vp run dev
 ```
 
-Then run `curl http://localhost:8787/visits` in another terminal. Repeat it to increment the count, or use another path for a separate counter. Stop for 30 seconds and watch the `vp run dev` terminal for the alarm's report. No frontend or external services needed.
+In another terminal:
+
+```sh
+curl -X PUT http://localhost:8787/notes --data-binary 'First draft'
+curl http://localhost:8787/notes
+```
+
+Stop Wrangler before the 30-second delivery delay, then restart it with `vp run dev`. Once the deadline has passed, `curl http://localhost:8787/archive/notes/1.txt` returns `First draft` without another save request. The deliberate delay makes this recovery path easy to try; production can schedule the initial delivery immediately.
+
+This is at-least-once delivery, not a transaction across SQLite and R2. Repeated uploads preserve the object's content, but may produce repeated write events. Persistent storage or alarm failures still need operational recovery. See the [example notes](examples/outbox/README.md) for scope and retry behavior.
 
 ## KV and R2
 
@@ -121,7 +161,7 @@ vp run check
 vp run dev
 ```
 
-`check` builds the packages, checks formatting, lints, runs tests, and typechecks the packages and example. `dev` starts the counter locally.
+`check` builds the packages, checks formatting, lints, runs tests, and typechecks the packages and example. `dev` starts the document outbox locally.
 
 Use `vp run -r build` to build all workspaces. Package tests live under `packages/*/tests`.
 

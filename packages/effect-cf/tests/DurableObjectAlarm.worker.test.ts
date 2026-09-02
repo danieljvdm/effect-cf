@@ -23,14 +23,20 @@ const alarm = (id: string, offset: number) =>
 
 it.effect("commits application SQL and mixed alarms together in workerd", () => {
   const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
-  const JobAlarms = DurableObjectAlarm.define({ job: Schema.Null, other: Schema.Null });
+
+  class JobAlarms extends DurableObjectAlarm.Tag<JobAlarms>()("JobAlarms", {
+    job: Schema.Null,
+    other: Schema.Null,
+  }) {}
+  const registration = JobAlarms.handlers({ job: () => Effect.void, other: () => Effect.void });
 
   return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
     Effect.gen(function* () {
+      const alarms = yield* JobAlarms;
       const sql = yield* SqlClient.SqlClient;
 
       yield* sql`CREATE TABLE jobs (id TEXT PRIMARY KEY, status TEXT NOT NULL)`;
-      const result = yield* JobAlarms.transaction((tx) =>
+      const result = yield* alarms.transaction((tx) =>
         Effect.gen(function* () {
           yield* sql`INSERT INTO jobs VALUES ('sql-client', 'ready')`;
           yield* state.storage.sql.exec("INSERT INTO jobs VALUES (?, ?)", "storage", "ready");
@@ -60,7 +66,7 @@ it.effect("commits application SQL and mixed alarms together in workerd", () => 
         ],
       );
 
-      yield* JobAlarms.transaction((tx) =>
+      yield* alarms.transaction((tx) =>
         Effect.gen(function* () {
           yield* sql`UPDATE jobs SET status = 'cancelled'`;
           yield* tx.cancelAlarm({ tag: "job", id: "a" });
@@ -73,7 +79,7 @@ it.effect("commits application SQL and mixed alarms together in workerd", () => 
       ]);
       assert.deepStrictEqual(yield* sql`SELECT * FROM effect_cf_scheduled_alarms`, []);
       assert.isNull(yield* state.storage.getAlarm());
-    }).pipe(Effect.provide(services)),
+    }).pipe(Effect.provide(registration.layer.pipe(Layer.provideMerge(services)))),
   );
 });
 

@@ -117,22 +117,21 @@ type MutableBoundaryHandlers<ROut, Self extends Definition.Any> = {
 /**
  * Durable Object constructor options for a specific RPC definition.
  */
-export interface Options<
+export type Options<
   ROut,
   Self extends Definition.Any,
   REvent = never,
   EventLayerError = never,
-> extends Omit<
-  DurableObjectEntrypoint.DurableObjectOptions<
-    ROut,
-    REvent,
-    EventLayerError,
-    Handlers<ROut | REvent, Self>
-  >,
-  "rpc"
-> {
-  readonly rpc: Handlers<ROut | REvent, Self>;
-}
+  RAlarm = never,
+> = DurableObjectEntrypoint.DurableObjectOptions<
+  ROut,
+  REvent,
+  EventLayerError,
+  Handlers<NoInfer<ROut> | REvent | NoInfer<RAlarm>, Self>,
+  RAlarm
+> & {
+  readonly rpc: Handlers<NoInfer<ROut> | REvent | NoInfer<RAlarm>, Self>;
+};
 
 export type LayerOptions = {
   readonly binding: string;
@@ -158,12 +157,12 @@ export type TagClass<
   > & {
     readonly id: Id;
     readonly methods: MethodDefinitions;
-    readonly make: <ROut, LayerError, REvent = never, EventLayerError = never>(
-      layer: Layer.Layer<ROut, LayerError, DurableObjectEntrypoint.RuntimeContext<never>>,
-      options: Options<ROut, Definition<Id, MethodDefinitions>, REvent, EventLayerError>,
+    readonly make: <ROut, LayerError, REvent = never, EventLayerError = never, RAlarm = never>(
+      layer: Layer.Layer<ROut, LayerError, DurableObjectEntrypoint.RuntimeContext<NoInfer<RAlarm>>>,
+      options: Options<ROut, Definition<Id, MethodDefinitions>, REvent, EventLayerError, RAlarm>,
     ) => DurableObjectEntrypoint.DurableObjectClass<
-      Handlers<ROut | REvent, Definition<Id, MethodDefinitions>>,
-      ROut | REvent
+      Handlers<ROut | REvent | RAlarm, Definition<Id, MethodDefinitions>>,
+      ROut | REvent | RAlarm
     >;
     readonly layer: (
       options: LayerOptions,
@@ -200,9 +199,9 @@ const makeDefinition = <Id extends string, const MethodDefinitions extends Metho
   const definition: SelfDefinition = RpcDefinition.make(id, methods);
 
   return Object.assign(definition, {
-    make: <ROut, LayerError, REvent = never, EventLayerError = never>(
-      layer: Layer.Layer<ROut, LayerError, DurableObjectEntrypoint.RuntimeContext<never>>,
-      options: Options<ROut, SelfDefinition, REvent, EventLayerError>,
+    make: <ROut, LayerError, REvent = never, EventLayerError = never, RAlarm = never>(
+      layer: Layer.Layer<ROut, LayerError, DurableObjectEntrypoint.RuntimeContext<NoInfer<RAlarm>>>,
+      options: Options<ROut, SelfDefinition, REvent, EventLayerError, RAlarm>,
     ) =>
       DurableObjectEntrypoint.make(layer, {
         ...options,

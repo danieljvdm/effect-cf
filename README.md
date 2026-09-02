@@ -27,6 +27,7 @@ const CounterLive = Counter.make(DurableObjectAlarm.DurableObjectAlarm.layer, {
       const state = yield* DurableObjectState.DurableObjectState;
       const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
 
+      // Save the count and schedule its alarm atomically: both commit or both roll back.
       return yield* alarms.transaction((tx) =>
         Effect.gen(function* () {
           const count = ((yield* state.storage.get<number>("count")) ?? 0) + 1;

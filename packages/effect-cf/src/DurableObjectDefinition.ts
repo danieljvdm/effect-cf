@@ -4,7 +4,6 @@ import type * as Binding from "./Binding";
 import * as DurableObjectEntrypoint from "./DurableObject";
 import type { DurableObjectHandler } from "./DurableObject";
 import * as DurableObjectNamespace from "./DurableObjectNamespace";
-import type { DurableObjectState } from "./DurableObjectState";
 import type * as Rpc from "./Rpc";
 import * as RpcDefinition from "./RpcDefinition";
 import { recordDecodedArgs } from "./internal/RpcInvocation";
@@ -160,7 +159,7 @@ export type TagClass<
     readonly id: Id;
     readonly methods: MethodDefinitions;
     readonly make: <ROut, LayerError, REvent = never, EventLayerError = never>(
-      layer: Layer.Layer<ROut, LayerError, DurableObjectState | WorkerEnvironment>,
+      layer: Layer.Layer<ROut, LayerError, DurableObjectEntrypoint.RuntimeContext<never>>,
       options: Options<ROut, Definition<Id, MethodDefinitions>, REvent, EventLayerError>,
     ) => DurableObjectEntrypoint.DurableObjectClass<
       Handlers<ROut | REvent, Definition<Id, MethodDefinitions>>,
@@ -202,7 +201,7 @@ const makeDefinition = <Id extends string, const MethodDefinitions extends Metho
 
   return Object.assign(definition, {
     make: <ROut, LayerError, REvent = never, EventLayerError = never>(
-      layer: Layer.Layer<ROut, LayerError, DurableObjectState | WorkerEnvironment>,
+      layer: Layer.Layer<ROut, LayerError, DurableObjectEntrypoint.RuntimeContext<never>>,
       options: Options<ROut, SelfDefinition, REvent, EventLayerError>,
     ) =>
       DurableObjectEntrypoint.make(layer, {

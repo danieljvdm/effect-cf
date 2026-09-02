@@ -368,6 +368,22 @@ export type DefinedAlarmHandlers<Definitions extends AlarmDefinitions, R = never
   ) => Effect.Effect<void, E, R>;
 };
 
+/** A discriminated union keeps each tag paired with its decoded payload type. */
+export type DefinedScheduleAlarmInput<Definitions extends AlarmDefinitions> = {
+  readonly [Tag in keyof Definitions & string]: Omit<ScheduleAlarmInput<Tag>, "payload"> & {
+    readonly payload: AlarmDefinitionPayload<Definitions[Tag]>;
+  };
+}[keyof Definitions & string];
+
+export interface DefinedAlarmTransaction<Definitions extends AlarmDefinitions> {
+  readonly scheduleAlarm: (
+    input: DefinedScheduleAlarmInput<Definitions>,
+  ) => ReturnType<AlarmScheduler["scheduleAlarm"]>;
+  readonly cancelAlarm: (
+    input: AlarmRef<keyof Definitions & string>,
+  ) => ReturnType<AlarmScheduler["cancelAlarm"]>;
+}
+
 const isAlarmDefinitionConfig = (
   definition: AlarmDefinitionEntry,
 ): definition is AlarmDefinitionConfig => Predicate.isObject(definition) && "payload" in definition;
@@ -391,54 +407,121 @@ const getAlarmDefinitionFailureAction = (
     : { mode: definition.failure };
 };
 
-export const define = <const Definitions extends AlarmDefinitions>(definitions: Definitions) => ({
-  handlers: <R = never, E = never>(
-    handlers: DefinedAlarmHandlers<Definitions, R, E>,
-    options?: ProcessDueAlarmsOptions<R, E>,
-  ) =>
-    processDue(
-      (event) =>
-        Effect.gen(function* () {
-          const definition = definitions[event.tag];
+export const define = <const Definitions extends AlarmDefinitions>(definitions: Definitions) => {
+  const definitionFor = (tag: string) =>
+    Object.hasOwn(definitions, tag) ? definitions[tag] : undefined;
 
-          if (definition === undefined) {
-            return;
-          }
+  const bind = (mutations: AlarmTransaction): DefinedAlarmTransaction<Definitions> => ({
+    scheduleAlarm: Effect.fn("DefinedAlarms.scheduleAlarm")(function* (
+      input: DefinedScheduleAlarmInput<Definitions>,
+    ) {
+      const definition = definitionFor(input.tag);
 
-          const schema = getAlarmDefinitionSchema(definition);
-          // SAFETY: schema is selected from the same tagged definition used to select its handler.
-          const payload = yield* (
-            S.decodeUnknownEffect(schema)(event.payload) as Effect.Effect<
-              AlarmDefinitionPayload<Definitions[keyof Definitions & string]>,
-              unknown
-            >
-          ).pipe(
-            Effect.mapError(
-              (cause) =>
+      if (definition === undefined) {
+        return yield* Effect.fail(
+          new InvalidAlarmRefError({
+            cause: new Error(`Unknown alarm tag "${input.tag}"`),
+          }),
+        );
+      }
+      const payload = yield* S.encodeEffect(getAlarmDefinitionSchema(definition))(
+        input.payload,
+      ).pipe(
+        Effect.flatMap(S.decodeUnknownEffect(S.Json)),
+        Effect.mapError((cause) => new InvalidAlarmPayloadError({ cause })),
+      );
+
+      yield* mutations.scheduleAlarm({ ...input, payload });
+    }),
+    cancelAlarm: Effect.fn("DefinedAlarms.cancelAlarm")(function* (
+      input: AlarmRef<keyof Definitions & string>,
+    ) {
+      if (definitionFor(input.tag) === undefined) {
+        return yield* Effect.fail(
+          new InvalidAlarmRefError({
+            cause: new Error(`Unknown alarm tag "${input.tag}"`),
+          }),
+        );
+      }
+
+      yield* mutations.cancelAlarm(input);
+    }),
+  });
+
+  return {
+    /** Encodes and validates the payload before persisting it. */
+    scheduleAlarm: Effect.fn("DefinedAlarms.scheduleAlarm")(function* (
+      input: DefinedScheduleAlarmInput<Definitions>,
+    ) {
+      const alarms = yield* DurableObjectAlarm;
+
+      yield* bind(alarms).scheduleAlarm(input);
+    }),
+    cancelAlarm: Effect.fn("DefinedAlarms.cancelAlarm")(function* (
+      input: AlarmRef<keyof Definitions & string>,
+    ) {
+      const alarms = yield* DurableObjectAlarm;
+
+      yield* bind(alarms).cancelAlarm(input);
+    }),
+    /** Uses the same callback-owned transaction as the raw scheduler. */
+    transaction: <A, E, R>(
+      closure: (alarms: DefinedAlarmTransaction<Definitions>) => Effect.Effect<A, E, R>,
+    ): Effect.Effect<A, E | StorageOperationError, R | DurableObjectAlarm> =>
+      Effect.flatMap(DurableObjectAlarm, (alarms) => alarms.transaction((tx) => closure(bind(tx)))),
+    handlers: <R = never, E = never>(
+      handlers: DefinedAlarmHandlers<Definitions, R, E>,
+      options?: ProcessDueAlarmsOptions<R, E>,
+    ) =>
+      processDue(
+        (event) =>
+          Effect.gen(function* () {
+            const definition = definitionFor(event.tag);
+
+            if (definition === undefined) {
+              return yield* Effect.fail(
                 new StoredAlarmDecodeError({
-                  cause,
+                  cause: new Error(`Unknown alarm tag "${event.tag}"`),
                   storageId: getScheduledEventId(event),
                 }),
-            ),
-          );
-          const handler = handlers[event.tag];
+              );
+            }
 
-          // SAFETY: event.tag indexes the matching definition and handler, whose payload schema was decoded above.
-          yield* handler({ ...event, payload } as never);
-        }),
-      {
-        ...options,
-        onFailure: (failure) =>
-          Effect.gen(function* () {
-            const action = getAlarmDefinitionFailureAction(definitions[failure.tag]);
-            const optionAction =
-              options?.onFailure === undefined ? undefined : yield* options.onFailure(failure);
+            const schema = getAlarmDefinitionSchema(definition);
+            // SAFETY: schema is selected from the same tagged definition used to select its handler.
+            const payload = yield* (
+              S.decodeUnknownEffect(schema)(event.payload) as Effect.Effect<
+                AlarmDefinitionPayload<Definitions[keyof Definitions & string]>,
+                unknown
+              >
+            ).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new StoredAlarmDecodeError({
+                    cause,
+                    storageId: getScheduledEventId(event),
+                  }),
+              ),
+            );
+            const handler = handlers[event.tag];
 
-            return action ?? optionAction;
+            // SAFETY: event.tag indexes the matching definition and handler, whose payload schema was decoded above.
+            yield* handler({ ...event, payload } as never);
           }),
-      },
-    ),
-});
+        {
+          ...options,
+          onFailure: (failure) =>
+            Effect.gen(function* () {
+              const action = getAlarmDefinitionFailureAction(definitionFor(failure.tag));
+              const optionAction =
+                options?.onFailure === undefined ? undefined : yield* options.onFailure(failure);
+
+              return action ?? optionAction;
+            }),
+        },
+      ),
+  };
+};
 
 export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, AlarmScheduler>()(
   "effect-cf/DurableObjectAlarm",
@@ -723,6 +806,6 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         scheduleAlarm: (input) => transaction((alarms) => alarms.scheduleAlarm(input)),
         transaction,
       });
-    }).pipe(Effect.withSpan("DurableObjectAlarm.layer")),
+    }),
   );
 }

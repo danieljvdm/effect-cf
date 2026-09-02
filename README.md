@@ -7,75 +7,102 @@ Effect services for Cloudflare Workers and Durable Objects.
 
 ## Worker + Durable Object
 
-Each URL path names a counter. The Worker calls its Durable Object through a typed RPC method. The object persists the count and schedules a report for 30 seconds later. Keep hitting it and the report moves back; stop and the object wakes up to log the count.
+Each URL path names a seat. A POST asks its Durable Object for a temporary reservation through a typed RPC method. The object saves a hold and schedules an alarm to release it after 30 seconds. While held, the seat cannot be reserved again.
+
+The hold and its expiry alarm must commit together. If writing the alarm record or setting the native alarm fails after saving the hold, the transaction rolls the hold back. Otherwise a failed reservation could leave a seat unavailable with no scheduled release.
 
 ```ts
 import { DateTime, Effect, Schema } from "effect";
 import { DurableObject, DurableObjectAlarm, DurableObjectState, Worker } from "effect-cf";
 
-class Counter extends DurableObject.Tag<Counter>()("Counter", {
-  increment: DurableObject.method({ success: Schema.Number }),
+class Seat extends DurableObject.Tag<Seat>()("Seat", {
+  reserve: DurableObject.method({ success: Schema.NullOr(Schema.String) }),
 }) {}
 
-const CounterAlarms = DurableObjectAlarm.define({
-  report: Schema.Struct({ count: Schema.Number }),
+const SeatAlarms = DurableObjectAlarm.define({
+  expire: Schema.Struct({ holdId: Schema.String }),
 });
 
-const CounterLive = Counter.make(DurableObjectAlarm.DurableObjectAlarm.layer, {
+const SeatLive = Seat.make(DurableObjectAlarm.DurableObjectAlarm.layer, {
   rpc: {
-    increment: Effect.fn("Counter.increment")(function* () {
+    reserve: Effect.fn("Seat.reserve")(function* () {
       const state = yield* DurableObjectState.DurableObjectState;
       const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
 
-      // Save the count and schedule its alarm atomically: both commit or both roll back.
       return yield* alarms.transaction((tx) =>
         Effect.gen(function* () {
-          const count = ((yield* state.storage.get<number>("count")) ?? 0) + 1;
+          if ((yield* state.storage.get<string>("hold")) !== undefined) {
+            return null;
+          }
+          const holdId = crypto.randomUUID();
           const now = yield* DateTime.now;
 
-          yield* state.storage.put("count", count);
+          // If scheduling fails, roll back the hold so the seat stays available.
+          yield* state.storage.put("hold", holdId);
           yield* tx.scheduleAlarm({
-            tag: "report",
-            id: "idle",
+            tag: "expire",
+            id: holdId,
             runAt: DateTime.add(now, { seconds: 30 }),
-            payload: { count },
+            payload: { holdId },
           });
 
-          return count;
+          return holdId;
         }),
       );
     }),
   },
-  alarms: CounterAlarms.handlers({
-    report: ({ payload }) => Effect.log(`Counter went quiet at ${payload.count} visits`),
+  alarms: SeatAlarms.handlers({
+    expire: Effect.fn("Seat.expire")(function* ({ payload }) {
+      const state = yield* DurableObjectState.DurableObjectState;
+
+      yield* state.storage.transaction(() =>
+        Effect.gen(function* () {
+          // A retried old alarm must not release a newer hold.
+          if ((yield* state.storage.get<string>("hold")) === payload.holdId) {
+            yield* state.storage.delete("hold");
+          }
+        }),
+      );
+    }),
   }),
 });
 
-export class CounterDurableObject extends CounterLive {}
+export class SeatDurableObject extends SeatLive {}
 
-export default Worker.make(Counter.layer({ binding: "COUNTERS" }), {
+export default Worker.make(Seat.layer({ binding: "SEATS" }), {
   fetch: Effect.gen(function* () {
     const request = yield* Worker.NativeRequest;
-    const counters = yield* Counter;
-    const count = yield* counters.byName(new URL(request.url).pathname).increment();
 
-    return Response.json({ count });
+    if (request.method !== "POST") {
+      return new Response("Use POST to reserve a seat", {
+        status: 405,
+        headers: { Allow: "POST" },
+      });
+    }
+    const seats = yield* Seat;
+    const holdId = yield* seats.byName(new URL(request.url).pathname).reserve();
+
+    return holdId === null
+      ? Response.json({ error: "Seat already held" }, { status: 409 })
+      : Response.json({ holdId }, { status: 201 });
   }),
 });
 ```
 
-`Counter` defines the RPC contract; `Counter.make` implements it. `Counter.layer` connects the client to the `COUNTERS` Wrangler binding. `Worker.make` owns the Effect runtime, so handlers can yield services and return native `Response` objects.
+`Seat` defines the RPC contract; `Seat.make` implements it. `reserve` returns a hold ID, or `null` when the seat is already held. `Seat.layer` connects the client to the `SEATS` Wrangler binding. `Worker.make` owns the Effect runtime, so handlers can yield services and return native `Response` objects.
 
-`DurableObjectAlarm` stores named alarms in SQLite and manages the DO's single native alarm. Reusing `{ tag: "report", id: "idle" }` replaces the pending report. `transaction` commits the count and alarm together; `define` decodes the payload before dispatching to its typed handler. Delivery is [at least once](https://developers.cloudflare.com/durable-objects/api/alarms/), so this log can repeat on retries.
+`DurableObjectAlarm` stores named alarms in SQLite and manages the DO's single native alarm. `transaction` commits the hold, logical alarm, and native alarm together; `define` decodes the payload before dispatching to its typed handler. Delivery is [at least once](https://developers.cloudflare.com/durable-objects/api/alarms/), so expiry checks the hold ID before deleting it. Repeated delivery is harmless, even if a newer hold exists.
 
-This is the complete [counter example](examples/counter/src/index.ts). Its [Wrangler config](examples/counter/wrangler.jsonc) declares the binding and SQLite storage migration. Run it from this repository:
+This is the complete [reservation example](examples/reservations/src/index.ts). Its [Wrangler config](examples/reservations/wrangler.jsonc) declares the binding and SQLite storage migration. Run it from this repository:
 
 ```sh
 vp install
 vp run dev
 ```
 
-Then run `curl http://localhost:8787/visits` in another terminal. Repeat it to increment the count, or use another path for a separate counter. Stop for 30 seconds and watch the `vp run dev` terminal for the alarm's report. No frontend or external services needed.
+Then run `curl -i -X POST http://localhost:8787/seat-A1` in another terminal. The first request returns `201` with a hold ID; an immediate repeat returns `409`. Once the alarm releases the hold, another POST succeeds. Use another path for a different seat. No frontend or external services needed.
+
+This example covers temporary holds, not checkout or payment. Atomic scheduling does not guarantee timely release through persistent handler failures: native alarm retries are bounded. A production reservation system also needs expiry checks or reconciliation for stranded holds.
 
 ## KV and R2
 
@@ -121,7 +148,7 @@ vp run check
 vp run dev
 ```
 
-`check` builds the packages, checks formatting, lints, runs tests, and typechecks the packages and example. `dev` starts the counter locally.
+`check` builds the packages, checks formatting, lints, runs tests, and typechecks the packages and example. `dev` starts the reservation example locally.
 
 Use `vp run -r build` to build all workspaces. Package tests live under `packages/*/tests`.
 

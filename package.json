@@ -15,7 +15,7 @@
     "changeset": "vp exec changeset",
     "changeset:version": "vp exec changeset version",
     "changeset:publish": "vp exec changeset publish",
-    "dev": "vp run effect-cf#build && vp run counter-example#dev"
+    "dev": "vp run effect-cf#build && vp run reservations-example#dev"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.7.0",

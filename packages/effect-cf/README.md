@@ -45,7 +45,7 @@ const greeting = Effect.gen(function* () {
 
 Declare `SETTINGS` in `wrangler.jsonc` and pass `SettingsLive` to `Worker.make`. Other bindings use the same tag/layer pattern.
 
-The [counter example](https://github.com/danieljvdm/effect-cf/tree/main/examples/counter) shows `DurableObject.Tag`, storage, a typed RPC call, and the complete Wrangler configuration.
+The [reservation example](https://github.com/danieljvdm/effect-cf/tree/main/examples/reservations) shows `DurableObject.Tag`, a typed RPC call, atomic holds with expiry alarms, and the complete Wrangler configuration.
 
 For atomic application writes and alarm changes, see the [alarm transaction example](tests/fixtures/alarm-transaction-consumer.ts) and [API contract](src/DurableObjectAlarm.ts).
 

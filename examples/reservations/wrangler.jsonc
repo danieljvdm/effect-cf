@@ -1,11 +1,11 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "effect-cf-counter",
+  "name": "effect-cf-reservations",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-25",
   "compatibility_flags": ["nodejs_compat"],
   "durable_objects": {
-    "bindings": [{ "name": "COUNTERS", "class_name": "CounterDurableObject" }],
+    "bindings": [{ "name": "SEATS", "class_name": "SeatDurableObject" }],
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["CounterDurableObject"] }],
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SeatDurableObject"] }],
 }

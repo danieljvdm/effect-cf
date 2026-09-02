@@ -384,9 +384,21 @@ export interface DefinedAlarmTransaction<Definitions extends AlarmDefinitions> {
   ) => ReturnType<AlarmScheduler["cancelAlarm"]>;
 }
 
+const TypedAlarmSchedulerTypeId: unique symbol = Symbol.for(
+  "effect-cf/DurableObjectAlarm/TypedScheduler",
+);
+
+/** Identifies service requirements whose scheduler needs a registered dispatcher. */
+export interface AlarmService {
+  readonly Service: {
+    readonly [TypedAlarmSchedulerTypeId]: typeof TypedAlarmSchedulerTypeId;
+  };
+}
+
 export interface DefinedAlarmScheduler<
   Definitions extends AlarmDefinitions,
 > extends DefinedAlarmTransaction<Definitions> {
+  readonly [TypedAlarmSchedulerTypeId]: typeof TypedAlarmSchedulerTypeId;
   readonly transaction: <A, E, R>(
     closure: (alarms: DefinedAlarmTransaction<Definitions>) => Effect.Effect<A, E, R>,
   ) => Effect.Effect<A, E | StorageOperationError, R>;
@@ -479,6 +491,7 @@ const makeDefinition = <const Definitions extends AlarmDefinitions>(definitions:
 
   return {
     make: (alarms: AlarmScheduler): DefinedAlarmScheduler<Definitions> => ({
+      [TypedAlarmSchedulerTypeId]: TypedAlarmSchedulerTypeId,
       ...bind(alarms),
       transaction: (closure) => alarms.transaction((tx) => closure(bind(tx))),
     }),

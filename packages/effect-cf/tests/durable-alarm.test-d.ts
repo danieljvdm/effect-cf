@@ -147,6 +147,31 @@ Documents.make(Layer.empty, { alarms: registration, rpc: { save: schedule } });
 // @ts-expect-error Tagged DOs must register the service too.
 Documents.make(Layer.empty, { rpc: { save: schedule } });
 
+const scheduleRpc = { save: schedule };
+const runtimeOnly = { rpc: scheduleRpc };
+const eventOnly = { eventLayer: registration.layer, rpc: scheduleRpc };
+const otherRegistration = OtherAlarms.handlers({
+  archive: () => Effect.void,
+  cleanup: () => Effect.void,
+});
+const wrongRegistration = { alarms: otherRegistration, rpc: scheduleRpc };
+
+// @ts-expect-error Installing the service layer alone does not install its dispatcher.
+DurableObject.make(registration.layer, runtimeOnly);
+// @ts-expect-error A layer can schedule work during construction even without RPC methods.
+DurableObject.make(registration.layer);
+// @ts-expect-error An event layer cannot substitute for handler registration.
+DurableObject.make(Layer.empty, eventOnly);
+// @ts-expect-error Tagged DOs cannot bypass registration through application outputs.
+Documents.make(registration.layer, runtimeOnly);
+// @ts-expect-error Tagged DOs cannot bypass registration through event outputs.
+Documents.make(Layer.empty, eventOnly);
+// @ts-expect-error A different dispatcher does not cover the service in the application layer.
+DurableObject.make(registration.layer, wrongRegistration);
+
+DurableObject.make(registration.layer, { alarms: registration, rpc: scheduleRpc });
+Documents.make(Layer.empty, { ...eventOnly, alarms: registration });
+
 const scheduled = Context.Service<{ readonly ready: boolean }>("test/Scheduled");
 const applicationLayer = Layer.effect(scheduled, schedule().pipe(Effect.as({ ready: true })));
 

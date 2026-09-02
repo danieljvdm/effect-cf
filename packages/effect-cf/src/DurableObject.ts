@@ -4,7 +4,11 @@ import { Effect, Layer, type ManagedRuntime, type Scope, Tracer } from "effect";
 import { NativeRequest } from "./Worker";
 import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 import { DurableObjectState, fromDurableObjectState } from "./DurableObjectState";
-import { DurableObjectAlarm, type AlarmRegistration } from "./DurableObjectAlarm";
+import {
+  DurableObjectAlarm,
+  type AlarmRegistration,
+  type AlarmService,
+} from "./DurableObjectAlarm";
 import { fromWebSocket, type DurableWebSocket } from "./DurableObjectWebSocket";
 import * as RpcDefinition from "./RpcDefinition";
 import * as Entrypoint from "./internal/Entrypoint";
@@ -165,6 +169,13 @@ interface DurableObjectOptionsBase<
   ) => Effect.Effect<void, unknown, HandlerContext<NoInfer<RRuntime> | REvent | NoInfer<RAlarm>>>;
 }
 
+// Providing a scheduler through an ordinary layer does not install its dispatcher.
+type CheckAlarmRegistration<RProvided, RAlarm> = [
+  Exclude<Extract<NoInfer<RProvided>, AlarmService>, NoInfer<RAlarm>>,
+] extends [never]
+  ? unknown
+  : never;
+
 /** A declared event or alarm service must have its corresponding provider. */
 export type DurableObjectOptions<
   RRuntime,
@@ -173,6 +184,7 @@ export type DurableObjectOptions<
   Rpc extends DurableObjectRpc<RRuntime | REvent | RAlarm> = Record<never, never>,
   RAlarm = never,
 > = DurableObjectOptionsBase<RRuntime, REvent, EventLayerError, Rpc, RAlarm> &
+  CheckAlarmRegistration<RRuntime | REvent, RAlarm> &
   ([Exclude<REvent, RuntimeContext<RRuntime | RAlarm> | Scope.Scope>] extends [never]
     ? unknown
     : {
@@ -213,7 +225,7 @@ export type DurableObjectClass<Rpc extends DurableObjectRpc<ROut>, ROut> = new (
  * release in `eventLayer`, whose scope closes after each handled event.
  */
 export function make<ROut, LayerError>(
-  layer: Layer.Layer<ROut, LayerError, RuntimeContext<never>>,
+  layer: Layer.Layer<ROut, LayerError, RuntimeContext<never>> & CheckAlarmRegistration<ROut, never>,
 ): DurableObjectClass<Record<never, never>, ROut>;
 export function make<
   ROut,

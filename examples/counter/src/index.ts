@@ -1,21 +1,41 @@
-import { Effect, Layer, Schema } from "effect";
-import { DurableObject, DurableObjectState, Worker } from "effect-cf";
+import { DateTime, Effect, Schema } from "effect";
+import { DurableObject, DurableObjectAlarm, DurableObjectState, Worker } from "effect-cf";
 
 class Counter extends DurableObject.Tag<Counter>()("Counter", {
   increment: DurableObject.method({ success: Schema.Number }),
 }) {}
 
-const CounterLive = Counter.make(Layer.empty, {
+const CounterAlarms = DurableObjectAlarm.define({
+  report: Schema.Struct({ count: Schema.Number }),
+});
+
+const CounterLive = Counter.make(DurableObjectAlarm.DurableObjectAlarm.layer, {
   rpc: {
     increment: Effect.fn("Counter.increment")(function* () {
       const state = yield* DurableObjectState.DurableObjectState;
-      const count = (yield* state.storage.get<number>("count")) ?? 0;
+      const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
 
-      yield* state.storage.put("count", count + 1);
+      return yield* alarms.transaction((tx) =>
+        Effect.gen(function* () {
+          const count = ((yield* state.storage.get<number>("count")) ?? 0) + 1;
+          const now = yield* DateTime.now;
 
-      return count + 1;
+          yield* state.storage.put("count", count);
+          yield* tx.scheduleAlarm({
+            tag: "report",
+            id: "idle",
+            runAt: DateTime.add(now, { seconds: 30 }),
+            payload: { count },
+          });
+
+          return count;
+        }),
+      );
     }),
   },
+  alarms: CounterAlarms.handlers({
+    report: ({ payload }) => Effect.log(`Counter went quiet at ${payload.count} visits`),
+  }),
 });
 
 export class CounterDurableObject extends CounterLive {}

@@ -1,0 +1,98 @@
+name: Bundle size
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bundle-size-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: "true"
+  VP_GIT_HOOKS: "0"
+
+jobs:
+  compare:
+    name: Compare consumer bundles
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out PR
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Check out base
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: .bundle-base
+          persist-credentials: false
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Set up Vite+ and install PR dependencies
+        uses: voidzero-dev/setup-vp@v1.18.0
+        with:
+          node-version: "24"
+          cache: true
+          run-install: |
+            args: ["--frozen-lockfile", "--ignore-scripts"]
+
+      # Each checkout installs its own lockfile so dependency changes count.
+      - name: Install base dependencies
+        working-directory: .bundle-base
+        run: vp install --frozen-lockfile --ignore-scripts
+
+      - name: Build PR packages
+        run: |
+          vp run patch:tsgo
+          vp run effect-cf#build
+          vp run effect-webtransport#build
+
+      - name: Build base packages
+        working-directory: .bundle-base
+        run: |
+          vp run patch:tsgo
+          vp run effect-cf#build
+          vp run effect-webtransport#build
+
+      - name: Compare bundles
+        run: vp run bundle:compare -- --base-dir .bundle-base
+
+      - name: Show comparison
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          echo "$PR_NUMBER" > .bundle-report/pr-number.txt
+          echo 'Minified ESM, es2022, browser target, including Effect and other dependencies. Native cloudflare:* and node:* imports remain external.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Gzip level 9 per chunk. Initial includes static shared chunks; deferred is the remaining output. New exports have no baseline.' >> "$GITHUB_STEP_SUMMARY"
+          cat .bundle-report/report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload size report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bundle-stats
+          path: |
+            .bundle-report/report.md
+            .bundle-report/report.json
+            .bundle-report/pr-number.txt
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 30
+
+      - name: Upload emitted chunks and module analysis
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bundle-analysis
+          path: |
+            .bundle-report/base
+            .bundle-report/head
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7

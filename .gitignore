@@ -51,3 +51,7 @@ Session.vim
 
 # Local Git worktrees
 .worktrees/
+
+# Consumer bundle comparison
+.bundle-base/
+.bundle-report/

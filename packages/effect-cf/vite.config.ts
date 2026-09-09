@@ -55,6 +55,7 @@ export default defineConfig({
     ],
   },
   pack: {
+    unbundle: true,
     entry: [
       "src/index.ts",
       "src/ComputerArtifacts.ts",

@@ -1,5 +1,11 @@
 # effect-webtransport
 
+## 0.4.1
+
+### Patch Changes
+
+- [#153](https://github.com/danieljvdm/effect-cf/pull/153) [`00a1247`](https://github.com/danieljvdm/effect-cf/commit/00a1247cfff4641539ffdb3928b56e4887e32499) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Reduce unused Effect code retained by consumer bundlers such as Wrangler and esbuild. Existing package imports and APIs continue to work without application changes.
+
 ## 0.4.0
 
 ### Minor Changes

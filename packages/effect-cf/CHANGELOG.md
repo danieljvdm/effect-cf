@@ -1,5 +1,13 @@
 # effect-cf
 
+## 0.40.1
+
+### Patch Changes
+
+- [#151](https://github.com/danieljvdm/effect-cf/pull/151) [`f6c9c9f`](https://github.com/danieljvdm/effect-cf/commit/f6c9c9f8ff504d44ab9c5c0d0fa6fc4c47a98039) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Reduce consumer bundles by preserving module boundaries in the published package and avoiding unused telemetry exporters. Consumers using only KV no longer retain unrelated Workers, Workflows, or Node async-hooks imports.
+
+- [#153](https://github.com/danieljvdm/effect-cf/pull/153) [`00a1247`](https://github.com/danieljvdm/effect-cf/commit/00a1247cfff4641539ffdb3928b56e4887e32499) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Reduce unused Effect code retained by consumer bundlers such as Wrangler and esbuild. Existing package imports and APIs continue to work without application changes.
+
 ## 0.40.0
 
 ### Minor Changes

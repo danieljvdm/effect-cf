@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "source": "Deterministic synthetic data; no production/customer data",
+  "catalogLookup": {
+    "sku": "NOTE-A5",
+    "name": "A5 dotted notebook",
+    "category": "paper",
+    "unitPriceCents": 1295
+  },
+  "small": {
+    "batchId": "fixture-small-v1",
+    "totalRecords": 10,
+    "acceptedRecords": 10,
+    "rejectedRecords": 0,
+    "acceptedLines": 60,
+    "totalUnits": 290,
+    "subtotalCents": 471705,
+    "discountCents": 36523,
+    "taxCents": 21442,
+    "shippingCents": 4770,
+    "totalCents": 461394,
+    "errors": []
+  },
+  "large": {
+    "batchId": "fixture-large-v1",
+    "totalRecords": 1000,
+    "acceptedRecords": 1000,
+    "rejectedRecords": 0,
+    "acceptedLines": 6000,
+    "totalUnits": 29990,
+    "subtotalCents": 51202080,
+    "discountCents": 3727519,
+    "taxCents": 2515580,
+    "shippingCents": 529470,
+    "totalCents": 50519611,
+    "errors": []
+  },
+  "invalid": {
+    "batchId": "fixture-invalid-v1",
+    "totalRecords": 5,
+    "acceptedRecords": 1,
+    "rejectedRecords": 4,
+    "acceptedLines": 4,
+    "totalUnits": 13,
+    "subtotalCents": 20455,
+    "discountCents": 1841,
+    "taxCents": 0,
+    "shippingCents": 0,
+    "totalCents": 18614,
+    "errors": [
+      {
+        "index": 1,
+        "code": "duplicate-order"
+      },
+      {
+        "index": 2,
+        "code": "invalid-order"
+      },
+      {
+        "index": 3,
+        "code": "unknown-sku"
+      },
+      {
+        "index": 4,
+        "code": "total-mismatch"
+      }
+    ]
+  },
+  "reportInvariants": {
+    "small": {
+      "months": 10,
+      "topCustomers": 10,
+      "products": 12
+    },
+    "large": {
+      "months": 12,
+      "topCustomers": 10,
+      "products": 12
+    },
+    "notes": "Report accepted/rejected counts, totalCents and totalUnits equal import summary. Sum months.totalCents equals totalCents; sum products.netMerchandiseCents equals subtotalCents minus discountCents."
+  }
+}

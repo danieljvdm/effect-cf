@@ -6,6 +6,7 @@ import { defineConfig } from "vite-plus";
 const toolIgnorePatterns = [
   ".bundle-base/**",
   ".bundle-report/**",
+  ".runtime-bench/**",
   ".agents/**",
   ".claude/**",
   ".dev-kit/**",
@@ -105,6 +106,7 @@ const recommendedOxlintConfig = {
 const testExcludes = [
   "**/.bundle-base/**",
   "**/.bundle-report/**",
+  "**/.runtime-bench/**",
   "**/node_modules/**",
   "**/dist/**",
   "**/.git/**",
@@ -215,6 +217,11 @@ export default defineConfig({
       },
       "bundle:typecheck": {
         command: "vp exec tsc --noEmit -p scripts/bundle-pipelines/tsconfig.json",
+        cache: false,
+      },
+      "runtime:bench": {
+        command: "bun scripts/runtime-bench.ts",
+        dependsOn: ["effect-cf#build"],
         cache: false,
       },
       // Examples consume the publishable packages through their published

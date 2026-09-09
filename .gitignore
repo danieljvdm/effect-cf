@@ -55,3 +55,4 @@ Session.vim
 # Consumer bundle comparison
 .bundle-base/
 .bundle-report/
+.runtime-bench/

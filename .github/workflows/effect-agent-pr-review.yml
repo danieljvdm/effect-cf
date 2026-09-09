@@ -68,5 +68,7 @@ jobs:
           model: gpt-6-astra
           effort: medium
           priority: fast
+          base-cost-usd: "7.50"
+          max-cost-usd: "7.50"
           guidance-file: .github/review-guidance.md
           ignore: "bun.lock,**/CHANGELOG.md,.agents/skills/**,.repos/**"

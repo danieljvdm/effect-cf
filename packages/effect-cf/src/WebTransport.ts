@@ -30,7 +30,12 @@
  * the edge does provide.
  */
 import type { Request as CloudflareRequest } from "@cloudflare/workers-types";
-import { Data, Effect, Option, Predicate, Result, Schema as S } from "effect";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import * as Result from "effect/Result";
+import * as S from "effect/Schema";
 
 /**
  * Metadata Cloudflare's edge reports about the inbound client connection.

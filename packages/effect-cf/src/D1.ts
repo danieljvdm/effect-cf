@@ -1,5 +1,8 @@
 import { D1Client } from "@effect/sql-d1";
-import { Effect, Layer, Predicate, type Config } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Predicate from "effect/Predicate";
+import type { Config } from "effect";
 import type { SqlClient } from "effect/unstable/sql";
 
 import * as Binding from "./Binding";

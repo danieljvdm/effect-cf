@@ -1,4 +1,6 @@
-import { Effect, Exit, FiberSet } from "effect";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as FiberSet from "effect/FiberSet";
 
 type RunCallback<A, E, R> = (effect: Effect.Effect<A, E, R>) => Promise<Exit.Exit<A, E>>;
 

@@ -4,17 +4,19 @@
  * flush explicitly. Scheduled flush failures cannot fail user events. Exporter
  * layer finalizers run separately and follow their configured shutdown timeout.
  */
-import { ConfigProvider, Effect, Layer, Option } from "effect";
+import * as ConfigProvider from "effect/ConfigProvider";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import type * as Tracer from "effect/Tracer";
-import { FetchHttpClient, type Headers } from "effect/unstable/http";
-import {
-  OtlpExporter,
-  OtlpLogger,
-  OtlpMetrics,
-  OtlpResource,
-  OtlpSerialization,
-  OtlpTracer,
-} from "effect/unstable/observability";
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
+import type { Headers } from "effect/unstable/http";
+import * as OtlpExporter from "effect/unstable/observability/OtlpExporter";
+import * as OtlpLogger from "effect/unstable/observability/OtlpLogger";
+import * as OtlpMetrics from "effect/unstable/observability/OtlpMetrics";
+import * as OtlpResource from "effect/unstable/observability/OtlpResource";
+import * as OtlpSerialization from "effect/unstable/observability/OtlpSerialization";
+import * as OtlpTracer from "effect/unstable/observability/OtlpTracer";
 
 import { DurableObjectState } from "./DurableObjectState";
 import { WorkerConfig, WorkerEnvironment } from "./Environment";

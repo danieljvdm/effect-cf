@@ -8,7 +8,8 @@ import type {
   ArtifactsCLIResult as CloudflareComputerArtifactsCliResult,
   RemoteAddFn as CloudflareComputerRemoteAdd,
 } from "@cloudflare/computer/artifacts";
-import { Effect, Predicate } from "effect";
+import * as Effect from "effect/Effect";
+import * as Predicate from "effect/Predicate";
 
 import * as Artifacts from "./Artifacts";
 

@@ -1,4 +1,8 @@
-import { Data, Effect, Option, Result, Schema as S } from "effect";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Result from "effect/Result";
+import * as S from "effect/Schema";
 
 import { DurableObjectState } from "./DurableObjectState";
 import * as ErrorMessage from "./internal/ErrorMessage";

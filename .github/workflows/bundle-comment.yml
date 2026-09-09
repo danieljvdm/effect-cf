@@ -44,23 +44,25 @@ jobs:
             };
             const table = readData('bundle-stats/report.md', 12000).trim();
             const lines = table.split('\n');
-            const fixtures = ['kv', 'worker', 'durable-object-rpc', 'outbox', 'lazy-worker', 'webtransport'];
-            const row = /^\| (kv|worker|durable-object-rpc|outbox|lazy-worker|webtransport) \| (initial|deferred|total) \| (n\/a|\d+\.\d{2} kB) \| \d+\.\d{2} kB \| (new export|[+-]?\d+\.\d{2} kB(?: \/ [+-]?\d+\.\d{2}%)?) \| \d+\.\d{2} kB \|$/;
-            if (lines.length < 8 || lines.length > 20 ||
-                lines[0] !== '| Fixture | Part | Base gzip | PR gzip | Change | PR minified |' ||
-                lines[1] !== '| --- | --- | ---: | ---: | ---: | ---: |' ||
+            const pipelines = ['Wrangler', 'Vite', 'Alchemy'];
+            const fixtures = ['kv', 'worker', 'durable-object-rpc', 'outbox', 'lazy-worker'];
+            const row = /^\| (Wrangler|Vite|Alchemy) \| (kv|worker|durable-object-rpc|outbox|lazy-worker) \| (initial|deferred|total) \| (n\/a|\d+\.\d{2} kB) \| \d+\.\d{2} kB \| (new export|[+-]?\d+\.\d{2} kB(?: \/ [+-]?\d+\.\d{2}%)?) \| \d+\.\d{2} kB \|$/;
+            if (lines.length < 17 || lines.length > 47 ||
+                lines[0] !== '| Pipeline | Fixture | Part | Base gzip | PR gzip | Change | PR minified |' ||
+                lines[1] !== '| --- | --- | --- | ---: | ---: | ---: | ---: |' ||
                 !lines.slice(2).every(line => row.test(line))) {
               throw new Error('Invalid bundle report table');
             }
             const parts = new Set();
             for (const line of lines.slice(2)) {
-              const [, fixture, part] = row.exec(line);
-              const key = `${fixture}/${part}`;
+              const [, pipeline, fixture, part] = row.exec(line);
+              const key = `${pipeline}/${fixture}/${part}`;
               if (parts.has(key)) throw new Error('Duplicate bundle report row');
               parts.add(key);
             }
-            if (!fixtures.every(fixture => parts.has(`${fixture}/initial`) &&
-                parts.has(`${fixture}/deferred`) === parts.has(`${fixture}/total`))) {
+            if (!pipelines.every(pipeline => fixtures.every(fixture =>
+                parts.has(`${pipeline}/${fixture}/initial`) &&
+                parts.has(`${pipeline}/${fixture}/deferred`) === parts.has(`${pipeline}/${fixture}/total`)))) {
               throw new Error('Incomplete bundle report table');
             }
             const number = readData('bundle-stats/pr-number.txt', 20).trim();
@@ -84,11 +86,11 @@ jobs:
             const marker = '<!-- effect-cf:bundle-size -->';
             const runUrl = `${context.serverUrl}/${repository}/actions/runs/${run.id}`;
             const body = `${marker}\n### Bundle size\n\n${table}\n\n` +
-              'Minified ESM for es2022, browser target, including Effect and other dependencies. ' +
-              'Native `cloudflare:*` and `node:*` imports remain external. ' +
+              'Actual Wrangler, Cloudflare Vite plugin, and Alchemy production builds, including Effect and other dependencies. ' +
+              'Compare base and PR within each pipeline; their build defaults differ. ' +
               'Gzip is measured per chunk. Initial includes statically imported shared chunks; ' +
               'deferred is the remaining output. New exports have no prior baseline.\n\n' +
-              `[Chunks, module analysis, and exact bytes](${runUrl}) for \`${run.head_sha.slice(0, 12)}\`.`;
+              `[Chunks, module analysis, tool versions, and exact bytes](${runUrl}) for \`${run.head_sha.slice(0, 12)}\`.`;
             const comments = await github.paginate(github.rest.issues.listComments, {
               ...context.repo, issue_number: pr.number, per_page: 100,
             });

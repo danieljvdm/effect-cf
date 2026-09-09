@@ -1,16 +1,14 @@
-import {
-  Cause,
-  Clock,
-  Data,
-  Duration,
-  Effect,
-  Exit,
-  Fiber,
-  Option,
-  Predicate,
-  Result,
-  Schema as S,
-} from "effect";
+import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
+import * as Data from "effect/Data";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import * as Result from "effect/Result";
+import * as S from "effect/Schema";
 
 import * as ErrorMessage from "./internal/ErrorMessage";
 import { runNativeCallback } from "./internal/NativeCallback";

@@ -24,7 +24,11 @@ import {
   runInDurableObject as runInDurableObjectPromise,
   waitOnExecutionContext,
 } from "cloudflare:test";
-import { ConfigProvider, Effect, Exit, Layer, Schema } from "effect";
+import * as ConfigProvider from "effect/ConfigProvider";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 
 import {
   DurableObjectState,

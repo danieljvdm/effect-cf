@@ -1,5 +1,6 @@
 import { SqliteClient } from "@effect/sql-sqlite-do";
-import { Effect, Layer } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import type { SqlClient } from "effect/unstable/sql";
 
 import { DurableObjectState } from "./DurableObjectState";

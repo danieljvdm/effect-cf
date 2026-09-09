@@ -1,4 +1,6 @@
-import { Data, Effect, type Scope } from "effect";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import type { Scope } from "effect";
 
 import type { ExecutionContext, WorkerContext } from "./Worker";
 import type { WorkerEnvironment } from "./Environment";

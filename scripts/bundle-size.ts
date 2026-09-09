@@ -3,7 +3,7 @@ import { gzip } from "node:zlib";
 import { Console, Effect, FileSystem, Path, Schema, Stream } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { ChildProcess } from "effect/unstable/process";
-import { analyzeMetafile, build, version as esbuildVersion } from "esbuild";
+import { build } from "esbuild";
 
 class BundleSizeError extends Schema.TaggedError<BundleSizeError>()("BundleSizeError", {
   message: Schema.String,
@@ -12,6 +12,7 @@ class BundleSizeError extends Schema.TaggedError<BundleSizeError>()("BundleSizeE
 
 const Bytes = Schema.Struct({ raw: Schema.Int, gzip: Schema.Int });
 const BundleSize = Schema.Struct({
+  entry: Schema.String,
   initial: Bytes,
   deferred: Bytes,
   total: Bytes,
@@ -20,51 +21,58 @@ const BundleSize = Schema.Struct({
     Schema.Struct({ file: Schema.String, initial: Schema.Boolean, ...Bytes.fields }),
   ),
 });
-
 const Environment = Schema.Struct({ revision: Schema.String, effect: Schema.String });
+const Versions = Schema.Record(Schema.String, Schema.String);
 
 export const BundleReport = Schema.Struct({
-  esbuild: Schema.String,
-  settings: Schema.Struct({
-    format: Schema.Literal("esm"),
-    target: Schema.Literal("es2022"),
-    platform: Schema.Literal("browser"),
-    minify: Schema.Literal(true),
-    compression: Schema.Literal("gzip level 9 per chunk"),
-    external: Schema.Array(Schema.String),
-  }),
   base: Environment,
   head: Environment,
-  fixtures: Schema.Array(
+  compression: Schema.Literal("gzip level 9 per chunk"),
+  pipelines: Schema.Array(
     Schema.Struct({
-      name: Schema.String,
-      base: Schema.NullOr(BundleSize),
-      head: BundleSize,
-      missingBaseExports: Schema.Array(Schema.String),
+      name: Schema.Literals(["Wrangler", "Vite", "Alchemy"]),
+      versions: Versions,
+      fixtures: Schema.Array(
+        Schema.Struct({
+          name: Schema.String,
+          base: Schema.NullOr(BundleSize),
+          head: BundleSize,
+          missingBaseExports: Schema.Array(Schema.String),
+        }),
+      ),
     }),
   ),
 });
 export type BundleReport = typeof BundleReport.Type;
 
+const PipelineBundle = Schema.fromJsonString(
+  Schema.Struct({
+    entry: Schema.String,
+    modules: Schema.Array(Schema.Struct({ file: Schema.String })),
+    versions: Versions,
+  }),
+);
 const Manifest = Schema.Struct({
   name: Schema.String,
   exports: Schema.Record(Schema.String, Schema.Unknown),
 });
 const PackageVersion = Schema.fromJsonString(Schema.Struct({ version: Schema.String }));
 const packages = ["effect-cf", "effect-webtransport"];
+const pipelines = [
+  { id: "wrangler", name: "Wrangler" },
+  { id: "vite", name: "Vite" },
+  { id: "alchemy", name: "Alchemy" },
+] as const;
 const fixtures = [
-  { name: "kv", entry: "cf/bundle/kv.ts", requires: ["effect-cf"] },
-  { name: "worker", entry: "cf/bundle/worker.ts", requires: ["effect-cf"] },
-  { name: "durable-object-rpc", entry: "cf/durable-object-consumer.ts", requires: ["effect-cf"] },
-  { name: "outbox", entry: "outbox/index.ts", requires: ["effect-cf"] },
-  { name: "lazy-worker", entry: "cf/bundle/lazy-worker.ts", requires: ["effect-cf"] },
-  { name: "webtransport", entry: "webtransport/client.ts", requires: ["effect-webtransport"] },
+  { name: "kv", entry: "cf/bundle/kv.ts" },
+  { name: "worker", entry: "cf/bundle/worker.ts" },
+  { name: "durable-object-rpc", entry: "cf/bundle/durable-object-entry.ts" },
+  { name: "outbox", entry: "outbox/index.ts" },
+  { name: "lazy-worker", entry: "cf/bundle/lazy-worker.ts" },
 ];
-const nativeImports = ["cloudflare:*", "node:*"];
 const isNativeImport = (specifier: string) => /^(cloudflare|node):/.test(specifier);
 
-// Effect has no compression service. This typed adapter keeps Node's gzip API
-// out of the analysis workflow and uses the same per-chunk settings as effect-agent.
+// Effect has no compression service. Keep Node's gzip API at this typed boundary.
 const gzipBytes = (bytes: Uint8Array) =>
   Effect.callback<number, BundleSizeError>((resume) => {
     gzip(bytes, { level: 9 }, (cause, compressed) =>
@@ -76,107 +84,104 @@ const gzipBytes = (bytes: Uint8Array) =>
     );
   });
 
-const measureBundle = Effect.fn("bundleSize.measureBundle")(function* (
-  root: string,
-  source: string,
-  dependencies: string[],
-  outputDirectory: string,
+// Parse imports from emitted files; never measure esbuild's rewritten output.
+// Accounting includes all statically reachable shared chunks in the initial size.
+export const measureArtifacts = Effect.fn("bundleSize.measureArtifacts")(function* (
+  output: string,
+  entry: string,
+  files: ReadonlyArray<string>,
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const entry = yield* fs.realPath(source);
-  const result = yield* Effect.tryPromise({
-    try: () =>
-      build({
-        absWorkingDir: root,
-        entryPoints: { entry },
-        outdir: "output",
-        outExtension: { ".js": ".mjs" },
-        nodePaths: dependencies,
-        bundle: true,
-        treeShaking: true,
-        minify: true,
-        splitting: true,
-        format: "esm",
-        platform: "browser",
-        target: "es2022",
-        external: nativeImports,
-        define: { "process.env.NODE_ENV": '"production"' },
-        legalComments: "none",
-        sourcemap: false,
-        metafile: true,
-        write: false,
-        logLevel: "silent",
-      }),
-    catch: (cause) =>
-      new BundleSizeError({ message: `Could not bundle ${source}: ${String(cause)}`, cause }),
-  });
-  const outputs = result.metafile.outputs;
-  const entryOutput = Object.keys(outputs).find(
-    (file) => path.resolve(root, outputs[file]?.entryPoint ?? "") === entry,
-  );
+  const modules = new Map<
+    string,
+    { file: string; raw: number; gzip: number; imports: Array<{ path: string; kind: string }> }
+  >();
 
-  if (entryOutput === undefined) {
-    return yield* new BundleSizeError({ message: `No output entry for ${source}` });
+  for (const file of files) {
+    const absolute = path.resolve(output, file);
+
+    if (
+      path.isAbsolute(file) ||
+      path.relative(output, absolute).startsWith("..") ||
+      modules.has(absolute)
+    ) {
+      return yield* new BundleSizeError({ message: `Invalid or duplicate output chunk: ${file}` });
+    }
+    const bytes = yield* fs.readFile(absolute);
+    const parsed = yield* Effect.tryPromise({
+      try: () =>
+        build({
+          entryPoints: [absolute],
+          absWorkingDir: output,
+          bundle: true,
+          external: ["*"],
+          write: false,
+          metafile: true,
+          outdir: "parse-only",
+          format: "esm",
+          platform: "neutral",
+          logLevel: "silent",
+        }),
+      catch: (cause) =>
+        new BundleSizeError({ message: `Could not read imports in ${file}`, cause }),
+    });
+    const input = Object.values(parsed.metafile.inputs)[0];
+
+    if (input === undefined)
+      return yield* new BundleSizeError({ message: `No JavaScript in ${file}` });
+    modules.set(absolute, {
+      file,
+      raw: bytes.byteLength,
+      gzip: yield* gzipBytes(bytes),
+      imports: input.imports,
+    });
   }
-
   const externals = new Set<string>();
 
-  for (const output of Object.values(outputs)) {
-    for (const imported of output.imports) {
-      if (!imported.external) continue;
-      if (!isNativeImport(imported.path)) {
+  for (const [file, module] of modules) {
+    for (const imported of module.imports) {
+      if (isNativeImport(imported.path)) externals.add(imported.path);
+      else if (
+        !imported.path.startsWith(".") ||
+        !modules.has(path.resolve(path.dirname(file), imported.path))
+      ) {
         return yield* new BundleSizeError({
-          message: `Unbundled dependency ${imported.path} in ${source}`,
+          message: `Unbundled dependency ${imported.path} in ${file}`,
         });
       }
-      externals.add(imported.path);
     }
   }
   const initial = new Set<string>();
-  const pending = [entryOutput];
+  const pending = [path.resolve(output, entry)];
 
   while (pending.length > 0) {
     const file = pending.pop();
 
     if (file === undefined || initial.has(file)) continue;
+    const module = modules.get(file);
+
+    if (module === undefined)
+      return yield* new BundleSizeError({ message: `Missing entry chunk: ${entry}` });
     initial.add(file);
-    for (const imported of outputs[file]?.imports ?? []) {
-      if (!imported.external && imported.kind !== "dynamic-import") pending.push(imported.path);
+    for (const imported of module.imports) {
+      if (imported.kind !== "dynamic-import" && imported.path.startsWith("."))
+        pending.push(path.resolve(path.dirname(file), imported.path));
     }
   }
-  yield* fs.makeDirectory(outputDirectory, { recursive: true });
-  const chunks = yield* Effect.forEach(
-    result.outputFiles,
-    Effect.fn(function* (output) {
-      const file = path.relative(root, output.path).replaceAll("\\", "/");
-
-      yield* fs.writeFile(path.join(outputDirectory, path.basename(file)), output.contents);
-
-      return {
-        file: path.basename(file),
-        initial: initial.has(file),
-        raw: output.contents.byteLength,
-        gzip: yield* gzipBytes(output.contents),
-      };
-    }),
-  );
+  const chunks = [...modules].map(([file, module]) => ({
+    file: module.file,
+    initial: initial.has(file),
+    raw: module.raw,
+    gzip: module.gzip,
+  }));
   const sum = (selected: typeof chunks) => ({
     raw: selected.reduce((total, chunk) => total + chunk.raw, 0),
     gzip: selected.reduce((total, chunk) => total + chunk.gzip, 0),
   });
-  const analysis = yield* Effect.tryPromise({
-    try: () => analyzeMetafile(result.metafile, { verbose: true }),
-    catch: (cause) => new BundleSizeError({ message: "Could not analyze bundle", cause }),
-  });
-
-  yield* fs.writeFileString(
-    path.join(outputDirectory, "meta.json"),
-    JSON.stringify(result.metafile, null, 2),
-  );
-  yield* fs.writeFileString(path.join(outputDirectory, "modules.txt"), analysis);
 
   return {
+    entry,
     initial: sum(chunks.filter((chunk) => chunk.initial)),
     deferred: sum(chunks.filter((chunk) => !chunk.initial)),
     total: sum(chunks),
@@ -199,46 +204,47 @@ const revision = Effect.fn("bundleSize.revision")(function* (root: string) {
   return code === 0 ? output.trim() : "unversioned checkout";
 }, Effect.scoped);
 
-const measureCheckout = Effect.fn("bundleSize.measureCheckout")(function* (
+const linkDependencies = Effect.fn("bundleSize.linkDependencies")(function* (
+  source: string,
+  destination: string,
+): Effect.fn.Return<
+  void,
+  import("effect/PlatformError").PlatformError,
+  FileSystem.FileSystem | Path.Path
+> {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+
+  if (!(yield* fs.exists(source))) return;
+  yield* fs.makeDirectory(destination, { recursive: true });
+  for (const name of yield* fs.readDirectory(source)) {
+    if (name.startsWith(".") || packages.includes(name)) continue;
+    if (name.startsWith("@")) {
+      yield* linkDependencies(path.join(source, name), path.join(destination, name));
+    } else if (!(yield* fs.exists(path.join(destination, name)))) {
+      yield* fs.symlink(path.join(source, name), path.join(destination, name));
+    }
+  }
+});
+
+export const stageCheckout = Effect.fn("bundleSize.stageCheckout")(function* (
   checkout: string,
-  fixtureRoot: string,
-  output: string,
-  allowMissing: boolean,
+  stage: string,
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const root = yield* fs.realPath(checkout);
-  const stage = yield* fs.realPath(
-    yield* fs.makeTempDirectoryScoped({ prefix: "effect-cf-bundle-" }),
-  );
   const available = new Set<string>();
-  const dependencies = [
-    path.join(root, "node_modules"),
-    ...packages.map((name) => path.join(root, "packages", name, "node_modules")),
-  ];
 
-  yield* fs.makeDirectory(path.join(stage, "fixtures", "cf"), { recursive: true });
-  yield* fs.copy(
-    path.join(fixtureRoot, "packages/effect-cf/tests/fixtures/bundle"),
-    path.join(stage, "fixtures/cf/bundle"),
+  yield* fs.makeDirectory(stage, { recursive: true });
+  yield* fs.writeFileString(
+    path.join(stage, "package.json"),
+    JSON.stringify({ name: "bundle-consumer", private: true, type: "module" }),
   );
-  yield* fs.copyFile(
-    path.join(fixtureRoot, "packages/effect-cf/tests/fixtures/durable-object-consumer.ts"),
-    path.join(stage, "fixtures/cf/durable-object-consumer.ts"),
-  );
-  yield* fs.copy(
-    path.join(fixtureRoot, "examples/outbox/src"),
-    path.join(stage, "fixtures/outbox"),
-  );
-  yield* fs.copy(
-    path.join(fixtureRoot, "packages/effect-webtransport/tests/fixtures/bundle"),
-    path.join(stage, "fixtures/webtransport"),
-  );
-
   for (const name of packages) {
     const source = path.join(root, "packages", name);
 
-    if (allowMissing && !(yield* fs.exists(source))) continue;
+    if (!(yield* fs.exists(source))) continue;
     const manifest = yield* Schema.decodeEffect(Schema.fromJsonString(Manifest))(
       yield* fs.readFileString(path.join(source, "package.json")),
     );
@@ -246,74 +252,170 @@ const measureCheckout = Effect.fn("bundleSize.measureCheckout")(function* (
 
     yield* fs.makeDirectory(destination, { recursive: true });
     yield* fs.copyFile(path.join(source, "package.json"), path.join(destination, "package.json"));
-    // Only published build output is available. Source aliases cannot hide a bad export.
+    // Never stage source: a broken published export must fail instead of falling back.
     yield* fs.copy(path.join(source, "dist"), path.join(destination, "dist"));
     const link = path.join(stage, "node_modules", manifest.name);
 
     yield* fs.makeDirectory(path.dirname(link), { recursive: true });
     yield* fs.symlink(destination, link);
-    for (const key of Object.keys(manifest.exports)) {
+    yield* linkDependencies(
+      path.join(source, "node_modules"),
+      path.join(destination, "node_modules"),
+    );
+    for (const key of Object.keys(manifest.exports))
       available.add(key === "." ? manifest.name : manifest.name + key.slice(1));
-    }
   }
+  yield* linkDependencies(path.join(root, "node_modules"), path.join(stage, "node_modules"));
+  for (const name of packages)
+    yield* linkDependencies(
+      path.join(root, "packages", name, "node_modules"),
+      path.join(stage, "node_modules"),
+    );
 
-  const results = yield* Effect.forEach(
-    fixtures,
-    Effect.fn(function* (fixture) {
-      const missing = fixture.requires.filter((required) => !available.has(required));
-
-      if (missing.length > 0) {
-        if (allowMissing) return { name: fixture.name, size: null, missing };
-
-        return yield* new BundleSizeError({
-          message: `Missing public exports: ${missing.join(", ")}`,
-        });
-      }
-      const size = yield* measureBundle(
-        stage,
-        path.join(stage, "fixtures", fixture.entry),
-        dependencies,
-        path.join(output, fixture.name),
-      );
-
-      return { name: fixture.name, size, missing };
-    }),
-  );
-  const effect = yield* Schema.decodeEffect(PackageVersion)(
-    yield* fs.readFileString(path.join(root, "node_modules/effect/package.json")),
-  );
-
-  return { results, environment: { revision: yield* revision(root), effect: effect.version } };
+  return available;
 });
+
+const copyFixtures = Effect.fn("bundleSize.copyFixtures")(function* (root: string, stage: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+
+  yield* fs.makeDirectory(path.join(stage, "fixtures/cf"), { recursive: true });
+  yield* fs.copy(
+    path.join(root, "packages/effect-cf/tests/fixtures/bundle"),
+    path.join(stage, "fixtures/cf/bundle"),
+  );
+  yield* fs.copyFile(
+    path.join(root, "packages/effect-cf/tests/fixtures/durable-object-consumer.ts"),
+    path.join(stage, "fixtures/cf/durable-object-consumer.ts"),
+  );
+  yield* fs.copy(path.join(root, "examples/outbox/src"), path.join(stage, "fixtures/outbox"));
+});
+
+const configureWorker = Effect.fn("bundleSize.configureWorker")(function* (
+  stage: string,
+  fixture: (typeof fixtures)[number],
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const durable =
+    fixture.name === "outbox"
+      ? { name: "DOCUMENTS", class_name: "DocumentDurableObject" }
+      : fixture.name === "durable-object-rpc"
+        ? { name: "COUNTERS", class_name: "ExampleDurableObject" }
+        : undefined;
+
+  yield* fs.writeFileString(
+    path.join(stage, "wrangler.json"),
+    JSON.stringify(
+      {
+        name: `bundle-${fixture.name}`,
+        main: `fixtures/${fixture.entry}`,
+        compatibility_date: "2026-08-25",
+        compatibility_flags: ["nodejs_compat"],
+        minify: true,
+        kv_namespaces:
+          fixture.name === "kv" || fixture.name === "lazy-worker"
+            ? [{ binding: "STORE", id: "00000000000000000000000000000000" }]
+            : [],
+        durable_objects: { bindings: durable === undefined ? [] : [durable] },
+        migrations:
+          durable === undefined ? [] : [{ tag: "v1", new_sqlite_classes: [durable.class_name] }],
+        r2_buckets:
+          fixture.name === "outbox" ? [{ binding: "ARCHIVE", bucket_name: "bundle-archive" }] : [],
+      },
+      null,
+      2,
+    ),
+  );
+});
+
+const buildPipeline = Effect.fn("bundleSize.buildPipeline")(function* (
+  root: string,
+  pipeline: string,
+  stage: string,
+  output: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+
+  yield* fs.makeDirectory(output, { recursive: true });
+  const child = yield* ChildProcess.make(
+    path.join(root, "node_modules/.bin/vp"),
+    [
+      "run",
+      "bundle:pipeline",
+      "--",
+      "--pipeline",
+      pipeline,
+      "--project-dir",
+      stage,
+      "--out-dir",
+      output,
+    ],
+    {
+      cwd: root,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { CI: "true", WRANGLER_SEND_METRICS: "false" },
+      extendEnv: true,
+    },
+  );
+  const [stdout, stderr, code] = yield* Effect.all(
+    [
+      Stream.mkString(Stream.decodeText(child.stdout)),
+      Stream.mkString(Stream.decodeText(child.stderr)),
+      child.exitCode,
+    ],
+    { concurrency: 3 },
+  );
+
+  yield* fs.writeFileString(path.join(output, "driver.log"), stdout + stderr);
+  if (code !== 0)
+    return yield* new BundleSizeError({
+      message: `${pipeline} build failed; see ${path.join(output, "driver.log")}`,
+    });
+  const manifest = yield* Schema.decodeEffect(PipelineBundle)(
+    yield* fs.readFileString(path.join(output, "bundle.json")),
+  );
+  const size = yield* measureArtifacts(
+    output,
+    manifest.entry,
+    manifest.modules.map((module) => module.file),
+  );
+
+  return { size, versions: manifest.versions };
+}, Effect.scoped);
 
 const kb = (bytes: number) => `${(bytes / 1000).toFixed(2)} kB`;
 
 export const renderBundleReport = (report: BundleReport) => {
   const lines = [
-    "| Fixture | Part | Base gzip | PR gzip | Change | PR minified |",
-    "| --- | --- | ---: | ---: | ---: | ---: |",
+    "| Pipeline | Fixture | Part | Base gzip | PR gzip | Change | PR minified |",
+    "| --- | --- | --- | ---: | ---: | ---: | ---: |",
   ];
 
-  for (const fixture of report.fixtures) {
-    for (const part of ["initial", "deferred", "total"] as const) {
-      if (
-        part !== "initial" &&
-        fixture.head.deferred.raw === 0 &&
-        (fixture.base?.deferred.raw ?? 0) === 0
-      )
-        continue;
-      const before = fixture.base?.[part].gzip;
-      const after = fixture.head[part].gzip;
-      const delta = before === undefined ? undefined : after - before;
-      const sign = delta !== undefined && delta > 0 ? "+" : "";
-      const change =
-        delta === undefined || before === undefined
-          ? "new export"
-          : `${sign}${kb(delta)}${before === 0 ? "" : ` / ${sign}${((delta / before) * 100).toFixed(2)}%`}`;
+  for (const pipeline of report.pipelines) {
+    for (const fixture of pipeline.fixtures) {
+      for (const part of ["initial", "deferred", "total"] as const) {
+        if (
+          part !== "initial" &&
+          fixture.head.deferred.raw === 0 &&
+          (fixture.base?.deferred.raw ?? 0) === 0
+        )
+          continue;
+        const before = fixture.base?.[part].gzip;
+        const after = fixture.head[part].gzip;
+        const delta = before === undefined ? undefined : after - before;
+        const sign = delta !== undefined && delta > 0 ? "+" : "";
+        const change =
+          delta === undefined || before === undefined
+            ? "new export"
+            : `${sign}${kb(delta)}${before === 0 ? "" : ` / ${sign}${((delta / before) * 100).toFixed(2)}%`}`;
 
-      lines.push(
-        `| ${fixture.name} | ${part} | ${before === undefined ? "n/a" : kb(before)} | ${kb(after)} | ${change} | ${kb(fixture.head[part].raw)} |`,
-      );
+        lines.push(
+          `| ${pipeline.name} | ${fixture.name} | ${part} | ${before === undefined ? "n/a" : kb(before)} | ${kb(after)} | ${change} | ${kb(fixture.head[part].raw)} |`,
+        );
+      }
     }
   }
 
@@ -325,42 +427,83 @@ export const compareBundles = Effect.fn("bundleSize.compareBundles")(
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
 
-    // A failed comparison must not leave a stale success table or obsolete chunks.
-    for (const generated of ["base", "head", "report.json", "report.md"]) {
+    for (const generated of ["base", "head", "report.json", "report.md"])
       yield* fs.remove(path.join(output, generated), { recursive: true, force: true });
-    }
-    const base = yield* measureCheckout(baseRoot, root, path.join(output, "base"), true);
-    const head = yield* measureCheckout(root, root, path.join(output, "head"), false);
-    const comparisons: BundleReport["fixtures"][number][] = [];
+    const environments = yield* Effect.forEach(
+      [baseRoot, root],
+      Effect.fn(function* (checkout) {
+        const effect = yield* Schema.decodeEffect(PackageVersion)(
+          yield* fs.readFileString(path.join(checkout, "node_modules/effect/package.json")),
+        );
 
-    for (const current of head.results) {
-      const previous = base.results.find((fixture) => fixture.name === current.name);
+        return { revision: yield* revision(checkout), effect: effect.version };
+      }),
+    );
+    const [base, head] = environments;
 
-      if (current.size === null || previous === undefined) {
-        return yield* new BundleSizeError({
-          message: `Incomplete measurement for ${current.name}`,
-        });
+    if (base === undefined || head === undefined)
+      return yield* new BundleSizeError({ message: "Missing checkout environment" });
+    const comparisons: BundleReport["pipelines"][number][] = [];
+
+    for (const pipeline of pipelines) {
+      const measured: BundleReport["pipelines"][number]["fixtures"][number][] = [];
+      let versions: typeof Versions.Type = {};
+
+      for (const fixture of fixtures) {
+        const sides: Array<typeof BundleSize.Type | null> = [];
+        const missingBaseExports: string[] = [];
+
+        for (const [side, checkout] of [
+          ["base", baseRoot],
+          ["head", root],
+        ] as const) {
+          yield* Console.error(`Building ${pipeline.name} / ${fixture.name} / ${side}`);
+          const stage = yield* fs.realPath(
+            yield* fs.makeTempDirectoryScoped({ prefix: "effect-cf-bundle-" }),
+          );
+          const available = yield* stageCheckout(checkout, stage);
+
+          if (!available.has("effect-cf")) {
+            if (side === "head")
+              return yield* new BundleSizeError({ message: "Missing public export: effect-cf" });
+            missingBaseExports.push("effect-cf");
+            sides.push(null);
+            continue;
+          }
+          yield* copyFixtures(root, stage);
+          yield* configureWorker(stage, fixture);
+          const built = yield* buildPipeline(
+            root,
+            pipeline.id,
+            stage,
+            path.join(output, side, pipeline.id, fixture.name),
+          );
+
+          if (
+            Object.keys(versions).length > 0 &&
+            JSON.stringify(versions) !== JSON.stringify(built.versions)
+          )
+            return yield* new BundleSizeError({
+              message: `Tool versions changed within ${pipeline.name} comparison`,
+            });
+          versions = built.versions;
+          sides.push(built.size);
+        }
+        const [before, after] = sides;
+
+        if (before === undefined || after === undefined || after === null)
+          return yield* new BundleSizeError({
+            message: `Incomplete measurement for ${fixture.name}`,
+          });
+        measured.push({ name: fixture.name, base: before, head: after, missingBaseExports });
       }
-      comparisons.push({
-        name: current.name,
-        head: current.size,
-        base: previous.size,
-        missingBaseExports: previous.missing,
-      });
+      comparisons.push({ name: pipeline.name, versions, fixtures: measured });
     }
     const report: BundleReport = {
-      esbuild: esbuildVersion,
-      settings: {
-        format: "esm",
-        target: "es2022",
-        platform: "browser",
-        minify: true,
-        compression: "gzip level 9 per chunk",
-        external: nativeImports,
-      },
-      base: base.environment,
-      head: head.environment,
-      fixtures: comparisons,
+      base,
+      head,
+      compression: "gzip level 9 per chunk",
+      pipelines: comparisons,
     };
 
     yield* fs.writeFileString(
@@ -376,7 +519,7 @@ export const compareBundles = Effect.fn("bundleSize.compareBundles")(
     cause._tag === "BundleSizeError"
       ? cause
       : new BundleSizeError({
-          message: `Bundle comparison failed. Install dependencies and build both checkouts. ${cause.message}`,
+          message: `Bundle comparison failed. Install pipeline tools and build both checkouts. ${cause.message}`,
           cause,
         }),
   ),
@@ -405,6 +548,6 @@ export const command = Command.make(
   }),
 ).pipe(
   Command.withDescription(
-    "Compare published consumer bundles, including Effect, against another built checkout.",
+    "Compare published consumers using Wrangler, Cloudflare Vite, and Alchemy.",
   ),
 );

@@ -4,7 +4,11 @@ import type {
   CacheStorage as CloudflareCacheStorage,
   RequestInfo as CloudflareRequestInfo,
 } from "@cloudflare/workers-types";
-import { Context, Data, Effect, Layer, Option } from "effect";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 
 import * as ErrorMessage from "./internal/ErrorMessage";
 

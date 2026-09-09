@@ -18,7 +18,7 @@ jobs:
   compare:
     name: Compare consumer bundles
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Check out PR
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -49,6 +49,14 @@ jobs:
         working-directory: .bundle-base
         run: vp install --frozen-lockfile --ignore-scripts
 
+      # Separate lockfile keeps framework build tools fixed across both sides
+      # without changing effect-cf's dated Cloudflare runtime dependencies.
+      - name: Install consumer pipeline tools
+        run: vp run bundle:setup
+
+      - name: Check pipeline adapters
+        run: vp run bundle:typecheck
+
       - name: Build PR packages
         run: |
           vp run patch:tsgo
@@ -70,7 +78,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           echo "$PR_NUMBER" > .bundle-report/pr-number.txt
-          echo 'Minified ESM, es2022, browser target, including Effect and other dependencies. Native cloudflare:* and node:* imports remain external.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Actual Wrangler, Cloudflare Vite plugin, and Alchemy production builds, including Effect and other dependencies. Exact tool versions are in report.json.' >> "$GITHUB_STEP_SUMMARY"
           echo 'Gzip level 9 per chunk. Initial includes static shared chunks; deferred is the remaining output. New exports have no baseline.' >> "$GITHUB_STEP_SUMMARY"
           cat .bundle-report/report.md >> "$GITHUB_STEP_SUMMARY"
 

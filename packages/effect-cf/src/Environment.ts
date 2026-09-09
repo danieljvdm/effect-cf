@@ -1,4 +1,9 @@
-import { Config, ConfigProvider, Context, Effect, type Layer, Predicate } from "effect";
+import * as Config from "effect/Config";
+import * as ConfigProvider from "effect/ConfigProvider";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Predicate from "effect/Predicate";
+import type { Layer } from "effect";
 
 export type WorkerEnv = Cloudflare.Env;
 

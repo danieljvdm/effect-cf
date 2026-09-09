@@ -21,4 +21,4 @@ export const causeMessage = (cause: unknown): string => {
 export const violationsMessage = (
   violations: ReadonlyArray<{ readonly path: string; readonly message: string }>,
 ): string => violations.map((violation) => `${violation.path}: ${violation.message}`).join("; ");
-import { Predicate } from "effect";
+import * as Predicate from "effect/Predicate";

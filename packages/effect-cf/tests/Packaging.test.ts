@@ -29,3 +29,29 @@ it.live("the root package bundles Durable Object consumers without optional peer
     expect(result.outputFiles).toHaveLength(1);
   }),
 );
+
+it.live("the root package bundles KV consumers without unrelated runtime imports", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.promise(() =>
+      build({
+        stdin: {
+          contents: 'import { Kv } from "effect-cf"; export const Tag = Kv.Tag;',
+          resolveDir: new URL("../", import.meta.url).pathname,
+        },
+        bundle: true,
+        external: ["cloudflare:*", "node:async_hooks"],
+        format: "esm",
+        metafile: true,
+        platform: "browser",
+        write: false,
+      }),
+    );
+    const imports = Object.values(result.metafile.outputs).flatMap((output) =>
+      output.imports.map((entry) => entry.path),
+    );
+
+    expect(imports).not.toContain("cloudflare:workers");
+    expect(imports).not.toContain("cloudflare:workflows");
+    expect(imports).not.toContain("node:async_hooks");
+  }),
+);

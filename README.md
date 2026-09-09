@@ -164,6 +164,10 @@ vp run dev
 
 Use `vp run -r build` to build all workspaces. Package tests live under `packages/*/tests`.
 
+Every PR gets a [consumer bundle comparison](docs/bundle-analysis.md), with initial
+and deferred sizes, a PR comment, and downloadable module analysis. Run it locally
+with `vp run bundle:compare -- --base-dir /path/to/built/base-checkout`.
+
 Vite+ 0.3 forwards Bun 1.4's native dependency-management commands:
 
 - Run `vp dedupe` after dependency updates to consolidate compatible versions in `bun.lock`, or `vp dedupe --check` to inspect without changing it.

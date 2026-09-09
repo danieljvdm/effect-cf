@@ -1,7 +1,10 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": {
-    "types": ["node"]
+    "types": ["node"],
+    // Effect's CLI declarations reference an unexported internal Param helper.
+    // Check our scripts while treating dependency declarations as library input.
+    "skipLibCheck": true
   },
   "include": ["*.ts"]
 }

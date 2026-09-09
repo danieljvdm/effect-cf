@@ -65,6 +65,8 @@ jobs:
           comment-id: ${{ github.event.comment.id || 0 }}
           automatic-review-limit: 2
           expected-head: ${{ github.event.pull_request.head.sha || '' }}
+          model: gpt-6-astra
           effort: medium
+          priority: fast
           guidance-file: .github/review-guidance.md
           ignore: "bun.lock,**/CHANGELOG.md,.agents/skills/**,.repos/**"

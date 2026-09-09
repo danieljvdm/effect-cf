@@ -4,6 +4,8 @@ import type { OxlintConfig } from "oxlint";
 import { defineConfig } from "vite-plus";
 
 const toolIgnorePatterns = [
+  ".bundle-base/**",
+  ".bundle-report/**",
   ".agents/**",
   ".claude/**",
   ".dev-kit/**",
@@ -101,6 +103,8 @@ const recommendedOxlintConfig = {
 } satisfies OxlintConfig;
 
 const testExcludes = [
+  "**/.bundle-base/**",
+  "**/.bundle-report/**",
   "**/node_modules/**",
   "**/dist/**",
   "**/.git/**",
@@ -196,6 +200,10 @@ export default defineConfig({
     cache: true,
     tasks: {
       ...recommended.run.tasks,
+      "bundle:compare": {
+        command: "bun scripts/bundle-compare.ts",
+        cache: false,
+      },
       // Examples consume the publishable packages through their published
       // `dist` entrypoints.
       check: {

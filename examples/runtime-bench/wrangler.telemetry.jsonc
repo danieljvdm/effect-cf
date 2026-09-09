@@ -1,0 +1,14 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "runtime-bench-telemetry-local",
+  "main": "src/telemetry.ts",
+  "compatibility_date": "2026-08-25",
+  "compatibility_flags": ["nodejs_compat", "new_module_registry"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "services": [{ "binding": "COLLECTOR", "service": "runtime-bench-collector-local" }],
+  "vars": {
+    "BENCH_SIGNALS": "all",
+    "BENCH_METRICS": "0",
+  },
+}

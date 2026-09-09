@@ -8,6 +8,8 @@ npm install effect-cf "effect@^4.0.0-rc.112"
 
 The repository tests against workerd `1.20260825.1` and `@cloudflare/workers-types@5.20260825.1`. Use `compatibility_date: "2026-08-25"` in Wrangler.
 
+See the [runtime performance guide](https://github.com/danieljvdm/effect-cf/blob/main/docs/runtime-performance.md) for measured alarm batching and telemetry configuration guidance.
+
 ## Worker
 
 ```ts

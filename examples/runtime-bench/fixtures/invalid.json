@@ -1,0 +1,169 @@
+{
+  "batchId": "fixture-invalid-v1",
+  "orders": [
+    {
+      "id": "ORDER-000001",
+      "placedAt": "2026-01-01T12:00:00.000Z",
+      "customer": {
+        "id": "CUSTOMER-0001",
+        "name": "Fixture Customer 1",
+        "email": "customer1@example.invalid",
+        "segment": "individual"
+      },
+      "shippingAddress": {
+        "line1": "100 Example Street",
+        "line2": "Suite 1",
+        "city": "Sample City",
+        "region": "CA",
+        "postalCode": "94107",
+        "country": "US"
+      },
+      "currency": "USD",
+      "channel": "web",
+      "lines": [
+        { "sku": "NOTE-A5", "quantity": 1, "unitPriceCents": 1295, "discountBasisPoints": 0 },
+        { "sku": "CLIP-BOX", "quantity": 4, "unitPriceCents": 575, "discountBasisPoints": 500 },
+        { "sku": "BOTTLE-600", "quantity": 7, "unitPriceCents": 2295, "discountBasisPoints": 1000 },
+        { "sku": "PAD-A4", "quantity": 1, "unitPriceCents": 795, "discountBasisPoints": 1500 }
+      ],
+      "shippingCents": 0,
+      "taxBasisPoints": 0,
+      "totalCents": 18614,
+      "note": "Please combine shipment when possible."
+    },
+    {
+      "id": "ORDER-000001",
+      "placedAt": "2026-01-01T12:00:00.000Z",
+      "customer": {
+        "id": "CUSTOMER-0001",
+        "name": "Fixture Customer 1",
+        "email": "customer1@example.invalid",
+        "segment": "individual"
+      },
+      "shippingAddress": {
+        "line1": "100 Example Street",
+        "line2": "Suite 1",
+        "city": "Sample City",
+        "region": "CA",
+        "postalCode": "94107",
+        "country": "US"
+      },
+      "currency": "USD",
+      "channel": "web",
+      "lines": [
+        { "sku": "NOTE-A5", "quantity": 1, "unitPriceCents": 1295, "discountBasisPoints": 0 },
+        { "sku": "CLIP-BOX", "quantity": 4, "unitPriceCents": 575, "discountBasisPoints": 500 },
+        { "sku": "BOTTLE-600", "quantity": 7, "unitPriceCents": 2295, "discountBasisPoints": 1000 },
+        { "sku": "PAD-A4", "quantity": 1, "unitPriceCents": 795, "discountBasisPoints": 1500 }
+      ],
+      "shippingCents": 0,
+      "taxBasisPoints": 0,
+      "totalCents": 18614,
+      "note": "Please combine shipment when possible."
+    },
+    {
+      "id": "ORDER-000003",
+      "placedAt": "2026-03-03T12:02:00.000Z",
+      "customer": {
+        "id": "CUSTOMER-0003",
+        "name": "Fixture Customer 3",
+        "email": "customer3@example.invalid",
+        "segment": "education"
+      },
+      "shippingAddress": {
+        "line1": "102 Example Street",
+        "line2": null,
+        "city": "Fixture Bay",
+        "region": "London",
+        "postalCode": "SW1A 1AA",
+        "country": "GB"
+      },
+      "currency": "USD",
+      "channel": "marketplace",
+      "lines": [
+        { "sku": "PENCIL-HB", "quantity": 0, "unitPriceCents": 650, "discountBasisPoints": 1000 },
+        { "sku": "CABLE-USB", "quantity": 6, "unitPriceCents": 1595, "discountBasisPoints": 1500 },
+        { "sku": "NOTE-A5", "quantity": 9, "unitPriceCents": 1295, "discountBasisPoints": 0 },
+        { "sku": "CLIP-BOX", "quantity": 3, "unitPriceCents": 575, "discountBasisPoints": 500 },
+        { "sku": "BOTTLE-600", "quantity": 6, "unitPriceCents": 2295, "discountBasisPoints": 1000 },
+        { "sku": "PAD-A4", "quantity": 9, "unitPriceCents": 795, "discountBasisPoints": 1500 }
+      ],
+      "shippingCents": 795,
+      "taxBasisPoints": 825,
+      "totalCents": 45890,
+      "note": null
+    },
+    {
+      "id": "ORDER-000004",
+      "placedAt": "2026-04-04T12:03:00.000Z",
+      "customer": {
+        "id": "CUSTOMER-0004",
+        "name": "Fixture Customer 4",
+        "email": "customer4@example.invalid",
+        "segment": "individual"
+      },
+      "shippingAddress": {
+        "line1": "103 Example Street",
+        "line2": null,
+        "city": "Sample City",
+        "region": "CA",
+        "postalCode": "94107",
+        "country": "US"
+      },
+      "currency": "USD",
+      "channel": "web",
+      "lines": [
+        {
+          "sku": "UNKNOWN-SKU",
+          "quantity": 4,
+          "unitPriceCents": 4495,
+          "discountBasisPoints": 1500
+        },
+        { "sku": "PENCIL-HB", "quantity": 7, "unitPriceCents": 650, "discountBasisPoints": 0 },
+        { "sku": "CABLE-USB", "quantity": 1, "unitPriceCents": 1595, "discountBasisPoints": 500 },
+        { "sku": "NOTE-A5", "quantity": 4, "unitPriceCents": 1295, "discountBasisPoints": 1000 },
+        { "sku": "CLIP-BOX", "quantity": 7, "unitPriceCents": 575, "discountBasisPoints": 1500 },
+        { "sku": "BOTTLE-600", "quantity": 1, "unitPriceCents": 2295, "discountBasisPoints": 0 },
+        { "sku": "PAD-A4", "quantity": 4, "unitPriceCents": 795, "discountBasisPoints": 500 }
+      ],
+      "shippingCents": 0,
+      "taxBasisPoints": 0,
+      "totalCents": 34747,
+      "note": null
+    },
+    {
+      "id": "ORDER-000005",
+      "placedAt": "2026-05-05T12:04:00.000Z",
+      "customer": {
+        "id": "CUSTOMER-0005",
+        "name": "Fixture Customer 5",
+        "email": "customer5@example.invalid",
+        "segment": "business"
+      },
+      "shippingAddress": {
+        "line1": "104 Example Street",
+        "line2": "Suite 5",
+        "city": "Example Town",
+        "region": "ON",
+        "postalCode": "M5V 2T6",
+        "country": "CA"
+      },
+      "currency": "USD",
+      "channel": "wholesale",
+      "lines": [
+        { "sku": "FOLDER-5", "quantity": 5, "unitPriceCents": 1195, "discountBasisPoints": 0 },
+        { "sku": "STAND-LP", "quantity": 8, "unitPriceCents": 4495, "discountBasisPoints": 500 },
+        { "sku": "PENCIL-HB", "quantity": 2, "unitPriceCents": 650, "discountBasisPoints": 1000 },
+        { "sku": "CABLE-USB", "quantity": 5, "unitPriceCents": 1595, "discountBasisPoints": 1500 },
+        { "sku": "NOTE-A5", "quantity": 8, "unitPriceCents": 1295, "discountBasisPoints": 0 },
+        { "sku": "CLIP-BOX", "quantity": 2, "unitPriceCents": 575, "discountBasisPoints": 500 },
+        { "sku": "BOTTLE-600", "quantity": 5, "unitPriceCents": 2295, "discountBasisPoints": 1000 },
+        { "sku": "PAD-A4", "quantity": 8, "unitPriceCents": 795, "discountBasisPoints": 1500 }
+      ],
+      "shippingCents": 795,
+      "taxBasisPoints": 625,
+      "totalCents": 80771,
+      "note": null
+    }
+  ]
+}

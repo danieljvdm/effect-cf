@@ -1,0 +1,9 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "runtime-bench-fresh-local",
+  "main": "src/fresh.ts",
+  "compatibility_date": "2026-08-25",
+  "compatibility_flags": ["nodejs_compat", "new_module_registry"],
+  "workers_dev": false,
+  "preview_urls": false,
+}

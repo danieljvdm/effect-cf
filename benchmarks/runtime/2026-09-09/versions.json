@@ -1,0 +1,182 @@
+[
+  {
+    "pipeline": "wrangler",
+    "variant": "rpc-base",
+    "versions": {
+      "wrangler": "4.126.0",
+      "esbuild": "0.28.1",
+      "effect": "4.0.0-rc.112"
+    }
+  },
+  {
+    "pipeline": "wrangler",
+    "variant": "rpc-cached",
+    "versions": {
+      "wrangler": "4.126.0",
+      "esbuild": "0.28.1",
+      "effect": "4.0.0-rc.112"
+    }
+  },
+  {
+    "pipeline": "wrangler",
+    "variant": "http-fresh",
+    "versions": {
+      "wrangler": "4.126.0",
+      "esbuild": "0.28.1",
+      "effect": "4.0.0-rc.112"
+    }
+  },
+  {
+    "pipeline": "wrangler",
+    "variant": "http-cached",
+    "versions": {
+      "wrangler": "4.126.0",
+      "esbuild": "0.28.1",
+      "effect": "4.0.0-rc.112"
+    }
+  },
+  {
+    "pipeline": "wrangler",
+    "variant": "telemetry",
+    "versions": {
+      "wrangler": "4.126.0",
+      "esbuild": "0.28.1",
+      "effect": "4.0.0-rc.112"
+    }
+  },
+  {
+    "pipeline": "wrangler",
+    "variant": "alarms",
+    "versions": {
+      "wrangler": "4.126.0",
+      "esbuild": "0.28.1",
+      "effect": "4.0.0-rc.112"
+    }
+  },
+  {
+    "pipeline": "vite",
+    "variant": "rpc-base",
+    "versions": {
+      "vite-plus": "0.3.0",
+      "@cloudflare/vite-plugin": "1.54.6",
+      "effect": "4.0.0-rc.112",
+      "vite": "8.2.2",
+      "rolldown": "1.2.5",
+      "wrangler": "4.130.0"
+    }
+  },
+  {
+    "pipeline": "vite",
+    "variant": "rpc-cached",
+    "versions": {
+      "vite-plus": "0.3.0",
+      "@cloudflare/vite-plugin": "1.54.6",
+      "effect": "4.0.0-rc.112",
+      "vite": "8.2.2",
+      "rolldown": "1.2.5",
+      "wrangler": "4.130.0"
+    }
+  },
+  {
+    "pipeline": "vite",
+    "variant": "http-fresh",
+    "versions": {
+      "vite-plus": "0.3.0",
+      "@cloudflare/vite-plugin": "1.54.6",
+      "effect": "4.0.0-rc.112",
+      "vite": "8.2.2",
+      "rolldown": "1.2.5",
+      "wrangler": "4.130.0"
+    }
+  },
+  {
+    "pipeline": "vite",
+    "variant": "http-cached",
+    "versions": {
+      "vite-plus": "0.3.0",
+      "@cloudflare/vite-plugin": "1.54.6",
+      "effect": "4.0.0-rc.112",
+      "vite": "8.2.2",
+      "rolldown": "1.2.5",
+      "wrangler": "4.130.0"
+    }
+  },
+  {
+    "pipeline": "vite",
+    "variant": "telemetry",
+    "versions": {
+      "vite-plus": "0.3.0",
+      "@cloudflare/vite-plugin": "1.54.6",
+      "effect": "4.0.0-rc.112",
+      "vite": "8.2.2",
+      "rolldown": "1.2.5",
+      "wrangler": "4.130.0"
+    }
+  },
+  {
+    "pipeline": "vite",
+    "variant": "alarms",
+    "versions": {
+      "vite-plus": "0.3.0",
+      "@cloudflare/vite-plugin": "1.54.6",
+      "effect": "4.0.0-rc.112",
+      "vite": "8.2.2",
+      "rolldown": "1.2.5",
+      "wrangler": "4.130.0"
+    }
+  },
+  {
+    "pipeline": "alchemy",
+    "variant": "rpc-base",
+    "versions": {
+      "alchemy": "2.0.0-beta.72",
+      "rolldown": "1.1.5",
+      "effect": "4.0.0-rc.112"
+    }
+  },
+  {
+    "pipeline": "alchemy",
+    "variant": "rpc-cached",
+    "versions": {
+      "alchemy": "2.0.0-beta.72",
+      "rolldown": "1.1.5",
+      "effect": "4.0.0-rc.112"
+    }
+  },
+  {
+    "pipeline": "alchemy",
+    "variant": "http-fresh",
+    "versions": {
+      "alchemy": "2.0.0-beta.72",
+      "rolldown": "1.1.5",
+      "effect": "4.0.0-rc.112"
+    }
+  },
+  {
+    "pipeline": "alchemy",
+    "variant": "http-cached",
+    "versions": {
+      "alchemy": "2.0.0-beta.72",
+      "rolldown": "1.1.5",
+      "effect": "4.0.0-rc.112"
+    }
+  },
+  {
+    "pipeline": "alchemy",
+    "variant": "telemetry",
+    "versions": {
+      "alchemy": "2.0.0-beta.72",
+      "rolldown": "1.1.5",
+      "effect": "4.0.0-rc.112"
+    }
+  },
+  {
+    "pipeline": "alchemy",
+    "variant": "alarms",
+    "versions": {
+      "alchemy": "2.0.0-beta.72",
+      "rolldown": "1.1.5",
+      "effect": "4.0.0-rc.112"
+    }
+  }
+]

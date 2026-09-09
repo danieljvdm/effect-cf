@@ -39,9 +39,22 @@
         "wrangler": "catalog:",
       },
     },
+    "examples/runtime-bench": {
+      "name": "runtime-bench-example",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect": "catalog:",
+        "effect-cf": "workspace:*",
+      },
+      "devDependencies": {
+        "@cloudflare/workers-types": "catalog:",
+        "vite-plus": "catalog:",
+        "wrangler": "catalog:",
+      },
+    },
     "packages/effect-cf": {
       "name": "effect-cf",
-      "version": "0.40.0",
+      "version": "0.40.1",
       "devDependencies": {
         "@cloudflare/computer": "0.2.0",
         "@cloudflare/containers": "catalog:",
@@ -84,7 +97,7 @@
     },
     "packages/effect-webtransport": {
       "name": "effect-webtransport",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "devDependencies": {
         "@effect/vitest": "catalog:",
         "effect": "catalog:",
@@ -1119,6 +1132,8 @@
     "reusify": ["reusify@1.1.0", "", {}, "sha512-g6QUff04oZpHs0eG5p83rFLhHeV00ug/Yf9nZM6fLeUrPguBTkTQOdpAWWspMh55TZfVQDPaN3NQJfbVRAxdIw=="],
 
     "run-parallel": ["run-parallel@1.2.0", "", { "dependencies": { "queue-microtask": "^1.2.2" } }, "sha512-5l4VyZR86LZ/lDxZTR6jqL8AFE2S0IFLMP26AbjsLVADxHdhB/c0GUsH+y39UfCi3dzz8OlQuPmnaJOMoDHQBA=="],
+
+    "runtime-bench-example": ["runtime-bench-example@workspace:examples/runtime-bench"],
 
     "safe-buffer": ["safe-buffer@5.1.2", "", {}, "sha512-Gd2UZBJDkXlY7GbJxfsE8/nvKkUEU1G38c1siN6QP6a9PT9MmHB8GnpscSmMJSoF8LOIrt8ud/wPtojys4G6+g=="],
 

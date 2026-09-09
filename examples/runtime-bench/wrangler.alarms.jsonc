@@ -1,0 +1,13 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "runtime-bench-alarms-local",
+  "main": "src/alarms.ts",
+  "compatibility_date": "2026-08-25",
+  "compatibility_flags": ["nodejs_compat", "new_module_registry"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "durable_objects": {
+    "bindings": [{ "name": "ALARMS", "class_name": "AlarmBench" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AlarmBench"] }],
+}

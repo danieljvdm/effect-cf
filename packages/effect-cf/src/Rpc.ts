@@ -1,5 +1,8 @@
 import { RpcStub, RpcTarget } from "cloudflare:workers";
-import { Effect, Predicate, Schema, type Scope } from "effect";
+import * as Effect from "effect/Effect";
+import * as Predicate from "effect/Predicate";
+import * as Schema from "effect/Schema";
+import type { Scope } from "effect";
 
 import { decodeWireError } from "./RpcDefinition";
 

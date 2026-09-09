@@ -1,17 +1,15 @@
-import {
-  Cause,
-  Channel,
-  Context,
-  type Duration,
-  Effect,
-  Exit,
-  Layer,
-  Predicate,
-  Result,
-  Schema,
-  Scope,
-  Stream,
-} from "effect";
+import * as Cause from "effect/Cause";
+import * as Channel from "effect/Channel";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
+import * as Predicate from "effect/Predicate";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
+import type { Duration } from "effect";
 
 export interface NativeCloseInfo {
   readonly closeCode?: number | undefined;

@@ -1,5 +1,7 @@
 import { PgClient } from "@effect/sql-pg";
-import { Effect, Layer, Redacted } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import type { SqlClient, SqlError } from "effect/unstable/sql";
 
 import type * as Binding from "./Binding";

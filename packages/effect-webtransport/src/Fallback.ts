@@ -12,17 +12,14 @@
  * A WebSocket candidate acquires lazily (the socket connects per run), so it
  * is best placed last as the assumed-available fallback.
  */
-import {
-  type Array as Arr,
-  type Duration,
-  Effect,
-  Exit,
-  Layer,
-  Option,
-  Schema,
-  Scope,
-} from "effect";
-import { Socket } from "effect/unstable/socket";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
+import type { Array as Arr, Duration } from "effect";
+import * as Socket from "effect/unstable/socket/Socket";
 
 import * as WebTransport from "./WebTransport";
 import * as WebTransportSocket from "./WebTransportSocket";

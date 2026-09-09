@@ -2,25 +2,20 @@ import type {
   AnalyticsEngineDataPoint as CloudflareAnalyticsEngineDataPoint,
   AnalyticsEngineDataset as CloudflareAnalyticsEngineDataset,
 } from "@cloudflare/workers-types";
-import {
-  type Redacted,
-  Config,
-  Context,
-  Data,
-  Effect,
-  Layer,
-  Option,
-  Predicate,
-  Result,
-  Schema as S,
-} from "effect";
-import {
-  FetchHttpClient,
-  type Headers,
-  HttpClient,
-  type HttpClientResponse,
-  HttpClientRequest,
-} from "effect/unstable/http";
+import * as Config from "effect/Config";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import * as Result from "effect/Result";
+import * as S from "effect/Schema";
+import type { Redacted } from "effect";
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
+import * as HttpClient from "effect/unstable/http/HttpClient";
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+import type { Headers, HttpClientResponse } from "effect/unstable/http";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";

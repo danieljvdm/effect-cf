@@ -32,7 +32,13 @@ import type {
   WaitForPortOptions,
   WatchOptions,
 } from "@cloudflare/sandbox";
-import { Context, Data, Effect, Option, Predicate, Stream, type Layer } from "effect";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import * as Stream from "effect/Stream";
+import type { Layer } from "effect";
 
 import * as Binding from "./Binding";
 import type { ContainerStartOptions, ContainerStopSignal } from "./ContainerNamespace";

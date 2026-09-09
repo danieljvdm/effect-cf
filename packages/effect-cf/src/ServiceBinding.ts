@@ -1,4 +1,9 @@
-import { Data, Effect, Option, Predicate, Schema, type Context, type Scope } from "effect";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import * as Schema from "effect/Schema";
+import type { Context, Scope } from "effect";
 
 import * as Binding from "./Binding";
 import * as CloudflareRpc from "./Rpc";

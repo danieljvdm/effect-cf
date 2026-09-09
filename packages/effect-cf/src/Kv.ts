@@ -2,7 +2,13 @@ import type {
   KVNamespaceListOptions as CloudflareKVNamespaceListOptions,
   KVNamespacePutOptions as CloudflareKVNamespacePutOptions,
 } from "@cloudflare/workers-types";
-import { Context, Data, Effect, Option, Predicate, Schema as S, type Layer } from "effect";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import * as S from "effect/Schema";
+import type { Layer } from "effect";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";

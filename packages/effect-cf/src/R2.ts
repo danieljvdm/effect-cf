@@ -12,7 +12,13 @@ import type {
   R2UploadPartOptions as CloudflareR2UploadPartOptions,
   R2UploadedPart as CloudflareR2UploadedPart,
 } from "@cloudflare/workers-types";
-import { Context, Data, Effect, Option, Predicate, Schema, type Layer } from "effect";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import * as Schema from "effect/Schema";
+import type { Layer } from "effect";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";

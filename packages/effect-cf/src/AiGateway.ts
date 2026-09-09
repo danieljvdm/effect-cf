@@ -1,4 +1,8 @@
-import { Context, Data, Effect, type Layer, Schema as S } from "effect";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as S from "effect/Schema";
+import type { Layer } from "effect";
 import type { AiGateway as CloudflareAiGateway } from "@cloudflare/workers-types";
 
 import * as Binding from "./Binding";

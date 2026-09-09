@@ -204,6 +204,19 @@ export default defineConfig({
         command: "bun scripts/bundle-compare.ts",
         cache: false,
       },
+      "bundle:pipeline": {
+        command: "bun scripts/bundle-pipelines/build.ts",
+        cache: false,
+      },
+      "bundle:setup": {
+        command: "vp install --frozen-lockfile --ignore-scripts",
+        cwd: "scripts/bundle-pipelines",
+        cache: false,
+      },
+      "bundle:typecheck": {
+        command: "vp exec tsc --noEmit -p scripts/bundle-pipelines/tsconfig.json",
+        cache: false,
+      },
       // Examples consume the publishable packages through their published
       // `dist` entrypoints.
       check: {

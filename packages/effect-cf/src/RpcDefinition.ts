@@ -1,4 +1,7 @@
-import { Data, Effect, Predicate, Schema as S } from "effect";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Predicate from "effect/Predicate";
+import * as S from "effect/Schema";
 
 import type * as Rpc from "./Rpc";
 import * as ErrorMessage from "./internal/ErrorMessage";

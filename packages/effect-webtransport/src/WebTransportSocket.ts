@@ -20,8 +20,16 @@
  * writable stream's backpressure, and each finished run closes its stream
  * with a FIN.
  */
-import { Context, Deferred, Effect, Exit, FiberSet, Latch, Layer, Predicate, Scope } from "effect";
-import { Socket } from "effect/unstable/socket";
+import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as FiberSet from "effect/FiberSet";
+import * as Latch from "effect/Latch";
+import * as Layer from "effect/Layer";
+import * as Predicate from "effect/Predicate";
+import * as Scope from "effect/Scope";
+import * as Socket from "effect/unstable/socket/Socket";
 
 import * as WebTransport from "./WebTransport";
 

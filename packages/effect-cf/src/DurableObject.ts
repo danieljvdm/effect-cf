@@ -1,5 +1,8 @@
 import { DurableObject as CloudflareDurableObject } from "cloudflare:workers";
-import { Effect, Layer, type ManagedRuntime, type Scope, Tracer } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Tracer from "effect/Tracer";
+import type { ManagedRuntime, Scope } from "effect";
 
 import { NativeRequest } from "./Worker";
 import { WorkerEnvironment, type WorkerEnv } from "./Environment";

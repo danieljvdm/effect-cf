@@ -21,7 +21,13 @@ import type {
   Response as CloudflareResponse,
   TextOptions as CloudflareTextOptions,
 } from "@cloudflare/workers-types";
-import { Context, Data, Effect, Function, Option, Predicate, type Layer } from "effect";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Function from "effect/Function";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import type { Layer } from "effect";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";

@@ -1,6 +1,12 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { tracing } from "cloudflare:workers";
-import { Cause, Effect, Exit, Layer, Option, Predicate, Tracer } from "effect";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import * as Tracer from "effect/Tracer";
 
 type SpanOptions = Parameters<Tracer.Tracer["span"]>[0];
 type RunInContext = ReturnType<typeof AsyncLocalStorage.snapshot>;

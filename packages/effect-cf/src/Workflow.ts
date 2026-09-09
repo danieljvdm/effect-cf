@@ -9,17 +9,14 @@ import {
   type WorkflowTimeoutDuration,
 } from "cloudflare:workers";
 import { NonRetryableError as CloudflareNonRetryableError } from "cloudflare:workflows";
-import {
-  Cause,
-  Context,
-  Data,
-  Effect,
-  FiberSet,
-  Layer,
-  type ManagedRuntime,
-  Option,
-  type Scope,
-} from "effect";
+import * as Cause from "effect/Cause";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as FiberSet from "effect/FiberSet";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import type { ManagedRuntime, Scope } from "effect";
 
 import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 import { ExecutionContext, WorkerContext } from "./Worker";

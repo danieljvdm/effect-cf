@@ -1,4 +1,12 @@
-import { Cause, Clock, Context, Effect, Exit, Option, References, Schema, Tracer } from "effect";
+import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Option from "effect/Option";
+import * as References from "effect/References";
+import * as Schema from "effect/Schema";
+import * as Tracer from "effect/Tracer";
 
 /**
  * Live native RPC metadata. Opted-in receivers reserve a valid trailing value

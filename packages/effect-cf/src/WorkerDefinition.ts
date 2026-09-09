@@ -1,4 +1,6 @@
-import { Context, Effect, type Layer, type Schema as S } from "effect";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import type { Layer, Schema as S } from "effect";
 
 import type * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";

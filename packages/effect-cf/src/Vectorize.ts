@@ -1,4 +1,10 @@
-import { Context, Data, Effect, Option, Predicate, Schema, type Layer } from "effect";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import * as Schema from "effect/Schema";
+import type { Layer } from "effect";
 import type {
   Vectorize as CloudflareVectorize,
   VectorizeAsyncMutation as CloudflareVectorizeAsyncMutation,

@@ -1,4 +1,8 @@
-import { Context, Data, Effect, Layer, Predicate } from "effect";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Predicate from "effect/Predicate";
 
 import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 

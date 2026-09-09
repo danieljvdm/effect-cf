@@ -11,19 +11,19 @@ import {
   type ServerOptions,
   type StandardSchemaWithJSON,
 } from "@modelcontextprotocol/server";
-import {
-  Cause,
-  Context,
-  Effect,
-  Exit,
-  type JsonSchema,
-  Option,
-  Predicate,
-  Schema,
-  Sink,
-  Stream,
-} from "effect";
-import { AiError, Tool, type Toolkit } from "effect/unstable/ai";
+import * as Cause from "effect/Cause";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import * as Schema from "effect/Schema";
+import * as Sink from "effect/Sink";
+import * as Stream from "effect/Stream";
+import type { JsonSchema } from "effect";
+import * as AiError from "effect/unstable/ai/AiError";
+import * as Tool from "effect/unstable/ai/Tool";
+import type { Toolkit } from "effect/unstable/ai";
 
 import { NativeRequest } from "./Worker";
 import { runNativeCallback } from "./internal/NativeCallback";

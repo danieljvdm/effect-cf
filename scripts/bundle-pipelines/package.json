@@ -1,0 +1,30 @@
+{
+  "name": "effect-cf-bundle-pipelines",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@cloudflare/vite-plugin": "1.54.6",
+    "@effect/platform-node": "4.0.0-rc.112",
+    "alchemy": "2.0.0-beta.72",
+    "effect": "4.0.0-rc.112",
+    "esbuild": "0.28.1",
+    "rolldown": "1.1.5",
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.3.0",
+    "vite-plus": "0.3.0",
+    "wrangler": "4.126.0"
+  },
+  "devDependencies": {
+    "@types/node": "25.6.0",
+    "typescript": "7.0.2"
+  },
+  "overrides": {
+    "@effect/platform-node": "4.0.0-rc.112",
+    "@effect/platform-node-shared": "4.0.0-rc.112",
+    "@effect/sql-d1": "4.0.0-rc.112",
+    "@effect/sql-sqlite-do": "4.0.0-rc.112",
+    "@effect/vitest": "4.0.0-rc.112",
+    "effect": "4.0.0-rc.112",
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.3.0"
+  },
+  "packageManager": "bun@1.4.0"
+}

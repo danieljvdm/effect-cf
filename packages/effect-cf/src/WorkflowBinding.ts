@@ -7,7 +7,12 @@ import type {
   WorkflowInstanceRestartOptions as CloudflareWorkflowInstanceRestartOptions,
   WorkflowInstanceTerminateOptions as CloudflareWorkflowInstanceTerminateOptions,
 } from "@cloudflare/workers-types";
-import { type Context, Data, Effect, Option, Predicate, Schema as S } from "effect";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import * as S from "effect/Schema";
+import type { Context } from "effect";
 
 import * as Binding from "./Binding";
 import type * as RpcDefinition from "./RpcDefinition";

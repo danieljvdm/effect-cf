@@ -1,4 +1,7 @@
-import { Data, Effect, Predicate, type Context, type Layer, type Scope } from "effect";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Predicate from "effect/Predicate";
+import type { Context, Layer, Scope } from "effect";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";

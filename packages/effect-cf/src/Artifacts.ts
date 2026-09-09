@@ -6,7 +6,12 @@ import type {
   ArtifactsTokenInfo as CloudflareArtifactsTokenInfo,
   ArtifactsTokenListResult as CloudflareArtifactsTokenListResult,
 } from "@cloudflare/workers-types";
-import { Context, Data, Effect, type Layer, Predicate, Schema } from "effect";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Predicate from "effect/Predicate";
+import * as Schema from "effect/Schema";
+import type { Layer } from "effect";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";

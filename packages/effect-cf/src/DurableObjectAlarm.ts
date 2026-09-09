@@ -1,15 +1,13 @@
-import {
-  Clock,
-  Context,
-  Data,
-  DateTime,
-  Duration,
-  Effect,
-  Exit,
-  Layer,
-  Predicate,
-  Schema as S,
-} from "effect";
+import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
+import * as Predicate from "effect/Predicate";
+import * as S from "effect/Schema";
 
 import { DurableObjectState } from "./DurableObjectState";
 import { type SqlStorageValue, StorageOperationError } from "./DurableObjectStorage";

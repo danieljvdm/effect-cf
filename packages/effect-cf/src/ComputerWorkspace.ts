@@ -27,7 +27,13 @@ import type {
   GitLogOptions as CloudflareGitLogOptions,
   GitUpdateRefOptions as CloudflareGitUpdateRefOptions,
 } from "@cloudflare/computer/git";
-import { Context, Effect, Layer, Predicate, Schema, type Scope, Stream } from "effect";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Predicate from "effect/Predicate";
+import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
+import type { Scope } from "effect";
 
 import * as ComputerArtifacts from "./ComputerArtifacts";
 import { DurableObjectState } from "./DurableObjectState";

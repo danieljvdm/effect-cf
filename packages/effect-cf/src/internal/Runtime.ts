@@ -1,4 +1,8 @@
-import { ConfigProvider, Effect, Layer, ManagedRuntime, type Scope, type Tracer } from "effect";
+import * as ConfigProvider from "effect/ConfigProvider";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as ManagedRuntime from "effect/ManagedRuntime";
+import type { Scope, Tracer } from "effect";
 
 import { WorkerConfig, WorkerEnvironment, type WorkerEnv } from "../Environment";
 import { provideEntrypointServices } from "./Entrypoint";

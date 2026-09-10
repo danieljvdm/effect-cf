@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.40.2
+
+### Patch Changes
+
+- [#155](https://github.com/danieljvdm/effect-cf/pull/155) [`c23dd31`](https://github.com/danieljvdm/effect-cf/commit/c23dd319f7ea018f803de31095937c2ca69eb0ed) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Fix initialization failures when importing Queue or Workflow definitions from the published ES modules. Their factory exports remain the same functions regardless of module evaluation order.
+
 ## 0.40.1
 
 ### Patch Changes

@@ -20,7 +20,7 @@ import type { ManagedRuntime, Scope } from "effect";
 
 import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 import { ExecutionContext, WorkerContext } from "./Worker";
-import * as WorkflowDefinition from "./WorkflowDefinition";
+import type * as WorkflowDefinition from "./WorkflowDefinition";
 import * as Entrypoint from "./internal/Entrypoint";
 import * as ErrorMessage from "./internal/ErrorMessage";
 import * as Runtime from "./internal/Runtime";
@@ -318,19 +318,7 @@ export type TagClass<
   Result extends WorkflowDefinition.Definition.Any["result"],
 > = WorkflowDefinition.TagClass<Self, Id, Payload, Result>;
 
-export const Tag: <Self>() => <
-  Id extends string,
-  Payload extends WorkflowDefinition.Definition.Any["payload"],
-  Result extends WorkflowDefinition.Definition.Any["result"],
->(
-  id: Id,
-  definition: {
-    readonly payload: Payload;
-    readonly result: Result;
-  },
-) => TagClass<Self, Id, Payload, Result> = WorkflowDefinition.Tag;
-
-export const implement = WorkflowDefinition.implement;
+export { implement, Tag } from "./WorkflowDefinition";
 
 export type Handler<
   ROut,

@@ -4,7 +4,7 @@ import type { Scope } from "effect";
 
 import type { ExecutionContext, WorkerContext } from "./Worker";
 import type { WorkerEnvironment } from "./Environment";
-import * as QueueDefinition from "./QueueDefinition";
+import type * as QueueDefinition from "./QueueDefinition";
 import * as ErrorMessage from "./internal/ErrorMessage";
 
 export interface QueueMessage<Body> {
@@ -117,15 +117,7 @@ export type TagClass<
   Message extends QueueDefinition.Definition.Any["message"],
 > = QueueDefinition.TagClass<Self, Id, Message>;
 
-export const Tag: <Self>() => <
-  Id extends string,
-  Message extends QueueDefinition.Definition.Any["message"],
->(
-  id: Id,
-  definition: { readonly message: Message },
-) => TagClass<Self, Id, Message> = QueueDefinition.Tag;
-
-export const implement = QueueDefinition.implement;
+export { implement, Tag } from "./QueueDefinition";
 
 export type Handler<ROut, Self extends QueueDefinition.Definition.Any> = QueueDefinition.Handler<
   ROut,

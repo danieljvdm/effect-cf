@@ -62,13 +62,13 @@ export function runEventPromise<A, E, R, REvent, EventLayerError, LayerError>(
   const [runtime, effect, eventLayer, parent] = args;
 
   if (eventLayer === undefined) {
-    const event = RpcTargets.withScope(Effect.scoped(effect));
+    const event = Effect.scoped(RpcTargets.withScope(effect));
 
     return runtime.runPromise(parent === undefined ? event : Effect.withParentSpan(event, parent));
   }
 
-  const event = RpcTargets.withScope(
-    Effect.scoped(effect.pipe(Effect.provide(eventLayer, { local: true }))),
+  const event = Effect.scoped(
+    RpcTargets.withScope(effect.pipe(Effect.provide(eventLayer, { local: true }))),
   );
 
   return runtime.runPromise(parent === undefined ? event : Effect.withParentSpan(event, parent));

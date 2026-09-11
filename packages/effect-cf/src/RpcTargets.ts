@@ -1,6 +1,13 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Data from "effect/Data";
+import type * as Scope from "effect/Scope";
 import * as Option from "effect/Option";
+
+/** A native RPC target could not be constructed. */
+export class RpcTargetError extends Data.TaggedError("RpcTargetError")<{
+  readonly cause: unknown;
+}> {}
 
 interface Targets {
   get<A extends object, Owner extends object>(owner: Owner, address: string, create: () => A): A;
@@ -26,7 +33,7 @@ export const get = <A extends object, Owner extends object>(
   Effect.flatMap(Effect.serviceOption(CurrentTargets), (targets) =>
     Effect.try({
       try: () => (Option.isSome(targets) ? targets.value.get(owner, address, create) : create()),
-      catch: (cause) => cause,
+      catch: (cause) => new RpcTargetError({ cause }),
     }),
   );
 
@@ -37,11 +44,13 @@ export const invalidate = <Target extends object>(target: Target): Effect.Effect
   });
 
 /**
- * Own RPC targets for one live invocation, never across incoming requests or
- * durable retries. effect-cf entrypoints install this boundary automatically.
+ * Own RPC targets in the current Scope, including a transferred response stream,
+ * never across incoming requests or durable retries. effect-cf entrypoints install this boundary automatically.
  */
-export const withScope = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
-  Effect.suspend(() => {
+export const withScope = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R | Scope.Scope> =>
+  Effect.gen(function* () {
     let active = true;
     let owners = new WeakMap<object, Map<string, object>>();
     let addresses = new WeakMap<object, { entries: Map<string, object>; address: string }>();
@@ -79,14 +88,13 @@ export const withScope = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effec
       },
     };
 
-    return effect.pipe(
-      Effect.provideService(CurrentTargets, targets),
-      Effect.ensuring(
-        Effect.sync(() => {
-          active = false;
-          owners = new WeakMap();
-          addresses = new WeakMap();
-        }),
-      ),
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        active = false;
+        owners = new WeakMap();
+        addresses = new WeakMap();
+      }),
     );
+
+    return yield* effect.pipe(Effect.provideService(CurrentTargets, targets));
   });

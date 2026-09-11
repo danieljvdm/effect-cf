@@ -1,3 +1,4 @@
+import * as RpcTargets from "./RpcTargets";
 import {
   WorkflowEntrypoint as CloudflareWorkflowEntrypoint,
   type WorkflowEvent as CloudflareWorkflowEvent,
@@ -151,7 +152,11 @@ const fromWorkflowStep = (step: CloudflareWorkflowStep): WorkflowStepService => 
                   A,
                   E,
                   Exclude<R, WorkflowStepContext>
-                > = Effect.scoped(Effect.provideService(effect, WorkflowStepContext, stepContext));
+                > = Effect.scoped(
+                  RpcTargets.withScope(
+                    Effect.provideService(effect, WorkflowStepContext, stepContext),
+                  ),
+                );
 
                 return runPromise(
                   exposeCloudflareNonRetryableError(Effect.provideContext(stepEffect, context)),

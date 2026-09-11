@@ -1,7 +1,12 @@
 import { assert, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import type {
+  WorkflowStep as NativeStep,
+  WorkflowStepContext as NativeStepContext,
+} from "cloudflare:workers";
+import { Effect, Layer, Stream } from "effect";
+import { HttpServerResponse } from "effect/unstable/http";
 
-import { DurableObject, DurableObjectNamespace } from "../src/index";
+import { DurableObject, DurableObjectNamespace, Worker, Workflow } from "../src/index";
 import { makePartialTestDouble } from "./TestDoubles";
 
 // https://github.com/danieljvdm/effect-cf/commit/37b4883de9790df151ddbb16f2fd432b2d4348b5
@@ -66,5 +71,90 @@ it.effect("reuses RPC targets per invocation and replaces failed channels", () =
     yield* Effect.promise(() => Promise.resolve(object.alarm?.()));
     assert.deepStrictEqual(observed, [1, 2, 3, 4]);
     assert.strictEqual(constructed, 4);
+
+    const executionContext = makePartialTestDouble<ExecutionContext>({
+      waitUntil: () => undefined,
+      passThroughOnException: () => undefined,
+    });
+
+    for (const eventLayer of [undefined, Layer.empty]) {
+      const Streaming = Worker.make(Layer.empty, {
+        eventLayer,
+        fetch: Effect.gen(function* () {
+          const first = yield* ping;
+
+          return HttpServerResponse.stream(
+            Stream.fromEffect(
+              Effect.gen(function* () {
+                assert.strictEqual(yield* ping, first);
+                assert.strictEqual(yield* ping, first);
+
+                return String(first);
+              }),
+            ).pipe(Stream.encodeText),
+          );
+        }),
+      });
+      const worker = new Streaming(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
+      const response = yield* Effect.promise(() =>
+        worker.fetch(new Request("https://worker.test/rpc-stream")),
+      );
+
+      assert.strictEqual(
+        yield* Effect.promise(() => response.text()),
+        eventLayer === undefined ? "5" : "6",
+      );
+    }
+
+    const retried: number[] = [];
+    const Retrying = Workflow.make(Layer.empty, {
+      run: () =>
+        Workflow.step(
+          "retry",
+          Effect.gen(function* () {
+            const step = yield* Workflow.WorkflowStepContext;
+            const target = yield* ping;
+
+            assert.strictEqual(yield* ping, target);
+            retried.push(target);
+            if (step.attempt === 1)
+              return yield* Effect.fail(new Error("retry after successful RPC"));
+
+            return target;
+          }),
+        ),
+    });
+    const step = {
+      do: async (name: string, callback: (context: NativeStepContext) => Promise<number>) => {
+        let rejected = false;
+
+        try {
+          await callback({ step: { name, count: 1 }, attempt: 1, config: {} });
+        } catch {
+          rejected = true;
+        }
+        assert.isTrue(rejected);
+
+        return callback({ step: { name, count: 1 }, attempt: 2, config: {} });
+      },
+    };
+    const workflow = new Retrying(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
+
+    // SAFETY: this fixture implements exactly the step.do callback overload exercised above.
+    const nativeStep = step as NativeStep;
+
+    yield* Effect.promise(() =>
+      workflow.run(
+        {
+          payload: undefined,
+          timestamp: new Date(0),
+          instanceId: "rpc-target-retry",
+          workflowName: "Retrying",
+        },
+        nativeStep,
+      ),
+    );
+    assert.deepStrictEqual(retried, [7, 8]);
+    assert.strictEqual(constructed, 8);
   }),
 );

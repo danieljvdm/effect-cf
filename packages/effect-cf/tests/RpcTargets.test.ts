@@ -96,7 +96,7 @@ it.effect("reuses RPC targets per invocation and replaces failed channels", () =
         }),
       });
       const worker = new Streaming(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
-      const response = yield* Effect.promise(() =>
+      const response = yield* Effect.promise(async () =>
         worker.fetch(new Request("https://worker.test/rpc-stream")),
       );
 
@@ -146,7 +146,7 @@ it.effect("reuses RPC targets per invocation and replaces failed channels", () =
     yield* Effect.promise(() =>
       workflow.run(
         {
-          payload: undefined,
+          payload: {},
           timestamp: new Date(0),
           instanceId: "rpc-target-retry",
           workflowName: "Retrying",

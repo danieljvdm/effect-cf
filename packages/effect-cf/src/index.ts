@@ -29,6 +29,7 @@ export * as R2 from "./R2";
 export * as Rpc from "./Rpc";
 export * as RpcDefinition from "./RpcDefinition";
 export * as RpcTracing from "./RpcTracing";
+export * as RpcTargets from "./RpcTargets";
 export * as ServiceBinding from "./ServiceBinding";
 export * as Vectorize from "./Vectorize";
 export * as WebTransport from "./WebTransport";

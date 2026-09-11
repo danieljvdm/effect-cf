@@ -5,6 +5,7 @@ import * as ManagedRuntime from "effect/ManagedRuntime";
 import type { Scope, Tracer } from "effect";
 
 import { WorkerConfig, WorkerEnvironment, type WorkerEnv } from "../Environment";
+import * as RpcTargets from "../RpcTargets";
 import { provideEntrypointServices } from "./Entrypoint";
 
 /**
@@ -61,12 +62,14 @@ export function runEventPromise<A, E, R, REvent, EventLayerError, LayerError>(
   const [runtime, effect, eventLayer, parent] = args;
 
   if (eventLayer === undefined) {
-    const event = Effect.scoped(effect);
+    const event = RpcTargets.withScope(Effect.scoped(effect));
 
     return runtime.runPromise(parent === undefined ? event : Effect.withParentSpan(event, parent));
   }
 
-  const event = Effect.scoped(effect.pipe(Effect.provide(eventLayer, { local: true })));
+  const event = RpcTargets.withScope(
+    Effect.scoped(effect.pipe(Effect.provide(eventLayer, { local: true }))),
+  );
 
   return runtime.runPromise(parent === undefined ? event : Effect.withParentSpan(event, parent));
 }

@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.40.3
+
+### Patch Changes
+
+- [#157](https://github.com/danieljvdm/effect-cf/pull/157) [`279eecd`](https://github.com/danieljvdm/effect-cf/commit/279eecd1a5ea9112e727497e0aac666142e7a7f8) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Prevent Durable Object SQLite transactions from stalling when a blocked owner timer precedes an Effect scheduler yield. Keep transaction isolation, rollback, and the caller's scheduler after the transaction completes.
+
 ## 0.40.2
 
 ### Patch Changes

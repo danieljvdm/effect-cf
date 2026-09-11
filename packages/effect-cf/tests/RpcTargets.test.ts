@@ -3,11 +3,13 @@ import type {
   WorkflowStep as NativeStep,
   WorkflowStepContext as NativeStepContext,
 } from "cloudflare:workers";
-import { Effect, Layer, Stream } from "effect";
+import { Data, Effect, Layer, Stream } from "effect";
 import { HttpServerResponse } from "effect/unstable/http";
 
 import { DurableObject, DurableObjectNamespace, Worker, Workflow } from "../src/index";
 import { makePartialTestDouble } from "./TestDoubles";
+
+class RetryFailure extends Data.TaggedError("RetryFailure") {}
 
 // https://github.com/danieljvdm/effect-cf/commit/37b4883de9790df151ddbb16f2fd432b2d4348b5
 // A remote two-Worker alarm probe fails after eight fresh-stub callback cycles;
@@ -117,8 +119,7 @@ it.effect("reuses RPC targets per invocation and replaces failed channels", () =
 
             assert.strictEqual(yield* ping, target);
             retried.push(target);
-            if (step.attempt === 1)
-              return yield* Effect.fail(new Error("retry after successful RPC"));
+            if (step.attempt === 1) return yield* Effect.fail(new RetryFailure());
 
             return target;
           }),

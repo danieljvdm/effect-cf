@@ -1,20 +1,14 @@
-import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Data from "effect/Data";
 import type * as Scope from "effect/Scope";
 import * as Option from "effect/Option";
 
+import { CurrentTargets, type Targets } from "./internal/RpcTargets";
+
 /** A native RPC target could not be constructed. */
 export class RpcTargetError extends Data.TaggedError("RpcTargetError")<{
   readonly cause: unknown;
 }> {}
-
-interface Targets {
-  get<A extends object, Owner extends object>(owner: Owner, address: string, create: () => A): A;
-  invalidate<Target extends object>(target: Target): void;
-}
-
-class CurrentTargets extends Context.Service<CurrentTargets, Targets>()("effect-cf/RpcTargets") {}
 
 /**
  * Reuse a native RPC target within the current invocation. Native Durable Object

@@ -13,6 +13,7 @@ import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 import { fromMessage, fromMessageBatch, type QueueHandler } from "./Queue";
 import * as RpcDefinition from "./RpcDefinition";
+import * as RpcTargets from "./RpcTargets";
 import type { ReceiverOptions, RpcInvocationInfo } from "./RpcTracing";
 import * as Entrypoint from "./internal/Entrypoint";
 import * as Runtime from "./internal/Runtime";
@@ -273,11 +274,13 @@ const renderFetchSuccess = <E, R, REvent, EventLayerError, EventLayerRequirement
             });
           });
     const telemetryMiddleware = HttpMiddleware.make((self) =>
-      Effect.gen(function* () {
-        yield* Effect.addFinalizer(() => scheduleTelemetryFlush);
+      RpcTargets.withScope(
+        Effect.gen(function* () {
+          yield* Effect.addFinalizer(() => scheduleTelemetryFlush);
 
-        return yield* self;
-      }),
+          return yield* self;
+        }),
+      ),
     );
     const handled =
       eventLayer === undefined
@@ -287,24 +290,26 @@ const renderFetchSuccess = <E, R, REvent, EventLayerError, EventLayerRequirement
               httpApp,
               handleResponse,
               HttpMiddleware.make((self) =>
-                Effect.provideService(
-                  Effect.gen(function* () {
-                    const context = yield* Layer.build(Layer.fresh(eventLayer));
+                RpcTargets.withScope(
+                  Effect.provideService(
+                    Effect.gen(function* () {
+                      const context = yield* Layer.build(Layer.fresh(eventLayer));
 
-                    yield* Effect.addFinalizer(() =>
-                      Effect.provideContext(scheduleTelemetryFlush, context),
-                    );
+                      yield* Effect.addFinalizer(() =>
+                        Effect.provideContext(scheduleTelemetryFlush, context),
+                      );
 
-                    return yield* HttpMiddleware.tracer(self).pipe(
-                      // The tracer schedules span completion. Let it publish on
-                      // every exit with event references still installed, before
-                      // the exporter scope finalizes.
-                      Effect.onExit(() => Effect.yieldNow),
-                      Effect.provideContext(context),
-                    );
-                  }),
-                  References.TracerEnabled,
-                  tracerEnabled,
+                      return yield* HttpMiddleware.tracer(self).pipe(
+                        // The tracer schedules span completion. Let it publish on
+                        // every exit with event references still installed, before
+                        // the exporter scope finalizes.
+                        Effect.onExit(() => Effect.yieldNow),
+                        Effect.provideContext(context),
+                      );
+                    }),
+                    References.TracerEnabled,
+                    tracerEnabled,
+                  ),
                 ),
               ),
             ).pipe(Effect.withTracerEnabled(false)),

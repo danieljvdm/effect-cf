@@ -11,6 +11,7 @@ import * as RpcDefinition from "./RpcDefinition";
 import * as ErrorMessage from "./internal/ErrorMessage";
 import * as RpcInvocation from "./internal/RpcInvocation";
 import * as RpcTracing from "./RpcTracing";
+import * as RpcTargets from "./RpcTargets";
 
 const expectedDurableObjectNamespace =
   "Durable Object namespace binding with getByName(), get(), idFromName(), idFromString(), newUniqueId(), and jurisdiction()";
@@ -348,12 +349,18 @@ export const makeClient = <
     const get = (
       id: globalThis.DurableObjectId,
       options?: globalThis.DurableObjectNamespaceGetDurableObjectOptions,
-    ) => Effect.sync(() => namespace.get(id, options));
+    ) =>
+      RpcTargets.get(namespace, JSON.stringify(["id", id.toString(), options]), () =>
+        namespace.get(id, options),
+      ).pipe(Effect.orDie);
 
     const getByName = (
       name: string,
       options?: globalThis.DurableObjectNamespaceGetDurableObjectOptions,
-    ) => Effect.sync(() => namespace.getByName(name, options));
+    ) =>
+      RpcTargets.get(namespace, JSON.stringify(["name", name, options]), () =>
+        namespace.getByName(name, options),
+      ).pipe(Effect.orDie);
 
     const jurisdiction = (value: globalThis.DurableObjectJurisdiction) =>
       Effect.sync(() => namespace.jurisdiction(value));
@@ -377,7 +384,7 @@ export const makeClient = <
           });
         },
         catch: (cause) => new DurableObjectFetchError({ binding: definition.binding, cause }),
-      });
+      }).pipe(Effect.tapCause(() => RpcTargets.invalidate(stub)));
 
     const rpc = Effect.fnUntraced(function* <Method extends StubMethodKey<Api>>(
       stub: StubClient,
@@ -419,7 +426,7 @@ export const makeClient = <
             method: methodName,
             cause,
           }),
-      );
+      ).pipe(Effect.tapCause(() => RpcTargets.invalidate(stub)));
     });
 
     const decodeSuccess = Effect.fnUntraced(function* <Method extends StubMethodKey<Api>>(
@@ -459,6 +466,7 @@ export const makeClient = <
       ): Effect.fn.Return<StubMethodSuccess<Api, Method>, DurableObjectRpcError> {
         const methodName = String(method);
         const value = yield* CloudflareRpc.resolve(yield* rpc(stub, method, ...args)).pipe(
+          Effect.tapCause(() => RpcTargets.invalidate(stub)),
           Effect.mapError(
             (cause) =>
               new DurableObjectRpcError({
@@ -484,6 +492,7 @@ export const makeClient = <
         const methodName = String(method);
         const result = yield* rpc(stub, method, ...args);
         const value = yield* CloudflareRpc.scoped(result).pipe(
+          Effect.tapCause(() => RpcTargets.invalidate(stub)),
           Effect.mapError(
             (cause) =>
               new DurableObjectRpcError({

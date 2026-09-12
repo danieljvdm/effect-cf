@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.41.1
+
+### Patch Changes
+
+- [#161](https://github.com/danieljvdm/effect-cf/pull/161) [`a627f80`](https://github.com/danieljvdm/effect-cf/commit/a627f80449bf40227bddf917640aae9574faa563) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Retain Sandbox and Container RPC channels for each invocation so repeated lookups after callbacks do not exhaust Cloudflare's subrequest depth. Sandbox configuration continues to apply on each lookup, and failed channels are replaced on subsequent acquisition.
+
 ## 0.41.0
 
 ### Minor Changes

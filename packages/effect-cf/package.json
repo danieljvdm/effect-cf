@@ -1,6 +1,6 @@
 {
   "name": "effect-cf",
-  "version": "0.40.3",
+  "version": "0.41.0",
   "description": "Effect-native primitives for Cloudflare Workers and bindings.",
   "license": "MIT",
   "repository": {

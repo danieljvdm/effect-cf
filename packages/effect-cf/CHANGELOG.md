@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.41.0
+
+### Minor Changes
+
+- [#159](https://github.com/danieljvdm/effect-cf/pull/159) [`8cbc534`](https://github.com/danieljvdm/effect-cf/commit/8cbc5344ffa2aa031b6d98a2845ca3b945cf7d5f) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Reuse Durable Object RPC targets within each invocation so callbacks cannot grow a new subrequest chain on every call. Incoming requests and durable retries retain separate target lifetimes. Expose RpcTargets for native RPC adapters sharing the same invocation boundary.
+
 ## 0.40.3
 
 ### Patch Changes

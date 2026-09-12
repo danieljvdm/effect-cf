@@ -6,6 +6,7 @@ import * as S from "effect/Schema";
 import type { Layer } from "effect";
 
 import * as Binding from "./Binding";
+import * as RpcTargets from "./RpcTargets";
 import type { WorkerEnvironment } from "./Environment";
 import * as ErrorMessage from "./internal/ErrorMessage";
 
@@ -231,6 +232,7 @@ const tryContainerPromise = <A>(
   instance: string,
   operation: string,
   evaluate: () => Promise<A>,
+  target: ContainerStub,
 ): Effect.Effect<A, ContainerOperationError> =>
   Effect.tryPromise({
     try: evaluate,
@@ -241,13 +243,15 @@ const tryContainerPromise = <A>(
         operation,
         cause,
       }),
-  });
+  }).pipe(Effect.tapCause(() => RpcTargets.invalidate(target)));
 
 const makeInstanceClient = <Stub extends ContainerStub>(
   definition: ContainerNamespaceDefinition,
   instance: string,
   stub: Stub,
 ): ContainerInstanceClient<Stub> => {
+  const attempt = <A>(operation: string, evaluate: () => Promise<A>) =>
+    tryContainerPromise(definition, instance, operation, evaluate, stub);
   const spanOptions = (operation: string) => ({
     attributes: { binding: definition.binding, instance, operation },
   });
@@ -256,9 +260,7 @@ const makeInstanceClient = <Stub extends ContainerStub>(
       `ContainerNamespace.${operation}`,
       spanOptions(operation),
     )(function* (hosts: ReadonlyArray<string>) {
-      return yield* tryContainerPromise(definition, instance, operation, () =>
-        stub[operation]([...hosts]),
-      );
+      return yield* attempt(operation, () => stub[operation]([...hosts]));
     });
   const hostnameOperation = (
     operation: "allowHost" | "denyHost" | "removeAllowedHost" | "removeDeniedHost",
@@ -267,14 +269,12 @@ const makeInstanceClient = <Stub extends ContainerStub>(
       `ContainerNamespace.${operation}`,
       spanOptions(operation),
     )(function* (hostname: string) {
-      return yield* tryContainerPromise(definition, instance, operation, () =>
-        stub[operation](hostname),
-      );
+      return yield* attempt(operation, () => stub[operation](hostname));
     });
 
   return {
     rawUnsafe: Effect.succeed(stub),
-    state: tryContainerPromise(definition, instance, "state", () => stub.getState()).pipe(
+    state: attempt("state", () => stub.getState()).pipe(
       Effect.flatMap(S.decodeUnknownEffect(ContainerState)),
       Effect.mapError((cause) =>
         cause instanceof ContainerOperationError
@@ -292,41 +292,33 @@ const makeInstanceClient = <Stub extends ContainerStub>(
       "ContainerNamespace.fetch",
       spanOptions("fetch"),
     )(function* (input: RequestInfo | URL, init?: RequestInit) {
-      return yield* tryContainerPromise(definition, instance, "fetch", () =>
-        stub.fetch(input, init),
-      );
+      return yield* attempt("fetch", () => stub.fetch(input, init));
     }),
     start: Effect.fn(
       "ContainerNamespace.start",
       spanOptions("start"),
     )(function* (options?: ContainerStartOptions, waitOptions?: ContainerWaitOptions) {
-      return yield* tryContainerPromise(definition, instance, "start", () =>
-        stub.start(options, waitOptions),
-      );
+      return yield* attempt("start", () => stub.start(options, waitOptions));
     }),
     startAndWaitForPorts: Effect.fn(
       "ContainerNamespace.startAndWaitForPorts",
       spanOptions("startAndWaitForPorts"),
     )(function* (options?: ContainerStartAndWaitForPortsOptions) {
-      return yield* tryContainerPromise(definition, instance, "startAndWaitForPorts", () =>
-        stub.startAndWaitForPorts(options),
-      );
+      return yield* attempt("startAndWaitForPorts", () => stub.startAndWaitForPorts(options));
     }),
     waitForPort: Effect.fn(
       "ContainerNamespace.waitForPort",
       spanOptions("waitForPort"),
     )(function* (options: ContainerWaitOptions) {
-      return yield* tryContainerPromise(definition, instance, "waitForPort", () =>
-        stub.waitForPort(options),
-      );
+      return yield* attempt("waitForPort", () => stub.waitForPort(options));
     }),
     stop: Effect.fn(
       "ContainerNamespace.stop",
       spanOptions("stop"),
     )(function* (signal?: ContainerStopSignal) {
-      return yield* tryContainerPromise(definition, instance, "stop", () => stub.stop(signal));
+      return yield* attempt("stop", () => stub.stop(signal));
     }),
-    destroy: tryContainerPromise(definition, instance, "destroy", () => stub.destroy()).pipe(
+    destroy: attempt("destroy", () => stub.destroy()).pipe(
       Effect.withSpan("ContainerNamespace.destroy", spanOptions("destroy")),
     ),
     setAllowedHosts: hostListOperation("setAllowedHosts"),
@@ -352,23 +344,24 @@ export const makeClient =
       name: string,
       options?: globalThis.DurableObjectNamespaceGetDurableObjectOptions,
     ) =>
-      Effect.try({
-        try: () =>
-          makeInstanceClient(
-            definition,
-            name,
-            // SAFETY: getByName has a single call signature, so its return type is
-            // exactly the namespace's stub type.
-            namespace.getByName(name, options) as ContainerStubOf<Namespace>,
-          ),
-        catch: (cause) =>
-          new ContainerOperationError({
-            binding: definition.binding,
-            instance: name,
-            operation: "getByName",
-            cause,
-          }),
-      });
+      RpcTargets.get(
+        namespace,
+        JSON.stringify(["container", name, options]),
+        () =>
+          // SAFETY: getByName returns the namespace's declared native stub type.
+          namespace.getByName(name, options) as ContainerStubOf<Namespace>,
+      ).pipe(
+        Effect.map((stub) => makeInstanceClient(definition, name, stub)),
+        Effect.mapError(
+          (error) =>
+            new ContainerOperationError({
+              binding: definition.binding,
+              instance: name,
+              operation: "getByName",
+              cause: error.cause,
+            }),
+        ),
+      );
 
     const byName = (
       name: string,

@@ -11,6 +11,15 @@ import * as RpcDefinition from "./RpcDefinition";
 import { recordDecodedArgs } from "./internal/RpcInvocation";
 import * as ServiceBinding from "./ServiceBinding";
 
+export type { BindingNotFoundError, BindingValidationError } from "./Binding";
+export type {
+  ServiceBindingFetchError,
+  ServiceBindingRpcError,
+  ServiceCall,
+  ServiceRpc,
+  ServiceScopedCall,
+} from "./ServiceBinding";
+
 /**
  * The client tuple types are re-established by the final `TagClass` cast, so
  * these internal invocations erase the binding client's generic argument

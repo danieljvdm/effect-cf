@@ -14,6 +14,8 @@ import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
 import * as ErrorMessage from "./internal/ErrorMessage";
 
+export type { BindingNotFoundError, BindingValidationError } from "./Binding";
+
 const expectedKvNamespace =
   "KV namespace binding with get(), put(), delete(), getWithMetadata(), and list()";
 

@@ -25,6 +25,8 @@ import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
 import * as ErrorMessage from "./internal/ErrorMessage";
 
+export type { BindingNotFoundError, BindingValidationError } from "./Binding";
+
 const expectedVectorizeBinding =
   "Vectorize index binding with describe(), query(), insert(), upsert(), deleteByIds(), and getByIds()";
 

@@ -120,11 +120,23 @@ type StubMethodCloudflareReturn<
   Method extends keyof Api,
 > = RpcInvocation.AsyncMethodCloudflareReturn<Api, Method>;
 
-type StubCall<R, Api extends object> = <Method extends StubMethodKey<Api>>(
+export type StubCall<R, Api extends object> = <Method extends StubMethodKey<Api>>(
   stub: DurableObjectStubClient<Api>,
   method: Method,
   ...args: StubMethodArgs<Api, Method>
 ) => Effect.Effect<StubMethodSuccess<Api, Method>, DurableObjectRpcError, R>;
+
+export type StubRpc<R, Api extends object> = <Method extends StubMethodKey<Api>>(
+  stub: DurableObjectStubClient<Api>,
+  method: Method,
+  ...args: StubMethodArgs<Api, Method>
+) => Effect.Effect<StubMethodCloudflareReturn<Api, Method>, DurableObjectRpcError, R>;
+
+export type StubScopedCall<R, Api extends object> = <Method extends StubMethodKey<Api>>(
+  stub: DurableObjectStubClient<Api>,
+  method: Method,
+  ...args: StubMethodArgs<Api, Method>
+) => Effect.Effect<Awaited<StubMethodSuccess<Api, Method>>, DurableObjectRpcError, Scope.Scope | R>;
 
 type DurableObjectDirectClient<R, Api extends object> = {
   readonly fetch: (
@@ -227,22 +239,14 @@ export type DurableObjectNamespaceEffectClient<
    *
    * Most application code should use {@link call} instead.
    */
-  readonly rpc: <Method extends StubMethodKey<Api>>(
-    stub: DurableObjectStubClient<Api>,
-    method: Method,
-    ...args: StubMethodArgs<Api, Method>
-  ) => Effect.Effect<StubMethodCloudflareReturn<Api, Method>, DurableObjectRpcError>;
+  readonly rpc: StubRpc<never, Api>;
   /**
    * Invokes a Durable Object RPC method, resolves Cloudflare's RPC result, and
    * decodes the success value when the namespace was created from a definition.
    *
    * This is the normal choice when application code wants the final typed value.
    */
-  readonly call: <Method extends StubMethodKey<Api>>(
-    stub: DurableObjectStubClient<Api>,
-    method: Method,
-    ...args: StubMethodArgs<Api, Method>
-  ) => Effect.Effect<StubMethodSuccess<Api, Method>, DurableObjectRpcError>;
+  readonly call: StubCall<never, Api>;
   /**
    * Invokes a Durable Object RPC method in the current `Scope`, resolves
    * Cloudflare's RPC result, decodes definition-backed success values, and
@@ -252,11 +256,7 @@ export type DurableObjectNamespaceEffectClient<
    * Use this for RPC methods that return Cloudflare RPC resources or other
    * disposable objects whose lifetime should be tied to an Effect scope.
    */
-  readonly scopedCall: <Method extends StubMethodKey<Api>>(
-    stub: DurableObjectStubClient<Api>,
-    method: Method,
-    ...args: StubMethodArgs<Api, Method>
-  ) => Effect.Effect<Awaited<StubMethodSuccess<Api, Method>>, DurableObjectRpcError, Scope.Scope>;
+  readonly scopedCall: StubScopedCall<never, Api>;
   /**
    * Exposes the underlying native Durable Object namespace binding.
    *
@@ -292,25 +292,9 @@ export type DurableObjectNamespaceStaticClient<
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => Effect.Effect<globalThis.Response, DurableObjectFetchError, R>;
-  readonly rpc: <Method extends StubMethodKey<Api>>(
-    stub: DurableObjectStubClient<Api>,
-    method: Method,
-    ...args: StubMethodArgs<Api, Method>
-  ) => Effect.Effect<StubMethodCloudflareReturn<Api, Method>, DurableObjectRpcError, R>;
-  readonly call: <Method extends StubMethodKey<Api>>(
-    stub: DurableObjectStubClient<Api>,
-    method: Method,
-    ...args: StubMethodArgs<Api, Method>
-  ) => Effect.Effect<StubMethodSuccess<Api, Method>, DurableObjectRpcError, R>;
-  readonly scopedCall: <Method extends StubMethodKey<Api>>(
-    stub: DurableObjectStubClient<Api>,
-    method: Method,
-    ...args: StubMethodArgs<Api, Method>
-  ) => Effect.Effect<
-    Awaited<StubMethodSuccess<Api, Method>>,
-    DurableObjectRpcError,
-    Scope.Scope | R
-  >;
+  readonly rpc: StubRpc<R, Api>;
+  readonly call: StubCall<R, Api>;
+  readonly scopedCall: StubScopedCall<R, Api>;
   readonly rawUnsafe: () => Effect.Effect<DurableObjectNamespaceClient<Api>, never, R>;
 };
 

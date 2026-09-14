@@ -21,6 +21,8 @@ import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
 import * as ErrorMessage from "./internal/ErrorMessage";
 
+export type { BindingNotFoundError, BindingValidationError } from "./Binding";
+
 const expectedAnalyticsEngineDataset = "Analytics Engine dataset binding with writeDataPoint()";
 const defaultQueryApiBaseUrl = "https://api.cloudflare.com/client/v4";
 const textEncoder = new TextEncoder();

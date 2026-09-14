@@ -15,5 +15,7 @@
     "verbatimModuleSyntax": true,
     "skipLibCheck": true
   },
-  "include": ["src", "tests"]
+  "include": ["src", "tests"],
+  // Packaging tests compile this standalone consumer after linking the built package.
+  "exclude": ["tests/fixtures/declaration-emit"]
 }

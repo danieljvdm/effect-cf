@@ -6,6 +6,8 @@ import type { Layer } from "effect";
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
 
+export type { BindingNotFoundError, BindingValidationError } from "./Binding";
+
 const expectedHyperdrive = "Hyperdrive binding with connectionString";
 
 export interface HyperdriveDefinition {

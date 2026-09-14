@@ -22,6 +22,8 @@ import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
 import * as ErrorMessage from "./internal/ErrorMessage";
 
+export type { BindingNotFoundError, BindingValidationError } from "./Binding";
+
 const expectedWorkersAiBinding = "Workers AI binding with run(), gateway(), and models()";
 
 export class WorkersAiOperationError extends Data.TaggedError("WorkersAiOperationError")<{

@@ -8,6 +8,8 @@ import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
 import * as ErrorMessage from "./internal/ErrorMessage";
 
+export type { BindingNotFoundError, BindingValidationError } from "./Binding";
+
 const expectedBrowserRenderingBinding = "Browser Rendering binding resource";
 
 export class BrowserRenderingOperationError extends Data.TaggedError(

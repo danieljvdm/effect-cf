@@ -11,6 +11,9 @@ import type { ExecutionContext, WorkerContext } from "./Worker";
 import * as WorkerEntrypoint from "./Worker";
 import type * as RpcDefinition from "./RpcDefinition";
 
+export type { BindingNotFoundError, BindingValidationError } from "./Binding";
+export type { QueueOperationError, QueueProducer } from "./QueueBinding";
+
 export interface Definition<
   Id extends string = string,
   Message extends RpcDefinition.ServiceFreeSchema = RpcDefinition.ServiceFreeSchema,

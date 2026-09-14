@@ -10,6 +10,14 @@ import type * as RpcDefinition from "./RpcDefinition";
 import * as WorkflowBinding from "./WorkflowBinding";
 import * as WorkflowEntrypoint from "./Workflow";
 
+export type { BindingNotFoundError, BindingValidationError } from "./Binding";
+export type {
+  WorkflowInstance,
+  WorkflowInstanceCreateOptions,
+  WorkflowInstanceCreateBatchOptions,
+  WorkflowOperationError,
+} from "./WorkflowBinding";
+
 export interface Definition<
   Id extends string = string,
   Payload extends RpcDefinition.ServiceFreeSchema = RpcDefinition.ServiceFreeSchema,

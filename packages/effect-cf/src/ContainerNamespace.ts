@@ -10,6 +10,8 @@ import * as RpcTargets from "./RpcTargets";
 import type { WorkerEnvironment } from "./Environment";
 import * as ErrorMessage from "./internal/ErrorMessage";
 
+export type { BindingNotFoundError, BindingValidationError } from "./Binding";
+
 const expectedContainerNamespace = "Container namespace binding with getByName()";
 
 export type ContainerSignal = "SIGKILL" | "SIGINT" | "SIGTERM";

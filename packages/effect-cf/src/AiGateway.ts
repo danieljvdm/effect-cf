@@ -10,6 +10,8 @@ import type { WorkerEnvironment } from "./Environment";
 import { isWorkersAiBinding, type WorkersAiBinding } from "./WorkersAi";
 import * as ErrorMessage from "./internal/ErrorMessage";
 
+export type { BindingNotFoundError, BindingValidationError } from "./Binding";
+
 const expectedAiGatewayBinding = "Workers AI binding with gateway()";
 
 export class AiGatewayOperationError extends Data.TaggedError("AiGatewayOperationError")<{

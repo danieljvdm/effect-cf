@@ -8,6 +8,8 @@ import type { SqlClient } from "effect/unstable/sql";
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
 
+export type { BindingNotFoundError, BindingValidationError } from "./Binding";
+
 const TypeId = "~effect-cf/D1" as const;
 
 export type TypeId = typeof TypeId;
@@ -18,6 +20,18 @@ export interface D1Definition {
 }
 
 export type D1SqlLayerOptions = Omit<D1Client.D1ClientConfig, "db">;
+
+export type ServiceClass<Self, Id extends string> = Binding.BindingService<Self, Id, D1Database> & {
+  [TypeId]: typeof TypeId;
+  definition: D1Definition;
+  sqlLayer: (
+    options?: D1SqlLayerOptions,
+  ) => Layer.Layer<
+    D1Client.D1Client | SqlClient.SqlClient,
+    Config.ConfigError | Binding.BindingNotFoundError | Binding.BindingValidationError,
+    WorkerEnvironment
+  >;
+};
 
 declare const D1ServiceTypeId: unique symbol;
 
@@ -40,18 +54,12 @@ export const make = <Id extends string>(id: Id, definition: D1Definition) =>
 
 export const Service =
   <Self>() =>
-  <Id extends string>(id: Id, definition: D1Definition) => {
+  <Id extends string>(id: Id, definition: D1Definition): ServiceClass<Self, Id> => {
     const tag = Binding.Service<Self>()(id, definition.binding, isD1Database, undefined, {
       expected: expectedD1Database,
     });
 
-    const sqlLayer = (
-      options?: D1SqlLayerOptions,
-    ): Layer.Layer<
-      D1Client.D1Client | SqlClient.SqlClient,
-      Config.ConfigError | Binding.BindingNotFoundError | Binding.BindingValidationError,
-      WorkerEnvironment
-    > =>
+    const sqlLayer: ServiceClass<Self, Id>["sqlLayer"] = (options) =>
       Layer.unwrap(
         Effect.gen(function* () {
           const db = yield* tag;

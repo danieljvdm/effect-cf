@@ -11,6 +11,17 @@ import * as RpcDefinition from "./RpcDefinition";
 import { recordDecodedArgs } from "./internal/RpcInvocation";
 import type { WorkerEnvironment } from "./Environment";
 
+export type { BindingNotFoundError, BindingValidationError } from "./Binding";
+export type {
+  DurableObjectFetchError,
+  DurableObjectNamespaceClient,
+  DurableObjectRpcError,
+  DurableObjectStubClient,
+  StubCall,
+  StubRpc,
+  StubScopedCall,
+} from "./DurableObjectNamespace";
+
 type ErasedInvoke<E> = (...args: ReadonlyArray<unknown>) => Effect.Effect<unknown, E>;
 
 export type ServiceFreeSchema = S.Codec<any, any, never, never>;

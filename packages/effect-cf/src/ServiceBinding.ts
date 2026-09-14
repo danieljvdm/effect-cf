@@ -13,6 +13,8 @@ import * as ErrorMessage from "./internal/ErrorMessage";
 import * as RpcInvocation from "./internal/RpcInvocation";
 import * as RpcTracing from "./RpcTracing";
 
+export type { BindingNotFoundError, BindingValidationError } from "./Binding";
+
 const TypeId = "effect-cf/ServiceBinding" as const;
 const expectedServiceBinding = "Worker service binding with fetch()";
 
@@ -91,10 +93,24 @@ type ServiceMethodCloudflareReturn<
   Method extends keyof Api,
 > = RpcInvocation.AsyncMethodCloudflareReturn<Api, Method>;
 
-type ServiceCall<R, Api> = <Method extends ServiceMethodKey<Api>>(
+export type ServiceCall<R, Api> = <Method extends ServiceMethodKey<Api>>(
   method: Method,
   ...args: ServiceMethodArgs<Api, Method>
 ) => Effect.Effect<ServiceMethodSuccess<Api, Method>, ServiceBindingRpcError, R>;
+
+export type ServiceRpc<R, Api> = <Method extends ServiceMethodKey<Api>>(
+  method: Method,
+  ...args: ServiceMethodArgs<Api, Method>
+) => Effect.Effect<ServiceMethodCloudflareReturn<Api, Method>, ServiceBindingRpcError, R>;
+
+export type ServiceScopedCall<R, Api> = <Method extends ServiceMethodKey<Api>>(
+  method: Method,
+  ...args: ServiceMethodArgs<Api, Method>
+) => Effect.Effect<
+  Awaited<ServiceMethodSuccess<Api, Method>>,
+  ServiceBindingRpcError,
+  Scope.Scope | R
+>;
 
 type DefinitionDirectMethods<R, Definition extends WorkerDefinition.Definition.Any> = {
   readonly [Method in RpcDefinition.Definition.MethodNames<Definition>]: (
@@ -127,20 +143,14 @@ export type ServiceBindingEffectClient<
    *
    * Most application code should use {@link call} instead.
    */
-  readonly rpc: <Method extends ServiceMethodKey<Api>>(
-    method: Method,
-    ...args: ServiceMethodArgs<Api, Method>
-  ) => Effect.Effect<ServiceMethodCloudflareReturn<Api, Method>, ServiceBindingRpcError>;
+  readonly rpc: ServiceRpc<never, Api>;
   /**
    * Invokes a Worker RPC method, resolves Cloudflare's RPC result, and decodes
    * the success value when the binding was created from a definition.
    *
    * This is the normal choice when application code wants the final typed value.
    */
-  readonly call: <Method extends ServiceMethodKey<Api>>(
-    method: Method,
-    ...args: ServiceMethodArgs<Api, Method>
-  ) => Effect.Effect<ServiceMethodSuccess<Api, Method>, ServiceBindingRpcError>;
+  readonly call: ServiceCall<never, Api>;
   /**
    * Invokes a Worker RPC method in the current `Scope`, resolves Cloudflare's RPC
    * result, decodes definition-backed success values, and disposes the resolved
@@ -149,14 +159,7 @@ export type ServiceBindingEffectClient<
    * Use this for RPC methods that return Cloudflare RPC resources or other
    * disposable objects whose lifetime should be tied to an Effect scope.
    */
-  readonly scopedCall: <Method extends ServiceMethodKey<Api>>(
-    method: Method,
-    ...args: ServiceMethodArgs<Api, Method>
-  ) => Effect.Effect<
-    Awaited<ServiceMethodSuccess<Api, Method>>,
-    ServiceBindingRpcError,
-    Scope.Scope
-  >;
+  readonly scopedCall: ServiceScopedCall<never, Api>;
 };
 
 export type ServiceBindingStaticClient<
@@ -168,23 +171,25 @@ export type ServiceBindingStaticClient<
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => Effect.Effect<globalThis.Response, ServiceBindingFetchError, R>;
-  readonly rpc: <Method extends ServiceMethodKey<Api>>(
-    method: Method,
-    ...args: ServiceMethodArgs<Api, Method>
-  ) => Effect.Effect<ServiceMethodCloudflareReturn<Api, Method>, ServiceBindingRpcError, R>;
-  readonly call: <Method extends ServiceMethodKey<Api>>(
-    method: Method,
-    ...args: ServiceMethodArgs<Api, Method>
-  ) => Effect.Effect<ServiceMethodSuccess<Api, Method>, ServiceBindingRpcError, R>;
-  readonly scopedCall: <Method extends ServiceMethodKey<Api>>(
-    method: Method,
-    ...args: ServiceMethodArgs<Api, Method>
-  ) => Effect.Effect<
-    Awaited<ServiceMethodSuccess<Api, Method>>,
-    ServiceBindingRpcError,
-    Scope.Scope | R
-  >;
+  readonly rpc: ServiceRpc<R, Api>;
+  readonly call: ServiceCall<R, Api>;
+  readonly scopedCall: ServiceScopedCall<R, Api>;
 };
+
+export type ServiceClass<
+  Self,
+  Id extends string,
+  Api extends object = never,
+  Definition extends WorkerDefinition.Definition.Any | undefined = undefined,
+> = Binding.BindingService<
+  Self,
+  Id,
+  ServiceBindingEffectClient<ApiOrDefinition<Api, Definition>, Definition>
+> &
+  ServiceBindingStaticClient<Self, ApiOrDefinition<Api, Definition>, Definition> & {
+    readonly [TypeId]: typeof TypeId;
+    readonly definition: ServiceBindingDefinition<Definition>;
+  };
 
 type ServiceBindingValue = Schema.Schema.Type<typeof Schema.Unknown>;
 
@@ -384,7 +389,7 @@ export const Service =
   >(
     id: Id,
     definition: ServiceBindingDefinition<Definition>,
-  ) => {
+  ): ServiceClass<Self, Id, Api, Definition> => {
     type ServiceApi = ApiOrDefinition<Api, Definition>;
 
     const tag = Binding.Service<Self>()(

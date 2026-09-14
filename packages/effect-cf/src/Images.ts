@@ -33,6 +33,8 @@ import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
 import * as ErrorMessage from "./internal/ErrorMessage";
 
+export type { BindingNotFoundError, BindingValidationError } from "./Binding";
+
 const TypeId = "~effect-cf/Images/Steps" as const;
 
 export type TypeId = typeof TypeId;

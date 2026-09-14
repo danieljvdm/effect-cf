@@ -20,6 +20,15 @@ import * as Runtime from "./internal/Runtime";
 import * as Telemetry from "./internal/Telemetry";
 import { fromExecutionContext } from "./internal/WorkerContext";
 
+export type { BindingNotFoundError, BindingValidationError } from "./Binding";
+export type {
+  ServiceBindingFetchError,
+  ServiceBindingRpcError,
+  ServiceCall,
+  ServiceRpc,
+  ServiceScopedCall,
+} from "./ServiceBinding";
+
 export class ExecutionContext extends Context.Service<
   ExecutionContext,
   globalThis.ExecutionContext

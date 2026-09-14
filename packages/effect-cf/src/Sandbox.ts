@@ -47,6 +47,8 @@ import * as ErrorMessage from "./internal/ErrorMessage";
 import { CurrentTargets } from "./internal/RpcTargets";
 import * as RpcTargets from "./RpcTargets";
 
+export type { BindingNotFoundError, BindingValidationError } from "./Binding";
+
 export type {
   BackupOptions,
   CheckChangesOptions,

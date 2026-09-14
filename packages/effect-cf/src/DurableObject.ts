@@ -19,6 +19,17 @@ import * as Runtime from "./internal/Runtime";
 import * as Telemetry from "./internal/Telemetry";
 import type { ReceiverOptions, RpcInvocationInfo } from "./RpcTracing";
 
+export type { BindingNotFoundError, BindingValidationError } from "./Binding";
+export type {
+  DurableObjectFetchError,
+  DurableObjectNamespaceClient,
+  DurableObjectRpcError,
+  DurableObjectStubClient,
+  StubCall,
+  StubRpc,
+  StubScopedCall,
+} from "./DurableObjectNamespace";
+
 const reservedMethodNames: ReadonlySet<string> = RpcDefinition.reservedMethodNames;
 
 export type RuntimeContext<ROut> =

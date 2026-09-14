@@ -27,6 +27,14 @@ import * as ErrorMessage from "./internal/ErrorMessage";
 import * as Runtime from "./internal/Runtime";
 import { fromExecutionContext } from "./internal/WorkerContext";
 
+export type { BindingNotFoundError, BindingValidationError } from "./Binding";
+export type {
+  WorkflowInstance,
+  WorkflowInstanceCreateOptions,
+  WorkflowInstanceCreateBatchOptions,
+  WorkflowOperationError,
+} from "./WorkflowBinding";
+
 export interface WorkflowEventService<Payload = unknown> {
   readonly raw: CloudflareWorkflowEvent<unknown>;
   readonly payload: Payload;

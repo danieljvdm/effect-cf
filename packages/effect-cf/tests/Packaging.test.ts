@@ -1,27 +1,36 @@
+import { NodeServices } from "@effect/platform-node";
 import { beforeAll, expect, it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Effect, FileSystem, Path, Stream } from "effect";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { build, type Plugin } from "esbuild";
-import { execFile } from "node:child_process";
-import { access } from "node:fs/promises";
-import { fileURLToPath, URL } from "node:url";
-import { promisify } from "node:util";
 
-const execFileAsync = promisify(execFile);
-
-beforeAll(async () => {
-  const built = await access(new URL("../dist/index.mjs", import.meta.url)).then(
-    () => true,
-    () => false,
+const run = Effect.fn("Packaging.run")(function* (args: ReadonlyArray<string>) {
+  const path = yield* Path.Path;
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const cwd = yield* path.fromFileUrl(new URL("../../../", import.meta.url));
+  const child = yield* spawner.spawn(
+    ChildProcess.make("vp", args, { cwd, stdout: "pipe", stderr: "pipe" }),
   );
+  const output = yield* child.all.pipe(Stream.decodeText(), Stream.mkString);
+  const exitCode = yield* child.exitCode;
 
-  if (!built) {
-    await execFileAsync("vp", ["run", "--concurrency-limit", "1", "effect-cf#build"], {
-      cwd: fileURLToPath(new URL("../../../", import.meta.url)),
-      timeout: 60_000,
-      maxBuffer: 1024 * 1024,
-    });
+  if (exitCode !== 0) {
+    expect.unreachable(`vp exited with code ${exitCode}:\n${output}`);
   }
-}, 65_000);
+
+  return output;
+}, Effect.scoped);
+
+beforeAll(
+  () =>
+    run(["run", "--no-cache", "--concurrency-limit", "1", "effect-cf#build"]).pipe(
+      Effect.asVoid,
+      Effect.timeout("60 seconds"),
+      Effect.provide(NodeServices.layer),
+      Effect.runPromise,
+    ),
+  65_000,
+);
 
 const rejectOptionalPeers: Plugin = {
   name: "reject-optional-peers",
@@ -82,19 +91,59 @@ it.live.each(["Queue", "Workflow"])(
   "published %s factories initialize when definitions are imported first",
   (family) =>
     Effect.gen(function* () {
-      const result = yield* Effect.promise(() =>
-        execFileAsync(
-          process.execPath,
-          [
-            "--experimental-strip-types",
-            fileURLToPath(new URL("./fixtures/definition-initialization.mjs", import.meta.url)),
-            new URL("../dist/", import.meta.url).href,
-            family,
-          ],
-          { timeout: 4_000, maxBuffer: 64 * 1024 },
-        ),
+      const path = yield* Path.Path;
+      const fixture = yield* path.fromFileUrl(
+        new URL("./fixtures/definition-initialization.mjs", import.meta.url),
       );
+      const output = yield* run([
+        "exec",
+        "node",
+        "--experimental-strip-types",
+        fixture,
+        new URL("../dist/", import.meta.url).href,
+        family,
+      ]);
 
-      expect(result.stdout).toBe("ok\n");
-    }),
+      expect(output).toBe("ok\n");
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+// Separate consumer modules prevent one namespace's exports from hiding another's missing types.
+it.live.each(["tsconfig.json", "tsconfig.composite.json"])(
+  "external package consumers emit portable declarations with %s",
+  (config) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const packageRoot = yield* path.fromFileUrl(new URL("../", import.meta.url));
+      const repoRoot = path.resolve(packageRoot, "../..");
+      const consumer = yield* fs.makeTempDirectoryScoped({ prefix: "effect-cf-declarations-" });
+
+      yield* fs.copy(path.join(packageRoot, "tests/fixtures/declaration-emit"), consumer);
+      yield* fs.makeDirectory(path.join(consumer, "node_modules/@cloudflare"), {
+        recursive: true,
+      });
+      yield* fs.symlink(packageRoot, path.join(consumer, "node_modules/effect-cf"));
+      yield* fs.symlink(
+        path.join(repoRoot, "node_modules/effect"),
+        path.join(consumer, "node_modules/effect"),
+      );
+      yield* fs.symlink(
+        path.join(packageRoot, "node_modules/@cloudflare/workers-types"),
+        path.join(consumer, "node_modules/@cloudflare/workers-types"),
+      );
+      yield* run([
+        "run",
+        "--no-cache",
+        "effect-cf#typecheck",
+        "--noEmit",
+        "false",
+        "--emitDeclarationOnly",
+        "-p",
+        path.join(consumer, config),
+      ]);
+
+      expect(yield* fs.exists(path.join(consumer, "dist/r2.d.ts"))).toBe(true);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  60_000,
 );

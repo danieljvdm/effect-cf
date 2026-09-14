@@ -67,7 +67,7 @@ expectTypeOf(CalculatorObject.byName("one").calculate(1)).toEqualTypeOf<
 >();
 
 // @ts-expect-error Effect callers use decoded arguments.
-Calculator.calculate("1");
+void Calculator.calculate("1");
 
 class User {
   constructor(readonly name: string) {}

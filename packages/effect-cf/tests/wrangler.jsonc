@@ -35,6 +35,14 @@
   "durable_objects": {
     "bindings": [
       {
+        "name": "TEST_INITIALIZATION_DO",
+        "class_name": "TestInitializationDurableObject",
+      },
+      {
+        "name": "TEST_INITIALIZATION_CONTROL",
+        "class_name": "TestInitializationControl",
+      },
+      {
         "name": "TEST_COUNTER_DO",
         "class_name": "TestCounterDurableObject",
       },
@@ -56,6 +64,8 @@
     {
       "tag": "v1",
       "new_sqlite_classes": [
+        "TestInitializationDurableObject",
+        "TestInitializationControl",
         "TestCounterDurableObject",
         "TestComputerWorkspaceDurableObject",
         "TestHibernationRpcDurableObject",

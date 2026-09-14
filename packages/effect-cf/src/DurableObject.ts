@@ -1,6 +1,7 @@
 import { DurableObject as CloudflareDurableObject } from "cloudflare:workers";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Scheduler from "effect/Scheduler";
 import * as Tracer from "effect/Tracer";
 import type { ManagedRuntime, Scope } from "effect";
 
@@ -114,8 +115,10 @@ interface DurableObjectOptionsBase<
   /**
    * Effect run when Cloudflare loads this Durable Object instance into memory.
    *
-   * Use `DurableObjectState.blockConcurrencyWhile` inside this hook when
-   * incoming events should wait for setup to finish. Cloudflare may construct
+   * The base layer is acquired before incoming events are admitted. The hook
+   * itself runs in the background; start it with
+   * `DurableObjectState.blockConcurrencyWhile` when incoming events should
+   * wait for setup to finish. Cloudflare may construct
    * the same Durable Object id again after eviction or restart; use Durable
    * Object storage if work must happen only once per id.
    */
@@ -287,7 +290,17 @@ export function make<
       const initialize = options.initialize;
 
       if (initialize !== undefined) {
-        state.waitUntil(this[RunSymbol](initialize, { eventLayer: false }));
+        state.waitUntil(
+          state.blockConcurrencyWhile(async () => {
+            // Build services before admitting the first event, then let the
+            // hook synchronously install its own gate if it needs one. Its
+            // background work and failure reporting keep their waitUntil owner.
+            await Effect.runPromise(this.runtime.contextEffect, {
+              scheduler: new Scheduler.MixedScheduler("sync"),
+            });
+            state.waitUntil(this[RunSymbol](initialize, { eventLayer: false }));
+          }),
+        );
       }
     }
 

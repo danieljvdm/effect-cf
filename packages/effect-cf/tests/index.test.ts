@@ -250,7 +250,7 @@ test("Durable Object initialize runs when the instance is constructed", async ()
   new Live(state, makePartialTestDouble<Cloudflare.Env>({}));
 
   await initialize;
-  expect(calls).toEqual(["block", "initialize:counter-id"]);
+  expect(calls).toEqual(["block", "block", "initialize:counter-id"]);
 });
 
 test("Durable Object eventLayer applies to events but not initialize", async () => {

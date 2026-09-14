@@ -4,11 +4,33 @@ import { createExecutionContext, env } from "cloudflare:test";
 import { Effect, Layer, Predicate, Schema as S } from "effect";
 import { expect, test } from "vite-plus/test";
 
-import { DurableObject, DurableObjectNamespace, Rpc, ServiceBinding, Worker } from "../src/index";
+import {
+  DurableObject,
+  DurableObjectNamespace,
+  Rpc,
+  ServiceBinding,
+  Worker,
+  WorkerEnvironment,
+} from "../src/index";
 import { makePartialTestDouble } from "./TestDoubles";
 
 class Counter extends DurableObject.Tag<Counter>()("WorkerPoolCounter", {
   get: DurableObject.method({ success: S.Number }),
+}) {}
+
+const ByteReadableStream = S.declare(
+  (value): value is ReadableStream<Uint8Array> => value instanceof ReadableStream,
+);
+
+class StreamCounter extends DurableObject.Tag<StreamCounter>()("TestCounter", {
+  consumeBytes: DurableObject.method({
+    args: [S.NumberFromString, DurableObject.native(ByteReadableStream)] as const,
+    success: S.Number,
+  }),
+  produceBytes: DurableObject.method({
+    args: [S.NumberFromString] as const,
+    success: DurableObject.native(ByteReadableStream),
+  }),
 }) {}
 
 class EchoWorker extends Worker.Tag<EchoWorker>()("WorkerPoolEcho", {
@@ -201,6 +223,48 @@ test("rpc decode failures keep their error tag across the Durable Object RPC bou
     definition: "TestCounter",
     method: "increment",
   });
+});
+
+test("native schemas transfer byte streams across the Durable Object RPC boundary", async () => {
+  const stream = new ReadableStream({
+    type: "bytes",
+    start(controller) {
+      controller.enqueue(new Uint8Array([1, 2, 3, 4]));
+      controller.close();
+    },
+  });
+  const program = Effect.gen(function* () {
+    const stub = yield* StreamCounter.getByName("native-stream");
+
+    return yield* StreamCounter.call(stub, "consumeBytes", 6, stream);
+  }).pipe(
+    Effect.provide(
+      StreamCounter.layer({ binding: "TEST_COUNTER_DO" }).pipe(
+        Layer.provide(Layer.succeed(WorkerEnvironment, env)),
+      ),
+    ),
+  );
+
+  await expect(Effect.runPromise(program)).resolves.toBe(10);
+});
+
+test("native schemas return byte streams across the Durable Object RPC boundary", async () => {
+  const program = Effect.gen(function* () {
+    const stub = yield* StreamCounter.getByName("native-stream-result");
+    const stream = yield* StreamCounter.call(stub, "produceBytes", 7);
+
+    return yield* Effect.tryPromise(() => new Response(stream).arrayBuffer()).pipe(
+      Effect.map((buffer) => buffer.byteLength),
+    );
+  }).pipe(
+    Effect.provide(
+      StreamCounter.layer({ binding: "TEST_COUNTER_DO" }).pipe(
+        Layer.provide(Layer.succeed(WorkerEnvironment, env)),
+      ),
+    ),
+  );
+
+  await expect(Effect.runPromise(program)).resolves.toBe(7);
 });
 
 test("workers compose service bindings and Durable Object RPC contracts in the Workers runtime", async () => {

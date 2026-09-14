@@ -14,38 +14,41 @@ import type { WorkerEnvironment } from "./Environment";
 type ErasedInvoke<E> = (...args: ReadonlyArray<unknown>) => Effect.Effect<unknown, E>;
 
 export type ServiceFreeSchema = S.Codec<any, any, never, never>;
+export type NativeSchema<Schema extends ServiceFreeSchema = ServiceFreeSchema> =
+  RpcDefinition.NativeSchema<Schema>;
+export type RpcSchema = RpcDefinition.RpcSchema;
 
 export interface Method<
-  Args extends ReadonlyArray<ServiceFreeSchema> = ReadonlyArray<ServiceFreeSchema>,
-  Success extends ServiceFreeSchema = ServiceFreeSchema,
+  Args extends ReadonlyArray<RpcSchema> = ReadonlyArray<RpcSchema>,
+  Success extends RpcSchema = RpcSchema,
 > {
   readonly args: Args;
   readonly success: Success;
 }
 
 export namespace Method {
-  export type Any = Method<ReadonlyArray<ServiceFreeSchema>, ServiceFreeSchema>;
+  export type Any = Method<ReadonlyArray<RpcSchema>, RpcSchema>;
 
-  type ArgsFromSchemas<Args extends ReadonlyArray<ServiceFreeSchema>> = Args extends readonly []
+  type ArgsFromSchemas<Args extends ReadonlyArray<RpcSchema>> = Args extends readonly []
     ? []
     : Args extends readonly [
-          infer Head extends ServiceFreeSchema,
-          ...infer Tail extends ReadonlyArray<ServiceFreeSchema>,
+          infer Head extends RpcSchema,
+          ...infer Tail extends ReadonlyArray<RpcSchema>,
         ]
-      ? [S.Schema.Type<Head>, ...ArgsFromSchemas<Tail>]
-      : Array<S.Schema.Type<Args[number]>>;
+      ? [RpcDefinition.SchemaType<Head>, ...ArgsFromSchemas<Tail>]
+      : Array<RpcDefinition.SchemaType<Args[number]>>;
 
-  type EncodedArgsFromSchemas<Args extends ReadonlyArray<ServiceFreeSchema>> = {
-    [Index in keyof Args]: S.Json;
+  type EncodedArgsFromSchemas<Args extends ReadonlyArray<RpcSchema>> = {
+    [Index in keyof Args]: RpcDefinition.WireEncoded<Args[Index]>;
   };
 
   export type Args<Self extends Any> = ArgsFromSchemas<Self["args"]>;
 
   export type EncodedArgs<Self extends Any> = EncodedArgsFromSchemas<Self["args"]>;
 
-  export type Success<Self extends Any> = S.Schema.Type<Self["success"]>;
+  export type Success<Self extends Any> = RpcDefinition.SchemaType<Self["success"]>;
 
-  export type EncodedSuccess<_Self extends Any> = S.Json;
+  export type EncodedSuccess<Self extends Any> = RpcDefinition.WireEncoded<Self["success"]>;
 }
 
 export type Methods = Record<string, Method.Any>;
@@ -178,19 +181,21 @@ export type TagClass<
 /**
  * Defines a single RPC method schema in a Durable Object definition.
  */
-export function method<Success extends ServiceFreeSchema>(definition: {
+export function method<Success extends RpcSchema>(definition: {
   readonly success: Success;
 }): Method<readonly [], Success>;
 export function method<
-  const Args extends ReadonlyArray<ServiceFreeSchema>,
-  Success extends ServiceFreeSchema,
+  const Args extends ReadonlyArray<RpcSchema>,
+  Success extends RpcSchema,
 >(definition: { readonly args: Args; readonly success: Success }): Method<Args, Success>;
 export function method(definition: {
-  readonly args?: ReadonlyArray<ServiceFreeSchema>;
-  readonly success: ServiceFreeSchema;
+  readonly args?: ReadonlyArray<RpcSchema>;
+  readonly success: RpcSchema;
 }): Method {
   return RpcDefinition.method(definition);
 }
+
+export const native = RpcDefinition.native;
 
 const makeDefinition = <Id extends string, const MethodDefinitions extends Methods>(
   id: Id,

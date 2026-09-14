@@ -148,45 +148,85 @@ export type ReservedMethodName = (typeof reservedMethodNameValues)[number];
 
 export type ServiceFreeSchema = S.Codec<any, any, never, never>;
 
+export const NativeSchemaTypeId: unique symbol = Symbol.for("effect-cf/RpcDefinition/NativeSchema");
+
+/** A schema whose encoded value is passed directly to Workers RPC. */
+export interface NativeSchema<Schema extends ServiceFreeSchema = ServiceFreeSchema> {
+  readonly [NativeSchemaTypeId]: typeof NativeSchemaTypeId;
+  readonly schema: Schema;
+}
+
+export type RpcSchema = ServiceFreeSchema | NativeSchema;
+
+export type SchemaType<Schema extends RpcSchema> =
+  Schema extends NativeSchema<infer Native extends ServiceFreeSchema>
+    ? S.Schema.Type<Native>
+    : Schema extends ServiceFreeSchema
+      ? S.Schema.Type<Schema>
+      : never;
+
+export type WireEncoded<Schema extends RpcSchema> =
+  Schema extends NativeSchema<infer Native extends ServiceFreeSchema>
+    ? S.Codec.Encoded<Native>
+    : S.Json;
+
+/**
+ * Marks a schema to use its declared encoded form directly at the Workers RPC
+ * boundary instead of lowering it to canonical JSON.
+ */
+export const native = <Schema extends ServiceFreeSchema>(schema: Schema): NativeSchema<Schema> => {
+  const nativeSchema: NativeSchema<Schema> = {
+    [NativeSchemaTypeId]: NativeSchemaTypeId,
+    schema,
+  };
+
+  return Object.freeze(nativeSchema);
+};
+
+const isNativeSchema = (schema: RpcSchema): schema is NativeSchema =>
+  Predicate.hasProperty(schema, NativeSchemaTypeId) &&
+  schema[NativeSchemaTypeId] === NativeSchemaTypeId;
+
 /**
  * Workers RPC structured-clones every value that crosses an isolate boundary
  * and rejects class instances. Declaration schemas such as `Schema.Result`
  * keep their container instance in their `Encoded` form, so the declared
  * schemas are lowered to their canonical JSON codec before touching the wire.
  */
-const wireCodec = <Schema extends S.Constraint>(schema: Schema) => S.toCodecJson(schema);
+const wireCodec = (schema: RpcSchema): ServiceFreeSchema =>
+  isNativeSchema(schema) ? schema.schema : S.toCodecJson(schema);
 
 export interface Method<
-  Args extends ReadonlyArray<ServiceFreeSchema> = ReadonlyArray<ServiceFreeSchema>,
-  Success extends ServiceFreeSchema = ServiceFreeSchema,
+  Args extends ReadonlyArray<RpcSchema> = ReadonlyArray<RpcSchema>,
+  Success extends RpcSchema = RpcSchema,
 > {
   readonly args: Args;
   readonly success: Success;
 }
 
 export namespace Method {
-  export type Any = Method<ReadonlyArray<ServiceFreeSchema>, ServiceFreeSchema>;
+  export type Any = Method<ReadonlyArray<RpcSchema>, RpcSchema>;
 
-  type ArgsFromSchemas<Args extends ReadonlyArray<ServiceFreeSchema>> = Args extends readonly []
+  type ArgsFromSchemas<Args extends ReadonlyArray<RpcSchema>> = Args extends readonly []
     ? []
     : Args extends readonly [
-          infer Head extends ServiceFreeSchema,
-          ...infer Tail extends ReadonlyArray<ServiceFreeSchema>,
+          infer Head extends RpcSchema,
+          ...infer Tail extends ReadonlyArray<RpcSchema>,
         ]
-      ? [S.Schema.Type<Head>, ...ArgsFromSchemas<Tail>]
-      : Array<S.Schema.Type<Args[number]>>;
+      ? [SchemaType<Head>, ...ArgsFromSchemas<Tail>]
+      : Array<SchemaType<Args[number]>>;
 
-  type EncodedArgsFromSchemas<Args extends ReadonlyArray<ServiceFreeSchema>> = {
-    [Index in keyof Args]: S.Json;
+  type EncodedArgsFromSchemas<Args extends ReadonlyArray<RpcSchema>> = {
+    [Index in keyof Args]: WireEncoded<Args[Index]>;
   };
 
   export type Args<Self extends Any> = ArgsFromSchemas<Self["args"]>;
 
   export type EncodedArgs<Self extends Any> = EncodedArgsFromSchemas<Self["args"]>;
 
-  export type Success<Self extends Any> = S.Schema.Type<Self["success"]>;
+  export type Success<Self extends Any> = SchemaType<Self["success"]>;
 
-  export type EncodedSuccess<_Self extends Any> = S.Json;
+  export type EncodedSuccess<Self extends Any> = WireEncoded<Self["success"]>;
 }
 
 export type Methods = Record<string, Method.Any>;
@@ -237,16 +277,16 @@ export const assertNoReservedMethods = <
   }
 };
 
-export function method<Success extends ServiceFreeSchema>(definition: {
+export function method<Success extends RpcSchema>(definition: {
   readonly success: Success;
 }): Method<readonly [], Success>;
 export function method<
-  const Args extends ReadonlyArray<ServiceFreeSchema>,
-  Success extends ServiceFreeSchema,
+  const Args extends ReadonlyArray<RpcSchema>,
+  Success extends RpcSchema,
 >(definition: { readonly args: Args; readonly success: Success }): Method<Args, Success>;
 export function method(definition: {
-  readonly args?: ReadonlyArray<ServiceFreeSchema>;
-  readonly success: ServiceFreeSchema;
+  readonly args?: ReadonlyArray<RpcSchema>;
+  readonly success: RpcSchema;
 }) {
   return {
     args: definition.args ?? [],
@@ -276,9 +316,8 @@ export const decodeArgs = Effect.fnUntraced(function* <
     });
   }
 
-  const decoded = yield* S.decodeUnknownEffect(wireCodec(S.Tuple(methodDefinition.args)))(
-    args,
-  ).pipe(
+  const codecs = methodDefinition.args.map((schema) => wireCodec(schema));
+  const decoded = yield* S.decodeUnknownEffect(S.Tuple(codecs))(args).pipe(
     Effect.mapError(
       (cause) =>
         new RpcArgumentDecodeError({
@@ -315,9 +354,8 @@ export const encodeArgs = Effect.fnUntraced(function* <
     });
   }
 
-  const encoded = yield* S.encodeUnknownEffect(wireCodec(S.Tuple(methodDefinition.args)))(
-    args,
-  ).pipe(
+  const codecs = methodDefinition.args.map((schema) => wireCodec(schema));
+  const encoded = yield* S.encodeUnknownEffect(S.Tuple(codecs))(args).pipe(
     Effect.mapError(
       (cause) =>
         new RpcArgumentEncodeError({

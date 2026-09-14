@@ -23,6 +23,34 @@ export default Worker.make(Layer.empty, {
 
 `Worker.make` owns the Effect runtime. Pass application services as its layer; use `Worker.NativeRequest` inside the handler to read the request.
 
+### Native RPC values
+
+Tagged Worker and Durable Object methods encode declared schemas through their canonical JSON codec by default. Wrap a method argument or success schema with `Worker.native(schema)` or `DurableObject.native(schema)` when its encoded value must instead pass directly through Cloudflare RPC.
+
+```ts
+import { Effect, Layer, Schema } from "effect";
+import { Worker } from "effect-cf";
+
+const ByteStream = Schema.declare(
+  (value): value is ReadableStream<Uint8Array> => value instanceof ReadableStream,
+);
+
+class Documents extends Worker.Tag<Documents>()("Documents", {
+  upload: Worker.method({
+    args: [Worker.native(ByteStream)],
+    success: Schema.Void,
+  }),
+}) {}
+
+export default Documents.make(Layer.empty, {
+  rpc: {
+    upload: (body) => Effect.tryPromise(() => new Response(body).arrayBuffer()).pipe(Effect.asVoid),
+  },
+});
+```
+
+The wrapped schema still validates and transforms values, but its encoded form must be supported by Cloudflare RPC. Native byte streams must be byte-oriented (`type: "bytes"`). Cloudflare transfers stream ownership to the recipient; use `ReadableStream.tee()` first if the sender must retain a copy.
+
 ## Bindings
 
 Define a service, connect it to a Wrangler binding, then yield it in your program.

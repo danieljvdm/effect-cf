@@ -191,7 +191,8 @@ const isNativeSchema = (schema: RpcSchema): schema is NativeSchema =>
  * Workers RPC structured-clones every value that crosses an isolate boundary
  * and rejects class instances. Declaration schemas such as `Schema.Result`
  * keep their container instance in their `Encoded` form, so the declared
- * schemas are lowered to their canonical JSON codec before touching the wire.
+ * schemas are lowered to their canonical JSON codec before touching the wire,
+ * unless explicitly wrapped with `native`.
  */
 const wireCodec = (schema: RpcSchema): ServiceFreeSchema =>
   isNativeSchema(schema) ? schema.schema : S.toCodecJson(schema);

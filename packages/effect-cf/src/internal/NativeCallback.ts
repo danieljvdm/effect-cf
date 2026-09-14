@@ -1,8 +1,12 @@
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FiberSet from "effect/FiberSet";
+import * as Scheduler from "effect/Scheduler";
 
 type RunCallback<A, E, R> = (effect: Effect.Effect<A, E, R>) => Promise<Exit.Exit<A, E>>;
+
+const callbackScheduler = new Scheduler.MixedScheduler("sync");
 
 /**
  * Runs an Effect callback owned by a native Promise operation.
@@ -14,7 +18,14 @@ type RunCallback<A, E, R> = (effect: Effect.Effect<A, E, R>) => Promise<Exit.Exi
 export const runNativeCallback = Effect.fnUntraced(function* <A, E, R, B>(
   operation: (run: RunCallback<A, E, R>) => Promise<B>,
 ): Effect.fn.Return<B, unknown, R> {
-  const callerContext = yield* Effect.context<R>();
+  // An older timer in the blocked parent input gate prevents later timers in
+  // this owner from running. Yield through microtasks while the native gate is
+  // held, including when the caller explicitly provided its own scheduler.
+  const callbackContext = Context.add(
+    yield* Effect.context<R>(),
+    Scheduler.Scheduler,
+    callbackScheduler,
+  );
 
   return yield* Effect.scoped(
     Effect.gen(function* () {
@@ -39,7 +50,7 @@ export const runNativeCallback = Effect.fnUntraced(function* <A, E, R, B>(
       return yield* Effect.callback<B, unknown>((resume) => {
         try {
           nativePromise = operation((effect) =>
-            runPromise(Effect.provideContext(Effect.exit(effect), callerContext)),
+            runPromise(Effect.provideContext(Effect.exit(effect), callbackContext)),
           );
         } catch (cause) {
           resume(Effect.fail(cause));

@@ -316,14 +316,7 @@ export namespace Definition {
 
 export type LayerOptions = WorkflowDefinition.LayerOptions;
 
-export type TagClass<
-  Self,
-  Id extends string,
-  Payload extends WorkflowDefinition.Definition.Any["payload"],
-  Result extends WorkflowDefinition.Definition.Any["result"],
-> = WorkflowDefinition.TagClass<Self, Id, Payload, Result>;
-
-export { implement, Tag } from "./WorkflowDefinition";
+export { implement, Tag, type TagClass } from "./WorkflowDefinition";
 
 export type Handler<
   ROut,

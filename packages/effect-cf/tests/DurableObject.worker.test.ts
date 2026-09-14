@@ -24,10 +24,11 @@ it.each([true, false])(
 
       if (gated) {
         await control.release("initialize");
-        assert.deepStrictEqual(await response, { initialized: true, executionMode: "async" });
-      } else {
-        assert.deepStrictEqual(await response, { initialized: false, executionMode: "async" });
       }
+      using result = await response;
+
+      assert.strictEqual(result.initialized, gated);
+      assert.strictEqual(result.executionMode, "async");
     } finally {
       await control.release("layer");
       await control.release("initialize");

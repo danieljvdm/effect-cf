@@ -43,15 +43,15 @@ export type LayerOptions = {
   readonly binding: string;
 };
 
-export interface TagClass<
+export type TagClass<
   Self,
   Id extends string,
   Message extends RpcDefinition.ServiceFreeSchema,
-> extends Context.ServiceClass<
+> = Context.ServiceClass<
   Self,
   `effect-cf/Queue/${Id}`,
   QueueBinding.QueueBindingClient<Message>
-> {
+> & {
   readonly id: Id;
   readonly message: Message;
   readonly make: <ROut, LayerError>(
@@ -83,7 +83,7 @@ export interface TagClass<
     never,
     Self
   >;
-}
+};
 
 const makeDefinition = <Id extends string, Message extends RpcDefinition.ServiceFreeSchema>(
   id: Id,

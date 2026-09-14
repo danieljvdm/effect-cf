@@ -111,13 +111,7 @@ export namespace Definition {
 
 export type LayerOptions = QueueDefinition.LayerOptions;
 
-export type TagClass<
-  Self,
-  Id extends string,
-  Message extends QueueDefinition.Definition.Any["message"],
-> = QueueDefinition.TagClass<Self, Id, Message>;
-
-export { implement, Tag } from "./QueueDefinition";
+export { implement, Tag, type TagClass } from "./QueueDefinition";
 
 export type Handler<ROut, Self extends QueueDefinition.Definition.Any> = QueueDefinition.Handler<
   ROut,

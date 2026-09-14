@@ -7,6 +7,8 @@ declare global {
   namespace Cloudflare {
     interface Env {
       TEST_COUNTER_DO?: DurableObjectNamespace<TestWorkerModule.TestCounterDurableObject>;
+      TEST_INITIALIZATION_DO?: DurableObjectNamespace<TestWorkerModule.TestInitializationDurableObject>;
+      TEST_INITIALIZATION_CONTROL?: DurableObjectNamespace<TestWorkerModule.TestInitializationControl>;
       TEST_COMPUTER_DO?: DurableObjectNamespace<TestWorkerModule.TestComputerWorkspaceDurableObject>;
       TEST_HIBERNATION_RPC_DO?: DurableObjectNamespace<TestWorkerModule.TestHibernationRpcDurableObject>;
       TRACE_OBJECTS?: DurableObjectNamespace<TestWorkerModule.TestTracingDurableObject>;
@@ -41,6 +43,8 @@ declare global {
       durableNamespaces:
         | "TestComputerWorkspaceDurableObject"
         | "TestCounterDurableObject"
+        | "TestInitializationDurableObject"
+        | "TestInitializationControl"
         | "TestTracingDurableObject"
         | "TestHibernationRpcDurableObject";
     }

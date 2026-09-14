@@ -35,6 +35,10 @@ export const TestWorkerDefinition = WorkerDefinition.make("TestWorker", {
   }),
 });
 
+const ByteReadableStream = S.declare(
+  (value): value is ReadableStream<Uint8Array> => value instanceof ReadableStream,
+);
+
 export const TestCounterDefinition = DurableObjectDefinition.make("TestCounter", {
   increment: DurableObjectDefinition.method({
     args: [S.NumberFromString] as const,
@@ -42,6 +46,14 @@ export const TestCounterDefinition = DurableObjectDefinition.make("TestCounter",
   }),
   get: DurableObjectDefinition.method({
     success: S.Number,
+  }),
+  consumeBytes: DurableObjectDefinition.method({
+    args: [S.NumberFromString, DurableObjectDefinition.native(ByteReadableStream)] as const,
+    success: S.Number,
+  }),
+  produceBytes: DurableObjectDefinition.method({
+    args: [S.NumberFromString] as const,
+    success: DurableObjectDefinition.native(ByteReadableStream),
   }),
 });
 
@@ -110,6 +122,20 @@ const TestCounterLive = TestCounterDefinition.make(Layer.empty, {
 
         return Option.isSome(current) ? current.value.count : 0;
       }),
+    consumeBytes: (offset, stream) =>
+      Effect.tryPromise(() => new Response(stream).arrayBuffer()).pipe(
+        Effect.map((buffer) => offset + buffer.byteLength),
+      ),
+    produceBytes: (length) =>
+      Effect.succeed(
+        new ReadableStream({
+          type: "bytes",
+          start(controller) {
+            controller.enqueue(new Uint8Array(length));
+            controller.close();
+          },
+        }),
+      ),
   },
   fetch: Effect.gen(function* () {
     const request = yield* Worker.NativeRequest;

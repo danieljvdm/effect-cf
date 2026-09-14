@@ -7,6 +7,7 @@ import {
   DurableObject,
   DurableObjectNamespace,
   DurableObjectState,
+  RpcSchema,
   ServiceBinding,
   Worker,
   WorkerEnvironment,
@@ -36,7 +37,7 @@ interface DynamicCounterStubCandidate {
   readonly id: DurableObjectId;
   readonly fetch: () => Promise<Response>;
   readonly get?: number | (() => Promise<number>) | (() => never);
-  readonly resource?: () => Promise<{ readonly [Symbol.dispose]: () => void }>;
+  readonly resource?: () => Promise<Response & Disposable>;
 }
 
 const defineWorkerAtBoundary = (id: string, methods: BoundaryRpcMethods): void => {
@@ -92,7 +93,7 @@ class Counter extends DurableObject.Tag<Counter>()("Counter", {
     args: [S.Number, S.String] as const,
     success: S.Number,
   }),
-  resource: DurableObject.method({ success: S.Unknown }),
+  resource: DurableObject.method({ success: RpcSchema.Response }),
 }) {}
 
 const provideCounters = <A, E>(effect: Effect.Effect<A, E, Counter>, env: Cloudflare.Env) =>
@@ -496,7 +497,7 @@ test("DurableObject preserves server, client, handler, and namespace types", () 
             return 1;
           }),
         add: (amount, label) => Effect.succeed(amount + label.length),
-        resource: () => Effect.succeed({ value: "resource" }),
+        resource: () => Effect.sync(() => new Response("resource")),
       };
 
     const handler: DurableObject.HandlerEffect<
@@ -545,7 +546,7 @@ test("DurableObject preserves server, client, handler, and namespace types", () 
       rpc: {
         get: () => Effect.as(DurableObjectEventValue, 1),
         add: (amount) => Effect.as(DurableObjectEventValue, amount),
-        resource: () => DurableObjectEventValue,
+        resource: () => Effect.map(DurableObjectEventValue, (value) => new Response(value)),
       },
     });
 
@@ -684,11 +685,13 @@ test("Durable Object namespace scopedCall disposes disposable RPC results", asyn
     ...fetcher,
     id: durableObjectId,
     resource: () =>
-      Promise.resolve({
-        [Symbol.dispose]() {
-          disposed = true;
-        },
-      }),
+      Promise.resolve(
+        Object.assign(new Response("resource"), {
+          [Symbol.dispose]() {
+            disposed = true;
+          },
+        }),
+      ),
   };
 
   await Effect.runPromise(

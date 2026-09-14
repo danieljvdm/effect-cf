@@ -8,6 +8,7 @@ import * as WorkerEntrypoint from "./Worker";
 import type { WorkerRpcHandler } from "./Worker";
 import type * as Rpc from "./Rpc";
 import * as RpcDefinition from "./RpcDefinition";
+import type * as WireSchema from "./RpcSchema";
 import { recordDecodedArgs } from "./internal/RpcInvocation";
 import * as ServiceBinding from "./ServiceBinding";
 
@@ -27,42 +28,19 @@ export type {
  */
 type UnsafeInvoke<E> = (...args: ReadonlyArray<unknown>) => Effect.Effect<unknown, E>;
 
-export type ServiceFreeSchema = S.Codec<any, any, never, never>;
-export type NativeSchema<Schema extends ServiceFreeSchema = ServiceFreeSchema> =
-  RpcDefinition.NativeSchema<Schema>;
+export type ServiceFreeSchema = RpcDefinition.ServiceFreeSchema;
 export type RpcSchema = RpcDefinition.RpcSchema;
-
 export interface Method<
   Args extends ReadonlyArray<RpcSchema> = ReadonlyArray<RpcSchema>,
   Success extends RpcSchema = RpcSchema,
-> {
-  readonly args: Args;
-  readonly success: Success;
-}
+> extends RpcDefinition.Method<Args, Success> {}
 
 export namespace Method {
   export type Any = Method<ReadonlyArray<RpcSchema>, RpcSchema>;
-
-  type ArgsFromSchemas<Args extends ReadonlyArray<RpcSchema>> = Args extends readonly []
-    ? []
-    : Args extends readonly [
-          infer Head extends RpcSchema,
-          ...infer Tail extends ReadonlyArray<RpcSchema>,
-        ]
-      ? [RpcDefinition.SchemaType<Head>, ...ArgsFromSchemas<Tail>]
-      : Array<RpcDefinition.SchemaType<Args[number]>>;
-
-  type EncodedArgsFromSchemas<Args extends ReadonlyArray<RpcSchema>> = {
-    [Index in keyof Args]: RpcDefinition.WireEncoded<Args[Index]>;
-  };
-
-  export type Args<Self extends Any> = ArgsFromSchemas<Self["args"]>;
-
-  export type EncodedArgs<Self extends Any> = EncodedArgsFromSchemas<Self["args"]>;
-
-  export type Success<Self extends Any> = RpcDefinition.SchemaType<Self["success"]>;
-
-  export type EncodedSuccess<Self extends Any> = RpcDefinition.WireEncoded<Self["success"]>;
+  export type Args<Self extends Any> = RpcDefinition.Method.Args<Self>;
+  export type EncodedArgs<Self extends Any> = RpcDefinition.Method.EncodedArgs<Self>;
+  export type Success<Self extends Any> = RpcDefinition.Method.Success<Self>;
+  export type EncodedSuccess<Self extends Any> = RpcDefinition.Method.EncodedSuccess<Self>;
 }
 
 export type Methods = Record<string, Method.Any>;
@@ -110,11 +88,7 @@ const reservedMethodNames = new Set<string>([
 /**
  * Promise-based client API derived from a {@link Definition}.
  */
-export type ServerApi<Self extends Definition.Any> = {
-  readonly [Key in keyof Self["methods"]]: (
-    ...args: Method.Args<Self["methods"][Key]>
-  ) => Promise<Method.Success<Self["methods"][Key]>>;
-};
+export type ServerApi<Self extends Definition.Any> = RpcDefinition.Definition.ServerApi<Self>;
 
 export type Api<Self extends Definition.Any> = Rpc.Provider<ServerApi<Self>, ReservedMethodName>;
 
@@ -129,13 +103,13 @@ export type Handlers<ROut, Self extends Definition.Any> = {
 
 type BoundaryHandlers<ROut, Self extends Definition.Any> = {
   readonly [Key in keyof Self["methods"]]: (
-    ...args: Array<unknown>
+    ...args: Method.EncodedArgs<Self["methods"][Key]>
   ) => WorkerRpcHandler<ROut, Method.EncodedSuccess<Self["methods"][Key]>>;
 };
 
 type MutableBoundaryHandlers<ROut, Self extends Definition.Any> = {
   -readonly [Key in keyof Self["methods"]]: (
-    ...args: Array<unknown>
+    ...args: Method.EncodedArgs<Self["methods"][Key]>
   ) => WorkerRpcHandler<ROut, Method.EncodedSuccess<Self["methods"][Key]>>;
 };
 
@@ -178,13 +152,13 @@ export type TagClass<
   Self,
   Id,
   ServiceBinding.ServiceBindingEffectClient<
-    Api<Definition<Id, MethodDefinitions>>,
+    ServerApi<Definition<Id, MethodDefinitions>>,
     Definition<Id, MethodDefinitions>
   >
 > &
   ServiceBinding.ServiceBindingStaticClient<
     Self,
-    Api<Definition<Id, MethodDefinitions>>,
+    ServerApi<Definition<Id, MethodDefinitions>>,
     Definition<Id, MethodDefinitions>
   > & {
     readonly id: Id;
@@ -202,7 +176,7 @@ export type TagClass<
           >;
         },
       ): WorkerEntrypoint.WorkerClass<
-        Handlers<ROut | REvent, Definition<Id, MethodDefinitions>>,
+        BoundaryHandlers<ROut | REvent, Definition<Id, MethodDefinitions>>,
         ROut | REvent
       >;
       <ROut, LayerError, REvent extends never = never, EventLayerError = never>(
@@ -213,7 +187,7 @@ export type TagClass<
         >,
         options: Options<ROut, Definition<Id, MethodDefinitions>, REvent, EventLayerError>,
       ): WorkerEntrypoint.WorkerClass<
-        Handlers<ROut | REvent, Definition<Id, MethodDefinitions>>,
+        BoundaryHandlers<ROut | REvent, Definition<Id, MethodDefinitions>>,
         ROut | REvent
       >;
     };
@@ -238,17 +212,16 @@ const assumeTagClass = <Self, Id extends string, MethodDefinitions extends Metho
 /**
  * Defines a single RPC method schema in a worker definition.
  */
+// Keep the return type nameable through this public namespace for declaration emit.
 export const method: {
   <Success extends RpcSchema>(definition: {
-    readonly success: Success;
+    readonly success: Success & WireSchema.Check<NoInfer<Success>>;
   }): Method<readonly [], Success>;
   <const Args extends ReadonlyArray<RpcSchema>, Success extends RpcSchema>(definition: {
-    readonly args: Args;
-    readonly success: Success;
+    readonly args: Args & { readonly [K in keyof Args]: WireSchema.Check<NoInfer<Args[K]>> };
+    readonly success: Success & WireSchema.Check<NoInfer<Success>>;
   }): Method<Args, Success>;
 } = RpcDefinition.method;
-
-export const native = RpcDefinition.native;
 
 const makeDefinition = <Id extends string, const MethodDefinitions extends Methods>(
   id: Id,
@@ -315,7 +288,7 @@ export const Tag =
     const definition = makeDefinition<Id, MethodDefinitions>(id, methods);
 
     type SelfDefinition = Definition<Id, MethodDefinitions>;
-    type ClientApi = Api<SelfDefinition>;
+    type ClientApi = ServerApi<SelfDefinition>;
     const tag = Context.Service<
       Self,
       ServiceBinding.ServiceBindingEffectClient<ClientApi, SelfDefinition>
@@ -336,9 +309,9 @@ export const Tag =
         return yield* service.fetch(input, init);
       });
 
-    const rpc = <Method extends keyof ClientApi>(
+    const rpc = <Method extends RpcDefinition.Definition.MethodNames<SelfDefinition>>(
       method: Method,
-      ...args: ClientApi[Method] extends (...args: infer Args) => any ? Args : never
+      ...args: RpcDefinition.Method.Args<SelfDefinition["methods"][Method]>
     ) =>
       Effect.gen(function* () {
         const service = yield* tag;
@@ -350,9 +323,9 @@ export const Tag =
         );
       });
 
-    const call = <Method extends keyof ClientApi>(
+    const call = <Method extends RpcDefinition.Definition.MethodNames<SelfDefinition>>(
       method: Method,
-      ...args: ClientApi[Method] extends (...args: infer Args) => any ? Args : never
+      ...args: RpcDefinition.Method.Args<SelfDefinition["methods"][Method]>
     ) =>
       Effect.gen(function* () {
         const service = yield* tag;
@@ -364,9 +337,9 @@ export const Tag =
         );
       });
 
-    const scopedCall = <Method extends keyof ClientApi>(
+    const scopedCall = <Method extends RpcDefinition.Definition.MethodNames<SelfDefinition>>(
       method: Method,
-      ...args: ClientApi[Method] extends (...args: infer Args) => any ? Args : never
+      ...args: RpcDefinition.Method.Args<SelfDefinition["methods"][Method]>
     ) =>
       Effect.gen(function* () {
         const service = yield* tag;

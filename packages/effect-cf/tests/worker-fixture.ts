@@ -5,6 +5,7 @@ import {
   Option,
   Predicate,
   PubSub,
+  Result,
   Schema as S,
   Semaphore,
   Stream,
@@ -17,6 +18,7 @@ import * as RpcServer from "effect/unstable/rpc/RpcServer";
 import * as ComputerWorkspace from "../src/ComputerWorkspace";
 import {
   DurableObject,
+  RpcSchema,
   DurableObjectDefinition,
   DurableObjectRpcWebSocket,
   DurableObjectState,
@@ -28,18 +30,25 @@ import { withComputerWorkspace } from "../src/ComputerWorkspaceHost";
 
 export { TestTracingDurableObject, TestTracingWorker } from "./rpc-tracing-fixture";
 
+const NumberReply = S.Union([
+  S.Struct({ _tag: S.Literal("Success"), success: S.NumberFromString }),
+  S.Struct({ _tag: S.Literal("Failure"), failure: S.String }),
+]).pipe(S.decodeTo(S.toCodecIso(S.Result(S.Number, S.String))));
+
+const calculate = WorkerDefinition.method({ args: [S.NumberFromString], success: NumberReply });
+const calculateHandler = (value: number) =>
+  Effect.succeed(value < 0 ? Result.fail("negative") : Result.succeed(value + 1));
+
 export const TestWorkerDefinition = WorkerDefinition.make("TestWorker", {
+  calculate,
   parseNumber: WorkerDefinition.method({
     args: [S.NumberFromString] as const,
     success: S.NumberFromString,
   }),
 });
 
-const ByteReadableStream = S.declare(
-  (value): value is ReadableStream<Uint8Array> => value instanceof ReadableStream,
-);
-
 export const TestCounterDefinition = DurableObjectDefinition.make("TestCounter", {
+  calculate,
   increment: DurableObjectDefinition.method({
     args: [S.NumberFromString] as const,
     success: S.NumberFromString,
@@ -48,12 +57,12 @@ export const TestCounterDefinition = DurableObjectDefinition.make("TestCounter",
     success: S.Number,
   }),
   consumeBytes: DurableObjectDefinition.method({
-    args: [S.NumberFromString, DurableObjectDefinition.native(ByteReadableStream)] as const,
+    args: [S.NumberFromString, RpcSchema.ReadableStream] as const,
     success: S.Number,
   }),
   produceBytes: DurableObjectDefinition.method({
     args: [S.NumberFromString] as const,
-    success: DurableObjectDefinition.native(ByteReadableStream),
+    success: RpcSchema.ReadableStream,
   }),
 });
 
@@ -89,6 +98,7 @@ const CounterValue = S.Struct({ count: S.Number });
 const TestWorkerLive = TestWorkerDefinition.make(Layer.empty, {
   fetch: Effect.sync(() => new Response("Test WorkerEntrypoint", { status: 404 })),
   rpc: {
+    calculate: calculateHandler,
     parseNumber: (value) => Effect.succeed(value + 1),
   },
 });
@@ -97,6 +107,7 @@ export class TestWorkerEntrypoint extends TestWorkerLive {}
 
 const TestCounterLive = TestCounterDefinition.make(Layer.empty, {
   rpc: {
+    calculate: calculateHandler,
     increment: (amount) =>
       Effect.gen(function* () {
         const state = yield* DurableObjectState.DurableObjectState;

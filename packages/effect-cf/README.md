@@ -23,33 +23,65 @@ export default Worker.make(Layer.empty, {
 
 `Worker.make` owns the Effect runtime. Pass application services as its layer; use `Worker.NativeRequest` inside the handler to read the request.
 
-### Native RPC values
+### RPC wire codecs
 
-Tagged Worker and Durable Object methods encode declared schemas through their canonical JSON codec by default. Wrap a method argument or success schema with `Worker.native(schema)` or `DurableObject.native(schema)` when its encoded value must instead pass directly through Cloudflare RPC.
+`Worker.method` and `DurableObject.method` use each codec's declared `Encoded` type on the wire. Handlers and Effect clients use its decoded `Type`. Method definitions check the encoded schema at compile time and runtime; calls validate the actual values too.
+
+For an opaque type such as `Result`, define the wire representation and compose it with an Effect codec:
 
 ```ts
-import { Effect, Layer, Schema } from "effect";
+import { Effect, Layer, Result, Schema } from "effect";
 import { Worker } from "effect-cf";
 
-const ByteStream = Schema.declare(
-  (value): value is ReadableStream<Uint8Array> => value instanceof ReadableStream,
+const ReplyWire = Schema.Union([
+  Schema.Struct({ _tag: Schema.Literal("Success"), success: Schema.NumberFromString }),
+  Schema.Struct({ _tag: Schema.Literal("Failure"), failure: Schema.String }),
+]);
+const Reply = ReplyWire.pipe(
+  Schema.decodeTo(Schema.toCodecIso(Schema.Result(Schema.Number, Schema.String))),
 );
 
-class Documents extends Worker.Tag<Documents>()("Documents", {
-  upload: Worker.method({
-    args: [Worker.native(ByteStream)],
-    success: Schema.Void,
+class Calculator extends Worker.Tag<Calculator>()("Calculator", {
+  calculate: Worker.method({
+    args: [Schema.NumberFromString],
+    success: Reply,
   }),
 }) {}
 
-export default Documents.make(Layer.empty, {
+export default Calculator.make(Layer.empty, {
   rpc: {
-    upload: (body) => Effect.tryPromise(() => new Response(body).arrayBuffer()).pipe(Effect.asVoid),
+    calculate: (value) => Effect.succeed(Result.succeed(value + 1)),
   },
 });
 ```
 
-The wrapped schema still validates and transforms values, but its encoded form must be supported by Cloudflare RPC. Native byte streams must be byte-oriented (`type: "bytes"`). Cloudflare transfers stream ownership to the recipient; use `ReadableStream.tee()` first if the sender must retain a copy.
+| Caller                     | Call                                      | Result                               |
+| -------------------------- | ----------------------------------------- | ------------------------------------ |
+| Effect client              | `yield* Calculator.calculate(41)`         | `Result.succeed(42)`                 |
+| Effect client using `call` | `yield* Calculator.call("calculate", 41)` | `Result.succeed(42)`                 |
+| Native service binding     | `await env.CALCULATOR.calculate("41")`    | `{ _tag: "Success", success: "42" }` |
+
+`Calculator.rpc("calculate", 41)` encodes the arguments and returns Cloudflare's raw, pipelinable result. Its result type describes the encoded value. `Worker.ServerApi<typeof Calculator>` and generated entrypoint classes also expose the encoded signatures to native callers.
+
+Plain structs, arrays, tuples, records, unions, primitives and transformations from supported schemas work directly. `Schema.Class` works when its fields encode to supported values. Preserve concrete schema types: widening to `Schema.Codec<A, I>` loses the constructor information needed for the check. Opaque declarations, `Unknown`, `Any`, empty structs and bare `Result`/`Option` schemas are rejected. Derived codecs such as `toCodecIso` and `toCodecJson` need an explicit wire schema, as above.
+
+Cloudflare-specific leaves use `RpcSchema` and can be nested in ordinary schemas:
+
+```ts
+import { Schema } from "effect";
+import { RpcSchema, Worker } from "effect-cf";
+
+const upload = Worker.method({
+  args: [Schema.Struct({ name: Schema.String, body: RpcSchema.ReadableStream })],
+  success: RpcSchema.Response,
+});
+```
+
+This experiment provides native codecs for byte streams, `Request`, `Response`, `Headers`, `Date`, `RegExp`, `ArrayBuffer` and `Uint8Array`. Readable streams must be unlocked byte streams (`type: "bytes"`); validation briefly acquires and releases a BYOB reader. Cloudflare transfers stream ownership. Codecs cannot statically prove resource state or prevent transport failures.
+
+Support is incomplete: recursive schemas need a checked lazy constructor, and native `Map`/`Set` need recursive entry validation. Callbacks and RPC targets need types that account for the remote stubs Cloudflare sends and their lifetimes. These are gaps in this experiment, not Workers RPC restrictions. Wrappers whose encoding cannot be established from their concrete types are also rejected.
+
+Migration: automatic JSON derivation and `native(schema)` are removed. Use ordinary codecs directly, compose explicit wire schemas for opaque values, and use `RpcSchema` for supported native leaves.
 
 ## Bindings
 

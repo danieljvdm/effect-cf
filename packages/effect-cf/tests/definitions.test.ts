@@ -10,6 +10,7 @@ import {
   Predicate,
   Result,
   Schema as S,
+  SchemaGetter,
   type Scope,
 } from "effect";
 
@@ -520,7 +521,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
     const program = Effect.gen(function* () {
       const service = yield* StringNumberService;
 
-      expectType<Effect.Effect<Rpc.Result<number>, ServiceBinding.ServiceBindingRpcError>>(
+      expectType<Effect.Effect<Rpc.Result<string>, ServiceBinding.ServiceBindingRpcError>>(
         service.rpc("increment", 41),
       );
       expectType<Effect.Effect<number, ServiceBinding.ServiceBindingRpcError>>(
@@ -680,7 +681,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
       const rooms = yield* NumberRooms;
       const room = yield* rooms.getByName("room");
 
-      expectType<Effect.Effect<Rpc.Result<number>, DurableObjectNamespace.DurableObjectRpcError>>(
+      expectType<Effect.Effect<Rpc.Result<string>, DurableObjectNamespace.DurableObjectRpcError>>(
         rooms.rpc(room, "increment", 41),
       );
       expectType<Effect.Effect<number, DurableObjectNamespace.DurableObjectRpcError>>(
@@ -807,13 +808,29 @@ test("definition-backed Worker RPC validates encoded success values", async () =
 
   class TaskFailure extends S.TaggedError<TaskFailure>()("TaskFailure", {
     reason: S.String,
-    cause: S.Defect(),
+    cause: S.String.pipe(
+      S.decodeTo(S.instanceOf(Error), {
+        decode: SchemaGetter.transform((message) => new Error(message)),
+        encode: SchemaGetter.transform((error) => error.message),
+      }),
+    ),
   }) {}
+
+  const TaskResultWire = S.Union([
+    S.Struct({ _tag: S.Literal("Success"), success: S.Struct(TaskPayload.fields) }),
+    S.Struct({
+      _tag: S.Literal("Failure"),
+      failure: S.Struct({ _tag: S.Literal("TaskFailure"), reason: S.String, cause: S.String }),
+    }),
+  ]);
+  const TaskResult = TaskResultWire.pipe(
+    S.decodeTo(S.toCodecJson(S.Result(TaskPayload, TaskFailure))),
+  );
 
   const TaskRoom = DurableObjectDefinition.make("TaskRoom", {
     complete: DurableObjectDefinition.method({
       args: [TaskPayload] as const,
-      success: S.Result(TaskPayload, TaskFailure),
+      success: TaskResult,
     }),
   });
 
@@ -858,17 +875,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
     });
     const instance = new Live(makeState(), makePartialTestDouble<Cloudflare.Env>({}));
 
-    interface TaskWireRpc {
-      complete(payload: { readonly id: string; readonly attempts: number }): Promise<JsonValue>;
-    }
-    if (!Predicate.hasProperty(instance, "complete") || !Predicate.isFunction(instance.complete)) {
-      throw new Error("TaskRoom instance must provide complete");
-    }
-    // SAFETY: The raw Durable Object entrypoint exposes schema-encoded JSON across the RPC boundary;
-    // the method check protects the only dynamic member used by this fixture.
-    const wireRpc = instance as typeof instance & TaskWireRpc;
-
-    const succeeded = decodeJsonValue(await wireRpc.complete({ id: "task-1", attempts: 0 }));
+    const succeeded = await instance.complete({ id: "task-1", attempts: 0 });
 
     assert.strictEqual(Result.isResult(succeeded), false);
     expectStructuredCloneSafe(succeeded);
@@ -877,7 +884,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
       success: { id: "task-1", attempts: 1 },
     });
 
-    const failed = decodeJsonValue(await wireRpc.complete({ id: "task-1", attempts: 3 }));
+    const failed = await instance.complete({ id: "task-1", attempts: 3 });
 
     expectStructuredCloneSafe(failed);
     expect(failed).toMatchObject({

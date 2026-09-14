@@ -15,6 +15,7 @@ import {
   Artifacts,
   BrowserRendering,
   DurableObject,
+  RpcSchema,
   Email,
   Hyperdrive,
   Images,
@@ -612,18 +613,14 @@ const kvProgram = Effect.gen(function* () {
   yield* kv.put("session-1", { count: "1" });
 });
 
-const RpcReadableStream = Schema.declare(
-  (value): value is ReadableStream<Uint8Array> => value instanceof ReadableStream,
-);
-
 export class ApiWorker extends Worker.Tag<ApiWorker>()("ApiWorker", {
   ping: Worker.method({
     args: [Schema.String] as const,
     success: Schema.String,
   }),
   upload: Worker.method({
-    args: [Worker.native(RpcReadableStream)] as const,
-    success: Worker.native(Schema.instanceOf(Response)),
+    args: [RpcSchema.ReadableStream] as const,
+    success: RpcSchema.Response,
   }),
 }) {}
 

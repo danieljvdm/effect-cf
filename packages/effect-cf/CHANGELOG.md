@@ -1,5 +1,21 @@
 # effect-cf
 
+## 0.42.0
+
+### Minor Changes
+
+- [#163](https://github.com/danieljvdm/effect-cf/pull/163) [`8817ade`](https://github.com/danieljvdm/effect-cf/commit/8817adeead3fcaaf3b199ad02de7f5f347af88a5) Thanks [@limwa](https://github.com/limwa)! - Add `Worker.native(schema)` and `DurableObject.native(schema)` for RPC arguments and results that Cloudflare must transport without JSON encoding, including byte streams, requests, and responses.
+
+### Patch Changes
+
+- [#169](https://github.com/danieljvdm/effect-cf/pull/169) [`7560c67`](https://github.com/danieljvdm/effect-cf/commit/7560c67e392c9906dd8019a0c951e6c08b4ac306) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Fix TS2883 in consumers that export binding layers, D1 and service-binding classes, or Queue, Workflow, Worker, and Durable Object operations with `declaration` or `composite` enabled. These exports now emit portable types without consumers importing additional namespaces or annotating otherwise inferred values.
+
+  `isolatedDeclarations` continues to require explicit type annotations and a named class base instead of a factory call in `extends`.
+
+- [#166](https://github.com/danieljvdm/effect-cf/pull/166) [`183c198`](https://github.com/danieljvdm/effect-cf/commit/183c19896cb1a27675dce9a462893fcc96b6e3d6) Thanks [@limwa](https://github.com/limwa)! - Fix TS2883 when extending `Queue.Tag(...)` in projects that emit declarations with `declaration` or `composite`. The inferred base type can now be named through the `Queue` namespace. With `isolatedDeclarations`, TypeScript still requires an explicitly typed base variable instead of a factory call in the `extends` clause.
+
+- [#165](https://github.com/danieljvdm/effect-cf/pull/165) [`1681cbb`](https://github.com/danieljvdm/effect-cf/commit/1681cbb767954a90aa0222fd44485abfb490b98a) Thanks [@limwa](https://github.com/limwa)! - Fix TS2883 when extending `Workflow.Tag(...)` in projects that emit declarations with `declaration` or `composite`. The inferred base type can now be named through the `Workflow` namespace. With `isolatedDeclarations`, TypeScript still requires an explicitly typed base variable instead of a factory call in the `extends` clause.
+
 ## 0.41.1
 
 ### Patch Changes

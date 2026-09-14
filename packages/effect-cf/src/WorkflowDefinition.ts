@@ -44,16 +44,16 @@ export type LayerOptions = {
   readonly binding: string;
 };
 
-export interface TagClass<
+export type TagClass<
   Self,
   Id extends string,
   Payload extends RpcDefinition.ServiceFreeSchema,
   Result extends RpcDefinition.ServiceFreeSchema,
-> extends Context.ServiceClass<
+> = Context.ServiceClass<
   Self,
   `effect-cf/Workflow/${Id}`,
   WorkflowBinding.WorkflowBindingClient<Payload, Result>
-> {
+> & {
   readonly id: Id;
   readonly payload: Payload;
   readonly result: Result;
@@ -94,7 +94,7 @@ export interface TagClass<
     Self
   >;
   readonly rawUnsafe: Effect.Effect<globalThis.Workflow<S.Codec.Encoded<Payload>>, never, Self>;
-}
+};
 
 const makeDefinition = <
   Id extends string,

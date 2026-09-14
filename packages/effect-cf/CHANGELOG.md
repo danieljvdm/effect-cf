@@ -1,5 +1,13 @@
 # effect-cf
 
+## 0.42.1
+
+### Patch Changes
+
+- [#171](https://github.com/danieljvdm/effect-cf/pull/171) [`06a0bfc`](https://github.com/danieljvdm/effect-cf/commit/06a0bfc1f750f5042e13f97b212c63ced5caa5e5) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Prevent the first Durable Object event from overtaking an initialization hook's concurrency gate while its service layer is still building. Hooks that perform background setup without a concurrency gate continue to allow incoming events.
+
+- [#170](https://github.com/danieljvdm/effect-cf/pull/170) [`4c41e8d`](https://github.com/danieljvdm/effect-cf/commit/4c41e8d648f340dbf43c5e2c17a850d967b7fa09) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Prevent Durable Object storage transactions and concurrency-blocking callbacks from stalling when their Effect work yields while an earlier timer is blocked by the native input gate.
+
 ## 0.42.0
 
 ### Minor Changes

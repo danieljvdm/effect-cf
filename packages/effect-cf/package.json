@@ -94,11 +94,11 @@
     "@cloudflare/sandbox": "^0.13.0-next.738.2",
     "@cloudflare/vitest-plugin": "^1.0.0",
     "@cloudflare/workers-types": "^5.20260825.1",
-    "@effect/sql-d1": "^4.0.0-rc.112",
-    "@effect/sql-pg": "^4.0.0-rc.112",
-    "@effect/sql-sqlite-do": "^4.0.0-rc.112",
+    "@effect/sql-d1": "^4.0.0-rc.115",
+    "@effect/sql-pg": "^4.0.0-rc.115",
+    "@effect/sql-sqlite-do": "^4.0.0-rc.115",
     "@modelcontextprotocol/server": "^2.0.0",
-    "effect": "^4.0.0-rc.112"
+    "effect": "^4.0.0-rc.115"
   },
   "peerDependenciesMeta": {
     "@cloudflare/computer": {

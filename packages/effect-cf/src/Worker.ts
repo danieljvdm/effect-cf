@@ -277,10 +277,17 @@ const renderFetchSuccess = <E, R, REvent, EventLayerError, EventLayerRequirement
       nativeResponse !== undefined
         ? Effect.void
         : Effect.map(Effect.context<never>(), (context) => {
-            webResponse = HttpServerResponse.toWeb(HttpEffect.scopeTransferToStream(response), {
-              withoutBody: request.method === "HEAD",
-              context,
-            });
+            const withoutBody = request.method === "HEAD";
+
+            webResponse = HttpServerResponse.toWeb(
+              HttpServerResponse.omitsBody(response, withoutBody)
+                ? response
+                : HttpEffect.scopeTransferToStream(response),
+              {
+                withoutBody,
+                context,
+              },
+            );
           });
     const telemetryMiddleware = HttpMiddleware.make((self) =>
       RpcTargets.withScope(

@@ -729,11 +729,11 @@ export const makeClient =
 
 export const queryConfig = (options?: QueryConfigOptions) =>
   Config.all({
-    accountId: options?.accountId ?? Config.string("CLOUDFLARE_ACCOUNT_ID"),
-    apiToken: options?.apiToken ?? Config.redacted("CLOUDFLARE_API_TOKEN"),
+    accountId: options?.accountId ?? Config.String("CLOUDFLARE_ACCOUNT_ID"),
+    apiToken: options?.apiToken ?? Config.Redacted("CLOUDFLARE_API_TOKEN"),
     apiBaseUrl:
       options?.apiBaseUrl ??
-      Config.string("CLOUDFLARE_API_BASE_URL").pipe(Config.withDefault(defaultQueryApiBaseUrl)),
+      Config.String("CLOUDFLARE_API_BASE_URL").pipe(Config.withDefault(defaultQueryApiBaseUrl)),
   });
 
 export const queryLayer = <Self>(

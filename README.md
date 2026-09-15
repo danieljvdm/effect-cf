@@ -166,6 +166,11 @@ vp run dev
 
 Use `vp run -r build` to build all workspaces. Package tests live under `packages/*/tests`.
 
+Effect RC 115's Vitest adapter declares a Vitest 5 peer requirement, while Vite+
+and Cloudflare's test plugin currently support Vitest 4.1.11. The repository keeps
+that runner and validates the Effect adapter with its Node and workerd suites;
+this remains a declared peer compatibility gap until the toolchains align.
+
 Every PR gets a [consumer bundle comparison](docs/bundle-analysis.md), with initial
 and deferred sizes, a PR comment, and downloadable module analysis. Run it locally
 with `vp run bundle:compare -- --base-dir /path/to/built/base-checkout`.

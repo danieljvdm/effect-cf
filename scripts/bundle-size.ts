@@ -528,10 +528,10 @@ export const compareBundles = Effect.fn("bundleSize.compareBundles")(
 export const command = Command.make(
   "bundle-compare",
   {
-    base: Flag.string("base-dir").pipe(
+    base: Flag.String("base-dir").pipe(
       Flag.withDescription("Base checkout with its dependencies installed and packages built."),
     ),
-    output: Flag.string("out-dir").pipe(
+    output: Flag.String("out-dir").pipe(
       Flag.withDefault(".bundle-report"),
       Flag.withDescription("Directory for the report, chunks, and module analysis."),
     ),

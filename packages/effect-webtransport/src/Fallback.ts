@@ -9,7 +9,7 @@
  * application level if a new transport decision is desired.
  *
  * A WebTransport candidate performs the real session handshake as its probe.
- * A WebSocket candidate acquires lazily (the socket connects per run), so it
+ * A WebSocket candidate acquires lazily (the socket connects per reader), so it
  * is best placed last as the assumed-available fallback.
  */
 import * as Effect from "effect/Effect";
@@ -48,7 +48,7 @@ export class TransportSelectionError extends Schema.TaggedError<TransportSelecti
 /**
  * WebTransport candidate: connects a session to `url` (the QUIC/HTTP-3
  * handshake is the probe) and, when pinned, serves one fresh reliable
- * bidirectional stream per `Socket.run`.
+ * bidirectional stream per scoped `Socket.reader`.
  *
  * Uses a `WebTransportConstructor` from the environment when one is provided,
  * and otherwise feature-detects `globalThis.WebTransport` — a platform
@@ -76,21 +76,20 @@ export const webTransport = (
 
     return yield* WebTransportSocket.fromBidirectionalStream(
       session.openBidirectionalStream(options?.sendStream),
-      options,
     );
   }),
 });
 
 /**
  * WebSocket candidate. Acquisition itself cannot fail — the WebSocket
- * connects lazily on each `Socket.run` — so place it after candidates whose
+ * connects lazily on each `Socket.reader` — so place it after candidates whose
  * viability is probed eagerly.
  */
 export const webSocket = (
   url: string | Effect.Effect<string>,
   options?: {
     readonly name?: string | undefined;
-    readonly closeCodeIsError?: ((code: number) => boolean) | undefined;
+    readonly highWaterMark?: number | undefined;
     readonly openTimeout?: Duration.Input | undefined;
     readonly protocols?: string | Array<string> | undefined;
   },

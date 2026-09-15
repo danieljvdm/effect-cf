@@ -1,30 +1,16 @@
 /**
- * Adapts a single reliable bidirectional WebTransport stream to
- * `effect/unstable/socket` `Socket`, so existing Effect socket consumers —
- * including `RpcClient.layerProtocolSocket` — can run over WebTransport in a
- * lowest-common-denominator mode.
+ * Adapts one reliable bidirectional WebTransport stream to Effect's Socket.
+ * Reader acquisition opens a fresh stream; pulls apply transport backpressure
+ * without dispatching a fiber for each chunk. Closing the reader scope sends
+ * FIN on success or aborts writes on failure, cancels reads, and releases locks.
  *
- * Two honest limitations of this mode:
- *
- * - It uses exactly one reliable bidirectional stream. QUIC stream
- *   multiplexing and unreliable datagrams are not exercised; head-of-line
- *   blocking within the single stream applies.
- * - WebTransport streams are byte streams without message framing (unlike
- *   WebSocket). Pair the socket with a self-delimiting serialization such as
- *   `RpcSerialization.layerNdjson` or `layerMsgPack` — plain `layerJson`
- *   relies on chunk boundaries that real transports do not preserve.
- *
- * The implementation mirrors `Socket.fromTransformStream`, hardened for
- * WebTransport semantics: stream errors surface as typed `SocketReadError` /
- * `SocketWriteError` values (never finalizer defects), writes respect the
- * writable stream's backpressure, and each finished run closes its stream
- * with a FIN.
+ * This adapter does not use QUIC stream multiplexing or unreliable datagrams.
+ * RPC requires self-delimiting serialization such as RpcSerialization.layerNdjson
+ * or layerSchemaBinary(); byte streams do not preserve layerJson message boundaries.
  */
 import * as Context from "effect/Context";
-import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import * as FiberSet from "effect/FiberSet";
 import * as Latch from "effect/Latch";
 import * as Layer from "effect/Layer";
 import * as Predicate from "effect/Predicate";
@@ -33,179 +19,163 @@ import * as Socket from "effect/unstable/socket/Socket";
 
 import * as WebTransport from "./WebTransport";
 
-export interface FromBidirectionalStreamOptions {
-  /**
-   * Classifies which close codes fail the socket run. WebTransport streams
-   * have no close codes of their own; a graceful FIN surfaces as code `1000`,
-   * which is treated as a clean end by default.
-   */
-  readonly closeCodeIsError?: ((code: number) => boolean) | undefined;
-}
-
-export interface MakeSocketOptions extends FromBidirectionalStreamOptions {
+export interface MakeSocketOptions {
   readonly sendStream?: WebTransport.NativeSendStreamOptions | undefined;
 }
-
-export const defaultCloseCodeIsError = (code: number): boolean => code !== 1000;
 
 const toSocketOpenError = (cause: unknown): Socket.SocketError =>
   new Socket.SocketError({
     reason: new Socket.SocketOpenError({ kind: "Unknown", cause }),
   });
 
+const closeError = (code = 1000, closeReason?: string) =>
+  new Socket.SocketError({ reason: new Socket.SocketCloseError({ code, closeReason }) });
+
 const encoder = new TextEncoder();
 
 /**
- * Builds a `Socket` from a scoped acquisition of one reliable bidirectional
- * WebTransport stream. The acquisition runs once per `Socket.run`, so a
- * retried run opens a fresh stream on the same session; when a run ends, its
- * stream is closed (FIN) and its read side cancelled.
+ * Acquires one stream per scoped reader. Every termination, including peer FIN,
+ * fails the pull with SocketError; reconnect with Effect.retry around the scoped
+ * read loop. Writers wait for a reader and can be reused across acquisitions.
  */
 export const fromBidirectionalStream = <R>(
   acquire: Effect.Effect<WebTransport.NativeBidirectionalStream, WebTransport.WebTransportError, R>,
-  options?: FromBidirectionalStreamOptions,
 ): Effect.Effect<Socket.Socket, never, Exclude<R, Scope.Scope>> =>
   Effect.map(Effect.context<Exclude<R, Scope.Scope>>(), (acquireServices) => {
     const latch = Latch.makeUnsafe(false);
     let current:
       | {
           readonly writer: WritableStreamDefaultWriter<Uint8Array>;
-          readonly fiberSet: FiberSet.FiberSet<any, any>;
+          readonly fail: (error: Socket.SocketError) => void;
+          readonly close: (exit: Exit.Exit<unknown, unknown>) => Effect.Effect<void>;
         }
       | undefined;
-    const closeCodeIsError = options?.closeCodeIsError ?? defaultCloseCodeIsError;
 
-    const runRaw = <_, E, R2>(
-      handler: (_: string | Uint8Array) => Effect.Effect<_, E, R2> | void,
-      opts?: {
-        readonly onOpen?: Effect.Effect<void> | undefined;
-      },
-    ) =>
-      Effect.scopedWith(
-        Effect.fnUntraced(function* (scope) {
-          const stream = yield* Scope.provide(Effect.mapError(acquire, toSocketOpenError), scope);
-          const reader = yield* Effect.try({
-            try: () => stream.readable.getReader(),
-            catch: toSocketOpenError,
-          });
+    const reader: Socket.Socket["reader"] = Effect.gen(function* () {
+      const scope = yield* Effect.scope;
+      const stream = yield* Scope.provide(Effect.mapError(acquire, toSocketOpenError), scope);
+      const readerHandle = yield* Effect.try({
+        try: () => stream.readable.getReader(),
+        catch: toSocketOpenError,
+      });
+      let error: Socket.SocketError | undefined;
 
-          yield* Scope.addFinalizer(
-            scope,
-            Effect.promise(async () => {
-              try {
-                await reader.cancel();
-              } catch {
-                // already closed or errored
-              } finally {
-                try {
-                  reader.releaseLock();
-                } catch {
-                  // lock already released
-                }
-              }
-            }),
-          );
-          const writer = yield* Effect.try({
-            try: () => stream.writable.getWriter(),
-            catch: toSocketOpenError,
-          });
-
-          yield* Scope.addFinalizerExit(scope, (exit) =>
-            Effect.promise(async () => {
-              try {
-                await (Exit.isSuccess(exit) ? writer.close() : writer.abort(exit.cause));
-              } catch {
-                // already closed or errored
-              } finally {
-                try {
-                  writer.releaseLock();
-                } catch {
-                  // lock already released
-                }
-              }
-            }),
-          );
-          const fiberSet = yield* FiberSet.make<any, E | Socket.SocketError>().pipe(
-            Scope.provide(scope),
-          );
-          const runFork = yield* FiberSet.runtime(fiberSet)<R2>();
-
-          yield* Effect.tryPromise({
-            try: async () => {
-              while (true) {
-                const { done, value } = await reader.read();
-
-                if (done) {
-                  throw new Socket.SocketError({
-                    reason: new Socket.SocketCloseError({ code: 1000 }),
-                  });
-                }
-                const result = handler(value);
-
-                if (Effect.isEffect(result)) {
-                  runFork(result);
-                }
-              }
-            },
-            catch: (cause) =>
-              Socket.isSocketError(cause)
-                ? cause
-                : new Socket.SocketError({ reason: new Socket.SocketReadError({ cause }) }),
-          }).pipe(FiberSet.run(fiberSet));
-
-          current = { writer, fiberSet };
-          yield* latch.open;
-          if (opts?.onOpen) yield* opts.onOpen;
-
-          return yield* Effect.catchFilter(
-            FiberSet.join(fiberSet),
-            Socket.SocketCloseError.filterClean((code) => !closeCodeIsError(code)),
-            () => Effect.void,
-          );
+      yield* Scope.addFinalizer(
+        scope,
+        Effect.promise(async () => {
+          error ??= closeError();
+          try {
+            await readerHandle.cancel();
+          } catch {
+            // The peer may already have reset the stream.
+          } finally {
+            readerHandle.releaseLock();
+          }
         }),
-      ).pipe(
-        Effect.updateContext((input: Context.Context<R2>) => Context.merge(acquireServices, input)),
-        Effect.ensuring(
-          Effect.sync(() => {
-            latch.closeUnsafe();
-            current = undefined;
-          }),
-        ),
       );
+      const writer = yield* Effect.try({
+        try: () => stream.writable.getWriter(),
+        catch: toSocketOpenError,
+      });
+      let closingWriter: Promise<void> | undefined;
+      const close = (exit: Exit.Exit<unknown, unknown>) =>
+        Effect.promise(async () => {
+          if (closingWriter !== undefined) {
+            // Interruption must still abort a write that is delaying an earlier FIN.
+            if (Exit.isFailure(exit)) await writer.abort(exit.cause).catch(() => {});
 
-    const write = (chunk: Uint8Array | string | Socket.CloseEvent) =>
+            return closingWriter;
+          }
+          closingWriter = (Exit.isSuccess(exit) ? writer.close() : writer.abort(exit.cause))
+            // Stream closure must not turn a typed transport error into a defect.
+            .catch(() => {})
+            .finally(() => writer.releaseLock());
+
+          return closingWriter;
+        });
+      const connection = {
+        writer,
+        close,
+        fail(cause: Socket.SocketError) {
+          error ??= cause;
+          void readerHandle.cancel().catch(() => {});
+        },
+      };
+
+      yield* Scope.addFinalizerExit(scope, (exit) => {
+        connection.fail(closeError());
+        if (current === connection) {
+          current = undefined;
+          latch.closeUnsafe();
+        }
+
+        return close(exit);
+      });
+      current = connection;
+      latch.openUnsafe();
+      const pull = Effect.gen(function* () {
+        if (error !== undefined) return yield* Effect.fail(error);
+        const result = yield* Effect.tryPromise({
+          try: () => readerHandle.read(),
+          catch: (cause) =>
+            error ?? new Socket.SocketError({ reason: new Socket.SocketReadError({ cause }) }),
+        });
+
+        if (error !== undefined) return yield* Effect.fail(error);
+        if (result.done) return yield* closeError();
+
+        return [result.value] as const;
+      });
+
+      return { pull, upgrade: Socket.SocketUpgradeError.unsupported };
+    }).pipe(
+      Effect.updateContext((input: Context.Context<Scope.Scope>) =>
+        Context.merge(acquireServices, input),
+      ),
+    );
+
+    const write: Socket.Writer["write"] = (chunk) =>
       latch.whenOpen(
         Effect.suspend(() => {
-          const { fiberSet, writer } = current!;
+          const connection = current!;
 
           if (Socket.isCloseEvent(chunk)) {
-            return Deferred.fail(
-              fiberSet.deferred,
-              new Socket.SocketError({
-                reason: new Socket.SocketCloseError({
-                  code: chunk.code,
-                  closeReason: chunk.reason,
-                }),
-              }),
-            );
+            return Effect.sync(() => connection.fail(closeError(chunk.code, chunk.reason)));
           }
 
           return Effect.tryPromise({
             try: async () => {
-              const data = Predicate.isString(chunk) ? encoder.encode(chunk) : chunk;
-
-              await writer.ready;
-              await writer.write(data);
+              await connection.writer.ready;
+              await connection.writer.write(
+                Predicate.isString(chunk) ? encoder.encode(chunk) : chunk,
+              );
             },
             catch: (cause) =>
               new Socket.SocketError({ reason: new Socket.SocketWriteError({ cause }) }),
           });
         }),
       );
+    const writeAll: Socket.Writer["writeAll"] = (chunks) =>
+      latch.whenOpen(
+        Effect.tryPromise({
+          try: async () => {
+            const writer = current!.writer;
+
+            for (const chunk of chunks) {
+              await writer.ready;
+              await writer.write(Predicate.isString(chunk) ? encoder.encode(chunk) : chunk);
+            }
+          },
+          catch: (cause) =>
+            new Socket.SocketError({ reason: new Socket.SocketWriteError({ cause }) }),
+        }),
+      );
 
     return Socket.make({
-      runRaw,
-      writer: Effect.succeed(write),
+      reader,
+      writer: Effect.acquireRelease(Effect.succeed({ write, writeAll }), (_, exit) =>
+        Effect.suspend(() => current?.close(exit) ?? Effect.void),
+      ),
     });
   });
 
@@ -213,7 +183,7 @@ export const makeSocket = (
   options?: MakeSocketOptions,
 ): Effect.Effect<Socket.Socket, never, WebTransport.WebTransport> =>
   Effect.flatMap(WebTransport.WebTransport, (session) =>
-    fromBidirectionalStream(session.openBidirectionalStream(options?.sendStream), options),
+    fromBidirectionalStream(session.openBidirectionalStream(options?.sendStream)),
   );
 
 export const layerSocket = (

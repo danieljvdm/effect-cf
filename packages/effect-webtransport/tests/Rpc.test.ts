@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
-import { Effect, Layer, Schema } from "effect";
+import { Effect, Layer, Result, Schema } from "effect";
+import { NetAddress } from "effect/unstable/net";
 import { Rpc, RpcClient, RpcGroup, RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { Socket, SocketServer } from "effect/unstable/socket";
 
@@ -56,7 +57,7 @@ const makeWire = () => {
     incomingBidirectionalStreams: new ReadableStream<WebTransport.NativeBidirectionalStream>(),
   };
   const socketServer = SocketServer.SocketServer.of({
-    address: { _tag: "TcpAddress", hostname: "in-memory", port: 0 },
+    address: Result.getOrThrow(NetAddress.inetAddressV4(NetAddress.ipv4Loopback, 0)),
     run: (handler) =>
       Effect.gen(function* () {
         const stream = yield* Effect.promise(() => serverStream);

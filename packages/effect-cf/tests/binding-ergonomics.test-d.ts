@@ -428,15 +428,15 @@ export const RequestAnalyticsQueryFetchLayer = RequestAnalyticsQuery.layerFetch(
 
 export const RequestAnalyticsQueryConfigLayer = RequestAnalyticsQuery.layerConfig(
   AnalyticsEngine.queryConfig({
-    accountId: Config.string("ACCOUNT_ID"),
-    apiToken: Config.redacted("API_TOKEN"),
+    accountId: Config.String("ACCOUNT_ID"),
+    apiToken: Config.Redacted("API_TOKEN"),
   }),
 );
 
 export const RequestAnalyticsQueryFetchConfigLayer = RequestAnalyticsQuery.layerFetchConfig(
   AnalyticsEngine.queryConfig({
-    accountId: Config.string("ACCOUNT_ID"),
-    apiToken: Config.redacted("API_TOKEN"),
+    accountId: Config.String("ACCOUNT_ID"),
+    apiToken: Config.Redacted("API_TOKEN"),
   }),
 );
 

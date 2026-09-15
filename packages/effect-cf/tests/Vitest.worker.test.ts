@@ -8,7 +8,7 @@ import * as PoolWorkers from "../src/Vitest";
 it.effect("provides the Workers environment and config", () =>
   Effect.gen(function* () {
     const workerEnv = yield* WorkerEnvironment;
-    const appName = yield* Config.string("APP_NAME");
+    const appName = yield* Config.String("APP_NAME");
 
     assert.strictEqual(workerEnv, env);
     assert.strictEqual(appName, "effect-cf-tests");

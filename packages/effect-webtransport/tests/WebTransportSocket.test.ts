@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Deferred, Effect, Fiber, Schema } from "effect";
+import { Deferred, Effect, Exit, Fiber, Schema, Scope } from "effect";
 import { Socket } from "effect/unstable/socket";
 
 import * as WebTransport from "../src/WebTransport";
@@ -14,16 +14,6 @@ const provideSession = (handle: FakeWebTransportHandle) =>
     WebTransport.WebTransport.of(WebTransport.fromNative(handle.native)),
   );
 
-const tick = Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
-
-const waitFor = (condition: () => boolean) =>
-  Effect.gen(function* () {
-    for (let i = 0; i < 100 && !condition(); i++) {
-      yield* tick;
-    }
-    assert.isTrue(condition(), "condition not reached");
-  });
-
 const expectSocketReason = <S extends Schema.ConstraintDecoder<unknown, never>>(
   error: Socket.SocketError,
   schema: S,
@@ -36,129 +26,214 @@ const expectSocketReason = <S extends Schema.ConstraintDecoder<unknown, never>>(
 };
 
 describe("WebTransportSocket", () => {
-  it.effect("round-trips bytes through a bidirectional stream", () =>
+  it.effect("round-trips bytes and batches through a writer acquired before its reader", () =>
     Effect.gen(function* () {
       const fake = makeFakeWebTransport({ echo: true });
       const socket = yield* WebTransportSocket.makeSocket().pipe(provideSession(fake));
-      const received: Array<Uint8Array> = [];
+      const writer = yield* socket.writer;
+      const writing = yield* Effect.forkChild(writer.write(bytes(1, 2, 3)));
+      const pull = yield* Socket.readerBytes(socket);
 
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const write = yield* socket.writer;
-          const fiber = yield* Effect.forkChild(
-            socket.run((data) => {
-              received.push(data);
-            }),
-          );
+      yield* Fiber.join(writing);
+      assert.deepStrictEqual(yield* pull, [bytes(1, 2, 3)]);
+      yield* writer.writeAll(["hi", bytes(4)]);
+      assert.deepStrictEqual(yield* pull, [new TextEncoder().encode("hi")]);
+      assert.deepStrictEqual(yield* pull, [bytes(4)]);
+      yield* writer.write(new Socket.CloseEvent(1001, "finished"));
+      const error = yield* Effect.flip(pull);
+      const reason = expectSocketReason(error, Socket.SocketCloseError);
 
-          yield* write(bytes(1, 2, 3));
-          yield* waitFor(() => received.length === 1);
-          yield* write(new Socket.CloseEvent(1000));
-          yield* Fiber.join(fiber);
-        }),
-      );
-      assert.deepStrictEqual(received, [bytes(1, 2, 3)]);
-      assert.deepStrictEqual(fake.bidis[0]!.written, [bytes(1, 2, 3)]);
+      assert.strictEqual(reason.code, 1001);
+      assert.strictEqual(reason.closeReason, "finished");
+      assert.deepStrictEqual(fake.bidis[0]!.written, [
+        bytes(1, 2, 3),
+        new TextEncoder().encode("hi"),
+        bytes(4),
+      ]);
     }),
   );
 
-  it.effect("opens a fresh stream for every run and cleans up after each", () =>
+  it.effect("opens a fresh stream for every reader and cleans up after each", () =>
     Effect.gen(function* () {
       const fake = makeFakeWebTransport();
       const socket = yield* WebTransportSocket.makeSocket().pipe(provideSession(fake));
-      const runOnce = (expectedStreams: number) =>
-        Effect.scoped(
-          Effect.gen(function* () {
-            const fiber = yield* Effect.forkChild(socket.run(() => {}));
 
-            yield* waitFor(() => fake.bidis.length === expectedStreams);
-            fake.bidis.at(-1)!.end();
-            yield* Fiber.join(fiber);
+      for (let i = 0; i < 2; i++) {
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const { pull } = yield* socket.reader;
+
+            fake.bidis[i]!.end();
+            const error = yield* Effect.flip(pull);
+
+            assert.strictEqual(expectSocketReason(error, Socket.SocketCloseError).code, 1000);
           }),
         );
-
-      yield* runOnce(1);
-      yield* runOnce(2);
+      }
       assert.strictEqual(fake.bidis.length, 2);
-      // Each finished run closed its own stream: FIN on the writable half and
-      // cancellation of the readable half.
-      assert.isTrue(fake.bidis[0]!.writableClosed());
-      assert.isTrue(fake.bidis[1]!.writableClosed());
-      assert.isFalse(fake.bidis[0]!.native.readable.locked);
-      assert.isFalse(fake.bidis[0]!.native.writable.locked);
-      assert.isFalse(fake.bidis[1]!.native.readable.locked);
-      assert.isFalse(fake.bidis[1]!.native.writable.locked);
+      for (const stream of fake.bidis) {
+        assert.isTrue(stream.writableClosed());
+        assert.isFalse(stream.native.readable.locked);
+        assert.isFalse(stream.native.writable.locked);
+      }
     }),
   );
 
-  it.effect("aborts an in-flight write when the run is interrupted", () =>
+  it.effect("reads only when the consumer pulls", () =>
     Effect.gen(function* () {
-      const writeStarted = yield* Deferred.make<void>();
-      let releaseWrite = () => {};
-      let writeController!: WritableStreamDefaultController;
-      const writable = new WritableStream<Uint8Array>({
-        write(_chunk, controller) {
-          writeController = controller;
-          Effect.runSync(Deferred.succeed(writeStarted, undefined));
+      let reads = 0;
+      const socket = yield* WebTransportSocket.fromBidirectionalStream(
+        Effect.succeed({
+          readable: new ReadableStream<Uint8Array>(
+            {
+              pull(controller) {
+                controller.enqueue(bytes(++reads));
+              },
+            },
+            { highWaterMark: 0 },
+          ),
+          writable: new WritableStream<Uint8Array>(),
+        }),
+      );
+      const { pull } = yield* socket.reader;
 
-          return new Promise<void>((resolve, reject) => {
-            releaseWrite = resolve;
-            controller.signal.addEventListener("abort", () => reject(controller.signal.reason), {
-              once: true,
+      assert.strictEqual(reads, 0);
+      assert.deepStrictEqual(yield* pull, [bytes(1)]);
+      assert.strictEqual(reads, 1);
+      assert.deepStrictEqual(yield* pull, [bytes(2)]);
+      assert.strictEqual(reads, 2);
+    }),
+  );
+
+  it.effect("closing the reader scope wakes a suspended pull", () =>
+    Effect.gen(function* () {
+      const readStarted = yield* Deferred.make<void>();
+      const socket = yield* WebTransportSocket.fromBidirectionalStream(
+        Effect.succeed({
+          readable: new ReadableStream<Uint8Array>(
+            {
+              pull() {
+                Effect.runSync(Deferred.succeed(readStarted, undefined));
+              },
+            },
+            { highWaterMark: 0 },
+          ),
+          writable: new WritableStream<Uint8Array>(),
+        }),
+      );
+      const scope = yield* Scope.make();
+      const { pull } = yield* Scope.provide(socket.reader, scope);
+      const reading = yield* Effect.forkChild(Effect.flip(pull));
+
+      yield* Deferred.await(readStarted);
+      yield* Scope.close(scope, Exit.void);
+      const error = yield* Fiber.join(reading);
+
+      assert.strictEqual(expectSocketReason(error, Socket.SocketCloseError).code, 1000);
+    }),
+  );
+
+  it.effect.each([false, true])(
+    "aborts an in-flight write on interruption with pending FIN %s",
+    (pendingFin) =>
+      Effect.gen(function* () {
+        const writeStarted = yield* Deferred.make<void>();
+        let releaseWrite = () => {};
+        let writeController!: WritableStreamDefaultController;
+        const writable = new WritableStream<Uint8Array>({
+          write(_chunk, controller) {
+            writeController = controller;
+            Effect.runSync(Deferred.succeed(writeStarted, undefined));
+
+            return new Promise<void>((resolve, reject) => {
+              releaseWrite = resolve;
+              controller.signal.addEventListener("abort", () => reject(controller.signal.reason), {
+                once: true,
+              });
             });
-          });
+          },
+        });
+        const socket = yield* WebTransportSocket.fromBidirectionalStream(
+          Effect.succeed({ readable: new ReadableStream<Uint8Array>(), writable }),
+        );
+        const writerScope = yield* Scope.fork(yield* Effect.scope);
+        const writer = yield* Scope.provide(socket.writer, writerScope);
+        const readerFiber = yield* socket.reader.pipe(
+          Effect.andThen(Effect.never),
+          Effect.scoped,
+          Effect.forkChild,
+        );
+        const writeFiber = yield* writer.write(bytes(1)).pipe(Effect.forkChild);
+
+        yield* Deferred.await(writeStarted);
+        const closingFiber = pendingFin
+          ? yield* Effect.forkChild(Scope.close(writerScope, Exit.void))
+          : undefined;
+
+        yield* Effect.yieldNow;
+        const interruptFiber = yield* Fiber.interrupt(readerFiber).pipe(Effect.forkChild);
+
+        for (let i = 0; i < 10 && !writeController.signal.aborted; i++) {
+          yield* Effect.yieldNow;
+        }
+        const wasAborted = writeController.signal.aborted;
+
+        releaseWrite();
+        yield* Fiber.join(interruptFiber);
+        if (closingFiber !== undefined) yield* Fiber.join(closingFiber);
+        const error = yield* Effect.flip(Fiber.join(writeFiber));
+
+        assert.isTrue(wasAborted);
+        expectSocketReason(error, Socket.SocketWriteError);
+      }),
+  );
+
+  it.effect("releasing the writer sends FIN while leaving the reader open", () =>
+    Effect.gen(function* () {
+      const fake = makeFakeWebTransport();
+      const socket = yield* WebTransportSocket.makeSocket().pipe(provideSession(fake));
+      const { pull } = yield* socket.reader;
+
+      yield* Effect.scoped(socket.writer);
+      assert.isTrue(fake.bidis[0]!.writableClosed());
+      fake.bidis[0]!.push(bytes(7));
+      assert.deepStrictEqual(yield* pull, [bytes(7)]);
+    }),
+  );
+
+  it.effect("interrupting a batch stops unsent frames and leaves the socket usable", () =>
+    Effect.gen(function* () {
+      const started = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const written: Array<Uint8Array> = [];
+      const readable = new ReadableStream<Uint8Array>();
+      const writable = new WritableStream<Uint8Array>({
+        write(chunk) {
+          written.push(chunk);
+          if (written.length === 1) {
+            started.resolve();
+
+            return release.promise;
+          }
         },
       });
       const socket = yield* WebTransportSocket.fromBidirectionalStream(
-        Effect.succeed({
-          readable: new ReadableStream<Uint8Array>(),
-          writable,
-        }),
+        Effect.succeed({ readable, writable }),
       );
-      const write = yield* socket.writer;
-      const runFiber = yield* socket.run(() => {}).pipe(Effect.forkChild);
-      const writeFiber = yield* write(bytes(1)).pipe(Effect.forkChild);
 
-      yield* Deferred.await(writeStarted);
-      const interruptFiber = yield* Fiber.interrupt(runFiber).pipe(Effect.forkChild);
+      yield* socket.reader;
+      const writer = yield* socket.writer;
+      const batch = yield* Effect.forkChild(writer.writeAll([bytes(1), bytes(2), bytes(3)]));
 
-      for (let i = 0; i < 10 && !writeController.signal.aborted; i++) {
-        yield* Effect.yieldNow;
-      }
-      const wasAborted = writeController.signal.aborted;
+      yield* Effect.promise(() => started.promise);
+      yield* Fiber.interrupt(batch);
+      release.resolve();
+      yield* writer.write(bytes(4));
+      yield* Effect.yieldNow;
 
-      releaseWrite();
-      yield* Fiber.join(interruptFiber);
-      yield* Fiber.await(writeFiber);
-      assert.isTrue(wasAborted);
-    }),
-  );
-
-  it.effect("a peer FIN ends the run cleanly by default", () =>
-    Effect.gen(function* () {
-      const fake = makeFakeWebTransport();
-      const socket = yield* WebTransportSocket.makeSocket().pipe(provideSession(fake));
-      const fiber = yield* Effect.forkChild(socket.run(() => {}));
-
-      yield* waitFor(() => fake.bidis.length === 1);
-      fake.bidis[0]!.end();
-      yield* Fiber.join(fiber);
-    }),
-  );
-
-  it.effect("a peer FIN fails the run when classified as an error", () =>
-    Effect.gen(function* () {
-      const fake = makeFakeWebTransport();
-      const socket = yield* WebTransportSocket.makeSocket({
-        closeCodeIsError: () => true,
-      }).pipe(provideSession(fake));
-      const fiber = yield* Effect.forkChild(Effect.flip(socket.run(() => {})));
-
-      yield* waitFor(() => fake.bidis.length === 1);
-      fake.bidis[0]!.end();
-      const error = yield* Fiber.join(fiber);
-
-      expectSocketReason(error, Socket.SocketCloseError);
+      assert.deepStrictEqual(written, [bytes(1), bytes(4)]);
+      assert.isTrue(readable.locked);
+      assert.isTrue(writable.locked);
     }),
   );
 
@@ -166,24 +241,24 @@ describe("WebTransportSocket", () => {
     Effect.gen(function* () {
       const fake = makeFakeWebTransport({ failBidiOpen: new Error("no streams left") });
       const socket = yield* WebTransportSocket.makeSocket().pipe(provideSession(fake));
-      const error = yield* Effect.flip(socket.run(() => {}));
+      const error = yield* Effect.flip(socket.reader);
 
-      const reason = expectSocketReason(error, Socket.SocketOpenError);
-
-      assert.isTrue(WebTransport.WebTransportError.is(reason.cause));
+      assert.isTrue(
+        WebTransport.WebTransportError.is(expectSocketReason(error, Socket.SocketOpenError).cause),
+      );
     }),
   );
 
   it.effect("maps a locked readable to SocketOpenError", () =>
     Effect.gen(function* () {
       const fake = makeFakeWebTransport();
-      const stream = fake.native.createBidirectionalStream();
-      const native = yield* Effect.promise(() => stream);
+      const native = yield* Effect.promise(() => fake.native.createBidirectionalStream());
       const reader = native.readable.getReader();
       const socket = yield* WebTransportSocket.fromBidirectionalStream(Effect.succeed(native));
-      const error = yield* socket
-        .run(() => {})
-        .pipe(Effect.flip, Effect.ensuring(Effect.sync(() => reader.releaseLock())));
+      const error = yield* socket.reader.pipe(
+        Effect.flip,
+        Effect.ensuring(Effect.sync(() => reader.releaseLock())),
+      );
 
       expectSocketReason(error, Socket.SocketOpenError);
     }),
@@ -192,27 +267,26 @@ describe("WebTransportSocket", () => {
   it.effect("maps a locked writable to SocketOpenError", () =>
     Effect.gen(function* () {
       const fake = makeFakeWebTransport();
-      const stream = fake.native.createBidirectionalStream();
-      const native = yield* Effect.promise(() => stream);
+      const native = yield* Effect.promise(() => fake.native.createBidirectionalStream());
       const writer = native.writable.getWriter();
       const socket = yield* WebTransportSocket.fromBidirectionalStream(Effect.succeed(native));
-      const error = yield* socket
-        .run(() => {})
-        .pipe(Effect.flip, Effect.ensuring(Effect.sync(() => writer.releaseLock())));
+      const error = yield* socket.reader.pipe(
+        Effect.flip,
+        Effect.ensuring(Effect.sync(() => writer.releaseLock())),
+      );
 
       expectSocketReason(error, Socket.SocketOpenError);
     }),
   );
 
-  it.effect("stream read failures fail the run as SocketReadError", () =>
+  it.effect("maps stream read failures to SocketReadError", () =>
     Effect.gen(function* () {
       const fake = makeFakeWebTransport();
       const socket = yield* WebTransportSocket.makeSocket().pipe(provideSession(fake));
-      const fiber = yield* Effect.forkChild(Effect.flip(socket.run(() => {})));
+      const { pull } = yield* socket.reader;
 
-      yield* waitFor(() => fake.bidis.length === 1);
       fake.bidis[0]!.fail(new Error("stream reset"));
-      const error = yield* Fiber.join(fiber);
+      const error = yield* Effect.flip(pull);
 
       expectSocketReason(error, Socket.SocketReadError);
     }),

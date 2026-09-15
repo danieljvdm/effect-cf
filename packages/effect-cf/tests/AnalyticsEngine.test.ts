@@ -499,8 +499,8 @@ test("AnalyticsEngine query config accepts custom config keys", async () => {
         queryLayerWithFetch(
           RequestAnalyticsQuery.layerConfig(
             AnalyticsEngine.queryConfig({
-              accountId: Config.string("ACCOUNT_ID"),
-              apiToken: Config.redacted("API_TOKEN"),
+              accountId: Config.String("ACCOUNT_ID"),
+              apiToken: Config.Redacted("API_TOKEN"),
             }),
           ),
           request,

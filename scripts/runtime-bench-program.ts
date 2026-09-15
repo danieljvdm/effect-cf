@@ -197,17 +197,17 @@ export const buildBenchmarks = Effect.fn("runtimeBench.buildBenchmarks")(
 const buildCommand = Command.make(
   "build",
   {
-    pipeline: Flag.choice("pipeline", ["all", ...pipelines]).pipe(
+    pipeline: Flag.Literals("pipeline", ["all", ...pipelines]).pipe(
       Flag.withDefault("all"),
       Flag.withDescription("Consumer production pipeline to build; all builds each pipeline."),
     ),
-    variant: Flag.choice("variant", ["all", ...variants]).pipe(
+    variant: Flag.Literals("variant", ["all", ...variants]).pipe(
       Flag.withDefault("all"),
       Flag.withDescription(
         "Runtime workload to build; no experimental library patches are applied.",
       ),
     ),
-    outDir: Flag.string("out-dir").pipe(
+    outDir: Flag.String("out-dir").pipe(
       Flag.withDefault(".runtime-bench"),
       Flag.withDescription(
         "Parent for a new unique build directory; existing builds are retained.",
@@ -226,7 +226,7 @@ const buildCommand = Command.make(
 const fixturesCommand = Command.make(
   "fixtures",
   {
-    outDir: Flag.string("out-dir").pipe(
+    outDir: Flag.String("out-dir").pipe(
       Flag.withDefault(".runtime-bench/fixtures"),
       Flag.withDescription(
         "Directory for deterministic JSON fixtures and independent expected totals.",

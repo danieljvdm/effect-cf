@@ -9,6 +9,7 @@ import {
   HttpServerResponse,
 } from "effect/unstable/http";
 import { OtlpExporter } from "effect/unstable/observability";
+import { NetAddress } from "effect/unstable/net";
 import process from "node:process";
 
 import { CloudflareOtlp, DurableObject, Worker, WorkerDefinition } from "../src/index";
@@ -62,8 +63,8 @@ const mapleSmokeTest = processEnv?.MAPLE_OTLP_SMOKE === "1" ? it.effect : it.eff
 
 const makeEnv = (env: Record<string, string> = {}): Cloudflare.Env => env;
 
-const getTcpPort = (address: HttpServer.Address): number => {
-  if (address._tag === "TcpAddress") {
+const getTcpPort = (address: NetAddress.SocketAddress): number => {
+  if (NetAddress.isInetAddress(address)) {
     return address.port;
   }
 

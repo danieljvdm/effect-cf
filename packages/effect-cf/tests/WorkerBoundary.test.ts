@@ -536,6 +536,46 @@ test("Worker.fetch suppresses HttpServerResponse bodies for HEAD requests", asyn
   expect(response.body).toBeNull();
 });
 
+test.each([
+  ["HEAD", 200],
+  ["GET", 204],
+  ["GET", 205],
+  ["GET", 304],
+] as const)("Worker.fetch releases omitted stream resources for %s %i", async (method, status) => {
+  const events: Array<string> = [];
+  const flushes: Array<string> = [];
+  const Live = Worker.make(Layer.empty, {
+    eventLayer: makeFlusherProbeLayer(flushes),
+    fetch: Effect.gen(function* () {
+      yield* Effect.acquireRelease(
+        Effect.sync(() => events.push("acquire")),
+        () => Effect.sync(() => events.push("release")),
+      );
+
+      return HttpServerResponse.stream(
+        Stream.fromEffect(
+          Effect.sync(() => {
+            events.push("read");
+
+            return new Uint8Array([1]);
+          }),
+        ),
+        { status, headers: { "x-test": "yes" } },
+      );
+    }),
+  });
+  const { executionContext, waitUntilPromises } = makeWaitUntilContext();
+  const worker = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
+  const response = await worker.fetch(new Request("https://worker.test/", { method }));
+
+  expect(response.status).toBe(status);
+  expect(response.headers.get("x-test")).toBe("yes");
+  expect(response.body).toBeNull();
+  expect(events).toEqual(["acquire", "release"]);
+  await Promise.all(waitUntilPromises);
+  expect(flushes).toEqual(["flush"]);
+});
+
 test("Worker.fetch keeps request-scoped resources alive while streaming bodies", async () => {
   const events: Array<string> = [];
 
@@ -691,7 +731,7 @@ test("Worker.fetch accepts HttpServerResponse values returned directly", async (
 test("Worker fetch handlers read Effect config from env by default", async () => {
   const Live = Worker.make(Layer.empty, {
     fetch: Effect.gen(function* () {
-      const value = yield* Config.string("APP_NAME");
+      const value = yield* Config.String("APP_NAME");
 
       return new Response(value);
     }),
@@ -708,7 +748,7 @@ test("Worker fetch handlers read Effect config from env by default", async () =>
 test("Durable Object fetch handlers read Effect config from env by default", async () => {
   const Live = DurableObject.make(Layer.empty, {
     fetch: Effect.gen(function* () {
-      const value = yield* Config.string("APP_NAME");
+      const value = yield* Config.String("APP_NAME");
 
       return new Response(value);
     }),
@@ -731,7 +771,7 @@ test("WorkerConfig.layerWith derives Effect config from non-scalar env bindings"
     ),
     {
       fetch: Effect.gen(function* () {
-        const value = yield* Config.string("DATABASE_URL");
+        const value = yield* Config.String("DATABASE_URL");
 
         return new Response(value);
       }),

@@ -33,19 +33,19 @@ export namespace WorkerConfig {
   export type Key = ScalarConfigKey;
 
   /** Read a scalar Cloudflare var or secret as a string. */
-  export const string = <const Name extends Key>(name: Name) => Config.string(name);
+  export const string = <const Name extends Key>(name: Name) => Config.String(name);
 
   /** Read a scalar Cloudflare secret as a redacted string. */
-  export const redacted = <const Name extends Key>(name: Name) => Config.redacted(name);
+  export const redacted = <const Name extends Key>(name: Name) => Config.Redacted(name);
 
   /** Read a scalar Cloudflare var or secret as a number. */
-  export const number = <const Name extends Key>(name: Name) => Config.number(name);
+  export const number = <const Name extends Key>(name: Name) => Config.Number(name);
 
   /** Read a scalar Cloudflare var or secret as an integer. */
-  export const integer = <const Name extends Key>(name: Name) => Config.int(name);
+  export const integer = <const Name extends Key>(name: Name) => Config.Int(name);
 
   /** Read a scalar Cloudflare var or secret as a boolean. */
-  export const boolean = <const Name extends Key>(name: Name) => Config.boolean(name);
+  export const boolean = <const Name extends Key>(name: Name) => Config.Boolean(name);
 
   export interface ProviderOptions {
     /**

@@ -37,7 +37,7 @@ const spansIn = (bodies: ReadonlyArray<string>) =>
   );
 
 const worker = ServiceBinding.makeClient<
-  { read(value: number): Promise<number>; drain(): Promise<ReadonlyArray<string>> },
+  RpcDefinition.Definition.ServerApi<typeof TraceWorker>,
   typeof TraceWorker
 >({ binding: "TRACE_WORKER", definition: TraceWorker, rpcTracing: true })(
   exports.TestTracingWorker,

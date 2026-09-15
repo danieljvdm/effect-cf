@@ -5,6 +5,7 @@ import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 
 import type * as CloudflareRpc from "../Rpc";
+import type * as RpcDefinition from "../RpcDefinition";
 import type { RpcInvocationInfo } from "../RpcTracing";
 
 type AnyArgs = Array<any>;
@@ -48,6 +49,24 @@ export type AsyncMethodSuccess<Api, Method extends keyof Api> = Api[Method] exte
 export type AsyncMethodCloudflareReturn<Api, Method extends keyof Api> = CloudflareRpc.Result<
   AsyncMethodSuccess<Api, Method>
 >;
+
+export type ClientMethodArgs<Api, Method extends keyof Api, Definition> = [
+  ...(Definition extends RpcDefinition.Definition.Any
+    ? Method extends keyof Definition["methods"]
+      ? RpcDefinition.Method.Args<Definition["methods"][Method]>
+      : never
+    : AsyncMethodArgs<Api, Method>),
+];
+
+export type ClientMethodSuccess<
+  Api,
+  Method extends keyof Api,
+  Definition,
+> = Definition extends RpcDefinition.Definition.Any
+  ? Method extends keyof Definition["methods"]
+    ? RpcDefinition.Method.Success<Definition["methods"][Method]>
+    : never
+  : AsyncMethodSuccess<Api, Method>;
 
 type RpcTargetValue = Schema.Schema.Type<typeof Schema.Unknown>;
 type RpcMethodOwner<Method extends PropertyKey> = {

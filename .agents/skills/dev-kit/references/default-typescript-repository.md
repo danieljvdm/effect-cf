@@ -27,7 +27,29 @@ compiler plugins at the configuration level where their file globs are correct.
 When Effect TypeScript-Go is selected, install its commit-matched compiler and
 language service according to the installed Effect guidance. Materialize any
 required patch helper into a repository-owned script so installs never depend on
-Dev Kit.
+Dev Kit. Enable `preferTypedSchemaDecoder` at `warning` severity in the Effect
+language-service diagnostics so already-typed inputs use the typed Schema decoder.
+The current Dev Kit compiler baseline is `@effect/tsgo@0.45.0` with
+`typescript@7.0.2`.
+
+Set these Effect language-service diagnostics to `"warning"` as well:
+
+```json
+{
+  "catchAllTagDispatchToCatchTag": "warning",
+  "catchConditionalRefailToCatchIf": "warning",
+  "provideLayerSucceedToProvideService": "warning",
+  "allOfMapToForEach": "warning",
+  "flatMapConditionalToFilterOrFail": "warning",
+  "optionMatchToFromOption": "warning",
+  "timeoutCatchTagToTimeoutOrElse": "warning",
+  "runOfExitToRunExit": "warning"
+}
+```
+
+Keep the smaller simplification rules at their default suggestion severity and
+`schemaSync` off. Retain `unsafeEffectTypeAssertion` as a warning. Apply suggested
+rewrites only when they preserve failure, interruption, and resource behavior.
 
 ## Workspaces
 

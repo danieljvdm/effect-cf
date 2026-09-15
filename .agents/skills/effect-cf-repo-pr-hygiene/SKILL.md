@@ -5,7 +5,7 @@ description: Use before creating or updating PRs, choosing PR titles, writing PR
 
 # PR Hygiene
 
-Make pull requests pass repository policy on the first try: use a Conventional Commit title, add a changeset when the published package changes, write consumer-quality release notes, and report validation accurately.
+Make pull requests pass repository policy on the first try: use a Conventional Commit title, add a changeset when the published package changes, and write consumer-quality release notes.
 
 ## PR title
 
@@ -41,7 +41,10 @@ Merge a `Version Packages` PR alone, last, and freshly refreshed: after any othe
 
 ## PR body
 
-Use `## Summary` and `## Validation` sections. List the validation commands actually run and explain anything skipped.
+Follow the `open-pull-request` skill for concise descriptions and relevant review
+evidence. Include calculated release versions when the PR has a changeset.
+Keep validation commands and routine test results in the agent handoff rather
+than the PR body; disclose material risks or limitations when they affect review.
 
 ## Before creating or updating a PR
 
@@ -49,6 +52,6 @@ Use `## Summary` and `## Validation` sections. List the validation commands actu
 2. Add or update the changeset when the published package changed.
 3. Run `vp check` and relevant tests, normally `vp test`.
 4. Use a Conventional Commit PR title.
-5. Ensure the PR body matches the actual change and validation.
+5. Ensure the PR body describes the final aggregate change and relevant limitations.
 
 Changesets release PRs from `changeset-release/*` are exempt from the title and changeset checks.

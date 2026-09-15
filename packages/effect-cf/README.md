@@ -120,12 +120,82 @@ Nested spans, concurrent fibers, and resumed work restore the appropriate span
 context. Cloudflare handles sampling and export; no exporter endpoint or flush
 is needed.
 
-String, number, and boolean attributes are forwarded. Other attributes, span
-events, and links remain Effect-local. Completion is recorded as `effect.exit`
-with `success`, `failure`, or `interrupted`; Cloudflare does not expose a setter
-for native outcome status. Effect IDs remain separate from Cloudflare's opaque
-trace/span IDs. Explicit external parents cannot join a Cloudflare trace by ID,
-and `root: true` starts under the invocation's captured context.
+Strings, finite numbers, and booleans are forwarded as native scalars. Null,
+plain objects (including null-prototype objects), and dense arrays are encoded
+as JSON strings under the original attribute key. For example,
+`{ routes: ["email", "sms"], retry: false }` becomes the string
+`'{"routes":["email","sms"],"retry":false}'`, not native object/array metadata.
+There is no flattening or generated attribute key per nested field.
+
+Each encoded value is limited to **4096 UTF-8 bytes, four container levels, and
+64 values including the root**. Keys and JSON punctuation count toward bytes.
+The entire value is dropped if it exceeds a limit or contains unsupported input:
+cycles, accessors, undefined, non-finite numbers, bigint, symbols, functions,
+class instances (including errors and Effect `Redacted`), or sparse arrays.
+Only own enumerable string keys and array elements are included; getters and
+`toJSON` are never called. Serialization/host errors are ignored. Dropped updates
+leave any previous native attribute value intact. Original Effect-local values
+remain available. These are adapter limits; Cloudflare can apply further limits.
+Existing scalar strings are forwarded unchanged.
+
+The adapter reserves **`effect.*`**; caller attributes in that namespace remain
+Effect-local and cannot overwrite its metadata. Existing annotations using that
+prefix should move to an application namespace if they need native export.
+
+| Native attribute                                  | Representation                                                                                               |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `effect.trace_id`, `effect.span_id`               | Effect IDs, distinct from Cloudflare's opaque IDs                                                            |
+| `effect.parent.trace_id`, `effect.parent.span_id` | Effect parent IDs, when present                                                                              |
+| `effect.span.kind`                                | Effect's internal/server/client/producer/consumer kind                                                       |
+| `effect.span.links`                               | JSON array of `{ traceId, spanId }` for the first eight links at span end, including `addLinks` updates      |
+| `effect.span.links_dropped`                       | Omitted link count; the candidate array is dropped whole if it exceeds the JSON limits                       |
+| `effect.exit`                                     | `success`, `failure`, or `interrupted`                                                                       |
+| `effect.error.kind`                               | On failure: `failure`, `defect`, `mixed` (typed failures and defects), or `interrupted` (interruptions only) |
+
+Link attributes remain local. Correlation and error metadata add no spans or
+logs. No Cause, error payload, message, stack, schema input, or request body is
+automatically serialized for errors. Optional diagnostics require an explicit
+sanitizing formatter:
+
+```ts
+const tracing = CloudflareTracer.layerWith({
+  formatError: () => ({
+    type: "OperationFailed",
+    message: "The operation could not complete",
+  }),
+  spanEvents: true,
+});
+
+export default Worker.make(Layer.empty, {
+  eventLayer: tracing,
+  fetch: Effect.sync(() => new Response("Hello")).pipe(Effect.withSpan("greet")),
+});
+```
+
+`formatError` receives the failed span's Cause, including interruption, and may
+return `undefined` or sanitized `type`/`message` strings. These become
+`effect.error.type` and `effect.error.message`; each is dropped above 4096 UTF-8
+bytes. Extra returned fields are ignored. The formatter runs once at end only
+for sampled failed spans; formatter exceptions cannot change the application exit.
+Do not pass through raw errors or use a full Cause formatter here.
+
+`spanEvents` defaults to `false`. Opting in forwards at most the first **16 event
+attempts per span** through `console.log` in that span's captured async context.
+Each structured log contains `effect.event` (the original name),
+`effect.event.time_unix_nano` (the original bigint timestamp as a decimal string),
+`effect.trace_id`, `effect.span_id`, and nested `attributes`. The complete log
+uses the same JSON limits, including its envelope; an unsupported/oversized log
+is dropped whole and still consumes one attempt. Unsampled and ended spans emit
+no event logs. Reentrant forwarding and console failures are suppressed. This
+adds log volume and may increase Observability costs; log retention/export also
+depends on your Cloudflare logging configuration.
+
+This is searchable correlation and optional **log forwarding**. Cloudflare's
+custom span API does not expose native IDs, manual parent wiring, an outcome
+setter, `addLink`, or `addEvent`. It does not create native graph edges, clickable
+links, native OTel span events, or cross-system propagation. Explicit external
+parents cannot join a Cloudflare trace by ID, and `root: true` starts under the
+invocation's captured context.
 
 This layer replaces the active Effect tracer. When combining it with
 `CloudflareOtlp`, select only `logs` and/or `metrics` in the OTLP layer. See

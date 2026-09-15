@@ -2,12 +2,12 @@
   "version": 1,
   "selector": "@effect-cf/repo#pr-hygiene",
   "name": "effect-cf-repo-pr-hygiene",
-  "baseDigest": "sha256:29213ca0b1179936b79a7293465fb36438c4d725e9d8c2630b431174af567899",
+  "baseDigest": "sha256:a2ddd8d0ac2669eff861ba226da37cbe06b51a6c148d0cf9a2841453b37470fe",
   "source": {
     "type": "package",
     "package": "@effect-cf/repo",
     "version": "0.0.0",
     "skill": "pr-hygiene",
-    "digest": "sha256:b3d50061943c0affefb82ecb9472f6d10104e7b72650d137d5a24e4a54b8028c"
+    "digest": "sha256:973452dccc19054a188cb530d5abf7dc2475db611705bb8516f01e148b241f91"
   }
 }

@@ -26,3 +26,7 @@ repository rules:
   `package.json` needs exactly one consumer-worded changeset; internal-only
   PRs (CI, docs, examples, tests, tooling) must not add one, and empty
   changesets are never acceptable.
+- Both packages remain pre-1.0: breaking changes and public additions use a
+  `minor` changeset, compatible fixes use `patch`. A `major` changeset means
+  `1.0.0` and requires an explicit user instruction to make that release.
+  Verify the calculated target versions and require them in the PR body.

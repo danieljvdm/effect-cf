@@ -1,6 +1,28 @@
 # effect-webtransport
 
+## 0.5.0
+
+### Minor Changes
+
+- Continue the pre-1.0 release line with the Effect RC 115 upgrade. This release
+  contains the same runtime changes as the accidentally published `1.0.0` and
+  replaces it as the intended current version.
+
+  Require Effect `^4.0.0-rc.115`. Replace `socket.run(handler)` with a scoped
+  `socket.reader` acquisition and a loop over `reader.pull`; acquire `socket.writer`
+  and use `writer.write` or `writer.writeAll` to send frames. Interrupted batches
+  stop sending remaining frames while the socket remains usable.
+
+  Every close, including peer FIN, fails with `SocketError` containing
+  `SocketCloseError`. Remove `closeCodeIsError`, `FromBidirectionalStreamOptions`,
+  and `defaultCloseCodeIsError`; retry the scoped read loop to reconnect.
+  WebSocket fallback options now accept `highWaterMark`. Use
+  `RpcSerialization.layerNdjson` or `RpcSerialization.layerSchemaBinary()` in
+  place of the MessagePack serialization removed upstream.
+
 ## 1.0.0
+
+This version was published accidentally. The package continues on the `0.x` line.
 
 ### Major Changes
 

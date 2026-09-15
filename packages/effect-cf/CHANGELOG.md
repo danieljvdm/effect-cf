@@ -1,8 +1,8 @@
 # effect-cf
 
-## 1.0.0
+## 0.43.0
 
-### Major Changes
+### Minor Changes
 
 - [#174](https://github.com/danieljvdm/effect-cf/pull/174) [`10cd4a9`](https://github.com/danieljvdm/effect-cf/commit/10cd4a9cd162ef38599a53c772cdb19f8e241605) Thanks [@danieljvdm](https://github.com/danieljvdm)! - ## effect-cf
 

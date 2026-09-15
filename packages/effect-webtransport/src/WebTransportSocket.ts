@@ -158,11 +158,12 @@ export const fromBidirectionalStream = <R>(
     const writeAll: Socket.Writer["writeAll"] = (chunks) =>
       latch.whenOpen(
         Effect.tryPromise({
-          try: async () => {
+          try: async (signal) => {
             const writer = current!.writer;
 
             for (const chunk of chunks) {
               await writer.ready;
+              signal.throwIfAborted();
               await writer.write(Predicate.isString(chunk) ? encoder.encode(chunk) : chunk);
             }
           },

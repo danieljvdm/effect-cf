@@ -201,6 +201,42 @@ describe("WebTransportSocket", () => {
     }),
   );
 
+  it.effect("interrupting a batch stops unsent frames and leaves the socket usable", () =>
+    Effect.gen(function* () {
+      const started = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const written: Array<Uint8Array> = [];
+      const readable = new ReadableStream<Uint8Array>();
+      const writable = new WritableStream<Uint8Array>({
+        write(chunk) {
+          written.push(chunk);
+          if (written.length === 1) {
+            started.resolve();
+
+            return release.promise;
+          }
+        },
+      });
+      const socket = yield* WebTransportSocket.fromBidirectionalStream(
+        Effect.succeed({ readable, writable }),
+      );
+
+      yield* socket.reader;
+      const writer = yield* socket.writer;
+      const batch = yield* Effect.forkChild(writer.writeAll([bytes(1), bytes(2), bytes(3)]));
+
+      yield* Effect.promise(() => started.promise);
+      yield* Fiber.interrupt(batch);
+      release.resolve();
+      yield* writer.write(bytes(4));
+      yield* Effect.yieldNow;
+
+      assert.deepStrictEqual(written, [bytes(1), bytes(4)]);
+      assert.isTrue(readable.locked);
+      assert.isTrue(writable.locked);
+    }),
+  );
+
   it.effect("maps stream-open failures to SocketOpenError with the typed cause", () =>
     Effect.gen(function* () {
       const fake = makeFakeWebTransport({ failBidiOpen: new Error("no streams left") });

@@ -39,6 +39,14 @@ Do not use `bun run`, `npm run`, `pnpm run`, or `yarn run` in this repository. D
 
 # Repo-local skills
 
+- Both publishable packages remain on the `0.x` release line. Use `minor` for
+  breaking changes and public additions, and `patch` for compatible fixes.
+  A `major` changeset moves a `0.x` package to `1.0.0`; never do this without the
+  user's explicit instruction to release `1.0.0`. Upstream version changes do
+  not determine this repository's release bump.
+- Check the calculated release versions with `vp run changeset status` before
+  opening a PR with a changeset, and state the exact target versions in its body.
+
 - Skills under `.agents/skills` are repository-owned. Each `.dev-kit-origin.json` records update
   provenance only. Check for upstream changes with
   `bunx @danieljvdm/dev-kit@latest skills status`; use `skills update <name>` for an unmodified

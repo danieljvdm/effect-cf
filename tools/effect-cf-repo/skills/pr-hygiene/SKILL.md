@@ -25,7 +25,15 @@ Add Effect-native Durable Object WebSocket helpers for typed hibernation attachm
 
 Internal-only PRs (CI, docs, examples, repository tooling, test-only changes) must not add a changeset. Never add an empty changeset: the release workflow publishes only when zero changeset files remain on main, so a leftover changeset silently converts a release into another Version Packages PR and the skipped version number is lost permanently.
 
-Choose `patch` for compatible fixes, `minor` for public additions, and `major` for breaking changes. Write release notes for consumers rather than describing implementation details.
+Both publishable packages remain on the `0.x` release line. Choose `patch` for
+compatible fixes and `minor` for public additions or breaking changes. A `major`
+changeset advances a `0.x` package to `1.0.0`; never use it without the user's
+explicit instruction to release `1.0.0`. Upstream version changes do not determine
+the local release bump. Write release notes for consumers.
+
+Run `vp run changeset status` before opening a PR with a changeset and state the
+exact target versions in the PR body. A `!` in the Conventional Commit title can
+still describe a breaking change within the `0.x` release line.
 
 ## Merging Version Packages PRs
 

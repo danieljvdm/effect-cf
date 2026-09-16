@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.44.1
+
+### Patch Changes
+
+- [#180](https://github.com/danieljvdm/effect-cf/pull/180) [`c94adc5`](https://github.com/danieljvdm/effect-cf/commit/c94adc506142d5d30095e9a05d449fe407c568b3) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Keep Durable Object native callbacks on microtask scheduling through completion so restoring the caller context cannot leave an input gate waiting on a blocked timer.
+
 ## 0.44.0
 
 ### Minor Changes

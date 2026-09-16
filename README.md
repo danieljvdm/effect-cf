@@ -152,6 +152,27 @@ Declare `REPORT_INDEX` as a KV namespace and `REPORTS` as an R2 bucket in Wrangl
 
 See the [package docs](packages/effect-cf) for installation, tracing, and more APIs, including D1, Queues, Workflows, and WebSockets.
 
+## effect-cf vs Alchemy
+
+[Alchemy](https://alchemy.run/) handles infrastructure and deployment. `effect-cf` goes deep on the runtime inside Workers and Durable Objects. Use them together: Alchemy provisions and deploys your application; `effect-cf` runs it.
+
+Alchemy also includes runtime support. These are the areas where `effect-cf` adds more:
+
+| Runtime concern                | Alchemy                                                                                                                                                                   | What effect-cf adds                                                                                                                                                              |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Native RPC boundaries          | [Inferred types without runtime validation](https://alchemy.run/cloudflare/apis/schemaless-rpc/#when-you-need-schemas); schema-validated RPC is also available over HTTP. | [Schema-checked arguments and results](packages/effect-cf/src/RpcDefinition.ts), serialization that preserves schema-defined values, and tagged validation errors on native RPC. |
+| Durable alarm jobs             | [Persistent named jobs](https://alchemy.run/cloudflare/compute/hibernatable-websockets/#schedule-a-future-broadcast-alarms) with application-managed handling.            | [Typed handlers, retry policies, acknowledgement after success, and atomic commits of application state and alarms](packages/effect-cf/src/DurableObjectAlarm.ts).               |
+| Restoring WebSocket state      | Persistent attachments; application code restores sessions.                                                                                                               | [Schema-validated session restoration](packages/effect-cf/src/DurableObjectWebSocket.ts) with explicit handling of invalid state.                                                |
+| RPC streams across hibernation | Typed RPC and WebSocket lifecycle hooks.                                                                                                                                  | [Idle connection recovery and opt-in stream resumption](packages/effect-cf/src/DurableObjectRpcWebSocket.ts) from application-provided checkpoints and replay logic.             |
+
+That runtime focus also covers:
+
+- **Resource lifetimes:** reuse application services, keep resources alive through Effect response streams, and scope background work separately.
+- **Cancellation and cleanup:** abort in-flight binding requests and wait for transaction rollback and workflow callback cleanup.
+- **Observability:** trace RPC calls across services and flush telemetry without changing handler results.
+
+The [outbox example](#worker--durable-object) demonstrates atomic state and alarm updates. Our [bundle checks](docs/bundle-analysis.md) also build `effect-cf` applications with Alchemy.
+
 ## Development
 
 Use Vite+ 0.3.0 and Bun 1.4.0. Run `vp upgrade` to update an existing global Vite+ installation. The root `packageManager` field selects Bun for local installs and CI.

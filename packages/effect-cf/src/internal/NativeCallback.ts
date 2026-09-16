@@ -50,7 +50,9 @@ export const runNativeCallback = Effect.fnUntraced(function* <A, E, R, B>(
       return yield* Effect.callback<B, unknown>((resume) => {
         try {
           nativePromise = operation((effect) =>
-            runPromise(Effect.provideContext(Effect.exit(effect), callbackContext)),
+            runPromise(Effect.provideContext(Effect.exit(effect), callbackContext), {
+              scheduler: callbackScheduler,
+            }),
           );
         } catch (cause) {
           resume(Effect.fail(cause));

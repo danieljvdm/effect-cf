@@ -1,6 +1,6 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import type { Layer, Schema as S } from "effect";
+import type { Layer } from "effect";
 
 import type * as Binding from "./Binding";
 import * as DurableObjectEntrypoint from "./DurableObject";
@@ -8,6 +8,7 @@ import type { DurableObjectHandler } from "./DurableObject";
 import * as DurableObjectNamespace from "./DurableObjectNamespace";
 import type * as Rpc from "./Rpc";
 import * as RpcDefinition from "./RpcDefinition";
+import type * as WireSchema from "./RpcSchema";
 import { recordDecodedArgs } from "./internal/RpcInvocation";
 import type { WorkerEnvironment } from "./Environment";
 
@@ -24,42 +25,19 @@ export type {
 
 type ErasedInvoke<E> = (...args: ReadonlyArray<unknown>) => Effect.Effect<unknown, E>;
 
-export type ServiceFreeSchema = S.Codec<any, any, never, never>;
-export type NativeSchema<Schema extends ServiceFreeSchema = ServiceFreeSchema> =
-  RpcDefinition.NativeSchema<Schema>;
+export type ServiceFreeSchema = RpcDefinition.ServiceFreeSchema;
 export type RpcSchema = RpcDefinition.RpcSchema;
-
 export interface Method<
   Args extends ReadonlyArray<RpcSchema> = ReadonlyArray<RpcSchema>,
   Success extends RpcSchema = RpcSchema,
-> {
-  readonly args: Args;
-  readonly success: Success;
-}
+> extends RpcDefinition.Method<Args, Success> {}
 
 export namespace Method {
   export type Any = Method<ReadonlyArray<RpcSchema>, RpcSchema>;
-
-  type ArgsFromSchemas<Args extends ReadonlyArray<RpcSchema>> = Args extends readonly []
-    ? []
-    : Args extends readonly [
-          infer Head extends RpcSchema,
-          ...infer Tail extends ReadonlyArray<RpcSchema>,
-        ]
-      ? [RpcDefinition.SchemaType<Head>, ...ArgsFromSchemas<Tail>]
-      : Array<RpcDefinition.SchemaType<Args[number]>>;
-
-  type EncodedArgsFromSchemas<Args extends ReadonlyArray<RpcSchema>> = {
-    [Index in keyof Args]: RpcDefinition.WireEncoded<Args[Index]>;
-  };
-
-  export type Args<Self extends Any> = ArgsFromSchemas<Self["args"]>;
-
-  export type EncodedArgs<Self extends Any> = EncodedArgsFromSchemas<Self["args"]>;
-
-  export type Success<Self extends Any> = RpcDefinition.SchemaType<Self["success"]>;
-
-  export type EncodedSuccess<Self extends Any> = RpcDefinition.WireEncoded<Self["success"]>;
+  export type Args<Self extends Any> = RpcDefinition.Method.Args<Self>;
+  export type EncodedArgs<Self extends Any> = RpcDefinition.Method.EncodedArgs<Self>;
+  export type Success<Self extends Any> = RpcDefinition.Method.Success<Self>;
+  export type EncodedSuccess<Self extends Any> = RpcDefinition.Method.EncodedSuccess<Self>;
 }
 
 export type Methods = Record<string, Method.Any>;
@@ -103,11 +81,7 @@ const reservedMethodNames = new Set<string>([
 /**
  * Promise-based client API derived from a Durable Object definition.
  */
-export type ServerApi<Self extends Definition.Any> = {
-  readonly [Key in keyof Self["methods"]]: (
-    ...args: Method.Args<Self["methods"][Key]>
-  ) => Promise<Method.Success<Self["methods"][Key]>>;
-};
+export type ServerApi<Self extends Definition.Any> = RpcDefinition.Definition.ServerApi<Self>;
 
 export type Api<Self extends Definition.Any> = Rpc.Provider<ServerApi<Self>, ReservedMethodName>;
 
@@ -122,7 +96,7 @@ export type Handlers<ROut, Self extends Definition.Any> = {
 
 type BoundaryHandlers<ROut, Self extends Definition.Any> = {
   readonly [Key in keyof Self["methods"]]: (
-    ...args: Array<unknown>
+    ...args: Method.EncodedArgs<Self["methods"][Key]>
   ) => DurableObjectHandler<ROut, Method.EncodedSuccess<Self["methods"][Key]>>;
 };
 
@@ -162,13 +136,13 @@ export type TagClass<
   Self,
   `effect-cf/DurableObject/${Id}`,
   DurableObjectNamespace.DurableObjectNamespaceEffectClient<
-    Api<Definition<Id, MethodDefinitions>>,
+    ServerApi<Definition<Id, MethodDefinitions>>,
     Definition<Id, MethodDefinitions>
   >
 > &
   DurableObjectNamespace.DurableObjectNamespaceStaticClient<
     Self,
-    Api<Definition<Id, MethodDefinitions>>,
+    ServerApi<Definition<Id, MethodDefinitions>>,
     Definition<Id, MethodDefinitions>
   > & {
     readonly id: Id;
@@ -177,7 +151,7 @@ export type TagClass<
       layer: Layer.Layer<ROut, LayerError, DurableObjectEntrypoint.RuntimeContext<NoInfer<RAlarm>>>,
       options: Options<ROut, Definition<Id, MethodDefinitions>, REvent, EventLayerError, RAlarm>,
     ) => DurableObjectEntrypoint.DurableObjectClass<
-      Handlers<ROut | REvent | RAlarm, Definition<Id, MethodDefinitions>>,
+      BoundaryHandlers<ROut | REvent | RAlarm, Definition<Id, MethodDefinitions>>,
       ROut | REvent | RAlarm
     >;
     readonly layer: (
@@ -192,21 +166,16 @@ export type TagClass<
 /**
  * Defines a single RPC method schema in a Durable Object definition.
  */
-export function method<Success extends RpcSchema>(definition: {
-  readonly success: Success;
-}): Method<readonly [], Success>;
-export function method<
-  const Args extends ReadonlyArray<RpcSchema>,
-  Success extends RpcSchema,
->(definition: { readonly args: Args; readonly success: Success }): Method<Args, Success>;
-export function method(definition: {
-  readonly args?: ReadonlyArray<RpcSchema>;
-  readonly success: RpcSchema;
-}): Method {
-  return RpcDefinition.method(definition);
-}
-
-export const native = RpcDefinition.native;
+// Keep the return type nameable through this public namespace for declaration emit.
+export const method: {
+  <Success extends RpcSchema>(definition: {
+    readonly success: Success & WireSchema.Check<NoInfer<Success>>;
+  }): Method<readonly [], Success>;
+  <const Args extends ReadonlyArray<RpcSchema>, Success extends RpcSchema>(definition: {
+    readonly args: Args & { readonly [K in keyof Args]: WireSchema.Check<NoInfer<Args[K]>> };
+    readonly success: Success & WireSchema.Check<NoInfer<Success>>;
+  }): Method<Args, Success>;
+} = RpcDefinition.method;
 
 const makeDefinition = <Id extends string, const MethodDefinitions extends Methods>(
   id: Id,
@@ -242,7 +211,7 @@ export const Tag =
     const definition = makeDefinition<Id, MethodDefinitions>(id, methods);
 
     type SelfDefinition = Definition<Id, MethodDefinitions>;
-    type ClientApi = Api<SelfDefinition>;
+    type ClientApi = ServerApi<SelfDefinition>;
     const serviceKey: `effect-cf/DurableObject/${Id}` = `effect-cf/DurableObject/${id}`;
     const tag = Context.Service<
       Self,
@@ -322,10 +291,12 @@ export const Tag =
       return yield* namespace.fetch(stub, input, init);
     });
 
-    const rpc = Effect.fnUntraced(function* <MethodName extends keyof ClientApi>(
+    const rpc = Effect.fnUntraced(function* <
+      MethodName extends RpcDefinition.Definition.MethodNames<SelfDefinition>,
+    >(
       stub: DurableObjectNamespace.DurableObjectStubClient<ClientApi>,
       methodName: MethodName,
-      ...args: ClientApi[MethodName] extends (...args: infer Args) => Promise<any> ? Args : never
+      ...args: RpcDefinition.Method.Args<SelfDefinition["methods"][MethodName]>
     ) {
       const namespace = yield* tag;
       // SAFETY: ClientApi derives every key and argument tuple from the definition. This internal
@@ -336,10 +307,12 @@ export const Tag =
       return yield* invokeRpc(stub, methodName, ...args);
     });
 
-    const call = Effect.fnUntraced(function* <MethodName extends keyof ClientApi>(
+    const call = Effect.fnUntraced(function* <
+      MethodName extends RpcDefinition.Definition.MethodNames<SelfDefinition>,
+    >(
       stub: DurableObjectNamespace.DurableObjectStubClient<ClientApi>,
       methodName: MethodName,
-      ...args: ClientApi[MethodName] extends (...args: infer Args) => Promise<any> ? Args : never
+      ...args: RpcDefinition.Method.Args<SelfDefinition["methods"][MethodName]>
     ) {
       const namespace = yield* tag;
       // SAFETY: ClientApi derives every key and argument tuple from the definition. This internal
@@ -351,10 +324,12 @@ export const Tag =
       return yield* invokeCall(stub, methodName, ...args);
     });
 
-    const scopedCall = Effect.fnUntraced(function* <MethodName extends keyof ClientApi>(
+    const scopedCall = Effect.fnUntraced(function* <
+      MethodName extends RpcDefinition.Definition.MethodNames<SelfDefinition>,
+    >(
       stub: DurableObjectNamespace.DurableObjectStubClient<ClientApi>,
       methodName: MethodName,
-      ...args: ClientApi[MethodName] extends (...args: infer Args) => Promise<any> ? Args : never
+      ...args: RpcDefinition.Method.Args<SelfDefinition["methods"][MethodName]>
     ) {
       const namespace = yield* tag;
       // SAFETY: ClientApi derives every key and argument tuple from the definition. This internal

@@ -427,7 +427,6 @@ export type {
   LayerOptions,
   Method,
   Methods,
-  NativeSchema,
   NoReservedMethods,
   Options,
   ReservedMethodName,
@@ -437,7 +436,7 @@ export type {
   TagClass,
 } from "./DurableObjectDefinition";
 
-export { implement, method, native, Tag } from "./DurableObjectDefinition";
+export { implement, method, Tag } from "./DurableObjectDefinition";
 
 // Preserve the original public type export while using a domain-role name internally.
 export type { DurableObjectRpcApi as "DurableObjectRpcShape" };

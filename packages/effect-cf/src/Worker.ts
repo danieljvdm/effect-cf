@@ -595,7 +595,6 @@ export type {
   LayerOptions,
   Method,
   Methods,
-  NativeSchema,
   NoReservedMethods,
   Options,
   RpcSchema,
@@ -604,7 +603,7 @@ export type {
   TagClass,
 } from "./WorkerDefinition";
 
-export { implement, method, native, Tag } from "./WorkerDefinition";
+export { implement, method, Tag } from "./WorkerDefinition";
 
 /** @deprecated Use {@link WorkerRpcContract}. */
 export { type WorkerRpcContract as "WorkerRpcShape" };

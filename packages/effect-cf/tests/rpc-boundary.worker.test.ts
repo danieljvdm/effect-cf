@@ -1,35 +1,74 @@
 /// <reference types="@cloudflare/vitest-plugin/types" />
 
 import { createExecutionContext, env } from "cloudflare:test";
-import { Effect, Layer, Predicate, Schema as S } from "effect";
+import { exports as workerExports } from "cloudflare:workers";
+import { Effect, Layer, Predicate, Result, Schema as S } from "effect";
 import { expect, test } from "vite-plus/test";
 
 import {
   DurableObject,
+  RpcSchema,
   DurableObjectNamespace,
   Rpc,
+  RpcDefinition,
   ServiceBinding,
   Worker,
   WorkerEnvironment,
 } from "../src/index";
 import { makePartialTestDouble } from "./TestDoubles";
+import { TestCounterDefinition, TestWorkerDefinition } from "./worker-fixture";
+
+test("explicit Result codecs expose the same wire contract through Worker and Durable Object bindings", async () => {
+  const namespace = env.TEST_COUNTER_DO;
+
+  if (namespace === undefined) throw new Error("TEST_COUNTER_DO binding is missing");
+
+  const stub = namespace.getByName("explicit-codecs");
+  const service = workerExports.TestWorkerEntrypoint;
+
+  await expect(service.calculate("41")).resolves.toEqual({ _tag: "Success", success: "42" });
+  await expect(stub.calculate("41")).resolves.toEqual({ _tag: "Success", success: "42" });
+  await expect(stub.calculate("-1")).resolves.toEqual({ _tag: "Failure", failure: "negative" });
+
+  const client = ServiceBinding.makeClient<
+    RpcDefinition.Definition.ServerApi<typeof TestWorkerDefinition>,
+    typeof TestWorkerDefinition
+  >({ binding: "TEST_WORKER", definition: TestWorkerDefinition })(service);
+  const program = Effect.gen(function* () {
+    const workerResult = yield* client.calculate(41);
+    const objectResult = yield* TestCounterDefinition.byName("explicit-codecs").calculate(41);
+    const failure = yield* client.calculate(-1);
+    const raw = yield* Rpc.resolve(yield* client.rpc("calculate", 41));
+
+    expect(workerResult).toEqual(Result.succeed(42));
+    expect(objectResult).toEqual(Result.succeed(42));
+    expect(failure).toEqual(Result.fail("negative"));
+    expect(Result.isResult(workerResult)).toBe(true);
+    expect(Result.isResult(raw)).toBe(false);
+    expect(raw).toEqual({ _tag: "Success", success: "42" });
+  }).pipe(
+    Effect.provide(
+      TestCounterDefinition.layer({ binding: "TEST_COUNTER_DO" }).pipe(
+        Layer.provide(Layer.succeed(WorkerEnvironment, env)),
+      ),
+    ),
+  );
+
+  await Effect.runPromise(program);
+});
 
 class Counter extends DurableObject.Tag<Counter>()("WorkerPoolCounter", {
   get: DurableObject.method({ success: S.Number }),
 }) {}
 
-const ByteReadableStream = S.declare(
-  (value): value is ReadableStream<Uint8Array> => value instanceof ReadableStream,
-);
-
 class StreamCounter extends DurableObject.Tag<StreamCounter>()("TestCounter", {
   consumeBytes: DurableObject.method({
-    args: [S.NumberFromString, DurableObject.native(ByteReadableStream)] as const,
+    args: [S.NumberFromString, RpcSchema.ReadableStream] as const,
     success: S.Number,
   }),
   produceBytes: DurableObject.method({
     args: [S.NumberFromString] as const,
-    success: DurableObject.native(ByteReadableStream),
+    success: RpcSchema.ReadableStream,
   }),
 }) {}
 
@@ -216,6 +255,7 @@ test("rpc decode failures keep their error tag across the Durable Object RPC bou
   }
 
   const stub = namespace.get(namespace.idFromName("rpc-boundary-decode-error"));
+  // @ts-expect-error Native callers send the encoded string; exercise invalid JavaScript input.
   const cause = await Effect.runPromise(Rpc.resolve(stub.increment(123)).pipe(Effect.flip));
 
   expect(Predicate.isTagged(cause, "RpcArgumentDecodeError")).toBe(true);

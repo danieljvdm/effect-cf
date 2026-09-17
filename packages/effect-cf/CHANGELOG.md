@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.45.0
+
+### Minor Changes
+
+- [#183](https://github.com/danieljvdm/effect-cf/pull/183) [`138d799`](https://github.com/danieljvdm/effect-cf/commit/138d799b15cac583a3cefce85bb7c4f56b442857) Thanks [@limwa](https://github.com/limwa)! - Preserve Cloudflare type imports in generated declarations and expose `MessageSendRequest` through `Queue` and `QueueDefinition` so consumers can emit portable declarations for inferred `sendBatch` values.
+
 ## 0.44.1
 
 ### Patch Changes

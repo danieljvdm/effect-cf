@@ -8,7 +8,7 @@ import type * as QueueDefinition from "./QueueDefinition";
 import * as ErrorMessage from "./internal/ErrorMessage";
 
 export type { BindingNotFoundError, BindingValidationError } from "./Binding";
-export type { QueueOperationError, QueueProducer } from "./QueueBinding";
+export type { MessageSendRequest, QueueOperationError, QueueProducer } from "./QueueBinding";
 
 export interface QueueMessage<Body> {
   readonly raw: globalThis.Message<unknown>;

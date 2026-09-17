@@ -5,4 +5,5 @@ export class Api extends QueueDefinition.Tag<Api>()("Api", { message: Schema.Str
 
 export const bindingLayer = Api.layer({ binding: "API" });
 export const sent = Api.send("hello");
+export const sendBatch = Api.sendBatch;
 export const raw = Api.rawUnsafe;

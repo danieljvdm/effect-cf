@@ -63,6 +63,13 @@ export interface LayerOptions {
   readonly loggerExcludeLogSpans?: boolean;
   readonly loggerMergeWithExisting?: boolean;
   readonly tracerContext?: <X>(primitive: Tracer.EffectPrimitive<X>, span: Tracer.AnySpan) => X;
+  /**
+   * Filter ended, head-sampled spans before serialization. Defaults to keeping all.
+   * Prefer leaf-span policies: removing parents can leave partial trace trees.
+   * Must be pure and bounded; a thrown exception keeps that span. Logs, metrics,
+   * sampling propagation and local span lifecycles are unaffected.
+   */
+  readonly tracerSpanFilter?: (span: OtlpTracer.ScopeSpan["spans"][number]) => boolean;
 }
 
 export interface WorkerLayerOptions extends LayerOptions {
@@ -117,8 +124,39 @@ const makeResource = (
   },
 });
 
-const serializationLayer = (serialization: Serialization | undefined) =>
-  serialization === "json" ? OtlpSerialization.layerJson : OtlpSerialization.layerProtobuf;
+const serializationLayer = (options: LayerOptions) => {
+  const base =
+    options.serialization === "json"
+      ? OtlpSerialization.layerJson
+      : OtlpSerialization.layerProtobuf;
+  const filter = options.tracerSpanFilter;
+
+  if (filter === undefined) return base;
+
+  return Layer.effect(
+    OtlpSerialization.OtlpSerialization,
+    Effect.map(OtlpSerialization.OtlpSerialization, (serialization) => ({
+      ...serialization,
+      traces: (data: OtlpTracer.TraceData) =>
+        serialization.traces({
+          ...data,
+          resourceSpans: data.resourceSpans.map((resource) => ({
+            ...resource,
+            scopeSpans: resource.scopeSpans.map((scope) => ({
+              ...scope,
+              spans: scope.spans.filter((span) => {
+                try {
+                  return filter(span);
+                } catch {
+                  return true;
+                }
+              }),
+            })),
+          })),
+        }),
+    })),
+  ).pipe(Layer.provide(base));
+};
 
 type SignalLayer = ReturnType<typeof OtlpLogger.layerFromConfig>;
 
@@ -176,7 +214,7 @@ const makeLayer = (
 
   return mergeSignalLayers(layers).pipe(
     Layer.provide(cloudflareConfigProviderLayer),
-    Layer.provide(serializationLayer(options.serialization)),
+    Layer.provide(serializationLayer(options)),
     Layer.provide(FetchHttpClient.layer),
   );
 };

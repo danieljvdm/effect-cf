@@ -152,6 +152,53 @@ class OtlpCollector extends Context.Service<
 }
 
 layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
+  // https://reve-r6.sentry.io/explore/traces/trace/09c140a052588528d87d0ab131c5cbcc
+  it.effect.each(["json", "protobuf"] as const)(
+    "filters ended spans before %s export",
+    (serialization) =>
+      Effect.gen(function* () {
+        const collector = yield* OtlpCollector;
+        const statuses: Array<number> = [];
+
+        yield* Effect.gen(function* () {
+          yield* Effect.void.pipe(Effect.withSpan("discard.success"));
+          yield* Effect.fail("failure").pipe(Effect.withSpan("retain.failure"), Effect.exit);
+          yield* Effect.void.pipe(Effect.withSpan("retain.filter.failure"));
+        }).pipe(
+          Effect.withSpan("retain.root"),
+          Effect.provide(
+            CloudflareOtlp.layer({
+              signals: ["traces"],
+              resource: { serviceName: "span-filter-test" },
+              serialization,
+              tracerSpanFilter: (span) => {
+                statuses.push(span.status.code);
+                if (span.name === "retain.filter.failure") throw new Error("Filter failed");
+
+                return span.name !== "discard.success";
+              },
+            }).pipe(
+              Layer.provide(
+                ConfigProvider.layer(
+                  ConfigProvider.fromUnknown({
+                    OTEL_TRACES_EXPORTER: "otlp",
+                    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.endpoint}/v1/traces`,
+                  }),
+                ),
+              ),
+            ),
+          ),
+        );
+        const request = yield* collector.nextRequest;
+
+        expect(request.body).not.toContain("discard.success");
+        expect(request.body).toContain("retain.failure");
+        expect(request.body).toContain("retain.filter.failure");
+        expect(request.body).toContain("retain.root");
+        expect(statuses).toEqual([1, 2, 1, 1]);
+      }),
+  );
+
   it.effect("reads standard OTEL config from the ambient ConfigProvider", () =>
     Effect.gen(function* () {
       const collector = yield* OtlpCollector;

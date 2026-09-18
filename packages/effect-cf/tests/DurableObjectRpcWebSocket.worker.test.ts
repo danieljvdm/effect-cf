@@ -1,13 +1,82 @@
 import { env } from "cloudflare:workers";
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { expect, test } from "@effect/vitest";
-import { Effect, Exit, Layer, Option, Predicate, Queue, Schema, Scope } from "effect";
+import { Context, Effect, Exit, Layer, Option, Predicate, Queue, Schema, Scope } from "effect";
 import * as RpcClient from "effect/unstable/rpc/RpcClient";
+import type { RpcClientError } from "effect/unstable/rpc/RpcClientError";
 import * as RpcMessage from "effect/unstable/rpc/RpcMessage";
 import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
 import * as Socket from "effect/unstable/socket/Socket";
 
+import * as RpcWebSocketClient from "../src/RpcWebSocketClient";
 import { HibernationRpcs, TestHibernationRpcDurableObject } from "./worker-fixture";
+
+class HibernationClient extends Context.Service<
+  HibernationClient,
+  RpcClient.FromGroup<typeof HibernationRpcs, RpcClientError>
+>()("test/HibernationClient") {}
+
+test.each(["success", "failure"])(
+  "the client layer shares and releases its socket on %s without a caller scope",
+  async (outcome) => {
+    const namespace = env.TEST_HIBERNATION_RPC_DO;
+
+    if (namespace === undefined) {
+      throw new Error("TEST_HIBERNATION_RPC_DO binding is missing");
+    }
+
+    const stub = namespace.getByName(`client-layer-${crypto.randomUUID()}`);
+    const response = await stub.fetch(
+      new Request("https://example.test/rpc", { headers: { Upgrade: "websocket" } }),
+    );
+    const socket = response.webSocket;
+
+    if (socket === null) {
+      throw new Error("Durable Object did not return a websocket upgrade");
+    }
+
+    socket.accept();
+
+    const closed = waitForClose(socket);
+    let connections = 0;
+    const clientLayer = RpcWebSocketClient.layer(
+      HibernationClient,
+      HibernationRpcs,
+      "wss://example.test/rpc",
+    ).pipe(
+      Layer.provide(
+        Layer.succeed(Socket.WebSocketConstructor, (url) => {
+          expect(url).toBe("wss://example.test/rpc");
+          connections++;
+
+          return socket;
+        }),
+      ),
+    );
+
+    const program = Effect.gen(function* () {
+      const client = yield* HibernationClient;
+      const results = yield* Effect.all(
+        [client.HibernationPing({ nonce: "one" }), client.HibernationPing({ nonce: "two" })],
+        { concurrency: "unbounded" },
+      );
+
+      expect(results.map((result) => result.nonce)).toEqual(["one", "two"]);
+      yield* Effect.promise(() => evictDurableObject(stub, { webSockets: "hibernate" }));
+      expect((yield* client.HibernationPing({ nonce: "awake" })).nonce).toBe("awake");
+      expect(connections).toBe(1);
+
+      if (outcome === "failure") {
+        return yield* Effect.fail("stop");
+      }
+    }).pipe(Effect.provide(clientLayer));
+
+    const exit = await Effect.runPromiseExit(program);
+
+    expect(exit).toEqual(outcome === "success" ? Exit.void : Exit.fail("stop"));
+    await expect(closed).resolves.toMatchObject({ code: 1000 });
+  },
+);
 
 interface RpcExit {
   readonly _tag: "Exit";

@@ -57,6 +57,11 @@
       "import": "./dist/Vitest.mjs",
       "default": "./dist/Vitest.mjs"
     },
+    "./rpc-websocket-client": {
+      "types": "./dist/RpcWebSocketClient.d.mts",
+      "import": "./dist/RpcWebSocketClient.mjs",
+      "default": "./dist/RpcWebSocketClient.mjs"
+    },
     "./package.json": "./package.json"
   },
   "publishConfig": {

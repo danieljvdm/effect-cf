@@ -30,6 +30,7 @@ export * as Rpc from "./Rpc";
 export * as RpcDefinition from "./RpcDefinition";
 export * as RpcTracing from "./RpcTracing";
 export * as RpcTargets from "./RpcTargets";
+export * as RpcWebSocketClient from "./RpcWebSocketClient";
 export * as ServiceBinding from "./ServiceBinding";
 export * as Vectorize from "./Vectorize";
 export * as WebTransport from "./WebTransport";

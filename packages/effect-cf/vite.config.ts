@@ -48,6 +48,7 @@ export default defineConfig({
       "src/Mcp.ts",
       "src/Sandbox.ts",
       "src/Vitest.ts",
+      "src/RpcWebSocketClient.ts",
     ],
     deps: {
       neverBundle: ["cloudflare:test", "cloudflare:workers", "cloudflare:workflows"],

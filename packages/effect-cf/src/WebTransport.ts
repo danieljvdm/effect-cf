@@ -29,7 +29,6 @@
  * {@link inboundTransport} decodes the HTTP/3-relevant request metadata that
  * the edge does provide.
  */
-import type { Request as CloudflareRequest } from "@cloudflare/workers-types";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -61,9 +60,8 @@ const decodeInboundTransport = S.decodeUnknownResult(InboundTransport);
  * dev` or when a Worker invokes another Worker directly) or does not match
  * the expected shape.
  */
-export const inboundTransport = (
-  request: Pick<CloudflareRequest, "cf">,
-): Option.Option<InboundTransport> => Result.getSuccess(decodeInboundTransport(request.cf));
+export const inboundTransport = (request: Pick<Request, "cf">): Option.Option<InboundTransport> =>
+  Result.getSuccess(decodeInboundTransport(request.cf));
 
 export const isHttp3 = (transport: InboundTransport): boolean =>
   transport.clientQuicRtt !== undefined || transport.httpProtocol === "HTTP/3";

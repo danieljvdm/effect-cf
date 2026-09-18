@@ -13,3 +13,8 @@ export const metrics = Jobs.metrics();
 export const raw = Jobs.rawUnsafe;
 export const send = Jobs.send;
 export const sendBatch = Jobs.sendBatch;
+
+export const delayed = Jobs.send({ jobId: "one" }, { delaySeconds: 1 });
+
+// @ts-expect-error Queue delays must be numbers.
+export const invalidDelay = Jobs.send({ jobId: "one" }, { delaySeconds: "invalid" });

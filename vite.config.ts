@@ -14,6 +14,7 @@ const toolIgnorePatterns = [
   ".repos/**",
   ".vite-hooks/_/**",
   "oxlint/plugin-anti-slop.js",
+  "packages/effect-cf/tests/fixtures/declaration-emit/worker-configuration.d.ts",
 ];
 
 const recommendedOxfmtConfig = {

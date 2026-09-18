@@ -1,4 +1,3 @@
-import type { ExportedHandler, KVNamespace } from "@cloudflare/workers-types";
 import { Effect, Option, Schema } from "effect";
 import { Kv } from "effect-cf";
 

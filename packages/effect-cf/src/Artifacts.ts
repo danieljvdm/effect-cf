@@ -1,11 +1,3 @@
-import type {
-  ArtifactsCreateRepoResult as CloudflareArtifactsCreateRepoResult,
-  ArtifactsCreateTokenResult as CloudflareArtifactsCreateTokenResult,
-  ArtifactsErrorCode as CloudflareArtifactsErrorCode,
-  ArtifactsRepoInfo as CloudflareArtifactsRepoInfo,
-  ArtifactsTokenInfo as CloudflareArtifactsTokenInfo,
-  ArtifactsTokenListResult as CloudflareArtifactsTokenListResult,
-} from "@cloudflare/workers-types";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -56,7 +48,7 @@ export const artifactsErrorCodes = [
   "UPSTREAM_UNAVAILABLE",
   "MEMORY_LIMIT",
   "INTERNAL_ERROR",
-] as const satisfies ReadonlyArray<CloudflareArtifactsErrorCode>;
+] as const satisfies ReadonlyArray<ArtifactsErrorCode>;
 
 export const artifactsErrorNumericCodes = {
   ALREADY_EXISTS: 10201,
@@ -71,9 +63,9 @@ export const artifactsErrorNumericCodes = {
   UPSTREAM_UNAVAILABLE: 10401,
   MEMORY_LIMIT: 10402,
   INTERNAL_ERROR: 10400,
-} as const satisfies Readonly<Record<CloudflareArtifactsErrorCode, number>>;
+} as const satisfies Readonly<Record<ArtifactsErrorCode, number>>;
 
-export type ArtifactsErrorCode = CloudflareArtifactsErrorCode;
+export type ArtifactsErrorCode = globalThis.ArtifactsErrorCode;
 
 export class ArtifactsOperationError extends Data.TaggedError("ArtifactsOperationError")<{
   readonly binding: string;
@@ -105,9 +97,9 @@ export type ArtifactsTokenState = "active" | "expired" | "revoked";
 
 export type ArtifactsRepoStatus = "ready" | "importing" | "forking";
 
-export type ArtifactsRepoInfo = CloudflareArtifactsRepoInfo;
+export type ArtifactsRepoInfo = globalThis.ArtifactsRepoInfo;
 
-export type ArtifactsCreateRepoResult = Readonly<CloudflareArtifactsCreateRepoResult>;
+export type ArtifactsCreateRepoResult = Readonly<globalThis.ArtifactsCreateRepoResult>;
 
 export interface ArtifactsRepoListEntry extends ArtifactsRepoInfo {
   readonly status: ArtifactsRepoStatus;
@@ -120,13 +112,13 @@ export interface ArtifactsRepoListResult {
 }
 
 /** Result of creating a repository token. */
-export type ArtifactsCreateTokenResult = CloudflareArtifactsCreateTokenResult;
+export type ArtifactsCreateTokenResult = globalThis.ArtifactsCreateTokenResult;
 
 /** Repository token metadata, excluding its plaintext secret. */
-export type ArtifactsTokenInfo = CloudflareArtifactsTokenInfo;
+export type ArtifactsTokenInfo = globalThis.ArtifactsTokenInfo;
 
 /** Repository token list result. */
-export type ArtifactsTokenListResult = CloudflareArtifactsTokenListResult;
+export type ArtifactsTokenListResult = globalThis.ArtifactsTokenListResult;
 
 /** Identity recorded for a Git commit author or committer. */
 export interface ArtifactsCommitIdentity {

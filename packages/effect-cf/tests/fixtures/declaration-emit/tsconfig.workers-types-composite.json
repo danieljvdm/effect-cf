@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.workers-types.json",
+  "compilerOptions": {
+    "composite": true
+  },
+  "include": ["src/*.ts"]
+}

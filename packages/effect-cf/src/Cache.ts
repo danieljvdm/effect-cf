@@ -1,9 +1,3 @@
-import type {
-  Cache as CloudflareCache,
-  CacheQueryOptions as CloudflareCacheQueryOptions,
-  CacheStorage as CloudflareCacheStorage,
-  RequestInfo as CloudflareRequestInfo,
-} from "@cloudflare/workers-types";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -12,9 +6,9 @@ import * as Option from "effect/Option";
 
 import * as ErrorMessage from "./internal/ErrorMessage";
 
-export type CacheRequest = CloudflareRequestInfo | URL;
+export type CacheRequest = RequestInfo | URL;
 
-export type CacheQueryOptions = CloudflareCacheQueryOptions;
+export type CacheQueryOptions = globalThis.CacheQueryOptions;
 
 export type CacheOperation = "open" | "match" | "put" | "delete";
 
@@ -42,13 +36,13 @@ export interface CacheClient {
     request: CacheRequest,
     options?: CacheQueryOptions,
   ) => Effect.Effect<boolean, CacheOperationError>;
-  readonly rawUnsafe: Effect.Effect<CloudflareCache>;
+  readonly rawUnsafe: Effect.Effect<Cache>;
 }
 
 export interface CacheStorageClient {
   readonly default: CacheClient;
   readonly open: (name: string) => Effect.Effect<CacheClient, CacheOperationError>;
-  readonly rawUnsafe: Effect.Effect<CloudflareCacheStorage>;
+  readonly rawUnsafe: Effect.Effect<globalThis.CacheStorage>;
 }
 
 export class CacheStorage extends Context.Service<CacheStorage, CacheStorageClient>()(
@@ -72,7 +66,7 @@ const spanOptions = (cache: string, operation: CacheOperation) => ({
   attributes: { cache, operation },
 });
 
-export const makeCacheClient = (cache: CloudflareCache, name = "default"): CacheClient => ({
+export const makeCacheClient = (cache: Cache, name = "default"): CacheClient => ({
   name,
   match: Effect.fn(
     "Cache.match",
@@ -97,7 +91,7 @@ export const makeCacheClient = (cache: CloudflareCache, name = "default"): Cache
   rawUnsafe: Effect.succeed(cache),
 });
 
-export const makeClient = (storage: CloudflareCacheStorage): CacheStorageClient => ({
+export const makeClient = (storage: globalThis.CacheStorage): CacheStorageClient => ({
   default: makeCacheClient(storage.default),
   open: (name) =>
     tryCachePromise(name, "open", () => storage.open(name)).pipe(
@@ -107,7 +101,7 @@ export const makeClient = (storage: CloudflareCacheStorage): CacheStorageClient 
   rawUnsafe: Effect.succeed(storage),
 });
 
-export const layerFrom = (storage: CloudflareCacheStorage): Layer.Layer<CacheStorage> =>
+export const layerFrom = (storage: globalThis.CacheStorage): Layer.Layer<CacheStorage> =>
   Layer.succeed(CacheStorage, makeClient(storage));
 
 export const layer: Layer.Layer<CacheStorage> = Layer.sync(CacheStorage, () => makeClient(caches));

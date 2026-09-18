@@ -54,7 +54,7 @@
     },
     "packages/effect-cf": {
       "name": "effect-cf",
-      "version": "0.43.0",
+      "version": "0.46.0",
       "devDependencies": {
         "@cloudflare/computer": "0.2.0",
         "@cloudflare/containers": "catalog:",

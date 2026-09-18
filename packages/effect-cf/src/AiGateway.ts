@@ -3,7 +3,6 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as S from "effect/Schema";
 import type { Layer } from "effect";
-import type { AiGateway as CloudflareAiGateway } from "@cloudflare/workers-types";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
@@ -30,14 +29,14 @@ export interface AiGatewayDefinition {
   readonly accountId?: string;
 }
 
-export type AiGatewayBinding = CloudflareAiGateway;
+export type AiGatewayBinding = AiGateway;
 type AiGatewayRunData = Parameters<AiGatewayBinding["run"]>[0];
 export type AiGatewayPatchLog = Parameters<AiGatewayBinding["patchLog"]>[1];
 export type AiGatewayLog = Awaited<ReturnType<AiGatewayBinding["getLog"]>>;
 export type AiGatewayProvider = NonNullable<Parameters<AiGatewayBinding["getUrl"]>[0]>;
 export type AiGatewayUniversalRequest = Exclude<AiGatewayRunData, ReadonlyArray<unknown>>;
 export type AiGatewayHeaders = NonNullable<AiGatewayUniversalRequest["headers"]>;
-export type AiGatewayRunOptions = Parameters<CloudflareAiGateway["run"]>[1];
+export type AiGatewayRunOptions = Parameters<AiGatewayBinding["run"]>[1];
 type AiGatewayBindingCandidate = Parameters<typeof isWorkersAiBinding>[0];
 
 const AiGatewayMetadata = S.Record(S.String, S.Union([S.String, S.Number, S.Boolean, S.Null]));

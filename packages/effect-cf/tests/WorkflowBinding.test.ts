@@ -1,12 +1,11 @@
-import type {
-  Workflow as CloudflareWorkflow,
-  WorkflowInstance as CloudflareWorkflowInstance,
-} from "@cloudflare/workers-types";
 import { assert, it } from "@effect/vitest";
 import { Effect, Option, Schema as S } from "effect";
 
 import { WorkflowBinding } from "../src/index";
 import { makePartialTestDouble } from "./TestDoubles";
+
+type CloudflareWorkflow<Payload> = Workflow<Payload>;
+type CloudflareWorkflowInstance = WorkflowInstance;
 
 it.effect("returns an errored status with Option.none output when output is null", () => {
   const workflowError = { name: "Error", message: "step failed" };

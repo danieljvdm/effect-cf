@@ -1,9 +1,3 @@
-import type {
-  EmailAddress as CloudflareEmailAddress,
-  EmailAttachment as CloudflareEmailAttachment,
-  EmailSendResult as CloudflareEmailSendResult,
-  SendEmail as CloudflareSendEmail,
-} from "@cloudflare/workers-types";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -103,11 +97,11 @@ export interface EmailDefinition {
   readonly binding: string;
 }
 
-export type EmailAddress = CloudflareEmailAddress;
-export type EmailAttachment = CloudflareEmailAttachment;
-export type EmailMessageBuilder = Parameters<CloudflareSendEmail["send"]>[0];
-export type EmailSendResult = CloudflareEmailSendResult;
-export type EmailBinding = CloudflareSendEmail;
+export type EmailAddress = globalThis.EmailAddress;
+export type EmailAttachment = globalThis.EmailAttachment;
+export type EmailSendResult = globalThis.EmailSendResult;
+export type EmailMessageBuilder = Parameters<SendEmail["send"]>[0];
+export type EmailBinding = SendEmail;
 export type EmailRecipients = string | EmailAddress | ReadonlyArray<string | EmailAddress>;
 export type EmailSendError = EmailOperationError | EmailValidationError;
 type EmailFieldCandidate = Parameters<typeof Predicate.isUnknown>[0];

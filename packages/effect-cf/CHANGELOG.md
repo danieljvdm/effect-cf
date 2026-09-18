@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.46.1
+
+### Patch Changes
+
+- [#188](https://github.com/danieljvdm/effect-cf/pull/188) [`731938e`](https://github.com/danieljvdm/effect-cf/commit/731938ec635355c769f451b6153f8eb806ad98c1) Thanks [@limwa](https://github.com/limwa)! - Fix declaration portability by referencing consumer-provided Cloudflare Workers globals instead of importing `@cloudflare/workers-types`.
+
 ## 0.46.0
 
 ### Minor Changes

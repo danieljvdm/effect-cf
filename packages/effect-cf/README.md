@@ -214,40 +214,6 @@ Applications own SERVER spans. Override the exported `DurableObject.RunSymbol` o
 
 This metadata belongs only to the live native call. Do not store it in domain envelopes, alarms, queues, or WebSocket attachments, or reuse it for resumed work. Sampling and exporter configuration remain application choices.
 
-## Native event failures
-
-Pass `RunOptions.onFailure` through a `Worker.RunSymbol`, `DurableObject.RunSymbol`,
-or `Workflow.RunSymbol` override to observe the complete failure `Cause` after event
-cleanup and before native rejection. This includes runtime/event-layer acquisition
-failures, finalizer defects, and interruption. The Promise keeps its original
-rejection value; the observer runs once per failed invocation, never on success.
-
-```ts
-import { Cause, Effect, Layer } from "effect";
-import { Worker } from "effect-cf";
-
-declare const report: (cause: Cause.Cause<unknown>) => void | Promise<void>;
-const Base = Worker.make(Layer.empty, { rpc: { read: () => Effect.fail("unavailable") } });
-
-export class Api extends Base {
-  override [Worker.RunSymbol]<A, E>(
-    effect: Effect.Effect<A, E, Effect.Services<Worker.WorkerRpcHandler<never>>>,
-    options: Worker.RunOptions = {},
-  ): Promise<A> {
-    return super[Worker.RunSymbol](effect, { ...options, onFailure: report });
-  }
-}
-```
-
-Observers run outside Effect and the closed event scope. Returned Promises are
-awaited and must settle; throws/rejections are ignored. Consumers own reporting,
-privacy, deduplication, and interruption filtering.
-
-Only failures reaching this event boundary are observed. HTTP failures already
-rendered as responses, streamed-body/background cleanup, base-runtime disposal,
-Durable Object constructor prebuild failures, and causes already reduced inside
-Workflow step callbacks remain outside it. Keep reporting at those owning boundaries.
-
 ## API
 
 See the [exports](src/index.ts) and [tests](https://github.com/danieljvdm/effect-cf/tree/main/packages/effect-cf/tests) for the remaining APIs.

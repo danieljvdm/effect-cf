@@ -1,5 +1,15 @@
 # effect-cf
 
+## 0.47.0
+
+### Minor Changes
+
+- [#190](https://github.com/danieljvdm/effect-cf/pull/190) [`a3ae008`](https://github.com/danieljvdm/effect-cf/commit/a3ae008af959d08eec649042edc9309982354a0d) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add `RpcWebSocketClient.layer` and the browser-safe `effect-cf/rpc-websocket-client` entrypoint. Provide a typed client service and its WebSocket connection for an application or session without requiring callers to wrap client construction in `Effect.scoped`. The layer closes the connection when its lifetime ends.
+
+  Persist the RPC serializer's content type in Durable Object WebSocket attachments and reset restored connections whose saved content type differs from the server's, preventing incompatible frames from reaching RPC handlers after a deployment. Existing attachments without serializer metadata remain supported.
+
+  Acknowledge WebSocket close events and ignore late messages on closed connections so client scope cleanup completes the close handshake.
+
 ## 0.46.1
 
 ### Patch Changes

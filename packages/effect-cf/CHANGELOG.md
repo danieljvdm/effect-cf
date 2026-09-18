@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.46.0
+
+### Minor Changes
+
+- [#186](https://github.com/danieljvdm/effect-cf/pull/186) [`d2b4d1f`](https://github.com/danieljvdm/effect-cf/commit/d2b4d1f1b376c1d7c33d798782d25c3e243140bf) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add opt-in `RunOptions.onFailure` observers for Worker, Durable Object, and Workflow entrypoints. Observe complete failure causes after event cleanup, including runtime acquisition failures, while preserving native rejection values. Workflow entrypoints now expose `RunSymbol` for instrumentation. Observer throws and rejections do not change the event outcome.
+
 ## 0.45.0
 
 ### Minor Changes

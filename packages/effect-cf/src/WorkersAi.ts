@@ -5,18 +5,6 @@ import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as S from "effect/Schema";
 import type { Layer } from "effect";
-import type {
-  Ai as CloudflareAi,
-  AiAsyncBatchResponse,
-  AiGateway as CloudflareAiGateway,
-  AiModelListType,
-  AiModels,
-  AiModelsSearchObject,
-  AiModelsSearchParams,
-  AiOptions,
-  AiTextEmbeddingsInput,
-  Ai_Cf_Qwen_Qwen3_Embedding_0_6B_Input,
-} from "@cloudflare/workers-types";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
@@ -40,8 +28,7 @@ export interface WorkersAiDefinition {
   readonly binding: string;
 }
 
-export type WorkersAiBinding<ModelList extends AiModelListType = AiModels> =
-  CloudflareAi<ModelList>;
+export type WorkersAiBinding<ModelList extends AiModelListType = AiModels> = Ai<ModelList>;
 export type WorkersAiOptions = AiOptions;
 export type WorkersAiModelsSearchParams = AiModelsSearchParams;
 export type WorkersAiModelsSearchObject = AiModelsSearchObject;
@@ -113,9 +100,7 @@ export interface WorkersAiClient<ModelList extends AiModelListType = AiModels> {
   readonly models: (
     params?: WorkersAiModelsSearchParams,
   ) => Effect.Effect<ReadonlyArray<WorkersAiModelsSearchObject>, WorkersAiOperationError>;
-  readonly gateway: (
-    gatewayId: string,
-  ) => Effect.Effect<CloudflareAiGateway, WorkersAiOperationError>;
+  readonly gateway: (gatewayId: string) => Effect.Effect<AiGateway, WorkersAiOperationError>;
   readonly rawUnsafe: Effect.Effect<WorkersAiBinding<ModelList>>;
   readonly definition: WorkersAiDefinition;
 }

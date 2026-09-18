@@ -8,6 +8,28 @@ npm install effect-cf "effect@^4.0.0-rc.115"
 
 The repository tests against workerd `1.20260825.1` and `@cloudflare/workers-types@5.20260825.1`. Use `compatibility_date: "2026-08-25"` in Wrangler.
 
+## TypeScript runtime types
+
+`effect-cf` uses Cloudflare Workers runtime types as ambient globals. Worker applications should run `wrangler types` and include the generated `worker-configuration.d.ts` in their TypeScript project.
+
+```json
+{
+  "compilerOptions": {
+    "types": ["./worker-configuration.d.ts"]
+  }
+}
+```
+
+Shared libraries without their own Wrangler configuration can install `@cloudflare/workers-types` as a development dependency and load it explicitly:
+
+```json
+{
+  "compilerOptions": {
+    "types": ["@cloudflare/workers-types"]
+  }
+}
+```
+
 See the [runtime performance guide](https://github.com/danieljvdm/effect-cf/blob/main/docs/runtime-performance.md) for measured alarm batching and telemetry configuration guidance.
 
 ## Worker

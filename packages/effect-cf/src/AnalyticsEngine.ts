@@ -1,7 +1,3 @@
-import type {
-  AnalyticsEngineDataPoint as CloudflareAnalyticsEngineDataPoint,
-  AnalyticsEngineDataset as CloudflareAnalyticsEngineDataset,
-} from "@cloudflare/workers-types";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
@@ -107,8 +103,8 @@ export interface AnalyticsEngineDefinition {
   readonly binding: string;
 }
 
-export type AnalyticsEngineBinding = CloudflareAnalyticsEngineDataset;
-export type AnalyticsEngineDataPoint = CloudflareAnalyticsEngineDataPoint;
+export type AnalyticsEngineBinding = AnalyticsEngineDataset;
+export type AnalyticsEngineDataPoint = globalThis.AnalyticsEngineDataPoint;
 export type AnalyticsEngineFieldValue = ArrayBuffer | string | null;
 export type AnalyticsEngineWriteError =
   | AnalyticsEngineOperationError

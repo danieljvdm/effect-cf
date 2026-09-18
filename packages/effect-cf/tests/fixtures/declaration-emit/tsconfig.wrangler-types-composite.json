@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.wrangler-types.json",
+  "compilerOptions": {
+    "composite": true
+  },
+  "include": ["src/*.ts", "src/wrangler/runtime-worker.ts"]
+}

@@ -1,4 +1,3 @@
-import type { ExportedHandler, KVNamespace } from "@cloudflare/workers-types";
 import { Effect } from "effect";
 
 // Keep the root route small while measuring a real deferred Effect/KV handler.

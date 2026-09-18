@@ -1,12 +1,3 @@
-import type {
-  InstanceStatus as CloudflareInstanceStatus,
-  Workflow as CloudflareWorkflow,
-  WorkflowInstance as CloudflareWorkflowInstance,
-  WorkflowInstanceCreateOptions as CloudflareWorkflowInstanceCreateOptions,
-  WorkflowInstanceLocationHint as CloudflareWorkflowInstanceLocationHint,
-  WorkflowInstanceRestartOptions as CloudflareWorkflowInstanceRestartOptions,
-  WorkflowInstanceTerminateOptions as CloudflareWorkflowInstanceTerminateOptions,
-} from "@cloudflare/workers-types";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -21,7 +12,7 @@ import * as ErrorMessage from "./internal/ErrorMessage";
 const expectedWorkflow = "Workflow binding with create(), createBatch(), and get()";
 
 export type WorkflowInstanceCreateOptions<Payload> = Omit<
-  CloudflareWorkflowInstanceCreateOptions<Payload>,
+  globalThis.WorkflowInstanceCreateOptions<Payload>,
   "params"
 >;
 
@@ -29,11 +20,11 @@ export type WorkflowInstanceCreateBatchOptions<Payload, EncodedPayload = unknown
   { readonly payload: Payload } & WorkflowInstanceCreateOptions<EncodedPayload>
 >;
 
-export type WorkflowInstanceRestartOptions = CloudflareWorkflowInstanceRestartOptions;
-export type WorkflowInstanceTerminateOptions = CloudflareWorkflowInstanceTerminateOptions;
-export type WorkflowInstanceLocationHint = CloudflareWorkflowInstanceLocationHint;
+export type WorkflowInstanceLocationHint = globalThis.WorkflowInstanceLocationHint;
+export type WorkflowInstanceRestartOptions = globalThis.WorkflowInstanceRestartOptions;
+export type WorkflowInstanceTerminateOptions = globalThis.WorkflowInstanceTerminateOptions;
 
-export type WorkflowInstanceStatusName = CloudflareInstanceStatus["status"];
+export type WorkflowInstanceStatusName = InstanceStatus["status"];
 
 export interface WorkflowInstanceStatus<Result> {
   readonly status: WorkflowInstanceStatusName;
@@ -45,7 +36,7 @@ export interface WorkflowInstanceStatus<Result> {
 }
 
 export interface WorkflowInstance<Result> {
-  readonly raw: CloudflareWorkflowInstance;
+  readonly raw: globalThis.WorkflowInstance;
   readonly id: string;
   readonly pause: Effect.Effect<void, WorkflowOperationError>;
   readonly resume: Effect.Effect<void, WorkflowOperationError>;
@@ -97,7 +88,7 @@ export interface WorkflowBindingClient<
   readonly get: (
     instanceId: string,
   ) => Effect.Effect<WorkflowInstance<S.Schema.Type<Result>>, WorkflowOperationError>;
-  readonly rawUnsafe: Effect.Effect<CloudflareWorkflow<S.Codec.Encoded<Payload>>>;
+  readonly rawUnsafe: Effect.Effect<Workflow<S.Codec.Encoded<Payload>>>;
 }
 
 export class WorkflowOperationError extends Data.TaggedError("WorkflowOperationError")<{
@@ -136,7 +127,7 @@ const tryWorkflowPromise = <A>(
 type WorkflowBindingValue = S.Schema.Type<typeof S.Unknown>;
 
 const WorkflowBindingSchema = S.declare(
-  (value: WorkflowBindingValue): value is CloudflareWorkflow<WorkflowBindingValue> =>
+  (value: WorkflowBindingValue): value is Workflow<WorkflowBindingValue> =>
     Predicate.hasProperty(value, "create") &&
     Predicate.isFunction(value.create) &&
     Predicate.hasProperty(value, "createBatch") &&
@@ -146,18 +137,15 @@ const WorkflowBindingSchema = S.declare(
 );
 const decodeWorkflowBinding = S.decodeUnknownOption(WorkflowBindingSchema);
 
-export const isWorkflow = <Payload>(
-  value: WorkflowBindingValue,
-): value is CloudflareWorkflow<Payload> => Option.isSome(decodeWorkflowBinding(value));
+export const isWorkflow = <Payload>(value: WorkflowBindingValue): value is Workflow<Payload> =>
+  Option.isSome(decodeWorkflowBinding(value));
 
 export const makeClient = <
   Payload extends RpcDefinition.ServiceFreeSchema,
   Result extends RpcDefinition.ServiceFreeSchema,
 >(
   definition: WorkflowBindingDefinition<Payload, Result>,
-): ((
-  workflow: CloudflareWorkflow<S.Codec.Encoded<Payload>>,
-) => WorkflowBindingClient<Payload, Result>) => {
+): ((workflow: Workflow<S.Codec.Encoded<Payload>>) => WorkflowBindingClient<Payload, Result>) => {
   type PayloadValue = S.Schema.Type<Payload>;
   type EncodedPayload = S.Codec.Encoded<Payload>;
   type ResultValue = S.Schema.Type<Result>;
@@ -165,7 +153,7 @@ export const makeClient = <
   const encodePayload = S.encodeEffect(definition.payload);
   const decodeResult = S.decodeUnknownEffect(definition.result);
 
-  const wrapInstance = (raw: CloudflareWorkflowInstance): WorkflowInstance<ResultValue> => {
+  const wrapInstance = (raw: globalThis.WorkflowInstance): WorkflowInstance<ResultValue> => {
     const operation = <A>(name: string, evaluate: () => Promise<A>) =>
       tryWorkflowPromise(definition.binding, name, evaluate);
 
@@ -229,7 +217,7 @@ export const makeClient = <
     createBatch: Effect.fn("WorkflowBinding.createBatch", {
       attributes: { binding: definition.binding, operation: "createBatch" },
     })(function* (batch: WorkflowInstanceCreateBatchOptions<PayloadValue, EncodedPayload>) {
-      const encodedBatch: Array<CloudflareWorkflowInstanceCreateOptions<EncodedPayload>> = [];
+      const encodedBatch: Array<globalThis.WorkflowInstanceCreateOptions<EncodedPayload>> = [];
 
       for (const item of batch) {
         const { payload, ...options } = item;
@@ -265,7 +253,7 @@ export const layer = <
   Binding.layer(
     tag,
     definition.binding,
-    (value): value is CloudflareWorkflow<S.Codec.Encoded<Payload>> =>
+    (value): value is Workflow<S.Codec.Encoded<Payload>> =>
       isWorkflow<S.Codec.Encoded<Payload>>(value),
     makeClient(definition),
     { expected: expectedWorkflow },

@@ -5,22 +5,6 @@ import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import type { Layer } from "effect";
-import type {
-  Vectorize as CloudflareVectorize,
-  VectorizeAsyncMutation as CloudflareVectorizeAsyncMutation,
-  VectorizeIndex as CloudflareVectorizeIndex,
-  VectorizeIndexDetails as CloudflareVectorizeIndexDetails,
-  VectorizeIndexInfo as CloudflareVectorizeIndexInfo,
-  VectorizeMatch as CloudflareVectorizeMatch,
-  VectorizeMatches as CloudflareVectorizeMatches,
-  VectorizeQueryOptions as CloudflareVectorizeQueryOptions,
-  VectorizeVector as CloudflareVectorizeVector,
-  VectorizeVectorMetadata as CloudflareVectorizeVectorMetadata,
-  VectorizeVectorMetadataFilter as CloudflareVectorizeVectorMetadataFilter,
-  VectorizeVectorMetadataValue as CloudflareVectorizeVectorMetadataValue,
-  VectorizeVectorMutation as CloudflareVectorizeVectorMutation,
-} from "@cloudflare/workers-types";
-
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";
 import * as ErrorMessage from "./internal/ErrorMessage";
@@ -53,19 +37,17 @@ export interface VectorizeDefinition {
   readonly binding: string;
 }
 
-export type VectorizeBinding = CloudflareVectorize | CloudflareVectorizeIndex;
-export type VectorizeVector = CloudflareVectorizeVector;
-export type VectorizeVectorMetadata = CloudflareVectorizeVectorMetadata;
-export type VectorizeVectorMetadataValue = CloudflareVectorizeVectorMetadataValue;
-export type VectorizeVectorMetadataFilter = CloudflareVectorizeVectorMetadataFilter;
-export type VectorizeQueryOptions = CloudflareVectorizeQueryOptions;
-export type VectorizeMatches = CloudflareVectorizeMatches;
-export type VectorizeMatch = CloudflareVectorizeMatch;
-export type VectorizeIndexInfo = CloudflareVectorizeIndexInfo;
-export type VectorizeIndexDetails = CloudflareVectorizeIndexDetails;
-export type VectorizeMutation =
-  | CloudflareVectorizeAsyncMutation
-  | CloudflareVectorizeVectorMutation;
+export type VectorizeBinding = Vectorize | VectorizeIndex;
+export type VectorizeIndexDetails = globalThis.VectorizeIndexDetails;
+export type VectorizeIndexInfo = globalThis.VectorizeIndexInfo;
+export type VectorizeMatch = globalThis.VectorizeMatch;
+export type VectorizeMatches = globalThis.VectorizeMatches;
+export type VectorizeQueryOptions = globalThis.VectorizeQueryOptions;
+export type VectorizeVector = globalThis.VectorizeVector;
+export type VectorizeVectorMetadata = globalThis.VectorizeVectorMetadata;
+export type VectorizeVectorMetadataFilter = globalThis.VectorizeVectorMetadataFilter;
+export type VectorizeVectorMetadataValue = globalThis.VectorizeVectorMetadataValue;
+export type VectorizeMutation = VectorizeAsyncMutation | VectorizeVectorMutation;
 export type VectorizeValues = Float32Array | Float64Array | ReadonlyArray<number>;
 
 interface VectorizeRuntimeBinding {

@@ -1,12 +1,3 @@
-import type {
-  MessageSendRequest as CloudflareMessageSendRequest,
-  Queue as CloudflareQueue,
-  QueueMetrics as CloudflareQueueMetrics,
-  QueueSendBatchOptions as CloudflareQueueSendBatchOptions,
-  QueueSendBatchResponse as CloudflareQueueSendBatchResponse,
-  QueueSendOptions as CloudflareQueueSendOptions,
-  QueueSendResponse as CloudflareQueueSendResponse,
-} from "@cloudflare/workers-types";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Predicate from "effect/Predicate";
@@ -16,15 +7,15 @@ import type { Context } from "effect";
 import * as Binding from "./Binding";
 import type * as RpcDefinition from "./RpcDefinition";
 
-export type QueueSendOptions = CloudflareQueueSendOptions;
-export type QueueSendResponse = CloudflareQueueSendResponse;
-export type QueueSendBatchOptions = CloudflareQueueSendBatchOptions;
-export type QueueSendBatchResponse = CloudflareQueueSendBatchResponse;
-export type QueueMetrics = CloudflareQueueMetrics;
-export type MessageSendRequest<Body> = CloudflareMessageSendRequest<Body>;
+export type MessageSendRequest<Body> = globalThis.MessageSendRequest<Body>;
+export type QueueMetrics = globalThis.QueueMetrics;
+export type QueueSendBatchOptions = globalThis.QueueSendBatchOptions;
+export type QueueSendBatchResponse = globalThis.QueueSendBatchResponse;
+export type QueueSendOptions = globalThis.QueueSendOptions;
+export type QueueSendResponse = globalThis.QueueSendResponse;
 
-export type QueueProducer<Body> = Pick<CloudflareQueue<Body>, "send"> &
-  Partial<Pick<CloudflareQueue<Body>, "sendBatch" | "metrics">>;
+export type QueueProducer<Body> = Pick<Queue<Body>, "send"> &
+  Partial<Pick<Queue<Body>, "sendBatch" | "metrics">>;
 
 const expectedQueueProducer = "Queue producer binding with send(); optional sendBatch()/metrics()";
 

@@ -109,7 +109,7 @@ it.live.each(["Queue", "Workflow"])(
 );
 
 // Separate consumer modules prevent one namespace's exports from hiding another's missing types.
-it.live.each(["tsconfig.json", "tsconfig.composite.json"])(
+it.live.each(["tsconfig.workers-types.json", "tsconfig.workers-types-composite.json"])(
   "external package consumers emit portable declarations with %s",
   (config) =>
     Effect.gen(function* () {
@@ -132,6 +132,60 @@ it.live.each(["tsconfig.json", "tsconfig.composite.json"])(
         path.join(packageRoot, "node_modules/@cloudflare/workers-types"),
         path.join(consumer, "node_modules/@cloudflare/workers-types"),
       );
+      yield* run([
+        "run",
+        "--no-cache",
+        "effect-cf#typecheck",
+        "--noEmit",
+        "false",
+        "--emitDeclarationOnly",
+        "-p",
+        path.join(consumer, config),
+      ]);
+
+      expect(yield* fs.exists(path.join(consumer, "dist/r2.d.ts"))).toBe(true);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  60_000,
+);
+
+it.live.each(["tsconfig.wrangler-types.json", "tsconfig.wrangler-types-composite.json"])(
+  "external package consumers emit declarations with Wrangler-generated runtime types and %s",
+  (config) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const packageRoot = yield* path.fromFileUrl(new URL("../", import.meta.url));
+      const repoRoot = path.resolve(packageRoot, "../..");
+      const fixtureRoot = path.join(packageRoot, "tests/fixtures/declaration-emit");
+      const temporaryConsumer = yield* fs.makeTempDirectoryScoped({
+        prefix: "effect-cf-wrangler-types-",
+      });
+      const consumer = yield* fs.realPath(temporaryConsumer);
+      const generatedTypes = path.join(consumer, "worker-configuration.d.ts");
+      const installedPackage = path.join(consumer, "node_modules/effect-cf");
+
+      yield* fs.copy(fixtureRoot, consumer);
+      yield* fs.makeDirectory(installedPackage, { recursive: true });
+      yield* fs.copy(path.join(packageRoot, "dist"), path.join(installedPackage, "dist"));
+      yield* fs.copy(
+        path.join(packageRoot, "package.json"),
+        path.join(installedPackage, "package.json"),
+      );
+      yield* fs.symlink(
+        path.join(repoRoot, "node_modules/effect"),
+        path.join(consumer, "node_modules/effect"),
+      );
+      expect(yield* fs.exists(path.join(consumer, "node_modules/@cloudflare/workers-types"))).toBe(
+        false,
+      );
+      yield* run([
+        "exec",
+        "wrangler",
+        "types",
+        generatedTypes,
+        "--config",
+        path.join(consumer, "wrangler.jsonc"),
+      ]);
       yield* run([
         "run",
         "--no-cache",

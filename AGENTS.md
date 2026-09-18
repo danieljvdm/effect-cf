@@ -35,7 +35,7 @@ Do not use `bun run`, `npm run`, `pnpm run`, or `yarn run` in this repository. D
 - `effect-cf` pins Cloudflare workerd `1.20260825.1` via the root catalog (`@cloudflare/workers-types@5.20260825.1`, `miniflare@5.20260825.0-alpha`, `wrangler@4.126.0`) and recommends `compatibility_date` `2026-08-25`. Keep the dated runtime packages and compatibility date in lockstep.
 - `examples/` contains consumer and example applications.
 - Reusable package code belongs under a package's `src/` and must be exported from that package's `src/index.ts`.
-- Worker projects use `@cloudflare/workers-types` directly for Cloudflare runtime types.
+- Worker applications generate runtime types with `wrangler types`; shared libraries use `@cloudflare/workers-types` through `compilerOptions.types` during development.
 
 # Repo-local skills
 

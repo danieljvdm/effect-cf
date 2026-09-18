@@ -1,7 +1,3 @@
-import type {
-  KVNamespaceListOptions as CloudflareKVNamespaceListOptions,
-  KVNamespacePutOptions as CloudflareKVNamespacePutOptions,
-} from "@cloudflare/workers-types";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -31,8 +27,8 @@ export class KvOperationError extends Data.TaggedError("KvOperationError")<{
   }
 }
 
-export type KvPutOptions = CloudflareKVNamespacePutOptions;
-export type KvListOptions<Metadata = unknown> = CloudflareKVNamespaceListOptions & {
+export type KvPutOptions = KVNamespacePutOptions;
+export type KvListOptions<Metadata = unknown> = KVNamespaceListOptions & {
   readonly metadataSchema?: S.Codec<Metadata, unknown>;
 };
 

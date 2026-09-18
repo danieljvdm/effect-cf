@@ -43,7 +43,7 @@ type HandlerContext<ROut> = RuntimeContext<ROut> | Scope.Scope;
 
 type FetchContext<ROut> = HandlerContext<ROut> | NativeRequest;
 /** Metadata available before an event effect or its event layer starts. */
-export interface RunOptions {
+export interface RunOptions extends Runtime.RunOptions {
   readonly eventLayer?: boolean;
   readonly event?:
     | "fetch"
@@ -331,6 +331,7 @@ export function make<
           effect as Effect.Effect<A, E, HandlerContext<ROut | RAlarm>>,
           undefined,
           parentSpan,
+          runOptions.onFailure,
         );
       }
 
@@ -341,7 +342,7 @@ export function make<
         REvent,
         EventLayerError,
         LayerError
-      >(this.runtime, effect, eventLayer, parentSpan);
+      >(this.runtime, effect, eventLayer, parentSpan, runOptions.onFailure);
     }
 
     fetch(request: Request): Promise<Response> {

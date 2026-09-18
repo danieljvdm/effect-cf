@@ -1,7 +1,7 @@
 /// <reference types="@cloudflare/vitest-plugin/types" />
 
 import { createExecutionContext, env } from "cloudflare:test";
-import { Effect, Layer, Predicate, Schema as S } from "effect";
+import { Cause, Effect, Layer, Predicate, Schema as S } from "effect";
 import { expect, test } from "vite-plus/test";
 
 import {
@@ -41,6 +41,48 @@ class EchoWorker extends Worker.Tag<EchoWorker>()("WorkerPoolEcho", {
 }) {}
 
 const EchoService = EchoWorker;
+
+test("RPC observes the complete event cause before rejecting with the original failure", async () => {
+  const handlerFailure = new Error("handler failed");
+  const finalizerDefect = new Error("event cleanup failed");
+  const observed: Array<Cause.Cause<unknown>> = [];
+  const events: Array<string> = [];
+  const Base = EchoWorker.make(Layer.empty, {
+    eventLayer: Layer.effectDiscard(
+      Effect.addFinalizer(() =>
+        Effect.sync(() => events.push("cleanup")).pipe(Effect.andThen(Effect.die(finalizerDefect))),
+      ),
+    ),
+    rpc: { echo: () => Effect.fail(handlerFailure) },
+  });
+
+  class ObservedWorker extends Base {
+    override [Worker.RunSymbol]<A, E>(
+      effect: Effect.Effect<A, E, Effect.Services<Worker.WorkerRpcHandler<never>>>,
+      options: Worker.RunOptions = {},
+    ): Promise<A> {
+      return super[Worker.RunSymbol](effect, {
+        ...options,
+        onFailure: async (cause) => {
+          observed.push(cause);
+          await Promise.resolve();
+          events.push("observe");
+          throw new Error("observer failed");
+        },
+      });
+    }
+  }
+
+  const worker = new ObservedWorker(createExecutionContext(), {});
+
+  await expect(worker.echo("input")).rejects.toBe(handlerFailure);
+  events.push("reject");
+  expect(events).toEqual(["cleanup", "observe", "reject"]);
+  expect(observed).toHaveLength(1);
+  expect(observed[0]!.reasons.map((reason) => reason._tag)).toEqual(["Fail", "Die"]);
+  expect(observed[0]!.reasons.filter(Cause.isFailReason)[0]!.error).toBe(handlerFailure);
+  expect(observed[0]!.reasons.filter(Cause.isDieReason)[0]!.defect).toBe(finalizerDefect);
+});
 
 interface AuditReceipt {
   readonly room: string;

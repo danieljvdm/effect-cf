@@ -218,6 +218,11 @@ const fromWorkflowStep = (step: CloudflareWorkflowStep): WorkflowStepService => 
 
 type RuntimeContext<ROut> = ExecutionContext | WorkerContext | WorkerEnvironment | ROut;
 
+/** Override to instrument the whole workflow run, then call super[RunSymbol]. */
+export const RunSymbol = Symbol.for("effect-cf/Workflow/run");
+
+export interface RunOptions extends Runtime.RunOptions {}
+
 export type WorkflowRunContext<ROut> =
   | RuntimeContext<ROut>
   | WorkflowEvent
@@ -232,10 +237,14 @@ export interface WorkflowOptions<ROut, Payload = unknown, Result = unknown> {
   readonly run: WorkflowHandler<ROut, Payload, Result>;
 }
 
-export type WorkflowClass<Payload, Result, _ROut> = new (
+export type WorkflowClass<Payload, Result, ROut> = new (
   ctx: globalThis.ExecutionContext,
   env: WorkerEnv,
 ) => CloudflareWorkflowEntrypoint<WorkerEnv, Payload> & {
+  [RunSymbol]<A, E>(
+    effect: Effect.Effect<A, E, RuntimeContext<ROut> | Scope.Scope>,
+    options?: RunOptions,
+  ): Promise<A>;
   run(
     event: Readonly<CloudflareWorkflowEvent<Payload>>,
     step: CloudflareWorkflowStep,
@@ -275,7 +284,22 @@ export const make = <ROut, LayerError, Payload = unknown, Result = unknown>(
         Layer.succeed(WorkflowStep, fromWorkflowStep(step)),
       );
 
-      return Runtime.runEventPromise(this.runtime, options.run(event.payload), workflowServices);
+      return this[RunSymbol](
+        options.run(event.payload).pipe(Effect.provide(workflowServices, { local: true })),
+      );
+    }
+
+    [RunSymbol]<A, E>(
+      effect: Effect.Effect<A, E, RuntimeContext<ROut> | Scope.Scope>,
+      runOptions: RunOptions = {},
+    ): Promise<A> {
+      return Runtime.runEventPromise(
+        this.runtime,
+        effect,
+        undefined,
+        undefined,
+        runOptions.onFailure,
+      );
     }
   }
 

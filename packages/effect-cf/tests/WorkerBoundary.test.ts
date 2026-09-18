@@ -258,11 +258,22 @@ test("WorkerDefinition RPC schedules event-scoped OTLP telemetry after success",
   expect(flushes).toEqual(["flush"]);
 });
 
-test("WorkerDefinition RPC preserves handler failure and still schedules telemetry", async () => {
+test("WorkerDefinition RPC preserves handler rejection despite an event-layer finalizer defect", async () => {
   const flushes: Array<string> = [];
   const handlerFailure = new BoomError();
+  const finalizerDefect = new Error("event cleanup failed");
+  let finalized = false;
   const Live = TelemetryWorker.make(Layer.empty, {
-    eventLayer: makeFlusherProbeLayer(flushes),
+    eventLayer: Layer.merge(
+      makeFlusherProbeLayer(flushes),
+      Layer.effectDiscard(
+        Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            finalized = true;
+          }).pipe(Effect.andThen(Effect.die(finalizerDefect))),
+        ),
+      ),
+    ),
     rpc: {
       succeed: () => Effect.succeed("unused"),
       fail: () => Effect.fail(handlerFailure),
@@ -272,6 +283,7 @@ test("WorkerDefinition RPC preserves handler failure and still schedules telemet
   const worker = new Live(executionContext, makePartialTestDouble<Cloudflare.Env>({}));
 
   await expect(worker.fail()).rejects.toBe(handlerFailure);
+  expect(finalized).toBe(true);
   expect(waitUntilPromises).toHaveLength(1);
 
   await Promise.all(waitUntilPromises);
@@ -292,6 +304,63 @@ test("WorkerDefinition RPC does not schedule background work without a flusher",
   await expect(worker.succeed()).resolves.toBe("result");
   expect(waitUntilPromises).toHaveLength(0);
 });
+
+test.each(["runtime", "event"] as const)(
+  "Durable Object observes %s acquisition failure and cleanup before rejecting",
+  async (boundary) => {
+    const acquisitionFailure = new Error("acquisition failed");
+    const finalizerDefect = new Error("acquisition cleanup failed");
+    const observed: Array<Cause.Cause<unknown>> = [];
+    const events: Array<string> = [];
+    const failingLayer = Layer.effectDiscard(
+      Effect.gen(function* () {
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => events.push("cleanup")).pipe(
+            Effect.andThen(Effect.die(finalizerDefect)),
+          ),
+        );
+
+        return yield* Effect.fail(acquisitionFailure);
+      }),
+    );
+    const Base = TelemetryDurableObject.make(boundary === "runtime" ? failingLayer : Layer.empty, {
+      eventLayer: boundary === "event" ? failingLayer : undefined,
+      rpc: {
+        succeed: () =>
+          Effect.sync(() => {
+            events.push("handler");
+
+            return "unexpected";
+          }),
+      },
+    });
+
+    class ObservedDurableObject extends Base {
+      override [DurableObject.RunSymbol]<A, E>(
+        effect: Effect.Effect<A, E, Effect.Services<DurableObject.DurableObjectHandler<never>>>,
+        options: DurableObject.RunOptions = {},
+      ): Promise<A> {
+        return super[DurableObject.RunSymbol](effect, {
+          ...options,
+          onFailure: (cause) => {
+            observed.push(cause);
+            events.push("observe");
+            throw new Error("observer failed");
+          },
+        });
+      }
+    }
+
+    const durableObject = new ObservedDurableObject(makeDurableObjectState(), {});
+
+    await expect(durableObject.succeed()).rejects.toBe(acquisitionFailure);
+    expect(events).toEqual(["cleanup", "observe"]);
+    expect(observed).toHaveLength(1);
+    expect(observed[0]!.reasons.map((reason) => reason._tag)).toEqual(["Fail", "Die"]);
+    expect(observed[0]!.reasons.filter(Cause.isFailReason)[0]!.error).toBe(acquisitionFailure);
+    expect(observed[0]!.reasons.filter(Cause.isDieReason)[0]!.defect).toBe(finalizerDefect);
+  },
+);
 
 test("WorkerDefinition RPC silently absorbs telemetry flush failure", async () => {
   const secret = "Bearer sensitive-exporter-credential";

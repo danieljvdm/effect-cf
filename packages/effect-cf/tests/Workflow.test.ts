@@ -6,7 +6,8 @@ import type {
 } from "cloudflare:workers";
 import { NonRetryableError } from "cloudflare:workflows";
 import { assert, test } from "@effect/vitest";
-import { Deferred, Effect, Fiber, Layer, Predicate } from "effect";
+import { Cause, Deferred, Effect, Fiber, Layer, Predicate } from "effect";
+import { expect } from "vite-plus/test";
 
 import { Workflow } from "../src/index";
 import { makePartialTestDouble } from "./TestDoubles";
@@ -64,6 +65,68 @@ const makeExecutingStep = (onReject?: (cause: Error) => void): CloudflareWorkflo
   // Cloudflare's additional rollback arguments are not used by effect-cf.
   return implementation as typeof implementation & CloudflareWorkflowStep;
 };
+
+test("Workflow observes interruption after cleanup without observing recovered retries", async () => {
+  const observed: Array<Cause.Cause<unknown>> = [];
+  const events: Array<string> = [];
+  const finalizerDefect = new Error("workflow cleanup failed");
+  let attempts = 0;
+  const Base = Workflow.make(Layer.empty, {
+    run: (interrupt: boolean) =>
+      interrupt
+        ? Effect.gen(function* () {
+            yield* Effect.addFinalizer(() =>
+              Effect.yieldNow.pipe(
+                Effect.andThen(Effect.sync(() => events.push("cleanup"))),
+                Effect.andThen(Effect.die(finalizerDefect)),
+              ),
+            );
+
+            return yield* Effect.interrupt;
+          })
+        : Effect.suspend(() => {
+            attempts++;
+
+            return attempts < 3 ? Effect.fail("retry") : Effect.succeed("ok");
+          }).pipe(Effect.retry({ times: 2 })),
+  });
+
+  class ObservedWorkflow extends Base {
+    override [Workflow.RunSymbol]<A, E>(
+      effect: Effect.Effect<
+        A,
+        E,
+        Exclude<Workflow.WorkflowRunContext<never>, Workflow.WorkflowEvent | Workflow.WorkflowStep>
+      >,
+      options: Workflow.RunOptions = {},
+    ): Promise<A> {
+      return super[Workflow.RunSymbol](effect, {
+        ...options,
+        onFailure: (cause) => {
+          observed.push(cause);
+          events.push("observe");
+        },
+      });
+    }
+  }
+
+  const workflow = new ObservedWorkflow(executionContext, {});
+
+  assert.strictEqual(
+    await workflow.run({ ...makeEvent(), payload: false }, makeExecutingStep()),
+    "ok",
+  );
+  assert.strictEqual(attempts, 3);
+  assert.deepStrictEqual(observed, []);
+
+  await expect(workflow.run({ ...makeEvent(), payload: true }, makeExecutingStep())).rejects.toBe(
+    finalizerDefect,
+  );
+  assert.deepStrictEqual(events, ["cleanup", "observe"]);
+  assert.lengthOf(observed, 1);
+  assert.isTrue(Cause.hasInterrupts(observed[0]!));
+  assert.strictEqual(observed[0]!.reasons.filter(Cause.isDieReason)[0]!.defect, finalizerDefect);
+});
 
 test("failing steps surface WorkflowStepError with step, operation, and cause", async () => {
   const cause = new Error("step failed");

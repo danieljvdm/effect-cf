@@ -108,7 +108,7 @@ export const RunSymbol = Symbol.for("effect-cf/Worker/run");
 const FetchSymbol = Symbol.for("effect-cf/Worker/fetch");
 
 /** Metadata available before an event effect or its event layer starts. */
-export interface RunOptions {
+export interface RunOptions extends Runtime.RunOptions {
   readonly event?: "fetch" | "rpc" | "queue";
   readonly rpc?: RpcInvocationInfo;
 }
@@ -438,6 +438,7 @@ export function make<
           effect as Effect.Effect<A, E, RuntimeContext<ROut> | Scope.Scope>,
           undefined,
           parentSpan,
+          runOptions.onFailure,
         );
       }
 
@@ -448,7 +449,7 @@ export function make<
         REvent,
         EventLayerError,
         LayerError
-      >(this.runtime, effect, eventLayer, parentSpan);
+      >(this.runtime, effect, eventLayer, parentSpan, runOptions.onFailure);
     }
 
     fetch(request: Request): Promise<Response> {

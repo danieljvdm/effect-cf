@@ -54,7 +54,7 @@
     },
     "packages/effect-cf": {
       "name": "effect-cf",
-      "version": "0.43.0",
+      "version": "0.46.0",
       "devDependencies": {
         "@cloudflare/computer": "0.2.0",
         "@cloudflare/containers": "catalog:",
@@ -79,6 +79,7 @@
         "@cloudflare/computer": "^0.2.0",
         "@cloudflare/sandbox": "^0.13.0-next.738.2",
         "@cloudflare/vitest-plugin": "^1.0.0",
+        "@cloudflare/workers-types": "^5.20260825.1",
         "@effect/sql-d1": "^4.0.0-rc.115",
         "@effect/sql-pg": "^4.0.0-rc.115",
         "@effect/sql-sqlite-do": "^4.0.0-rc.115",
@@ -89,6 +90,7 @@
         "@cloudflare/computer",
         "@cloudflare/sandbox",
         "@cloudflare/vitest-plugin",
+        "@cloudflare/workers-types",
         "@effect/sql-pg",
         "@modelcontextprotocol/server",
       ],

@@ -40,6 +40,7 @@ Do not use `bun run`, `npm run`, `pnpm run`, or `yarn run` in this repository. D
 
 - Worker applications generate runtime types with `vp exec wrangler types` and include the generated `worker-configuration.d.ts` in their TypeScript project.
 - `effect-cf` uses ambient Workers globals. Keep `@cloudflare/workers-types` as a development dependency loaded through `compilerOptions.types`; do not import its types into published package source or add references to it in emitted declarations. Consumers can supply either Wrangler-generated globals or `@cloudflare/workers-types`.
+- Retain `@cloudflare/workers-types` as an optional peer dependency to declare the supported version range for consumers that install it. Keep that range aligned with the tested runtime baseline; Wrangler-generated types do not require the package.
 - Keep Cloudflare types out of the platform-generic `effect-webtransport` package.
 
 # Documentation

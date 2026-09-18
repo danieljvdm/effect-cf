@@ -41,6 +41,25 @@ const rejectOptionalPeers: Plugin = {
   },
 };
 
+it.live("the WebSocket RPC client subpath bundles for browsers without Cloudflare imports", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.promise(() =>
+      build({
+        stdin: {
+          contents: 'export { layer } from "effect-cf/rpc-websocket-client";',
+          resolveDir: new URL("../", import.meta.url).pathname,
+        },
+        bundle: true,
+        format: "esm",
+        platform: "browser",
+        write: false,
+      }),
+    );
+
+    expect(result.outputFiles).toHaveLength(1);
+  }),
+);
+
 it.live("the root package bundles Durable Object consumers without optional peers", () =>
   Effect.gen(function* () {
     const result = yield* Effect.promise(() =>

@@ -148,6 +148,7 @@ interface LegacyAttachmentMetadata {
   readonly version: 1;
   readonly clientId: number;
   readonly hasPendingRequests: boolean;
+  readonly serialization?: string | undefined;
 }
 
 interface PersistedPendingBatch {
@@ -170,6 +171,7 @@ interface ResumableAttachmentMetadata {
   readonly hasPendingRequests: boolean;
   readonly hasNonResumableRequests: boolean;
   readonly subscriptions: ReadonlyArray<PersistedSubscription>;
+  readonly serialization?: string | undefined;
 }
 
 type AttachmentMetadata = LegacyAttachmentMetadata | ResumableAttachmentMetadata;
@@ -200,6 +202,7 @@ const ResumableAttachmentMetadataSchema = Schema.Struct({
   hasPendingRequests: Schema.Boolean,
   hasNonResumableRequests: Schema.Boolean,
   subscriptions: Schema.Array(PersistedSubscriptionSchema),
+  serialization: Schema.optionalKey(Schema.String),
 });
 
 const decodeResumableAttachment = Schema.decodeUnknownOption(ResumableAttachmentMetadataSchema);
@@ -279,6 +282,7 @@ export const layer = (
           version: legacyAttachmentVersion,
           clientId: id,
           hasPendingRequests: false,
+          serialization: serialization.contentType,
         };
 
         writeAttachment(socket.raw, attachmentKey, created);
@@ -392,6 +396,7 @@ export const layer = (
                 version: legacyAttachmentVersion,
                 clientId: connection.id,
                 hasPendingRequests: connection.requestIds.size > 0,
+                serialization: serialization.contentType,
               });
 
               return;
@@ -407,6 +412,7 @@ export const layer = (
               hasPendingRequests: connection.requestIds.size > 0,
               hasNonResumableRequests: connection.nonResumableRequestIds.size > 0,
               subscriptions,
+              serialization: serialization.contentType,
             });
           },
           catch: (cause) => new DurableWebSocketAttachmentError({ operation: "serialize", cause }),
@@ -588,6 +594,14 @@ export const layer = (
         }
 
         const metadata = attachment.metadata;
+
+        if (
+          metadata.serialization !== undefined &&
+          metadata.serialization !== serialization.contentType
+        ) {
+          yield* resetSocket(socket);
+          continue;
+        }
 
         if (metadata.version === legacyAttachmentVersion) {
           if (metadata.hasPendingRequests) {
@@ -1036,7 +1050,11 @@ export const layer = (
                 : send(connection, RpcMessage.ResponseDefectEncoded(encodeDefect(cause)));
             }),
           ),
-        close: unregister,
+        close: (socket) =>
+          Effect.gen(function* () {
+            resetSockets.add(socket.raw);
+            yield* socket.close(1000).pipe(Effect.ignore);
+          }).pipe(Effect.ensuring(unregister(socket)), Effect.uninterruptible),
         error: resetSocket,
         checkpoint,
       });
@@ -1102,13 +1120,17 @@ const readAttachment = (socket: WebSocket, key: string): AttachmentRead => {
   const hasPendingRequests = Predicate.hasProperty(metadata, "hasPendingRequests")
     ? metadata.hasPendingRequests
     : false;
+  const serialization = Predicate.hasProperty(metadata, "serialization")
+    ? metadata.serialization
+    : undefined;
 
   if (
     (!Predicate.hasProperty(metadata, "version") || metadata.version === legacyAttachmentVersion) &&
     Predicate.hasProperty(metadata, "clientId") &&
     Predicate.isNumber(metadata.clientId) &&
     isClientId(metadata.clientId) &&
-    Predicate.isBoolean(hasPendingRequests)
+    Predicate.isBoolean(hasPendingRequests) &&
+    (serialization === undefined || Predicate.isString(serialization))
   ) {
     return {
       _tag: "Valid",
@@ -1116,6 +1138,7 @@ const readAttachment = (socket: WebSocket, key: string): AttachmentRead => {
         version: legacyAttachmentVersion,
         clientId: metadata.clientId,
         hasPendingRequests,
+        serialization,
       },
     };
   }

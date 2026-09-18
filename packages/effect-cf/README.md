@@ -10,6 +10,8 @@ The repository tests against workerd `1.20260825.1` and `@cloudflare/workers-typ
 
 See the [runtime performance guide](https://github.com/danieljvdm/effect-cf/blob/main/docs/runtime-performance.md) for measured alarm batching and telemetry configuration guidance.
 
+For typed WebSocket RPC clients whose connection lifetime is owned by an Effect layer, see the [WebSocket RPC guide](https://github.com/danieljvdm/effect-cf/blob/main/docs/websocket-rpc.md).
+
 ## Worker
 
 ```ts

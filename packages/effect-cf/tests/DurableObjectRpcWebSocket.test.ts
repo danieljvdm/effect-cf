@@ -306,6 +306,24 @@ for (const [format, serializationLayer] of [
             },
           },
         ]);
+
+        yield* transport.close(durableSocket);
+        yield* transport.message(
+          durableSocket,
+          JSON.stringify({
+            _tag: "Request",
+            id: "late",
+            tag: "Ping",
+            payload: { nonce: "must-not-run" },
+            headers: [],
+          }),
+        );
+
+        const protocol = yield* RpcServer.Protocol;
+
+        assert.deepStrictEqual(socket.closed, [{ code: 1000, reason: undefined }]);
+        assert.strictEqual((yield* protocol.clientIds).size, 0);
+        assert.lengthOf(socket.sent, 1);
       }),
     );
   });
@@ -336,6 +354,7 @@ for (const [format, serializationLayer] of [
             version: 1,
             clientId: 0,
             hasPendingRequests: false,
+            serialization: "application/json",
           },
         });
       }),
@@ -345,6 +364,72 @@ for (const [format, serializationLayer] of [
 
 {
   layer(Layer.empty)("DurableObjectRpcWebSocket restoration isolation", (it) => {
+    it.effect("resets incompatible serializers without losing compatible or legacy sockets", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const incompatible = [1, 2].map((version) =>
+            makeFakeWebSocket({
+              effectCloudflareRpcClientId:
+                version === 1
+                  ? {
+                      version: 1,
+                      clientId: version,
+                      hasPendingRequests: false,
+                      serialization: "application/ndjson",
+                    }
+                  : {
+                      version: 2,
+                      clientId: version,
+                      hasPendingRequests: false,
+                      hasNonResumableRequests: false,
+                      subscriptions: [],
+                      serialization: "application/ndjson",
+                    },
+            }),
+          );
+          const compatible = makeFakeWebSocket({
+            effectCloudflareRpcClientId: {
+              version: 1,
+              clientId: 3,
+              hasPendingRequests: false,
+              serialization: "application/json",
+            },
+          });
+          const legacy = makeFakeWebSocket({ effectCloudflareRpcClientId: 4 });
+          const state = makeFakeDurableObjectState({
+            socketsByTag: new Map([["test-rpc", [...incompatible, compatible, legacy]]]),
+          });
+          const context = yield* Layer.build(makeAppLayer(state));
+          const transport = Context.get(
+            context,
+            DurableObjectRpcWebSocket.DurableObjectRpcWebSocket,
+          );
+          const protocol = Context.get(context, RpcServer.Protocol);
+
+          assert.deepStrictEqual(Array.from(yield* protocol.clientIds), [3, 4]);
+          for (const socket of incompatible) {
+            assert.deepStrictEqual(socket.closed, [
+              { code: 1012, reason: "Durable Object RPC activation reset" },
+            ]);
+            yield* transport.message(
+              DurableObjectWebSocket.fromWebSocket(socket),
+              JSON.stringify({
+                _tag: "Request",
+                id: "must-not-run",
+                tag: "Ping",
+                payload: { nonce: "wrong-serializer" },
+                headers: [],
+              }),
+            );
+            assert.deepStrictEqual(socket.sent, []);
+          }
+          assert.deepStrictEqual(compatible.closed, []);
+          assert.deepStrictEqual(legacy.closed, []);
+          assert.strictEqual(readRpcAttachment(legacy).serialization, "application/json");
+        }),
+      ),
+    );
+
     it.effect("continues restoring healthy sockets when an invalid socket cannot close", () =>
       Effect.scoped(
         Effect.gen(function* () {
@@ -764,6 +849,7 @@ for (const [format, serializationLayer] of [
               version: 1,
               clientId: 0,
               hasPendingRequests: false,
+              serialization: "application/json",
             },
           });
           assert.deepStrictEqual(yield* state.getTags(durableSocket), ["test-rpc", "room:general"]);
@@ -1201,6 +1287,7 @@ for (const [format, serializationLayer] of [
               version: 2,
               clientId: 0,
               hasPendingRequests: true,
+              serialization: "application/json",
               hasNonResumableRequests: false,
               subscriptions: [
                 {
@@ -1395,6 +1482,7 @@ for (const [format, serializationLayer] of [
             hasPendingRequests: false,
             hasNonResumableRequests: false,
             subscriptions: [],
+            serialization: "application/json",
           });
         }),
       ),
@@ -1444,6 +1532,7 @@ for (const [format, serializationLayer] of [
             hasPendingRequests: false,
             hasNonResumableRequests: false,
             subscriptions: [],
+            serialization: "application/json",
           });
 
           yield* activation.transport.message(
@@ -1475,6 +1564,7 @@ for (const [format, serializationLayer] of [
             hasPendingRequests: false,
             hasNonResumableRequests: false,
             subscriptions: [],
+            serialization: "application/json",
           });
         }),
       ),
@@ -1547,6 +1637,7 @@ interface FakeRpcAttachmentV1 {
   readonly version: 1;
   readonly clientId: number;
   readonly hasPendingRequests: boolean;
+  readonly serialization?: string;
 }
 
 interface TestPersistedPendingBatch {
@@ -1569,6 +1660,7 @@ interface FakeRpcAttachmentV2 {
   readonly hasPendingRequests: boolean;
   readonly hasNonResumableRequests: boolean;
   readonly subscriptions: ReadonlyArray<TestPersistedResumableSubscription>;
+  readonly serialization?: string;
 }
 
 interface FakeWebSocketAttachmentFields {

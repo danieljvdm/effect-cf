@@ -240,7 +240,7 @@ export interface SandboxTunnelsClient {
 }
 
 export interface SandboxInstanceClient {
-  readonly rawUnsafe: Effect.Effect<SandboxClientResource>;
+  readonly rawUnsafe: Effect.Effect<SandboxClientResource, SandboxOperationError>;
   readonly exec: (
     command: SandboxCommand,
     options?: ExecOptions,
@@ -610,45 +610,77 @@ export const fromSandboxClient = (
   client: SandboxClientResource,
   definition: SandboxDefinition,
   instance: string,
-): SandboxInstanceClient => makeSandboxClient(client, definition, instance, client);
+): SandboxInstanceClient =>
+  makeSandboxClient(Effect.succeed({ client, target: client }), definition, instance);
 
 const makeSandboxClient = (
-  client: SandboxClientResource,
+  resolve: Effect.Effect<
+    {
+      readonly client: SandboxClientResource;
+      readonly target: SandboxClientResource | SandboxNamespaceResource;
+    },
+    SandboxOperationError
+  >,
   definition: SandboxDefinition,
   instance: string,
-  target: SandboxClientResource | SandboxNamespaceResource,
 ): SandboxInstanceClient => {
-  const attempt = <A>(operation: string, evaluate: (signal: AbortSignal) => PromiseLike<A>) =>
-    trySandboxPromise(definition, instance, operation, evaluate, target);
+  const attempt = <A>(
+    operation: string,
+    evaluate: (
+      client: SandboxClientResource,
+      signal: AbortSignal,
+      target: SandboxClientResource | SandboxNamespaceResource,
+    ) => PromiseLike<A>,
+  ) =>
+    Effect.flatMap(resolve, ({ client, target }) =>
+      trySandboxPromise(
+        definition,
+        instance,
+        operation,
+        (signal) => evaluate(client, signal, target),
+        target,
+      ),
+    );
   const stream = <A>(
     operation: string,
-    acquire: (signal: AbortSignal) => PromiseLike<ReadableStream<A>>,
-  ) => sandboxStream(definition, instance, operation, acquire, target);
+    acquire: (client: SandboxClientResource, signal: AbortSignal) => PromiseLike<ReadableStream<A>>,
+  ) =>
+    Stream.unwrap(
+      Effect.map(resolve, ({ client, target }) =>
+        sandboxStream(definition, instance, operation, (signal) => acquire(client, signal), target),
+      ),
+    );
   const spanOptions = (operation: string) => ({
     attributes: { binding: definition.binding, instance, operation },
   });
 
   return {
-    rawUnsafe: Effect.succeed(client),
+    rawUnsafe: Effect.map(resolve, ({ client }) => client),
     exec: Effect.fn(
       "Sandbox.exec",
       spanOptions("exec"),
     )(function* (command: SandboxCommand, options?: ExecOptions) {
-      const process = yield* attempt("exec", () => client.exec(command, options));
-
-      return makeProcessHandle(definition, instance, process, target);
+      return yield* attempt("exec", (client, _signal, target) =>
+        client
+          .exec(command, options)
+          .then((process) => makeProcessHandle(definition, instance, process, target)),
+      );
     }),
     getProcess: Effect.fn(
       "Sandbox.getProcess",
       spanOptions("getProcess"),
     )(function* (id: string) {
-      const process = yield* attempt("getProcess", () => client.getProcess(id));
-
-      return Option.map(Option.fromNullishOr(process), (found) =>
-        makeProcessHandle(definition, instance, found, target),
+      return yield* attempt("getProcess", (client, _signal, target) =>
+        client
+          .getProcess(id)
+          .then((process) =>
+            Option.map(Option.fromNullishOr(process), (found) =>
+              makeProcessHandle(definition, instance, found, target),
+            ),
+          ),
       );
     }),
-    listProcesses: attempt("listProcesses", () => client.listProcesses()).pipe(
+    listProcesses: attempt("listProcesses", (client) => client.listProcesses()).pipe(
       Effect.withSpan("Sandbox.listProcesses", spanOptions("listProcesses")),
     ),
     writeFile: Effect.fn(
@@ -661,7 +693,7 @@ const makeSandboxClient = (
     ) {
       yield* Effect.annotateCurrentSpan("path", path);
 
-      return yield* attempt("writeFile", () => client.writeFile(path, content, options));
+      return yield* attempt("writeFile", (client) => client.writeFile(path, content, options));
     }),
     readFile: Effect.fn(
       "Sandbox.readFile",
@@ -669,16 +701,17 @@ const makeSandboxClient = (
     )(function* (path: string, options?: { readonly encoding?: ReadFileEncoding }) {
       yield* Effect.annotateCurrentSpan("path", path);
 
-      return yield* attempt("readFile", () => client.readFile(path, options));
+      return yield* attempt("readFile", (client) => client.readFile(path, options));
     }),
-    readFileStream: (path: string) => stream("readFileStream", () => client.readFileStream(path)),
+    readFileStream: (path: string) =>
+      stream("readFileStream", (client) => client.readFileStream(path)),
     mkdir: Effect.fn(
       "Sandbox.mkdir",
       spanOptions("mkdir"),
     )(function* (path: string, options?: { readonly recursive?: boolean }) {
       yield* Effect.annotateCurrentSpan("path", path);
 
-      return yield* attempt("mkdir", () => client.mkdir(path, options));
+      return yield* attempt("mkdir", (client) => client.mkdir(path, options));
     }),
     deleteFile: Effect.fn(
       "Sandbox.deleteFile",
@@ -686,7 +719,7 @@ const makeSandboxClient = (
     )(function* (path: string) {
       yield* Effect.annotateCurrentSpan("path", path);
 
-      return yield* attempt("deleteFile", () => client.deleteFile(path));
+      return yield* attempt("deleteFile", (client) => client.deleteFile(path));
     }),
     renameFile: Effect.fn(
       "Sandbox.renameFile",
@@ -694,7 +727,7 @@ const makeSandboxClient = (
     )(function* (oldPath: string, newPath: string) {
       yield* Effect.annotateCurrentSpan({ oldPath, newPath });
 
-      return yield* attempt("renameFile", () => client.renameFile(oldPath, newPath));
+      return yield* attempt("renameFile", (client) => client.renameFile(oldPath, newPath));
     }),
     moveFile: Effect.fn(
       "Sandbox.moveFile",
@@ -702,7 +735,7 @@ const makeSandboxClient = (
     )(function* (sourcePath: string, destinationPath: string) {
       yield* Effect.annotateCurrentSpan({ sourcePath, destinationPath });
 
-      return yield* attempt("moveFile", () => client.moveFile(sourcePath, destinationPath));
+      return yield* attempt("moveFile", (client) => client.moveFile(sourcePath, destinationPath));
     }),
     listFiles: Effect.fn(
       "Sandbox.listFiles",
@@ -710,7 +743,7 @@ const makeSandboxClient = (
     )(function* (path: string, options?: ListFilesOptions) {
       yield* Effect.annotateCurrentSpan("path", path);
 
-      return yield* attempt("listFiles", () => client.listFiles(path, options));
+      return yield* attempt("listFiles", (client) => client.listFiles(path, options));
     }),
     exists: Effect.fn(
       "Sandbox.exists",
@@ -718,11 +751,11 @@ const makeSandboxClient = (
     )(function* (path: string) {
       yield* Effect.annotateCurrentSpan("path", path);
 
-      return yield* attempt("exists", () => client.exists(path));
+      return yield* attempt("exists", (client) => client.exists(path));
     }),
     watch: (path: string, options?: WatchOptions) =>
       decodeSseEvents<FileWatchSSEEvent, SandboxOperationError, never>(
-        stream("watch", () => client.watch(path, options)),
+        stream("watch", (client) => client.watch(path, options)),
       ),
     checkChanges: Effect.fn(
       "Sandbox.checkChanges",
@@ -730,13 +763,13 @@ const makeSandboxClient = (
     )(function* (path: string, options?: CheckChangesOptions) {
       yield* Effect.annotateCurrentSpan("path", path);
 
-      return yield* attempt("checkChanges", () => client.checkChanges(path, options));
+      return yield* attempt("checkChanges", (client) => client.checkChanges(path, options));
     }),
     setEnvVars: Effect.fn(
       "Sandbox.setEnvVars",
       spanOptions("setEnvVars"),
     )(function* (envVars: Record<string, string | undefined>) {
-      return yield* attempt("setEnvVars", () => client.setEnvVars(envVars));
+      return yield* attempt("setEnvVars", (client) => client.setEnvVars(envVars));
     }),
     exposePort: Effect.fn(
       "Sandbox.exposePort",
@@ -744,7 +777,7 @@ const makeSandboxClient = (
     )(function* (port: number, options: ExposePortOptions) {
       yield* Effect.annotateCurrentSpan("port", port);
 
-      return yield* attempt("exposePort", () => client.exposePort(port, options));
+      return yield* attempt("exposePort", (client) => client.exposePort(port, options));
     }),
     unexposePort: Effect.fn(
       "Sandbox.unexposePort",
@@ -752,13 +785,13 @@ const makeSandboxClient = (
     )(function* (port: number) {
       yield* Effect.annotateCurrentSpan("port", port);
 
-      return yield* attempt("unexposePort", () => client.unexposePort(port));
+      return yield* attempt("unexposePort", (client) => client.unexposePort(port));
     }),
     getExposedPorts: Effect.fn(
       "Sandbox.getExposedPorts",
       spanOptions("getExposedPorts"),
     )(function* (hostname: string) {
-      return yield* attempt("getExposedPorts", () => client.getExposedPorts(hostname));
+      return yield* attempt("getExposedPorts", (client) => client.getExposedPorts(hostname));
     }),
     isPortExposed: Effect.fn(
       "Sandbox.isPortExposed",
@@ -766,7 +799,7 @@ const makeSandboxClient = (
     )(function* (port: number) {
       yield* Effect.annotateCurrentSpan("port", port);
 
-      return yield* attempt("isPortExposed", () => client.isPortExposed(port));
+      return yield* attempt("isPortExposed", (client) => client.isPortExposed(port));
     }),
     validatePortToken: Effect.fn(
       "Sandbox.validatePortToken",
@@ -774,13 +807,15 @@ const makeSandboxClient = (
     )(function* (port: number, token: string) {
       yield* Effect.annotateCurrentSpan("port", port);
 
-      return yield* attempt("validatePortToken", () => client.validatePortToken(port, token));
+      return yield* attempt("validatePortToken", (client) => client.validatePortToken(port, token));
     }),
     containerFetch: Effect.fn(
       "Sandbox.containerFetch",
       spanOptions("containerFetch"),
     )(function* (requestOrUrl: Request | string | URL, port?: number) {
-      return yield* attempt("containerFetch", () => client.containerFetch(requestOrUrl, port));
+      return yield* attempt("containerFetch", (client) =>
+        client.containerFetch(requestOrUrl, port),
+      );
     }),
     wsConnect: Effect.fn(
       "Sandbox.wsConnect",
@@ -788,7 +823,7 @@ const makeSandboxClient = (
     )(function* (request: Request, port: number) {
       yield* Effect.annotateCurrentSpan("port", port);
 
-      return yield* attempt("wsConnect", () => client.wsConnect(request, port));
+      return yield* attempt("wsConnect", (client) => client.wsConnect(request, port));
     }),
     mountBucket: Effect.fn(
       "Sandbox.mountBucket",
@@ -796,7 +831,9 @@ const makeSandboxClient = (
     )(function* (bucket: string, mountPath: string, options: MountBucketOptions) {
       yield* Effect.annotateCurrentSpan({ bucket, mountPath });
 
-      return yield* attempt("mountBucket", () => client.mountBucket(bucket, mountPath, options));
+      return yield* attempt("mountBucket", (client) =>
+        client.mountBucket(bucket, mountPath, options),
+      );
     }),
     unmountBucket: Effect.fn(
       "Sandbox.unmountBucket",
@@ -804,7 +841,7 @@ const makeSandboxClient = (
     )(function* (mountPath: string) {
       yield* Effect.annotateCurrentSpan("mountPath", mountPath);
 
-      return yield* attempt("unmountBucket", () => client.unmountBucket(mountPath));
+      return yield* attempt("unmountBucket", (client) => client.unmountBucket(mountPath));
     }),
     createBackup: Effect.fn(
       "Sandbox.createBackup",
@@ -812,7 +849,7 @@ const makeSandboxClient = (
     )(function* (options: BackupOptions) {
       yield* Effect.annotateCurrentSpan("dir", options.dir);
 
-      return yield* attempt("createBackup", () => client.createBackup(options));
+      return yield* attempt("createBackup", (client) => client.createBackup(options));
     }),
     restoreBackup: Effect.fn(
       "Sandbox.restoreBackup",
@@ -820,32 +857,39 @@ const makeSandboxClient = (
     )(function* (backup: DirectoryBackup) {
       yield* Effect.annotateCurrentSpan({ backupId: backup.id, dir: backup.dir });
 
-      return yield* attempt("restoreBackup", () => client.restoreBackup(backup));
+      return yield* attempt("restoreBackup", (client) => client.restoreBackup(backup));
     }),
     createTerminal: Effect.fn(
       "Sandbox.createTerminal",
       spanOptions("createTerminal"),
     )(function* (options: CreateTerminalOptions) {
-      const terminal = yield* attempt("createTerminal", () => client.createTerminal(options));
-
-      return makeTerminalHandle(definition, instance, terminal, target);
+      return yield* attempt("createTerminal", (client, _signal, target) =>
+        client
+          .createTerminal(options)
+          .then((terminal) => makeTerminalHandle(definition, instance, terminal, target)),
+      );
     }),
     getTerminal: Effect.fn(
       "Sandbox.getTerminal",
       spanOptions("getTerminal"),
     )(function* (id: string) {
-      const terminal = yield* attempt("getTerminal", () => client.getTerminal(id));
-
-      return Option.map(Option.fromNullishOr(terminal), (found) =>
-        makeTerminalHandle(definition, instance, found, target),
+      return yield* attempt("getTerminal", (client, _signal, target) =>
+        client
+          .getTerminal(id)
+          .then((terminal) =>
+            Option.map(Option.fromNullishOr(terminal), (found) =>
+              makeTerminalHandle(definition, instance, found, target),
+            ),
+          ),
       );
     }),
-    listTerminals: attempt("listTerminals", () => client.listTerminals()).pipe(
-      Effect.map((terminals) =>
-        terminals.map((terminal) => makeTerminalHandle(definition, instance, terminal, target)),
-      ),
-      Effect.withSpan("Sandbox.listTerminals", spanOptions("listTerminals")),
-    ),
+    listTerminals: attempt("listTerminals", (client, _signal, target) =>
+      client
+        .listTerminals()
+        .then((terminals) =>
+          terminals.map((terminal) => makeTerminalHandle(definition, instance, terminal, target)),
+        ),
+    ).pipe(Effect.withSpan("Sandbox.listTerminals", spanOptions("listTerminals"))),
     tunnels: {
       get: Effect.fn(
         "Sandbox.tunnels.get",
@@ -853,31 +897,31 @@ const makeSandboxClient = (
       )(function* (port: number, options?: TunnelOptions) {
         yield* Effect.annotateCurrentSpan("port", port);
 
-        return yield* attempt("tunnels.get", () => client.tunnels.get(port, options));
+        return yield* attempt("tunnels.get", (client) => client.tunnels.get(port, options));
       }),
-      list: attempt("tunnels.list", () => client.tunnels.list()).pipe(
+      list: attempt("tunnels.list", (client) => client.tunnels.list()).pipe(
         Effect.withSpan("Sandbox.tunnels.list", spanOptions("tunnels.list")),
       ),
       destroy: Effect.fn(
         "Sandbox.tunnels.destroy",
         spanOptions("tunnels.destroy"),
       )(function* (portOrInfo: number | TunnelInfo) {
-        return yield* attempt("tunnels.destroy", () => client.tunnels.destroy(portOrInfo));
+        return yield* attempt("tunnels.destroy", (client) => client.tunnels.destroy(portOrInfo));
       }),
     },
     start: Effect.fn(
       "Sandbox.start",
       spanOptions("start"),
     )(function* (options?: ContainerStartOptions) {
-      return yield* attempt("start", () => client.start(options));
+      return yield* attempt("start", (client) => client.start(options));
     }),
     stop: Effect.fn(
       "Sandbox.stop",
       spanOptions("stop"),
     )(function* (signal?: ContainerStopSignal) {
-      return yield* attempt("stop", () => client.stop(signal));
+      return yield* attempt("stop", (client) => client.stop(signal));
     }),
-    destroy: attempt("destroy", () => client.destroy()).pipe(
+    destroy: attempt("destroy", (client) => client.destroy()).pipe(
       Effect.withSpan("Sandbox.destroy", spanOptions("destroy")),
     ),
   };
@@ -921,52 +965,58 @@ export const makeClient =
       yield* Effect.annotateCurrentSpan("instance", name);
 
       const sandboxModule = yield* importSandboxModule(definition, name);
-      const targets = yield* Effect.serviceOption(CurrentTargets);
-      const scopedNamespace = yield* RpcTargets.get(namespace, "sandbox-namespace", () => {
-        const adapter: SandboxNamespaceResource = {
-          idFromName: (name) => namespace.idFromName(name),
-          get: (id, options) =>
-            Option.isSome(targets)
-              ? targets.value.get(adapter, JSON.stringify([id.toString(), options]), () =>
-                  namespace.get(id, options),
-                )
-              : namespace.get(id, options),
-        };
+      // Resolve through the invocation cache on each operation. A retained client
+      // must observe invalidation after a native stub fails; failed work is not replayed.
+      const resolve = Effect.gen(function* () {
+        const targets = yield* Effect.serviceOption(CurrentTargets);
+        const scopedNamespace = yield* RpcTargets.get(namespace, "sandbox-namespace", () => {
+          const adapter: SandboxNamespaceResource = {
+            idFromName: (name) => namespace.idFromName(name),
+            get: (id, options) =>
+              Option.isSome(targets)
+                ? targets.value.get(adapter, JSON.stringify([id.toString(), options]), () =>
+                    namespace.get(id, options),
+                  )
+                : namespace.get(id, options),
+          };
 
-        return adapter;
-      }).pipe(
-        Effect.mapError(
-          (error) =>
+          return adapter;
+        }).pipe(
+          Effect.mapError(
+            (error) =>
+              new SandboxOperationError({
+                binding: definition.binding,
+                instance: name,
+                operation: "get",
+                cause: error.cause,
+              }),
+          ),
+        );
+        const nativeNamespace: unknown = scopedNamespace;
+        const client = yield* Effect.try({
+          try: () =>
+            sandboxModule.getSandbox(
+              // SAFETY: the layer validated the binding as a Durable Object
+              // namespace, and getSandbox only requires idFromName() and get();
+              // the structural namespace type is narrower than the SDK's nominal
+              // one, so the conversion goes through unknown.
+              nativeNamespace as Parameters<typeof sandboxModule.getSandbox>[0],
+              name,
+              options,
+            ),
+          catch: (cause) =>
             new SandboxOperationError({
               binding: definition.binding,
               instance: name,
               operation: "get",
-              cause: error.cause,
+              cause,
             }),
-        ),
-      );
-      const nativeNamespace: unknown = scopedNamespace;
-      const client = yield* Effect.try({
-        try: () =>
-          sandboxModule.getSandbox(
-            // SAFETY: the layer validated the binding as a Durable Object
-            // namespace, and getSandbox only requires idFromName() and get();
-            // the structural namespace type is narrower than the SDK's nominal
-            // one, so the conversion goes through unknown.
-            nativeNamespace as Parameters<typeof sandboxModule.getSandbox>[0],
-            name,
-            options,
-          ),
-        catch: (cause) =>
-          new SandboxOperationError({
-            binding: definition.binding,
-            instance: name,
-            operation: "get",
-            cause,
-          }),
+        });
+
+        return { client, target: scopedNamespace };
       });
 
-      return makeSandboxClient(client, definition, name, scopedNamespace);
+      return makeSandboxClient(resolve, definition, name);
     });
 
     return {

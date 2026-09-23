@@ -240,7 +240,7 @@ export interface SandboxTunnelsClient {
 }
 
 export interface SandboxInstanceClient {
-  readonly rawUnsafe: Effect.Effect<SandboxClientResource>;
+  readonly rawUnsafe: Effect.Effect<SandboxClientResource, SandboxOperationError>;
   readonly exec: (
     command: SandboxCommand,
     options?: ExecOptions,

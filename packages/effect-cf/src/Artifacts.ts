@@ -222,7 +222,7 @@ export interface ArtifactsRepoBinding extends Partial<ArtifactsRepoInfo> {
     options?: ArtifactsForkOptions,
   ) => Promise<ArtifactsCreateRepoResult>;
   readonly log: (options?: ArtifactsLogOptions) => Promise<ArtifactsLogResult>;
-  readonly readCommit: (hash: string) => Promise<ArtifactsCommit>;
+  readonly readCommit: (hash: string) => Promise<ArtifactsCommit | null>;
   readonly readTree: (hash: string) => Promise<ArtifactsTree>;
 }
 
@@ -451,7 +451,20 @@ const wrapRepo = (
   readCommit: Effect.fn(
     "Artifacts.readCommit",
     spanOptions(binding, "readCommit"),
-  )((hash: string) => tryArtifactsPromise(binding, "readCommit", () => repo.readCommit(hash))),
+  )(function* (hash: string) {
+    const commit = yield* tryArtifactsPromise(binding, "readCommit", () => repo.readCommit(hash));
+
+    if (commit === null)
+      return yield* new ArtifactsOperationError({
+        binding,
+        operation: "readCommit",
+        code: "NOT_FOUND",
+        numericCode: artifactsErrorNumericCodes.NOT_FOUND,
+        cause: new Error("Commit not found"),
+      });
+
+    return commit;
+  }),
   readTree: Effect.fn(
     "Artifacts.readTree",
     spanOptions(binding, "readTree"),

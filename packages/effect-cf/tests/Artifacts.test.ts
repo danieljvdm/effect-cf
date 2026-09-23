@@ -445,3 +445,32 @@ test("Artifacts preserves Cloudflare error identifiers", async () => {
   assert.strictEqual(error.numericCode, 10201);
   assert.match(error.message, /\(ALREADY_EXISTS\)/);
 });
+
+// Regression: https://github.com/danieljvdm/effect-cf/commit/b7bc27eb
+// The live binding returns null for an absent commit; callers treated it as present.
+test("Artifacts readCommit reports an absent commit as NOT_FOUND", async () => {
+  const calls = makeCalls();
+  const artifacts = {
+    ...makeArtifacts(calls),
+    get: async () => ({ ...makeRepo(calls), readCommit: async () => null }),
+  } satisfies Artifacts.ArtifactsBinding;
+  const result = await Effect.runPromise(
+    Effect.gen(function* () {
+      const client = yield* TestArtifacts;
+      const repo = yield* client.get("starter-repo");
+
+      return yield* Effect.result(repo.readCommit("missing"));
+    }).pipe(Effect.provide(artifactsLayer(artifacts))),
+  );
+
+  expect(result).toMatchObject({
+    _tag: "Failure",
+    failure: {
+      _tag: "ArtifactsOperationError",
+      binding: "ARTIFACTS",
+      operation: "readCommit",
+      code: "NOT_FOUND",
+      numericCode: 10200,
+    },
+  });
+});

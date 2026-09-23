@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.48.0
+
+### Minor Changes
+
+- [#192](https://github.com/danieljvdm/effect-cf/pull/192) [`761c4f4`](https://github.com/danieljvdm/effect-cf/commit/761c4f411e11ae0491f61c6fe7c7697faf68e7f0) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Report absent Artifacts commits as `ArtifactsOperationError` with `NOT_FOUND` instead of succeeding with `null`. Correct the raw `ArtifactsRepoBinding.readCommit` return type to include `null`; the Effect client continues to return a commit or a typed failure.
+
 ## 0.47.0
 
 ### Minor Changes

@@ -1,5 +1,13 @@
 # effect-cf
 
+## 0.49.0
+
+### Minor Changes
+
+- [#194](https://github.com/danieljvdm/effect-cf/pull/194) [`adf4e33`](https://github.com/danieljvdm/effect-cf/commit/adf4e339aaaef21ef2abb87595c07406a3e64ac3) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Reacquire sandbox RPC clients after a failed native channel. Retained sandbox instances now use a fresh channel for subsequent operations while preserving invocation-local channel reuse. Failed operations are still returned to the caller without automatic replay.
+
+  `SandboxInstanceClient.rawUnsafe` now includes `SandboxOperationError` because acquiring a fresh native client can fail.
+
 ## 0.48.0
 
 ### Minor Changes

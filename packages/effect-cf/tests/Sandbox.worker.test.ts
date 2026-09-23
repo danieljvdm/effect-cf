@@ -19,6 +19,7 @@ it.effect("retains sandbox and container channels while applying current configu
       idFromName: (name) => makePartialTestDouble<DurableObjectId>({ toString: () => name }),
       get: () => {
         const identity = ++sandboxConstructions;
+        let broken = false;
 
         return makePartialTestDouble<
           DurableObjectStub &
@@ -31,7 +32,8 @@ it.effect("retains sandbox and container channels while applying current configu
           },
           // SAFETY: this fixture exercises only the SDK's UTF-8 read overload.
           readFile: (async (path: string) => {
-            if (failSandbox) throw transportFailure;
+            if (failSandbox) broken = true;
+            if (broken) throw transportFailure;
 
             return { success: true, path, content: String(identity), timestamp: "t" };
           }) as Sandbox.SandboxClientResource["readFile"],
@@ -78,7 +80,9 @@ it.effect("retains sandbox and container channels while applying current configu
 
       assert.strictEqual(sandboxFailure.cause, transportFailure);
       failSandbox = false;
-      const replacement = yield* sandboxes.get("sandbox");
+      // A retained instance must reacquire after its native channel is poisoned.
+      // https://repairs.reve.build/incidents/6116cb94-b78e-576f-b8c5-e1b0e8a34d92
+      const replacement = sandbox;
 
       assert.notStrictEqual(
         (yield* replacement.readFile("marker", { encoding: "utf-8" })).content,
@@ -95,7 +99,8 @@ it.effect("retains sandbox and container channels while applying current configu
     yield* exercise.pipe(RpcTargets.withScope, Effect.scoped);
     yield* exercise.pipe(RpcTargets.withScope, Effect.scoped);
     assert.deepStrictEqual(adapterIdentities, ["1", "3"]);
-    assert.deepStrictEqual(configurations, [true, false, true, true, false, true]);
+    // Reacquiring the retained client also restores its requested keepAlive option.
+    assert.deepStrictEqual(configurations, [true, false, true, true, true, false, true, true]);
     assert.strictEqual(sandboxConstructions, 4);
     assert.strictEqual(containerConstructions, 4);
   }),

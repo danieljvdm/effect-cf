@@ -30,6 +30,8 @@ declare global {
       ARTIFACT_BUCKET?: R2Bucket;
       AVATAR_QUEUE?: Queue;
       BROWSER?: BrowserRun;
+      // Browser binding as Wrangler 4.1-4.95 declares it.
+      LEGACY_BROWSER?: Fetcher;
       COUNTER_DURABLE_OBJECTS?: DurableObjectNamespace;
       FETCH_ONLY_WORKER?: Fetcher;
       REPORT_WORKFLOW?: Workflow;

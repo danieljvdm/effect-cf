@@ -142,7 +142,8 @@ export interface BrowserRenderingService<Id extends string> {
 }
 
 export type LayerOptions = {
-  readonly binding: Binding.Name<globalThis.BrowserRun>;
+  /** Wrangler declares browser bindings as `Fetcher` before 4.96 and `BrowserRun` after. */
+  readonly binding: Binding.Name<globalThis.BrowserRun | Fetcher>;
 };
 
 export interface TagClass<Self, Id extends string> extends Context.ServiceClass<

@@ -106,8 +106,7 @@ class Browser extends BrowserRendering.Tag<Browser>()("Browser") {}
 Browser.layer({ binding: "BROWSER" });
 // @ts-expect-error R2 buckets cannot back a browser layer.
 Browser.layer({ binding: "TEST_BUCKET" });
-// @ts-expect-error service bindings are Fetchers, not Browser Run bindings.
-Browser.layer({ binding: "API_WORKER" });
+Browser.layer({ binding: "LEGACY_BROWSER" });
 
 // Queue bindings also check the encoded message against the declared body.
 // `AVATAR_QUEUE` is an untyped `Queue`, like `wrangler types` output; `TYPED_JOBS`

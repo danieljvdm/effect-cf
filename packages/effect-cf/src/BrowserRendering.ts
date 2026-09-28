@@ -142,7 +142,7 @@ export interface BrowserRenderingService<Id extends string> {
 }
 
 export type LayerOptions = {
-  readonly binding: Binding.Name<BrowserRenderingBinding>;
+  readonly binding: Binding.Name<globalThis.BrowserRun>;
 };
 
 export interface TagClass<Self, Id extends string> extends Context.ServiceClass<

@@ -29,11 +29,14 @@ declare global {
       API_WORKER?: Fetcher;
       ARTIFACT_BUCKET?: R2Bucket;
       AVATAR_QUEUE?: Queue;
+      BROWSER?: BrowserRun;
       COUNTER_DURABLE_OBJECTS?: DurableObjectNamespace;
       FETCH_ONLY_WORKER?: Fetcher;
       REPORT_WORKFLOW?: Workflow;
       SANDBOX?: DurableObjectNamespace;
       SESSION_KV?: KVNamespace;
+      // Declared with no possible value; must not match any resource.
+      RETIRED_BINDING?: null;
       // Typed like `cf workers types` output, to exercise payload checks.
       TYPED_JOBS?: Queue<{ readonly userId: string; readonly attempts: number }>;
       DATABASE_URL?: string;

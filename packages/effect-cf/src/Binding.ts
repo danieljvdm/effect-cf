@@ -16,6 +16,14 @@ type EnvName = keyof Cloudflare.Env & string;
 type EnvValue<Name extends EnvName> = NonNullable<Cloudflare.Env[Name]>;
 
 /**
+ * Names whose declared value can hold a resource. An entry typed only as `null`
+ * or `undefined` reduces to `never`, which would otherwise match every resource.
+ */
+type ResourceName = {
+  readonly [Name in EnvName]-?: [EnvValue<Name>] extends [never] ? never : Name;
+}[EnvName];
+
+/**
  * Binding names on the ambient `Cloudflare.Env` whose value is assignable to
  * `Resource`.
  *
@@ -26,8 +34,8 @@ type EnvValue<Name extends EnvName> = NonNullable<Cloudflare.Env[Name]>;
 export type Key<Resource> = [EnvName] extends [never]
   ? string
   : {
-      readonly [Name in EnvName]-?: EnvValue<Name> extends Resource ? Name : never;
-    }[EnvName];
+      readonly [Name in ResourceName]-?: EnvValue<Name> extends Resource ? Name : never;
+    }[ResourceName];
 
 /**
  * Queue producer binding names whose declared message body accepts `Body`.
@@ -37,12 +45,12 @@ export type Key<Resource> = [EnvName] extends [never]
 export type QueueKey<Body> = [EnvName] extends [never]
   ? string
   : {
-      readonly [Name in EnvName]-?: EnvValue<Name> extends Queue<infer Declared>
+      readonly [Name in ResourceName]-?: EnvValue<Name> extends Queue<infer Declared>
         ? [Body] extends [Declared]
           ? Name
           : never
         : never;
-    }[EnvName];
+    }[ResourceName];
 
 /**
  * Workflow binding names whose declared payload accepts `Payload`.
@@ -53,12 +61,12 @@ export type QueueKey<Body> = [EnvName] extends [never]
 export type WorkflowKey<Payload> = [EnvName] extends [never]
   ? string
   : {
-      readonly [Name in EnvName]-?: EnvValue<Name> extends Workflow<infer Declared>
+      readonly [Name in ResourceName]-?: EnvValue<Name> extends Workflow<infer Declared>
         ? [Payload] extends [Declared]
           ? Name
           : never
         : never;
-    }[EnvName];
+    }[ResourceName];
 
 /**
  * A binding name that skips the compile-time `Env` check. The binding is still

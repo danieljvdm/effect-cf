@@ -3,6 +3,7 @@ import { Effect, Layer, Schema } from "effect";
 
 import {
   Binding,
+  BrowserRendering,
   D1,
   DurableObject,
   Kv,
@@ -31,6 +32,9 @@ Uploads.layer({ binding: "TEST_BUKET" });
 // @ts-expect-error KV namespaces cannot back an R2 layer.
 Uploads.layer({ binding: "TEST_KV" });
 Uploads.layer({ binding: Binding.unchecked("RUNTIME_ONLY_BUCKET") });
+
+// @ts-expect-error entries typed only as null cannot hold a bucket.
+Uploads.layer({ binding: "RETIRED_BINDING" });
 
 declare const computedName: string;
 // @ts-expect-error computed names must opt out explicitly.
@@ -97,6 +101,14 @@ export const previewRouting = Effect.gen(function* () {
   yield* Sandbox.proxyToSandbox(new Request("https://example.com"), { binding: "TEST_BUCKET" });
 });
 
+class Browser extends BrowserRendering.Tag<Browser>()("Browser") {}
+
+Browser.layer({ binding: "BROWSER" });
+// @ts-expect-error R2 buckets cannot back a browser layer.
+Browser.layer({ binding: "TEST_BUCKET" });
+// @ts-expect-error service bindings are Fetchers, not Browser Run bindings.
+Browser.layer({ binding: "API_WORKER" });
+
 // Queue bindings also check the encoded message against the declared body.
 // `AVATAR_QUEUE` is an untyped `Queue`, like `wrangler types` output; `TYPED_JOBS`
 // carries a body type, like `cf workers types` output.
@@ -118,6 +130,8 @@ Orders.layer({ binding: "AVATAR_QUEUE" });
 Orders.layer({ binding: "TYPED_JOBS" });
 // @ts-expect-error KV namespaces cannot back a queue layer.
 Jobs.layer({ binding: "TEST_KV" });
+// @ts-expect-error entries typed only as null are not queues.
+Jobs.layer({ binding: "RETIRED_BINDING" });
 
 // `TEST_WORKFLOW` declares `Workflow<{ readonly value: string }>`.
 
@@ -135,6 +149,8 @@ ValueWorkflow.layer({ binding: "TEST_WORKFLOW" });
 CountWorkflow.layer({ binding: "REPORT_WORKFLOW" });
 // @ts-expect-error the workflow payload declared in Env does not accept this schema.
 CountWorkflow.layer({ binding: "TEST_WORKFLOW" });
+// @ts-expect-error entries typed only as null are not workflows.
+CountWorkflow.layer({ binding: "RETIRED_BINDING" });
 
 // Checked and unchecked names produce the same layer.
 expectTypeOf(Uploads.layer({ binding: "TEST_BUCKET" })).toEqualTypeOf(

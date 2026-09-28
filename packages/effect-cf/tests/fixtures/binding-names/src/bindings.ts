@@ -92,6 +92,10 @@ export class Browser extends BrowserRendering.Tag<Browser>()("Browser") {}
 export const browserLayer = Browser.layer({ binding: "BROWSER" });
 // @ts-expect-error a text var cannot back a browser layer.
 export const textBrowser = Browser.layer({ binding: "APP_NAME" });
+// @ts-expect-error an R2 bucket cannot back a browser layer.
+export const bucketBrowser = Browser.layer({ binding: "ARCHIVE" });
+// @ts-expect-error a service binding cannot back a browser layer.
+export const serviceBrowser = Browser.layer({ binding: "AUTH" });
 
 export class Repositories extends Artifacts.Tag<Repositories>()("Repositories") {}
 export const repositoriesLayer = Repositories.layer({ binding: "ARTIFACTS" });

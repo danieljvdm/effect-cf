@@ -1,0 +1,45 @@
+// One binding of every kind effect-cf layers accept. `wrangler types` turns this
+// into the `Cloudflare.Env` that `src/bindings.ts` checks binding names against.
+{
+  "name": "effect-cf-binding-names",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-08-25",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": { "APP_NAME": "binding-names" },
+  "kv_namespaces": [{ "binding": "CACHE", "id": "00000000000000000000000000000000" }],
+  "r2_buckets": [{ "binding": "ARCHIVE", "bucket_name": "archive" }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "db",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+    },
+  ],
+  "queues": { "producers": [{ "binding": "JOBS", "queue": "jobs" }] },
+  "workflows": [
+    { "name": "onboarding", "binding": "ONBOARDING", "class_name": "OnboardingWorkflow" },
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "COUNTERS", "class_name": "CounterDurableObject" },
+      // Container and Sandbox namespaces are Durable Object bindings too.
+      { "name": "CONTAINERS", "class_name": "CounterDurableObject" },
+    ],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["CounterDurableObject"] }],
+  "services": [{ "binding": "AUTH", "service": "auth-worker" }],
+  "ai": { "binding": "AI" },
+  "vectorize": [{ "binding": "VECTORS", "index_name": "vectors" }],
+  "analytics_engine_datasets": [{ "binding": "EVENTS", "dataset": "events" }],
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "00000000000000000000000000000000",
+      "localConnectionString": "postgres://localhost/db",
+    },
+  ],
+  "images": { "binding": "IMAGES" },
+  "send_email": [{ "name": "MAILER" }],
+  "browser": { "binding": "BROWSER" },
+  "artifacts": [{ "binding": "ARTIFACTS", "namespace": "default" }],
+}

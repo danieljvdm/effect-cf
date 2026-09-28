@@ -128,9 +128,15 @@ export const makeClient = <Message extends RpcDefinition.ServiceFreeSchema>(
   });
 };
 
+export type LayerOptions<
+  Message extends RpcDefinition.ServiceFreeSchema = RpcDefinition.ServiceFreeSchema,
+> = {
+  readonly binding: Binding.QueueName<S.Codec.Encoded<Message>>;
+};
+
 export const layer = <Self, Message extends RpcDefinition.ServiceFreeSchema>(
   tag: Context.Service<Self, QueueBindingClient<Message>>,
-  definition: QueueBindingDefinition<Message>,
+  definition: QueueBindingDefinition<Message> & LayerOptions<Message>,
 ) =>
   Binding.layer(
     tag,

@@ -201,7 +201,7 @@ export interface AnalyticsEngineQueryService<Id extends string> {
 }
 
 export type LayerOptions = {
-  readonly binding: string;
+  readonly binding: Binding.Name<AnalyticsEngineBinding>;
   readonly write?: AnalyticsEngineWritePolicy;
 };
 

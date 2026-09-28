@@ -296,7 +296,7 @@ export function make<
         ROut,
         LayerError,
         DurableObjectState | DurableObjectAlarm | RAlarm
-      >(layer, env, services);
+      >(layer, env, services, state.exports);
 
       const initialize = options.initialize;
 

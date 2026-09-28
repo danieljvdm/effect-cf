@@ -165,8 +165,7 @@ export type Options<
 > = BaseOptions<ROut, Self, REvent, EventLayerError> &
   EventLayerOptions<ROut, REvent, EventLayerError>;
 
-export type LayerOptions = {
-  readonly binding: string;
+export type LayerOptions = ServiceBinding.LayerOptions & {
   readonly rpcTracing?: boolean;
 };
 

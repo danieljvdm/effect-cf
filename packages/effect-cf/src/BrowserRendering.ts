@@ -142,7 +142,7 @@ export interface BrowserRenderingService<Id extends string> {
 }
 
 export type LayerOptions = {
-  readonly binding: string;
+  readonly binding: Binding.Name<BrowserRenderingBinding>;
 };
 
 export interface TagClass<Self, Id extends string> extends Context.ServiceClass<
@@ -327,7 +327,7 @@ export const makeClient =
 
 export const layer = <Self>(
   tag: Context.Service<Self, BrowserRenderingClient>,
-  definition: BrowserRenderingDefinition,
+  definition: LayerOptions,
 ) =>
   Binding.layer(tag, definition.binding, isBrowserRenderingBinding, makeClient(definition), {
     expected: expectedBrowserRenderingBinding,

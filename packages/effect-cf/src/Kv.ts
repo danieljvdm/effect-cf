@@ -98,7 +98,7 @@ export interface KvClient<Key, Value, EncodedValue> {
 }
 
 export type LayerOptions = {
-  readonly binding: string;
+  readonly binding: Binding.Name<KVNamespace>;
 };
 
 export interface TagClass<
@@ -248,7 +248,7 @@ export const makeClient = <Key, Value, EncodedValue>(
 
 export const layer = <Self, Key, Value, EncodedValue>(
   tag: Context.Service<Self, KvClient<Key, Value, EncodedValue>>,
-  definition: KvDefinition<Key, Value, EncodedValue>,
+  definition: KvDefinition<Key, Value, EncodedValue> & LayerOptions,
 ) =>
   Binding.layer(
     tag,

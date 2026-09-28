@@ -365,13 +365,17 @@ export const makeClient = <
   };
 };
 
+export type LayerOptions = {
+  readonly binding: Binding.Name<Fetcher>;
+};
+
 export const layer = <
   Self,
   Api extends object,
   const Definition extends WorkerDefinition.Definition.Any | undefined = undefined,
 >(
   tag: Context.Service<Self, ServiceBindingEffectClient<Api, Definition>>,
-  definition: ServiceBindingDefinition<Definition>,
+  definition: ServiceBindingDefinition<Definition> & LayerOptions,
 ) =>
   Binding.layer(
     tag,
@@ -388,7 +392,7 @@ export const Service =
     const Definition extends WorkerDefinition.Definition.Any | undefined = undefined,
   >(
     id: Id,
-    definition: ServiceBindingDefinition<Definition>,
+    definition: ServiceBindingDefinition<Definition> & LayerOptions,
   ): ServiceClass<Self, Id, Api, Definition> => {
     type ServiceApi = ApiOrDefinition<Api, Definition>;
 

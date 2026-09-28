@@ -1,14 +1,100 @@
+import * as Brand from "effect/Brand";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Predicate from "effect/Predicate";
 
-import { WorkerEnvironment, type WorkerEnv } from "./Environment";
+import { WorkerEnvironment, WorkerExports } from "./Environment";
 
 export const TypeId = "~effect-cf/Binding" as const;
 
 export type TypeId = typeof TypeId;
+
+type EnvName = keyof Cloudflare.Env & string;
+
+type EnvValue<Name extends EnvName> = NonNullable<Cloudflare.Env[Name]>;
+
+/**
+ * Binding names on the ambient `Cloudflare.Env` whose value is assignable to
+ * `Resource`.
+ *
+ * Generated `Env` types (`wrangler types` or `cf workers types`) turn binding
+ * names into checked literals. Without a declared `Env`, any string is
+ * accepted.
+ */
+export type Key<Resource> = [EnvName] extends [never]
+  ? string
+  : {
+      readonly [Name in EnvName]-?: EnvValue<Name> extends Resource ? Name : never;
+    }[EnvName];
+
+/**
+ * Queue producer binding names whose declared message body accepts `Body`.
+ *
+ * Wrangler declares untyped `Queue` bindings, which accept any body.
+ */
+export type QueueKey<Body> = [EnvName] extends [never]
+  ? string
+  : {
+      readonly [Name in EnvName]-?: EnvValue<Name> extends Queue<infer Declared>
+        ? [Body] extends [Declared]
+          ? Name
+          : never
+        : never;
+    }[EnvName];
+
+/**
+ * Workflow binding names whose declared payload accepts `Payload`.
+ *
+ * Wrangler declares untyped `Workflow` bindings for classes it cannot resolve,
+ * which accept any payload.
+ */
+export type WorkflowKey<Payload> = [EnvName] extends [never]
+  ? string
+  : {
+      readonly [Name in EnvName]-?: EnvValue<Name> extends Workflow<infer Declared>
+        ? [Payload] extends [Declared]
+          ? Name
+          : never
+        : never;
+    }[EnvName];
+
+/**
+ * A binding name that skips the compile-time `Env` check. The binding is still
+ * validated when its layer is built.
+ */
+export type Unchecked = string & Brand.Brand<"effect-cf/Binding/Unchecked">;
+
+/**
+ * Accept a binding name that the ambient `Cloudflare.Env` does not declare,
+ * such as one computed at runtime.
+ */
+export const unchecked = Brand.nominal<Unchecked>();
+
+/** A checked binding name for `Resource`, or an {@link Unchecked} one. */
+export type Name<Resource> = Key<Resource> | Unchecked;
+
+/** A checked queue producer binding name for `Body`, or an {@link Unchecked} one. */
+export type QueueName<Body> = QueueKey<Body> | Unchecked;
+
+/** A checked Workflow binding name for `Payload`, or an {@link Unchecked} one. */
+export type WorkflowName<Payload> = WorkflowKey<Payload> | Unchecked;
+
+type DeclaredDurableNamespace = Cloudflare.GlobalProp<"durableNamespaces", never>;
+
+/**
+ * Main-module exports that `Cloudflare.GlobalProps` declares as Durable Object
+ * namespaces, reachable through `ctx.exports` without an `env` binding.
+ *
+ * Without declared `GlobalProps`, any string is accepted.
+ */
+export type DurableNamespaceKey = [DeclaredDurableNamespace] extends [never]
+  ? string
+  : DeclaredDurableNamespace & string;
+
+/** A checked Durable Object export name, or an {@link Unchecked} one. */
+export type DurableNamespaceName = DurableNamespaceKey | Unchecked;
 
 /** Error raised when a configured binding does not exist on `env`. */
 export class BindingNotFoundError extends Data.TaggedError("BindingNotFoundError")<{
@@ -125,33 +211,47 @@ const describeActual = (value: BindingCandidate): string => {
   return `${getObjectName(value)} with ${details.join("; ")}`;
 };
 
+interface ResourceSource {
+  /** What one entry is called in error messages. */
+  readonly entry: string;
+  /** Where entries are looked up, as named in error messages. */
+  readonly container: string;
+}
+
+const envSource: ResourceSource = { entry: "binding", container: "WorkerEnvironment" };
+
+const exportsSource: ResourceSource = { entry: "export", container: "ctx.exports" };
+
 const getBinding = <Resource>(
-  env: WorkerEnv,
+  source: ResourceSource,
+  record: BindingCandidate,
   binding: string,
   isResource: (value: BindingCandidate) => value is Resource,
   options?: ValidationOptions,
 ): Effect.Effect<Resource, BindingNotFoundError | BindingValidationError> =>
   Effect.gen(function* () {
-    if (!isPropertyTarget(env)) {
-      const actual = describeActual(env);
+    const label = `Cloudflare ${source.entry} "${binding}"`;
+
+    if (!isPropertyTarget(record)) {
+      const actual = describeActual(record);
 
       return yield* Effect.fail(
         new BindingValidationError({
           binding,
-          expected: "WorkerEnvironment object",
+          expected: `${source.container} object`,
           actual,
-          message: `Cloudflare binding "${binding}" failed validation. Expected WorkerEnvironment object; got ${actual}`,
+          message: `${label} failed validation. Expected ${source.container} object; got ${actual}`,
         }),
       );
     }
 
-    const resource = Predicate.hasProperty(env, binding) ? env[binding] : undefined;
+    const resource = Predicate.hasProperty(record, binding) ? record[binding] : undefined;
 
     if (resource === undefined) {
       return yield* Effect.fail(
         new BindingNotFoundError({
           binding,
-          message: `Cloudflare binding "${binding}" was not found in WorkerEnvironment`,
+          message: `${label} was not found in ${source.container}`,
         }),
       );
     }
@@ -165,7 +265,7 @@ const getBinding = <Resource>(
           binding,
           expected,
           actual,
-          message: `Cloudflare binding "${binding}" failed validation. Expected ${expected}; got ${actual}`,
+          message: `${label} failed validation. Expected ${expected}; got ${actual}`,
         }),
       );
     }
@@ -204,7 +304,7 @@ const makeBindingLayer = <Self, Resource, Service>(
     tag,
     Effect.gen(function* () {
       const env = yield* WorkerEnvironment;
-      const resource = yield* getBinding(env, binding, isResource, options);
+      const resource = yield* getBinding(envSource, env, binding, isResource, options);
 
       // SAFETY: the overload without wrap fixes Service to Resource; the other branch invokes wrap.
       return wrap === undefined ? (resource as Resource & Service) : wrap(resource);
@@ -234,6 +334,26 @@ export function layer<Self, Resource, Service = Resource>(
 ): Layer.Layer<Self, BindingNotFoundError | BindingValidationError, WorkerEnvironment> {
   return makeBindingLayer(tag, binding, isResource, wrap, options);
 }
+
+/**
+ * Build a layer from one of the main module's loopback exports
+ * (`ctx.exports`) instead of an `env` binding.
+ */
+export const layerFromExport = <Self, Resource, Service>(
+  tag: Context.Service<Self, Service>,
+  exportName: string,
+  isResource: (value: BindingCandidate) => value is Resource,
+  wrap: (resource: Resource) => Service,
+  options?: ValidationOptions,
+): Layer.Layer<Self, BindingNotFoundError | BindingValidationError> =>
+  Layer.effect(
+    tag,
+    Effect.gen(function* () {
+      const exports = yield* WorkerExports;
+
+      return wrap(yield* getBinding(exportsSource, exports, exportName, isResource, options));
+    }),
+  );
 
 export const Service = <Self>() => {
   function makeService<Id extends string, Resource>(

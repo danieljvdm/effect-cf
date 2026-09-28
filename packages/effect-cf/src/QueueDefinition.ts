@@ -42,9 +42,9 @@ export interface Options<ROut, Self extends Definition.Any> extends Omit<
   readonly rpc?: never;
 }
 
-export type LayerOptions = {
-  readonly binding: string;
-};
+export type LayerOptions<
+  Message extends RpcDefinition.ServiceFreeSchema = RpcDefinition.ServiceFreeSchema,
+> = QueueBinding.LayerOptions<Message>;
 
 export type TagClass<
   Self,
@@ -62,7 +62,7 @@ export type TagClass<
     options: Options<ROut, Definition<Id, Message>>,
   ) => WorkerEntrypoint.WorkerClass<Record<never, never>, ROut>;
   readonly layer: (
-    options: LayerOptions,
+    options: LayerOptions<Message>,
   ) => Layer.Layer<
     Self,
     Binding.BindingNotFoundError | Binding.BindingValidationError,
@@ -126,7 +126,7 @@ export const Tag =
       `effect-cf/Queue/${id}` as const,
     );
 
-    const layer = (binding: LayerOptions) =>
+    const layer = (binding: LayerOptions<Message>) =>
       QueueBinding.layer(tag, {
         ...binding,
         message: definition.message,

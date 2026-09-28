@@ -517,26 +517,48 @@ export const makeClient = <
   };
 };
 
+/**
+ * Where a Durable Object namespace comes from: an `env` binding, or one of this
+ * Worker's own exported classes through `ctx.exports`.
+ */
+export type LayerOptions =
+  | {
+      readonly binding: Binding.Name<globalThis.DurableObjectNamespace>;
+      readonly exportName?: never;
+    }
+  | {
+      /** An exported Durable Object class of this Worker, reached through `ctx.exports`. */
+      readonly exportName: Binding.DurableNamespaceName;
+      readonly binding?: never;
+    };
+
 export const layer = <
   Self,
   Api extends object,
   const Definition extends DurableObjectDefinition.Definition.Any | undefined = undefined,
 >(
   tag: Context.Service<Self, DurableObjectNamespaceEffectClient<Api, Definition>>,
-  definition: DurableObjectNamespaceBindingDefinition<Definition>,
+  definition: Omit<DurableObjectNamespaceBindingDefinition<Definition>, "binding"> & LayerOptions,
 ): Layer.Layer<
   Self,
   Binding.BindingNotFoundError | Binding.BindingValidationError,
   WorkerEnvironment
-> =>
-  Binding.layer(
-    tag,
-    definition.binding,
-    (value): value is DurableObjectNamespaceClient<Api> =>
-      isDurableObjectNamespaceClient<Api>(value),
-    makeClient<Api, Definition>(definition),
-    { expected: expectedDurableObjectNamespace },
-  );
+> => {
+  const isNamespace = (value: NamespaceCandidate): value is DurableObjectNamespaceClient<Api> =>
+    isDurableObjectNamespaceClient<Api>(value);
+  const options = { expected: expectedDurableObjectNamespace };
+
+  if (definition.exportName !== undefined) {
+    // Errors and RPC spans name the export in place of a binding.
+    const client = makeClient<Api, Definition>({ ...definition, binding: definition.exportName });
+
+    return Binding.layerFromExport(tag, definition.exportName, isNamespace, client, options);
+  }
+
+  const client = makeClient<Api, Definition>({ ...definition, binding: definition.binding });
+
+  return Binding.layer(tag, definition.binding, isNamespace, client, options);
+};
 
 export const makeDirectMethods = <
   R,

@@ -16,6 +16,6 @@
     "skipLibCheck": true
   },
   "include": ["src", "tests"],
-  // Packaging tests compile this standalone consumer after linking the built package.
-  "exclude": ["tests/fixtures/declaration-emit"]
+  // Packaging tests compile these standalone consumers after linking the built package.
+  "exclude": ["tests/fixtures/binding-names", "tests/fixtures/declaration-emit"]
 }

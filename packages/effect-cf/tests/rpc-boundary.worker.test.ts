@@ -5,6 +5,7 @@ import { Cause, Effect, Layer, Predicate, Schema as S } from "effect";
 import { expect, test } from "vite-plus/test";
 
 import {
+  Binding,
   DurableObject,
   DurableObjectNamespace,
   Rpc,
@@ -138,7 +139,7 @@ const makeNamespace = <Stub extends object>(stub: Stub) => {
 };
 
 test("namespace bindings resolve RPC calls inside the Workers runtime", async () => {
-  const WorkerClass = Worker.make(Counter.layer({ binding: "COUNTERS" }), {
+  const WorkerClass = Worker.make(Counter.layer({ binding: Binding.unchecked("COUNTERS") }), {
     fetch: Effect.gen(function* () {
       const stub = yield* Counter.getByName("counter");
       const value = yield* Counter.call(stub, "get");
@@ -165,7 +166,7 @@ test("namespace bindings resolve RPC calls inside the Workers runtime", async ()
 });
 
 test("namespace RPC validation fails with package errors inside the Workers runtime", async () => {
-  const WorkerClass = Worker.make(Counter.layer({ binding: "COUNTERS" }), {
+  const WorkerClass = Worker.make(Counter.layer({ binding: Binding.unchecked("COUNTERS") }), {
     fetch: Effect.gen(function* () {
       const stub = yield* Counter.getByName("counter");
 
@@ -204,7 +205,7 @@ test("namespace RPC validation fails with package errors inside the Workers runt
 });
 
 test("service binding RPC validation runs inside the Workers runtime", async () => {
-  const WorkerClass = Worker.make(EchoService.layer({ binding: "ECHO" }), {
+  const WorkerClass = Worker.make(EchoService.layer({ binding: Binding.unchecked("ECHO") }), {
     fetch: Effect.gen(function* () {
       return yield* EchoService.call("echo", "hello").pipe(
         Effect.match({
@@ -327,9 +328,9 @@ test("workers compose service bindings and Durable Object RPC contracts in the W
 
   const ApiWorkerClass = Worker.make(
     Layer.mergeAll(
-      MathService.layer({ binding: "MATH" }),
-      FormatService.layer({ binding: "FORMAT" }),
-      AuditLog.layer({ binding: "AUDIT_LOGS" }),
+      MathService.layer({ binding: Binding.unchecked("MATH") }),
+      FormatService.layer({ binding: Binding.unchecked("FORMAT") }),
+      AuditLog.layer({ binding: Binding.unchecked("AUDIT_LOGS") }),
     ),
     {
       fetch: Effect.gen(function* () {

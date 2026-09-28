@@ -346,7 +346,7 @@ export interface SandboxNamespaceClient<
 }
 
 export type LayerOptions = {
-  readonly binding: string;
+  readonly binding: Binding.Name<globalThis.DurableObjectNamespace>;
 };
 
 export interface TagClass<
@@ -1028,7 +1028,7 @@ export const makeClient =
 
 export const layer = <Self, Namespace extends SandboxNamespaceResource>(
   tag: Context.Service<Self, SandboxNamespaceClient<Namespace>>,
-  definition: SandboxDefinition,
+  definition: LayerOptions,
 ) =>
   Binding.layer(
     tag,
@@ -1086,7 +1086,7 @@ export const Sandbox = Tag;
  */
 export const proxyToSandbox = Effect.fn("Sandbox.proxyToSandbox")(function* (
   request: Request,
-  options?: { readonly binding?: string },
+  options?: { readonly binding?: Binding.Name<globalThis.DurableObjectNamespace> },
 ) {
   const binding = options?.binding ?? "Sandbox";
   const definition: SandboxDefinition = { binding };

@@ -25,6 +25,17 @@ declare global {
       ARTIFACTS?: EffectArtifacts.ArtifactsBinding;
       RECIPE_VECTORS?: Vectorize;
       MYBROWSER?: unknown;
+      // Bindings named by the binding ergonomics type tests.
+      API_WORKER?: Fetcher;
+      ARTIFACT_BUCKET?: R2Bucket;
+      AVATAR_QUEUE?: Queue;
+      COUNTER_DURABLE_OBJECTS?: DurableObjectNamespace;
+      FETCH_ONLY_WORKER?: Fetcher;
+      REPORT_WORKFLOW?: Workflow;
+      SANDBOX?: DurableObjectNamespace;
+      SESSION_KV?: KVNamespace;
+      // Typed like `cf workers types` output, to exercise payload checks.
+      TYPED_JOBS?: Queue<{ readonly userId: string; readonly attempts: number }>;
       DATABASE_URL?: string;
       CLOUDFLARE_ACCOUNT_ID?: string;
       CLOUDFLARE_API_TOKEN?: string;

@@ -6,6 +6,14 @@ import { DurableObject, DurableObjectAlarm, DurableObjectState, Worker } from "e
 
 import { headers, mark } from "./instrumentation";
 
+declare global {
+  namespace Cloudflare {
+    interface Env {
+      ALARMS: DurableObjectNamespace;
+    }
+  }
+}
+
 const Mode = Schema.Literals(["independent", "transaction"]);
 const Count = Schema.Literals([1, 10, 100]);
 

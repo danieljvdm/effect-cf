@@ -111,7 +111,7 @@ export interface AiGatewayService<Id extends string> {
 }
 
 export type LayerOptions = {
-  readonly binding: string;
+  readonly binding: Binding.Name<Ai>;
   readonly gatewayId: string;
   readonly accountId?: string;
 };
@@ -349,7 +349,7 @@ export const makeHttpClient = (
 
 export const layer = <Self>(
   tag: Context.Service<Self, AiGatewayClient>,
-  definition: AiGatewayDefinition,
+  definition: LayerOptions,
 ) =>
   Binding.layer(
     tag,

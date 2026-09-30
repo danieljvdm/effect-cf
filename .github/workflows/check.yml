@@ -52,5 +52,8 @@ jobs:
       - name: Run tests
         run: vp test
 
+      - name: Test native containers with Docker
+        run: vp run test:containers
+
       - name: Type check with Effect TypeScript-Go
         run: vp run typecheck

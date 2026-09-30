@@ -6,6 +6,7 @@ export * as BrowserRendering from "./BrowserRendering";
 export * as Cache from "./Cache";
 export * as CloudflareOtlp from "./CloudflareOtlp";
 export * as CloudflareTracer from "./CloudflareTracer";
+export * as ContainerFiles from "./ContainerFiles";
 export * as ContainerNamespace from "./ContainerNamespace";
 export * as D1 from "./D1";
 export * as DurableObject from "./DurableObject";

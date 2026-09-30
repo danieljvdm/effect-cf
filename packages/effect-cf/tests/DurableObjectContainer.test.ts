@@ -1,8 +1,95 @@
 import { assert, it } from "@effect/vitest";
-import { Deferred, Effect, Fiber, Stream } from "effect";
+import { Deferred, Duration, Effect, Fiber, Stream } from "effect";
+import { TestClock } from "effect/testing";
 
 import { DurableObjectContainer } from "../src/index";
 import { makePartialTestDouble } from "./TestDoubles";
+
+it.effect("inactivity timeouts accept milliseconds and Effect duration inputs", () =>
+  Effect.gen(function* () {
+    const timeouts: Array<number | bigint> = [];
+    const container = DurableObjectContainer.fromContainer(
+      makePartialTestDouble<Container>({
+        setInactivityTimeout: async (duration) => {
+          timeouts.push(duration);
+        },
+      }),
+    );
+    const milliseconds = container.setInactivityTimeout(60_000);
+
+    assert.deepStrictEqual(timeouts, []);
+    yield* milliseconds;
+    yield* container.setInactivityTimeout("1 minute");
+    yield* container.setInactivityTimeout(Duration.minutes(1));
+    yield* container.setInactivityTimeout(60_000_000_000n);
+
+    assert.deepStrictEqual(timeouts, [60_000, 60_000, 60_000, 60_000]);
+  }),
+);
+
+it.effect("readiness deadlines retain the failed probe without retrying application work", () =>
+  Effect.gen(function* () {
+    const refused = new Error("Connection refused");
+    const container = DurableObjectContainer.fromContainer(
+      makePartialTestDouble<Container>({
+        running: true,
+        getTcpPort: () =>
+          makePartialTestDouble<Fetcher>({
+            fetch: async () => {
+              throw refused;
+            },
+          }),
+      }),
+    );
+    const fiber = yield* Effect.forkChild(
+      container.waitForHttp(8080, {
+        timeout: Duration.seconds(1),
+        interval: 100,
+        attemptTimeout: "500 millis",
+      }),
+    );
+
+    yield* TestClock.adjust("1 second");
+
+    const error = yield* Effect.flip(Fiber.join(fiber));
+
+    assert.instanceOf(error, DurableObjectContainer.ContainerReadinessTimeoutError);
+    assert.instanceOf(error.cause, DurableObjectContainer.ContainerError);
+    assert.strictEqual(error.cause.cause, refused);
+  }),
+);
+
+it.effect("interrupting readiness aborts its pending HTTP probe", () =>
+  Effect.gen(function* () {
+    const acquired = yield* Deferred.make<AbortSignal>();
+    const container = DurableObjectContainer.fromContainer(
+      makePartialTestDouble<Container>({
+        running: true,
+        getTcpPort: () =>
+          makePartialTestDouble<Fetcher>({
+            fetch: (_input, init) =>
+              new Promise((_resolve, reject) => {
+                const signal = init!.signal!;
+
+                Deferred.doneUnsafe(acquired, Effect.succeed(signal));
+                signal.addEventListener(
+                  "abort",
+                  () => reject(new DOMException("Aborted", "AbortError")),
+                  { once: true },
+                );
+              }),
+          }),
+      }),
+    );
+    const fiber = yield* Effect.forkChild(container.waitForHttp(8080));
+
+    const signal = yield* Deferred.await(acquired);
+
+    yield* Fiber.interrupt(fiber);
+
+    assert.isTrue(signal.aborted);
+  }),
+);
 
 it.effect("container validation and asynchronous lifecycle failures remain typed and lazy", () =>
   Effect.gen(function* () {

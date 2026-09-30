@@ -1,5 +1,6 @@
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -15,6 +16,29 @@ export type ContainerInfo = globalThis.ContainerInfo;
 export type ContainerSnapshot = globalThis.ContainerSnapshot;
 export type ContainerSnapshotOptions = globalThis.ContainerSnapshotOptions;
 export type ContainerExecOutput = globalThis.ExecOutput;
+
+export interface ContainerExecOutputText {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number;
+}
+
+export interface ContainerProcessLog {
+  readonly stream: "stdout" | "stderr";
+  readonly data: Uint8Array;
+}
+
+export interface ContainerHttpReadinessOptions {
+  /** Defaults to 30 seconds. All durations accept numbers in milliseconds. */
+  readonly timeout?: Duration.Input;
+  /** Delay between probes. Defaults to 100 milliseconds. */
+  readonly interval?: Duration.Input;
+  /** Bounds each connection or HTTP probe. Defaults to 1 second. */
+  readonly attemptTimeout?: Duration.Input;
+  readonly path?: string;
+  /** Accepts any HTTP response unless a status range is supplied. */
+  readonly status?: { readonly min: number; readonly max: number };
+}
 
 export class ContainerNotConfiguredError extends Data.TaggedError("ContainerNotConfiguredError")<{
   readonly durableObjectId: string;
@@ -33,7 +57,20 @@ export class ContainerError extends Data.TaggedError("ContainerError")<{
   }
 }
 
-/** A native process. Consume either `output` or the output streams, once. */
+export class ContainerReadinessTimeoutError extends Data.TaggedError(
+  "ContainerReadinessTimeoutError",
+)<{
+  readonly port: number;
+  readonly timeout: Duration.Duration;
+  /** The last completed probe failure, when available. */
+  readonly cause: unknown;
+}> {
+  override get message(): string {
+    return `Container port ${this.port} was not ready within ${Duration.toMillis(this.timeout)}ms`;
+  }
+}
+
+/** A native process handle owned by its creating request. Choose one output consumer. */
 export interface ContainerProcess {
   readonly raw: globalThis.ExecProcess;
   readonly pid: number;
@@ -42,9 +79,12 @@ export interface ContainerProcess {
   /** Empty when the corresponding native stream is absent. */
   readonly stdout: Stream.Stream<Uint8Array, ContainerError>;
   readonly stderr: Stream.Stream<Uint8Array, ContainerError>;
+  /** Drains both channels concurrently. Single-use, without buffering or replay. */
+  readonly logs: Stream.Stream<ContainerProcessLog, ContainerError>;
   /** Nonzero exit codes are values, not Effect failures. */
   readonly exitCode: Effect.Effect<number, ContainerError>;
   readonly output: Effect.Effect<ContainerExecOutput, ContainerError>;
+  readonly outputText: Effect.Effect<ContainerExecOutputText, ContainerError>;
   /** Signals the main process only; does nothing after its exit has been observed. */
   readonly kill: (signal?: number) => Effect.Effect<void, ContainerError>;
   readonly resize: (cols: number, rows: number) => Effect.Effect<void, ContainerError>;
@@ -56,6 +96,8 @@ export interface ContainerTcpPort {
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => Effect.Effect<Response, ContainerError>;
+  /** Forwards an authorized preview request once, using the container's HTTP transport. */
+  readonly proxy: (request: Request) => Effect.Effect<Response, ContainerError>;
   /** The caller owns the returned socket and must close it. */
   readonly connect: (
     ...args: Parameters<globalThis.Fetcher["connect"]>
@@ -76,13 +118,18 @@ export interface DurableObjectContainerService {
     reason?: Parameters<globalThis.Container["destroy"]>[0],
   ) => Effect.Effect<void, ContainerError>;
   readonly signal: (signal: number) => Effect.Effect<void, ContainerError>;
-  readonly setInactivityTimeout: (
-    durationMs: number | bigint,
-  ) => Effect.Effect<void, ContainerError>;
+  /** Effect duration input: numbers are milliseconds; bigints are nanoseconds. */
+  readonly setInactivityTimeout: (duration: Duration.Input) => Effect.Effect<void, ContainerError>;
   readonly getTcpPort: (port: number) => Effect.Effect<ContainerTcpPort, ContainerError>;
+  /** Sends HTTP GET probes to an already-started container. Never retries a caller's request. */
+  readonly waitForHttp: (
+    port: number,
+    options?: ContainerHttpReadinessOptions,
+  ) => Effect.Effect<void, ContainerError | ContainerReadinessTimeoutError>;
   /**
    * Runs an executable with arguments, without a shell or automatic container startup.
    * Interruption cancels acquisition. After acquisition, the caller owns the process.
+   * To observe it from later requests, redirect output to files and ignore the native pipes.
    */
   readonly exec: (
     command: ReadonlyArray<string>,
@@ -150,15 +197,28 @@ const fromProcess = (process: globalThis.ExecProcess): ContainerProcess => {
   // Observe completion immediately, even if the caller never awaits exitCode.
   process.exitCode.then(onExit, onExit);
 
+  const stdout = processStream(process.stdout, "exec.stdout");
+  const stderr = processStream(process.stderr, "exec.stderr");
+  const output = attemptPromise("exec.output", () => process.output());
+
   return {
     raw: process,
     pid: process.pid,
     isPty: process.isPty,
     stdin: process.stdin ?? null,
-    stdout: processStream(process.stdout, "exec.stdout"),
-    stderr: processStream(process.stderr, "exec.stderr"),
+    stdout,
+    stderr,
+    logs: Stream.merge(
+      Stream.map(stdout, (data): ContainerProcessLog => ({ stream: "stdout", data })),
+      Stream.map(stderr, (data): ContainerProcessLog => ({ stream: "stderr", data })),
+    ),
     exitCode: attemptPromise("exec.exitCode", () => process.exitCode),
-    output: attemptPromise("exec.output", () => process.output()),
+    output,
+    outputText: Effect.map(output, (result) => ({
+      stdout: new TextDecoder().decode(result.stdout),
+      stderr: new TextDecoder().decode(result.stderr),
+      exitCode: result.exitCode,
+    })),
     kill: (signal) =>
       attemptPromise("exec.kill", async () => {
         // Let an already-settled exitCode notify us before attempting a signal.
@@ -169,9 +229,8 @@ const fromProcess = (process: globalThis.ExecProcess): ContainerProcess => {
   };
 };
 
-const fromTcpPort = (port: globalThis.Fetcher): ContainerTcpPort => ({
-  raw: port,
-  fetch: (input, init) =>
+const fromTcpPort = (port: globalThis.Fetcher): ContainerTcpPort => {
+  const fetch: ContainerTcpPort["fetch"] = (input, init) =>
     attemptPromise("getTcpPort.fetch", (signal) => {
       const callerSignal =
         init?.signal !== undefined
@@ -187,9 +246,22 @@ const fromTcpPort = (port: globalThis.Fetcher): ContainerTcpPort => ({
             ? signal
             : AbortSignal.any([callerSignal, signal]),
       });
-    }),
-  connect: (...args) => attempt("getTcpPort.connect", () => port.connect(...args)),
-});
+    });
+
+  return {
+    raw: port,
+    fetch,
+    proxy: (request) =>
+      attempt("getTcpPort.proxy", () => {
+        const url = new URL(request.url);
+
+        url.protocol = "http:";
+
+        return new Request(url, request);
+      }).pipe(Effect.flatMap((forwarded) => fetch(forwarded))),
+    connect: (...args) => attempt("getTcpPort.connect", () => port.connect(...args)),
+  };
+};
 
 /** Wraps `ctx.container` without starting it or taking ownership of its lifecycle. */
 export const fromContainer = (container: globalThis.Container): DurableObjectContainerService => {
@@ -197,6 +269,63 @@ export const fromContainer = (container: globalThis.Container): DurableObjectCon
     attemptPromise("exec", (signal) => container.exec([...command], { ...options, signal })).pipe(
       Effect.map(fromProcess),
     );
+  const waitForHttp = Effect.fnUntraced(function* (
+    portNumber: number,
+    options: ContainerHttpReadinessOptions = {},
+  ) {
+    const timeout = yield* attempt("waitForHttp", () =>
+      Duration.fromInputUnsafe(options.timeout ?? "30 seconds"),
+    );
+    let lastFailure: unknown;
+    const probe = attemptPromise("waitForHttp", async (signal) => {
+      // Reacquire after a failed probe so workerd can discard a failed cached port capability.
+      const response = await container
+        .getTcpPort(portNumber)
+        .fetch(new URL(options.path ?? "/", "http://container"), { signal });
+
+      await response.body?.cancel();
+      if (
+        options.status !== undefined &&
+        (response.status < options.status.min || response.status > options.status.max)
+      ) {
+        throw new Error(`HTTP readiness probe returned status ${response.status}`);
+      }
+    });
+    const poll = Effect.gen(function* () {
+      while (true) {
+        if (!(yield* attempt("running", () => container.running))) {
+          return yield* new ContainerError({
+            operation: "waitForHttp",
+            cause: new Error("Container stopped before the port became ready"),
+          });
+        }
+        const ready = yield* probe.pipe(
+          Effect.timeout(options.attemptTimeout ?? "1 second"),
+          Effect.match({
+            onSuccess: () => true,
+            onFailure: (error) => {
+              lastFailure = error;
+
+              return false;
+            },
+          }),
+        );
+
+        if (ready) return;
+        yield* Effect.sleep(options.interval ?? "100 millis");
+      }
+    });
+
+    return yield* poll.pipe(
+      Effect.timeoutOrElse({
+        duration: timeout,
+        orElse: () =>
+          Effect.fail(
+            new ContainerReadinessTimeoutError({ port: portNumber, timeout, cause: lastFailure }),
+          ),
+      }),
+    );
+  });
 
   return {
     raw: container,
@@ -209,9 +338,12 @@ export const fromContainer = (container: globalThis.Container): DurableObjectCon
     monitor: attemptPromise("monitor", () => container.monitor()),
     destroy: (reason) => attemptPromise("destroy", () => container.destroy(reason)),
     signal: (signal) => attempt("signal", () => container.signal(signal)),
-    setInactivityTimeout: (durationMs) =>
-      attemptPromise("setInactivityTimeout", () => container.setInactivityTimeout(durationMs)),
+    setInactivityTimeout: (duration) =>
+      attemptPromise("setInactivityTimeout", () =>
+        container.setInactivityTimeout(Duration.toMillis(duration)),
+      ),
     getTcpPort: (port) => attempt("getTcpPort", () => fromTcpPort(container.getTcpPort(port))),
+    waitForHttp,
     exec,
     execScoped: (command, options) =>
       Effect.acquireRelease(

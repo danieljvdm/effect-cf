@@ -1,8 +1,14 @@
-import { Effect } from "effect";
-import { DurableObject, DurableObjectContainer, DurableObjectState } from "effect-cf";
+import { Duration, Effect } from "effect";
+import {
+  ContainerFiles,
+  DurableObject,
+  DurableObjectContainer,
+  DurableObjectState,
+} from "effect-cf";
 
 export const containerLayer = DurableObjectContainer.layer;
 export const fromContainer = DurableObjectContainer.fromContainer;
+export const fromFiles = ContainerFiles.fromFiles;
 export const inspect = Effect.flatMap(
   DurableObjectContainer.DurableObjectContainer,
   (container) => container.inspect,
@@ -16,6 +22,15 @@ export const port = Effect.flatMap(DurableObjectContainer.DurableObjectContainer
 );
 export const process = Effect.flatMap(DurableObjectContainer.DurableObjectContainer, (container) =>
   container.execScoped(["node", "--version"]),
+);
+export const readiness = Effect.flatMap(
+  DurableObjectContainer.DurableObjectContainer,
+  (container) =>
+    container.waitForHttp(8080, {
+      timeout: Duration.seconds(30),
+      interval: 100,
+      attemptTimeout: "1 second",
+    }),
 );
 
 export class AgentContainer extends DurableObject.make(DurableObjectContainer.layer, {
@@ -33,7 +48,7 @@ export class AgentContainer extends DurableObject.make(DurableObjectContainer.la
           }
         }),
       );
-      yield* container.setInactivityTimeout(60_000);
+      yield* container.setInactivityTimeout(Duration.minutes(1));
 
       const child = yield* container.execScoped(command);
 

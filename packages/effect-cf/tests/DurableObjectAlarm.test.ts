@@ -1,3 +1,4 @@
+import { DatabaseSync } from "node:sqlite";
 import { assert, expect, it, test } from "@effect/vitest";
 import { Cause, Context, DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema } from "effect";
 
@@ -16,6 +17,60 @@ const writeJob = (storage: DurableObjectStorage.DurableObjectStorage, status: st
     "job",
     status,
   );
+
+it.effect("rejects self-rearms from a detached handler fiber after the pass completes", () =>
+  Effect.gen(function* () {
+    const fixture = makeAlarmFixture();
+
+    yield* fixture.run(
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+        const release = yield* Deferred.make<void>();
+        const input = { tag: "job", id: "a", payload: null, runAt: atMillis(0) };
+        const fibers: Fiber.Fiber<void, DurableObjectAlarm.DurableObjectAlarmError>[] = [];
+
+        yield* alarms.scheduleAlarm(input);
+        yield* alarms.processDueAlarms(() =>
+          Effect.gen(function* () {
+            fibers.push(
+              yield* Effect.forkChild(
+                Deferred.await(release).pipe(Effect.andThen(alarms.scheduleAlarm(input))),
+              ),
+            );
+          }),
+        );
+        yield* Deferred.succeed(release, undefined);
+        const error = yield* Fiber.join(fibers[0]!).pipe(Effect.flip);
+
+        assert.strictEqual(error._tag, "StorageOperationError");
+        assert.isUndefined(yield* alarms.getAlarmStatus(input));
+        assert.isNull(fixture.currentAlarm());
+      }),
+    );
+  }),
+);
+
+it.effect("rolls back a failure's retry budget when native reconciliation fails", () =>
+  Effect.gen(function* () {
+    const fixture = makeAlarmFixture();
+
+    yield* fixture.run(
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+        const input = { tag: "job", id: "a", payload: null, runAt: atMillis(0) };
+
+        yield* alarms.scheduleAlarm(input);
+        fixture.failNextSetAlarm();
+        const exit = yield* alarms.processDueAlarms(() => Effect.fail("fail")).pipe(Effect.exit);
+
+        assert.isTrue(Exit.isFailure(exit));
+        assert.strictEqual((yield* alarms.getAlarmStatus(input))!.attempts, 0);
+        assert.isUndefined((yield* alarms.getAlarmStatus(input))!.retryAt);
+        assert.strictEqual(fixture.currentAlarm(), 0);
+      }),
+    );
+  }),
+);
 
 it.effect("commits application writes and mixed alarm mutations in one transaction", () =>
   Effect.gen(function* () {
@@ -358,7 +413,7 @@ it.effect("schedules, replaces, and reconciles to the earliest logical alarm", (
           tag: "email",
           id: "b",
           runAt: atMillis(4_000),
-          repeatEvery: "5 seconds",
+          repeatEvery: "1 minute",
           payload: { step: "replacement" },
         });
       }),
@@ -367,7 +422,7 @@ it.effect("schedules, replaces, and reconciles to the earliest logical alarm", (
     assert.strictEqual(fixture.currentAlarm(), 2_000);
     assert.strictEqual(fixture.row("email", "a")?.run_at, 2_000);
     assert.strictEqual(fixture.row("email", "b")?.run_at, 4_000);
-    assert.strictEqual(fixture.row("email", "b")?.repeat_every_ms, 5_000);
+    assert.strictEqual(fixture.row("email", "b")?.repeat_every_ms, 60_000);
     assert.deepStrictEqual(JSON.parse(fixture.row("email", "b")?.payload ?? "null"), {
       step: "replacement",
     });
@@ -446,7 +501,7 @@ it.effect("does not let repeating acknowledgement overwrite a replacement schedu
           tag: "heartbeat",
           id: "room",
           runAt: atMillis(0),
-          repeatEvery: "10 seconds",
+          repeatEvery: "1 minute",
           payload: "old",
         });
 
@@ -547,7 +602,7 @@ it.effect("isolates logical failures by default and continues later due rows", (
     );
     assert.deepStrictEqual(observedFailures, ["b"]);
     assert.strictEqual(fixture.row("jobs", "a"), undefined);
-    assert.ok((fixture.row("jobs", "b")?.run_at ?? 0) >= 60_000);
+    assert.strictEqual(fixture.row("jobs", "b")?.run_at, 0);
     assert.strictEqual(fixture.row("jobs", "c"), undefined);
     assert.ok((fixture.currentAlarm() ?? 0) >= 60_000);
   }),
@@ -583,7 +638,7 @@ it.effect("ordered mode preserves strict head-of-line failure behavior", () =>
     assert.strictEqual(fixture.row("jobs", "a"), undefined);
     assert.strictEqual(fixture.row("jobs", "b")?.run_at, 0);
     assert.strictEqual(fixture.row("jobs", "c")?.run_at, 0);
-    assert.strictEqual(fixture.currentAlarm(), 0);
+    assert.strictEqual(fixture.currentAlarm(), 1_000);
   }),
 );
 
@@ -776,7 +831,7 @@ it.effect("applies per-tag failure policies from typed alarm definitions", () =>
           tag: "heartbeat",
           id: "room",
           runAt: atMillis(0),
-          repeatEvery: "10 seconds",
+          repeatEvery: "1 minute",
           payload: null,
         });
         yield* alarms.scheduleAlarm({
@@ -806,7 +861,7 @@ it.effect("applies per-tag failure policies from typed alarm definitions", () =>
       ["heartbeat", "reconnectGrace"],
     );
     assert.ok((fixture.row("heartbeat", "room")?.run_at ?? 0) > 0);
-    assert.ok((fixture.row("reconnectGrace", "connection-1")?.run_at ?? 0) >= 120_000);
+    assert.ok((fixture.currentAlarm() ?? 0) >= 60_000);
     assert.strictEqual(fixture.row("maintenance", "cleanup"), undefined);
   }),
 );
@@ -928,8 +983,9 @@ interface AlarmFixtureOptions {
 }
 
 function makeAlarmFixture(options: AlarmFixtureOptions = {}) {
-  const rows = new Map<string, StoredAlarmRow>();
-  const jobs = new Map<string, string>();
+  const database = new DatabaseSync(":memory:");
+
+  database.exec("CREATE TABLE application_jobs (id TEXT PRIMARY KEY, status TEXT NOT NULL)");
   const tracker: AlarmFixtureTracker = {
     setAlarms: [],
     deletedAlarms: [],
@@ -941,7 +997,7 @@ function makeAlarmFixture(options: AlarmFixtureOptions = {}) {
   let rejectNextDeleteAlarm = false;
   let inTransaction = false;
 
-  const sql = makeSqlStorage(rows, jobs);
+  const sql = makeSqlStorage(database);
   const rawStorageImplementation = {
     get: async () => undefined,
     put: async () => undefined,
@@ -972,8 +1028,7 @@ function makeAlarmFixture(options: AlarmFixtureOptions = {}) {
         throw new Error("Nested transactions are not supported");
       }
       inTransaction = true;
-      const rowsSnapshot = cloneRows(rows);
-      const jobsSnapshot = new Map(jobs);
+      database.exec("BEGIN");
       const alarmSnapshot = currentAlarm;
       const setAlarmsLength = tracker.setAlarms.length;
       const deletedAlarmsLength = tracker.deletedAlarms.length;
@@ -984,14 +1039,7 @@ function makeAlarmFixture(options: AlarmFixtureOptions = {}) {
           makePartialTestDouble<globalThis.DurableObjectTransaction>({ rollback: () => {} }),
         );
       } catch (error) {
-        rows.clear();
-        for (const [key, value] of rowsSnapshot) {
-          rows.set(key, value);
-        }
-        jobs.clear();
-        for (const [key, value] of jobsSnapshot) {
-          jobs.set(key, value);
-        }
+        database.exec("ROLLBACK");
         currentAlarm = alarmSnapshot;
         tracker.setAlarms.length = setAlarmsLength;
         tracker.deletedAlarms.length = deletedAlarmsLength;
@@ -1000,6 +1048,7 @@ function makeAlarmFixture(options: AlarmFixtureOptions = {}) {
       } finally {
         inTransaction = false;
       }
+      database.exec("COMMIT");
       // Commit is complete. A failed or interrupted reply cannot roll it back.
       await options.afterCommit?.();
 
@@ -1049,7 +1098,8 @@ function makeAlarmFixture(options: AlarmFixtureOptions = {}) {
     state,
     storage: DurableObjectStorage.fromDurableObjectStorage(rawStorage),
     tracker,
-    job: (id: string) => jobs.get(id),
+    job: (id: string) =>
+      database.prepare("SELECT status FROM application_jobs WHERE id = ?").get(id)?.status,
     currentAlarm: () => currentAlarm,
     failNextSetAlarm: () => {
       rejectNextSetAlarm = true;
@@ -1057,155 +1107,58 @@ function makeAlarmFixture(options: AlarmFixtureOptions = {}) {
     failNextDeleteAlarm: () => {
       rejectNextDeleteAlarm = true;
     },
-    row: (tag: string, id: string) => rows.get(storageId(tag, id)),
+    row: (tag: string, id: string) => {
+      if (
+        database
+          .prepare("SELECT name FROM sqlite_master WHERE name = 'effect_cf_scheduled_alarms'")
+          .get() === undefined
+      ) {
+        return undefined;
+      }
+
+      // SAFETY: the query selects the scheduler-created alarm row columns.
+      return database
+        .prepare("SELECT * FROM effect_cf_scheduled_alarms WHERE storage_id = ?")
+        .get(storageId(tag, id)) as StoredAlarmRow | undefined;
+    },
     run: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect.pipe(Effect.provide(layer)),
   };
 }
 
-function makeSqlStorage(
-  rows: Map<string, StoredAlarmRow>,
-  jobs: Map<string, string>,
-): globalThis.SqlStorage {
-  const implementation = {
-    exec: (query: string, ...bindings: Array<globalThis.SqlStorageValue>) => {
-      const normalized = query.replaceAll(/\s+/g, " ").trim();
+function makeSqlStorage(database: DatabaseSync): globalThis.SqlStorage {
+  return makePartialTestDouble<globalThis.SqlStorage>({
+    exec: <T extends SqlFixtureRow>(query: string, ...bindings: globalThis.SqlStorageValue[]) => {
+      if (query.trim().startsWith("CREATE TABLE")) {
+        database.exec(query);
 
-      if (normalized.startsWith("CREATE TABLE")) {
-        return cursor([], 0);
+        return cursor<T>([], 0);
       }
+      // SAFETY: alarm/job queries only return SQLite text, number and null values;
+      // the Cloudflare cursor generic projects the same columns from this real SQLite engine.
+      const rows = database
+        .prepare(query)
+        .all(
+          ...bindings.map((value) =>
+            value instanceof ArrayBuffer ? new Uint8Array(value) : value,
+          ),
+        ) as T[];
+      const writes = query.trim().startsWith("SELECT")
+        ? 0
+        : Number(database.prepare("SELECT changes() AS count").get()?.count);
 
-      if (normalized.startsWith("INSERT OR REPLACE INTO application_jobs")) {
-        const [id, status] = Schema.decodeUnknownSync(Schema.Tuple([Schema.String, Schema.String]))(
-          bindings,
-        );
-
-        jobs.set(id, status);
-
-        return cursor([], 1);
-      }
-
-      if (normalized.startsWith("SELECT run_at FROM")) {
-        const next = sortRows(rows)[0];
-
-        return cursor(next === undefined ? [] : [{ run_at: next.run_at }], 0);
-      }
-
-      if (normalized.startsWith("DELETE FROM") && normalized.includes("AND run_at = ?")) {
-        const [rowId, runAt, payload] = Schema.decodeUnknownSync(
-          Schema.Tuple([Schema.String, Schema.Number, Schema.String]),
-        )(bindings);
-        const existing = rows.get(rowId);
-        const deleted =
-          existing !== undefined &&
-          existing.run_at === runAt &&
-          existing.repeat_every_ms === null &&
-          existing.payload === payload;
-
-        if (deleted) {
-          rows.delete(rowId);
-        }
-
-        return cursor([], deleted ? 1 : 0);
-      }
-
-      if (normalized.startsWith("DELETE FROM")) {
-        const [rowId] = Schema.decodeUnknownSync(Schema.Tuple([Schema.String]))(bindings);
-        const deleted = rows.delete(rowId);
-
-        return cursor([], deleted ? 1 : 0);
-      }
-
-      if (normalized.startsWith("INSERT OR REPLACE")) {
-        const [rowId, alarmId, tag, runAt, repeatEvery, payload] = Schema.decodeUnknownSync(
-          Schema.Tuple([
-            Schema.String,
-            Schema.String,
-            Schema.String,
-            Schema.Number,
-            Schema.NullOr(Schema.Number),
-            Schema.String,
-          ]),
-        )(bindings);
-
-        rows.set(rowId, {
-          storage_id: rowId,
-          alarm_id: alarmId,
-          tag,
-          run_at: runAt,
-          repeat_every_ms: repeatEvery,
-          payload,
-        });
-
-        return cursor([], 1);
-      }
-
-      if (normalized.startsWith("SELECT storage_id")) {
-        const [now, limit] = Schema.decodeUnknownSync(Schema.Tuple([Schema.Number, Schema.Number]))(
-          bindings,
-        );
-
-        return cursor(
-          sortRows(rows)
-            .filter((row) => row.run_at <= now)
-            .slice(0, limit),
-          0,
-        );
-      }
-
-      if (normalized.startsWith("UPDATE")) {
-        const isOneShotUpdate = normalized.includes("repeat_every_ms IS NULL");
-        const [nextRunAt, rowId, previousRunAt, repeatEvery, payload] = decodeUpdateBindings(
-          bindings,
-          isOneShotUpdate,
-        );
-        const existing = rows.get(rowId);
-        const updated =
-          existing !== undefined &&
-          existing.run_at === previousRunAt &&
-          existing.repeat_every_ms === repeatEvery &&
-          existing.payload === payload;
-
-        if (updated) {
-          rows.set(rowId, { ...existing, run_at: nextRunAt });
-        }
-
-        return cursor([], updated ? 1 : 0);
-      }
-
-      throw new Error(`Unexpected SQL: ${query}`);
+      return cursor(rows, writes);
     },
     databaseSize: 0,
-  };
-
-  // SAFETY: The fake SQL engine owns schema-shaped rows for every recognized production query;
-  // the native exec generic only projects the columns selected by that same query string.
-  return implementation as typeof implementation & globalThis.SqlStorage;
+  });
 }
 
-function decodeUpdateBindings(
-  bindings: ReadonlyArray<globalThis.SqlStorageValue>,
-  isOneShotUpdate: boolean,
-): readonly [number, string, number, number | null, string] {
-  if (isOneShotUpdate) {
-    const [nextRunAt, rowId, previousRunAt, payload] = Schema.decodeUnknownSync(
-      Schema.Tuple([Schema.Number, Schema.String, Schema.Number, Schema.String]),
-    )(bindings);
-
-    return [nextRunAt, rowId, previousRunAt, null, payload];
-  }
-
-  return Schema.decodeUnknownSync(
-    Schema.Tuple([Schema.Number, Schema.String, Schema.Number, Schema.Number, Schema.String]),
-  )(bindings);
-}
-
-function cursor(
-  rows: Array<SqlFixtureRow>,
+function cursor<T extends SqlFixtureRow>(
+  rows: Array<T>,
   rowsWritten: number,
-): globalThis.SqlStorageCursor<SqlFixtureRow> {
+): globalThis.SqlStorageCursor<T> {
   let index = 0;
 
-  return makePartialTestDouble<globalThis.SqlStorageCursor<SqlFixtureRow>>({
+  return makePartialTestDouble<globalThis.SqlStorageCursor<T>>({
     next: () => {
       const value = rows[index];
 
@@ -1228,16 +1181,6 @@ function cursor(
     rowsRead: rows.length,
     rowsWritten,
   });
-}
-
-function sortRows(rows: Map<string, StoredAlarmRow>): Array<StoredAlarmRow> {
-  return Array.from(rows.values()).sort(
-    (left, right) => left.run_at - right.run_at || left.storage_id.localeCompare(right.storage_id),
-  );
-}
-
-function cloneRows(rows: Map<string, StoredAlarmRow>): Map<string, StoredAlarmRow> {
-  return new Map(Array.from(rows, ([key, value]) => [key, { ...value }]));
 }
 
 function storageId(tag: string, id: string): string {

@@ -349,9 +349,14 @@ test("a hibernated non-resumable RPC stream is reset with 1012", async () => {
 
   await evictDurableObject(stub, { webSockets: "hibernate" });
 
-  const closed = waitForClose(client);
+  const pong = waitForPong(client);
 
   client.send(JSON.stringify(RpcMessage.constPing));
+  await expect(pong).resolves.toEqual(RpcMessage.constPong);
+
+  const closed = waitForClose(client);
+
+  client.send(request("state-message", "wake"));
 
   await expect(closed).resolves.toEqual({
     code: 1012,
@@ -550,9 +555,14 @@ test("a hibernated in-flight finite RPC is reset without replay", async () => {
 
   await evictDurableObject(stub, { webSockets: "hibernate" });
 
-  const closed = waitForClose(client);
+  const pong = waitForPong(client);
 
   client.send(JSON.stringify(RpcMessage.constPing));
+  await expect(pong).resolves.toEqual(RpcMessage.constPong);
+
+  const closed = waitForClose(client);
+
+  client.send(request("state-message", "wake"));
 
   await expect(closed).resolves.toEqual({
     code: 1012,

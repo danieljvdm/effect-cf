@@ -736,7 +736,10 @@ for (const [format, serializationLayer] of [
           const pendingCall = yield* client.Never().pipe(Effect.forkChild);
 
           yield* Deferred.await(neverStarted);
-          assert.strictEqual(state.autoResponse, null);
+          assert.deepStrictEqual(state.autoResponse, {
+            request: JSON.stringify(RpcMessage.constPing),
+            response: JSON.stringify(RpcMessage.constPong),
+          });
           assert.strictEqual(readRpcAttachment(failedSocket).hasPendingRequests, true);
 
           yield* activation.transport.error(failedDurableSocket, new Error("socket failed"));
@@ -880,7 +883,10 @@ for (const [format, serializationLayer] of [
 
           yield* Deferred.await(neverStarted);
 
-          assert.strictEqual(state.autoResponse, null);
+          assert.deepStrictEqual(state.autoResponse, {
+            request: JSON.stringify(RpcMessage.constPing),
+            response: JSON.stringify(RpcMessage.constPong),
+          });
           assert.strictEqual(readRpcAttachment(socket).hasPendingRequests, true);
 
           const resetActivation = yield* makeActivation(parentScope, state, makeTestRpcHandlers());
@@ -955,7 +961,10 @@ for (const [format, serializationLayer] of [
           yield* Effect.promise(() => socket.nextSend);
 
           assert.strictEqual(readRpcAttachment(socket).hasPendingRequests, true);
-          assert.strictEqual(state.autoResponse, null);
+          assert.deepStrictEqual(state.autoResponse, {
+            request: JSON.stringify(RpcMessage.constPing),
+            response: JSON.stringify(RpcMessage.constPong),
+          });
           assert.deepStrictEqual(decodeSent(socket)[0], {
             _tag: "Chunk",
             requestId: "stream-1",

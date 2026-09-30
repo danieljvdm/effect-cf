@@ -76,7 +76,6 @@ export class AlarmBench extends AlarmsApi.make(Layer.empty, {
       yield* mark("alarm", benchId, { operation: "cleanup" });
       const state = yield* DurableObjectState.DurableObjectState;
 
-      yield* state.storage.deleteAlarm();
       yield* state.storage.deleteAll();
       const nextAlarm = yield* state.storage.getAlarm();
       const cursor = yield* state.storage.sql.exec(
@@ -92,7 +91,6 @@ export class AlarmBench extends AlarmsApi.make(Layer.empty, {
       yield* mark("alarm", "unexpected-platform-alarm", { operation: "unexpected-alarm" });
       const state = yield* DurableObjectState.DurableObjectState;
 
-      yield* state.storage.deleteAlarm();
       yield* state.storage.deleteAll();
     }),
 }) {}

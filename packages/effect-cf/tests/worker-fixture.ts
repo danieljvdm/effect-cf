@@ -20,6 +20,7 @@ import {
   DurableObjectDefinition,
   DurableObjectRpcWebSocket,
   DurableObjectState,
+  DurableObjectWebSocket,
   Worker,
   WorkerDefinition,
   Workflow,
@@ -100,6 +101,14 @@ const TestWorkerLive = TestWorkerDefinition.make(Layer.empty, {
 export class TestWorkerEntrypoint extends TestWorkerLive {}
 
 const TestCounterLive = TestCounterDefinition.make(Layer.empty, {
+  webSocketMessage: (socket, message) =>
+    Effect.gen(function* () {
+      const state = yield* DurableObjectState.DurableObjectState;
+      const count = (yield* state.storage.get<number>("socket-invocations")) ?? 0;
+
+      yield* state.storage.put("socket-invocations", count + 1);
+      yield* socket.send(message);
+    }),
   rpc: {
     increment: (amount) =>
       Effect.gen(function* () {
@@ -143,6 +152,12 @@ const TestCounterLive = TestCounterDefinition.make(Layer.empty, {
   },
   fetch: Effect.gen(function* () {
     const request = yield* Worker.NativeRequest;
+
+    if (Worker.isWebSocketUpgrade(request)) {
+      yield* DurableObjectWebSocket.installKeepalive();
+
+      return (yield* DurableObjectWebSocket.acceptUpgrade()).response;
+    }
     const url = new URL(request.url);
     const amount = url.searchParams.get("amount") ?? "1";
     const state = yield* DurableObjectState.DurableObjectState;

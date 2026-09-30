@@ -12,6 +12,8 @@ See the [runtime performance guide](https://github.com/danieljvdm/effect-cf/blob
 
 For typed WebSocket RPC clients whose connection lifetime is owned by an Effect layer, see the [WebSocket RPC guide](https://github.com/danieljvdm/effect-cf/blob/main/docs/websocket-rpc.md).
 
+Durable Object alarms bound unchanged retries and self-rearms, and hibernating sockets handle keepalives without waking the object. See the [wakeup and migration guide](https://github.com/danieljvdm/effect-cf/blob/main/docs/durable-object-wakeups.md).
+
 `DurableObjectContainer.layer` adds native `ctx.container` control to `DurableObject.make`: runtime image selection, command execution, filesystem snapshots, networking, and idle timeouts. See the [container guide](https://github.com/danieljvdm/effect-cf/blob/main/docs/containers.md) for setup and migration from the legacy Container and Sandbox classes.
 
 ## Worker

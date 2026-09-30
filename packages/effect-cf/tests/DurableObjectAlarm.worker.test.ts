@@ -28,6 +28,172 @@ const alarm = (id: string, offset: number) =>
     payload: null,
   }) satisfies DurableObjectAlarm.ScheduleAlarmInput<"job">;
 
+const customConfiguration = {
+  minimumRetryDelay: "2 seconds",
+  unchangedAttemptBudget: 3,
+  parkedRetryDelay: "2 hours",
+  minimumRepeatInterval: "10 seconds",
+} satisfies DurableObjectAlarm.ScheduleConfiguration;
+
+it.effect.each([
+  { kind: "failure", provision: "runtime" },
+  { kind: "failure", provision: "construction" },
+  { kind: "self-rearm", provision: "runtime" },
+  { kind: "self-rearm", provision: "construction" },
+] as const)(
+  "configures $kind at $provision and preserves parking when the budget changes",
+  ({ kind, provision }) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+        const reports: DurableObjectAlarm.AlarmParked[] = [];
+        let now = deadline;
+        const pass = () =>
+          alarms
+            .processDueAlarms(
+              () =>
+                Effect.gen(function* () {
+                  if (kind === "failure") return yield* Effect.fail("private failure");
+                  yield* alarms.scheduleAlarm(alarm("a", 0));
+                }),
+              { retryFailedAfter: 1 },
+            )
+            .pipe(
+              Effect.provideService(DurableObjectAlarm.AlarmReporter, (event) =>
+                Effect.sync(() => {
+                  reports.push(event);
+                }),
+              ),
+            );
+
+        yield* TestClock.setTime(now);
+        yield* alarms.scheduleAlarm(alarm("a", 0));
+        for (const delay of [2_000, 4_000, 7_200_000]) {
+          yield* pass();
+          assert.strictEqual(yield* state.storage.getAlarm(), now + delay);
+          now += delay;
+          yield* TestClock.setTime(now);
+        }
+        assert.strictEqual(reports.length, 1);
+        assert.strictEqual(reports[0]!.attempts, 3);
+        yield* pass().pipe(
+          Effect.provideService(DurableObjectAlarm.ScheduleConfiguration, {
+            ...customConfiguration,
+            unchangedAttemptBudget: 20,
+          }),
+        );
+        assert.strictEqual(yield* state.storage.getAlarm(), now + 7_200_000);
+        const parked = (yield* alarms.getAlarmStatus({ tag: "job", id: "a" }))!;
+
+        assert.isTrue(parked.parked);
+        assert.strictEqual(parked.attempts, 3);
+        assert.strictEqual(reports.length, 1);
+        yield* alarms.scheduleAlarm({ ...alarm("a", now - deadline), progress: 1 });
+        assert.strictEqual(yield* state.storage.getAlarm(), now);
+        yield* pass();
+        assert.strictEqual(yield* state.storage.getAlarm(), now + 2_000);
+        assert.isFalse((yield* alarms.getAlarmStatus({ tag: "job", id: "a" }))!.parked);
+
+        yield* alarms.cancelAlarm({ tag: "job", id: "a" });
+        yield* alarms.scheduleAlarm({
+          ...alarm("repeat", now - deadline),
+          repeatEvery: "10 seconds",
+        });
+        yield* alarms.processDueAlarms(() => Effect.void);
+        assert.strictEqual(yield* state.storage.getAlarm(), now + 10_000);
+      }).pipe(
+        Effect.provide(
+          provision === "runtime"
+            ? Layer.merge(
+                services,
+                Layer.succeed(DurableObjectAlarm.ScheduleConfiguration, customConfiguration),
+              )
+            : services.pipe(
+                Layer.provide(
+                  Layer.succeed(DurableObjectAlarm.ScheduleConfiguration, customConfiguration),
+                ),
+              ),
+        ),
+      ),
+    );
+  },
+);
+
+it.effect.each([
+  { unchangedAttemptBudget: 0 },
+  { unchangedAttemptBudget: 1.5 },
+  { unchangedAttemptBudget: Infinity },
+  { minimumRetryDelay: "500 millis" },
+  { minimumRetryDelay: Infinity },
+  { parkedRetryDelay: "30 minutes" },
+  { parkedRetryDelay: Infinity },
+  { minimumRepeatInterval: 0 },
+  { minimumRepeatInterval: Infinity },
+  { minimumRetryDelay: "2 hours", parkedRetryDelay: "1 hour" },
+] satisfies ReadonlyArray<DurableObjectAlarm.ScheduleConfiguration>)(
+  "rejects unsafe configuration %j before committing a schedule",
+  (configuration) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+        const error = yield* alarms
+          .scheduleAlarm(alarm("a", 0))
+          .pipe(
+            Effect.provideService(DurableObjectAlarm.ScheduleConfiguration, configuration),
+            Effect.flip,
+          );
+
+        assert.instanceOf(error, DurableObjectAlarm.InvalidScheduleConfigurationError);
+        assert.isNull(yield* state.storage.getAlarm());
+        assert.isUndefined(yield* alarms.getAlarmStatus({ tag: "job", id: "a" }));
+      }).pipe(Effect.provide(services)),
+    );
+  },
+);
+
+it.effect("a productive workflow can chain new deadlines beyond its configured budget", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
+      yield* TestClock.setTime(deadline);
+      yield* alarms.scheduleAlarm({ ...alarm("0", 0), progress: 0 });
+      for (let version = 1; version <= 10; version++) {
+        const result = yield* alarms.processDueAlarms(() =>
+          alarms.transaction((tx) =>
+            Effect.gen(function* () {
+              yield* state.storage.put("workflow-version", version);
+              yield* tx.scheduleAlarm({ ...alarm(String(version), 0), progress: version });
+            }),
+          ),
+        );
+
+        assert.strictEqual(result.handled.length, 1);
+        assert.deepStrictEqual(result.parked, []);
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline);
+      }
+      const status = (yield* alarms.getAlarmStatus({ tag: "job", id: "10" }))!;
+
+      assert.strictEqual(status.attempts, 0);
+      assert.isFalse(status.parked);
+      assert.strictEqual(yield* state.storage.get("workflow-version"), 10);
+    }).pipe(
+      Effect.provide(
+        Layer.merge(
+          services,
+          Layer.succeed(DurableObjectAlarm.ScheduleConfiguration, { unchangedAttemptBudget: 2 }),
+        ),
+      ),
+    ),
+  );
+});
+
 it.effect.each(["failure", "self-rearm"] as const)(
   "parks unchanged %s after eight attempts, recovers hourly and resumes on enrollment",
   (kind) => {

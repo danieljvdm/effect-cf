@@ -11,7 +11,8 @@ The effect-cf primitives enforce these rules:
 - Unchanged work cannot keep re-arming at short intervals. Only committed source
   progress or completion replenishes a handler's budget.
 - Parked work remains durable, visible and recoverable. It gets at most one
-  automatic attempt per hour until progress resumes it.
+  automatic attempt per hour until progress resumes it; consumers can choose
+  a longer recovery interval.
 - One scheduler owns the platform alarm. Logical deadlines, attempt state and
   native alarm reconciliation commit or roll back together.
 
@@ -81,11 +82,12 @@ cursor: a strictly increasing value resets the budget. Replayed or older source
 notices cannot reset a live budget. Use a committed version or source sequence;
 lease renewals, retry counters and changing wall-clock deadlines are not progress.
 
-Failures and unchanged self-rearms have a one-second floor and exponential
-backoff: 1, 2, 4, 8, 16, 32 and 64 seconds. The eighth unchanged attempt parks
-work for hourly recovery; later failures remain parked. `retryFailedAfter` and
+By default, failures and unchanged self-rearms have a one-second floor and
+exponential backoff: 1, 2, 4, 8, 16, 32 and 64 seconds. The eighth unchanged
+attempt parks work for hourly recovery; later failures remain parked.
+`retryFailedAfter` and
 typed definitions' `retry.initialDelay` select the initial backoff, subject to
-the floor, budget and hourly cap. Failures retry independently so unrelated due
+the configured floor, budget and recovery interval. Failures retry independently so unrelated due
 alarms can proceed. A stale failure cannot overwrite a handler's replacement,
 and an unchanged self-rearm is charged only once per pass.
 
@@ -94,10 +96,50 @@ ordered by deadline and then storage key. Backing-off and parked work does not
 block other alarms or require scanning the retained backlog. Existing logical
 schedules are migrated automatically; their logical `scheduledAt` is preserved.
 
-`repeatEvery` is a product schedule, with a **one-minute minimum**. It advances
+`repeatEvery` is a product schedule, with a **one-minute default minimum**. It advances
 from completion time without catch-up invocations. Never use it to poll for a
 receipt, settlement, lease, connection heartbeat or a state change. Existing
-stored repeats below the floor advance at the floor after their next completion.
+stored repeats below the configured floor advance at that floor after their next completion.
+
+## Configure scheduling policy
+
+Provide the optional `DurableObjectAlarm.ScheduleConfiguration` reference with
+`Layer.succeed`. Omitted fields retain their defaults:
+
+```ts
+const schedulingPolicy = Layer.succeed(DurableObjectAlarm.ScheduleConfiguration, {
+  minimumRetryDelay: "2 seconds",
+  unchangedAttemptBudget: 4,
+  parkedRetryDelay: "2 hours",
+  minimumRepeatInterval: "20 seconds",
+});
+```
+
+Pass `schedulingPolicy` as the application layer to `DurableObject.make`. With
+other application services, use
+`applicationLayer.pipe(Layer.provideMerge(schedulingPolicy))` so policy is available
+during service initialization and retained for events. Custom runtimes can provide it to
+`DurableObjectAlarm.layer` with `Layer.provide`. A runtime or
+`Effect.provideService` override takes precedence for its supplied fields.
+
+| Setting                  | Default  | Constraint                                            |
+| ------------------------ | -------- | ----------------------------------------------------- |
+| `minimumRetryDelay`      | 1 second | Finite, at least 1 second                             |
+| `unchangedAttemptBudget` | 8        | Positive safe integer; cannot disable parking         |
+| `parkedRetryDelay`       | 1 hour   | Finite, at least 1 hour and the retry floor           |
+| `minimumRepeatInterval`  | 1 minute | Finite, at least 1 second; only for product schedules |
+
+Durations accept Effect `Duration.Input`. Invalid policy raises
+`InvalidScheduleConfigurationError` before scheduling commits. The configured
+retry floor also applies to per-handler retry delays; exponential backoff caps
+at the parked recovery interval. Raising the budget does not resume already
+parked work or report it again. Existing deadlines remain enrolled; later
+re-arms and repeat completions use the active configuration. Real progress,
+completion or explicit external enrollment still resets the work's budget.
+
+These settings tune timing and retry limits. They do not make state polling a
+product schedule. A productive workflow that schedules its next step should
+commit and supply forward `progress`, even when it uses a new alarm ID.
 
 ## Observe and recover parked work
 

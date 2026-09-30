@@ -38,16 +38,60 @@ const WAKE_INDEX = "idx_effect_cf_scheduled_alarms_wake_at_storage_id";
 const DEFAULT_PROCESS_DUE_ALARMS_LIMIT = 100;
 
 export const MIN_RETRY_DELAY_MS = 1_000;
+/** Default unchanged-attempt budget. */
 export const UNCHANGED_ATTEMPT_BUDGET = 8;
+/** Minimum and default parked recovery interval. */
 export const PARKED_RETRY_DELAY_MS = 3_600_000;
 
-/** Product schedules must be at least one minute apart. Never use repeats to poll state. */
-export const MIN_REPEAT_INTERVAL_MS = 60_000;
+/** Absolute product repeat floor. */
+export const MIN_REPEAT_INTERVAL_MS = 1_000;
+/** Default product schedule floor. Never use repeats to poll state. */
+export const DEFAULT_MIN_REPEAT_INTERVAL_MS = 60_000;
 
-const retryDelay = (attempts: number, initialDelay = MIN_RETRY_DELAY_MS) =>
-  attempts >= UNCHANGED_ATTEMPT_BUDGET
-    ? PARKED_RETRY_DELAY_MS
-    : Math.min(PARKED_RETRY_DELAY_MS, initialDelay * 2 ** (attempts - 1));
+export interface ScheduleConfiguration {
+  /** Retry floor, at least one second. Defaults to one second. */
+  readonly minimumRetryDelay?: Duration.Input;
+  /** Positive safe integer. Defaults to eight unchanged attempts. */
+  readonly unchangedAttemptBudget?: number;
+  /** Recovery interval, at least one hour and the retry floor. Defaults to one hour. */
+  readonly parkedRetryDelay?: Duration.Input;
+  /** Product repeat floor, at least one second. Defaults to one minute. */
+  readonly minimumRepeatInterval?: Duration.Input;
+}
+
+/** Optional policy overrides. Provide with Layer.succeed in the Durable Object's application layer. */
+export const ScheduleConfiguration = Context.Reference<ScheduleConfiguration>(
+  "effect-cf/DurableObjectAlarm/ScheduleConfiguration",
+  { defaultValue: () => ({}) },
+);
+
+const safeIntegerAtLeast = (minimum: number) =>
+  S.Int.check(S.isGreaterThanOrEqualTo(minimum), S.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER));
+
+const ScheduleConfigurationSchema = S.Struct({
+  minimumRetryDelay: safeIntegerAtLeast(MIN_RETRY_DELAY_MS),
+  unchangedAttemptBudget: safeIntegerAtLeast(1),
+  parkedRetryDelay: safeIntegerAtLeast(PARKED_RETRY_DELAY_MS),
+  minimumRepeatInterval: safeIntegerAtLeast(MIN_REPEAT_INTERVAL_MS),
+}).check(
+  S.makeFilter((configuration) =>
+    configuration.parkedRetryDelay >= configuration.minimumRetryDelay
+      ? undefined
+      : "parkedRetryDelay must be at least minimumRetryDelay",
+  ),
+);
+
+type ResolvedScheduleConfiguration = typeof ScheduleConfigurationSchema.Type;
+
+const retryDelay = (
+  attempts: number,
+  configuration: ResolvedScheduleConfiguration,
+  parked: boolean,
+  initialDelay = configuration.minimumRetryDelay,
+) =>
+  parked
+    ? configuration.parkedRetryDelay
+    : Math.min(configuration.parkedRetryDelay, initialDelay * 2 ** (attempts - 1));
 
 const getScheduledEventId = (input: { readonly id: string; readonly tag: string }) =>
   `effect-cf-alarm:${encodeURIComponent(input.tag)}:${encodeURIComponent(input.id)}`;
@@ -134,6 +178,37 @@ export class InvalidProcessDueAlarmsOptionsError extends Data.TaggedError(
   }
 }
 
+export class InvalidScheduleConfigurationError extends Data.TaggedError(
+  "InvalidScheduleConfigurationError",
+)<{
+  readonly cause: unknown;
+}> {
+  override get message(): string {
+    return `Invalid Durable Object alarm configuration: ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
+
+const getScheduleConfiguration = Effect.fnUntraced(function* (defaults: ScheduleConfiguration) {
+  const input = { ...defaults, ...(yield* ScheduleConfiguration) };
+
+  return yield* Effect.try({
+    try: () =>
+      S.decodeUnknownSync(ScheduleConfigurationSchema)({
+        minimumRetryDelay: Math.ceil(
+          Duration.toMillis(input.minimumRetryDelay ?? MIN_RETRY_DELAY_MS),
+        ),
+        unchangedAttemptBudget: input.unchangedAttemptBudget ?? UNCHANGED_ATTEMPT_BUDGET,
+        parkedRetryDelay: Math.ceil(
+          Duration.toMillis(input.parkedRetryDelay ?? PARKED_RETRY_DELAY_MS),
+        ),
+        minimumRepeatInterval: Math.ceil(
+          Duration.toMillis(input.minimumRepeatInterval ?? DEFAULT_MIN_REPEAT_INTERVAL_MS),
+        ),
+      }),
+    catch: (cause) => new InvalidScheduleConfigurationError({ cause }),
+  });
+});
+
 export class StoredAlarmDecodeError extends Data.TaggedError("StoredAlarmDecodeError")<{
   readonly cause: unknown;
   readonly storageId: string;
@@ -148,6 +223,7 @@ export type DurableObjectAlarmError =
   | InvalidAlarmRefError
   | InvalidProcessDueAlarmsOptionsError
   | InvalidRepeatEveryError
+  | InvalidScheduleConfigurationError
   | StorageOperationError
   | StoredAlarmDecodeError;
 
@@ -179,7 +255,7 @@ const decodeAlarmRef = (input: AlarmRef) =>
 
 /**
  * Arm a logical deadline. External enrollment is progress; handler self-rearms consume a budget.
- * Reusing `{tag, id}` replaces an alarm. Product repeats (minimum one minute) run after completion.
+ * Reusing `{tag, id}` replaces an alarm. Product repeats use the configured floor and run after completion.
  */
 export type ScheduleAlarmInput<Tag extends string = string> = AlarmRef<Tag> & {
   readonly payload: AlarmPayload;
@@ -290,6 +366,7 @@ export type AlarmScheduler = {
     | InvalidAlarmPayloadError
     | InvalidAlarmRefError
     | InvalidRepeatEveryError
+    | InvalidScheduleConfigurationError
     | StorageOperationError
   >;
   /** Atomically min-merge a logical deadline. Preserves an earlier alarm's payload and repeat. */
@@ -338,7 +415,7 @@ const ensureTable = Effect.fnUntraced(function* (state: DurableObjectState["Serv
     ON effect_cf_scheduled_alarms (wake_at, storage_id)`);
 });
 
-const toRepeatEveryMillis = (input: Duration.Input | undefined) => {
+const toRepeatEveryMillis = (input: Duration.Input | undefined, minimum: number) => {
   if (input === undefined) {
     return Effect.succeed(null);
   }
@@ -347,8 +424,8 @@ const toRepeatEveryMillis = (input: Duration.Input | undefined) => {
     try: () => {
       const millis = Duration.toMillis(input);
 
-      if (!Number.isFinite(millis) || millis < MIN_REPEAT_INTERVAL_MS) {
-        throw new Error("Alarm repeatEvery must be at least one minute and finite");
+      if (!Number.isFinite(millis) || millis < minimum) {
+        throw new Error(`Alarm repeatEvery must be at least ${minimum} milliseconds and finite`);
       }
 
       return Math.ceil(millis);
@@ -391,7 +468,7 @@ const getProcessLimit = (options: ProcessDueAlarmsOptions<unknown, unknown> | un
   return Effect.succeed(limit);
 };
 
-const toFailureRescheduleMillis = (input: Duration.Input) =>
+const toFailureRescheduleMillis = (input: Duration.Input, minimum: number) =>
   Effect.try({
     try: () => {
       const millis = Duration.toMillis(input);
@@ -400,13 +477,19 @@ const toFailureRescheduleMillis = (input: Duration.Input) =>
         throw new Error("Alarm failure rescheduleAfter must be a positive finite duration");
       }
 
-      return Math.max(MIN_RETRY_DELAY_MS, Math.ceil(millis));
+      return Math.max(minimum, Math.ceil(millis));
     },
     catch: (cause) => new InvalidProcessDueAlarmsOptionsError({ cause }),
   });
 
-const getFailureRetryDelay = (options: ProcessDueAlarmsOptions<unknown, unknown> | undefined) =>
-  toFailureRescheduleMillis(options?.retryFailedAfter ?? MIN_RETRY_DELAY_MS);
+const getFailureRetryDelay = (
+  options: ProcessDueAlarmsOptions<unknown, unknown> | undefined,
+  configuration: ResolvedScheduleConfiguration,
+) =>
+  toFailureRescheduleMillis(
+    options?.retryFailedAfter ?? configuration.minimumRetryDelay,
+    configuration.minimumRetryDelay,
+  );
 
 const getFailureActionMode = (action: ProcessDueAlarmsFailureAction) =>
   Predicate.isString(action) ? action : action.mode;
@@ -687,6 +770,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
     DurableObjectAlarm,
     Effect.gen(function* () {
       const state = yield* DurableObjectState;
+      const configurationDefaults = { ...(yield* ScheduleConfiguration) };
 
       const readRow = Effect.fnUntraced(function* (storageId: string) {
         const cursor = yield* state.storage.sql.exec<AlarmRow>(
@@ -765,8 +849,12 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         earlier: boolean,
         reports: string[],
       ) {
+        const configuration = yield* getScheduleConfiguration(configurationDefaults);
         const ref = yield* decodeAlarmRef(input);
-        const repeatEveryMillis = yield* toRepeatEveryMillis(input.repeatEvery);
+        const repeatEveryMillis = yield* toRepeatEveryMillis(
+          input.repeatEvery,
+          configuration.minimumRepeatInterval,
+        );
         const payload = yield* encodeStoredPayload(input.payload);
         const storageId = getScheduledEventId(ref);
         const existing = yield* readRow(storageId);
@@ -799,13 +887,22 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         const attempts =
           source === undefined || progressed || sourceProgressed
             ? 0
-            : Math.min(
-                UNCHANGED_ATTEMPT_BUDGET,
-                Math.max(source.attempts + 1, existing?.attempts ?? 0),
-              );
-        const parked = attempts >= UNCHANGED_ATTEMPT_BUDGET ? 1 : 0;
+            : source.parked === 1 || existing?.parked === 1
+              ? Math.max(source.attempts, existing?.attempts ?? 0)
+              : Math.min(
+                  configuration.unchangedAttemptBudget,
+                  Math.max(source.attempts + 1, existing?.attempts ?? 0),
+                );
+        const parked =
+          attempts > 0 &&
+          (attempts >= configuration.unchangedAttemptBudget ||
+            source?.parked === 1 ||
+            existing?.parked === 1)
+            ? 1
+            : 0;
         const now = yield* Clock.currentTimeMillis;
-        const retryAt = attempts === 0 ? null : now + retryDelay(attempts);
+        const retryAt =
+          attempts === 0 ? null : now + retryDelay(attempts, configuration, parked === 1);
         const runAt = DateTime.toEpochMillis(input.runAt);
         const keepEarlier = earlier && existing !== undefined && existing.run_at <= runAt;
         const scheduledAt = keepEarlier ? existing.run_at : runAt;
@@ -902,15 +999,21 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
       const rescheduleFailedAlarm = Effect.fnUntraced(function* (
         row: AlarmRow,
         initialDelay: number,
+        configuration: ResolvedScheduleConfiguration,
         reports: string[],
       ) {
         const current = yield* readRow(row.storage_id);
 
         // A self-rearm already charged this pass; a newer schedule must survive a stale failure.
         if (current === undefined || current.revision !== row.revision) return;
-        const attempts = Math.min(UNCHANGED_ATTEMPT_BUDGET, row.attempts + 1);
-        const retryAt = (yield* Clock.currentTimeMillis) + retryDelay(attempts, initialDelay);
-        const parked = attempts >= UNCHANGED_ATTEMPT_BUDGET ? 1 : 0;
+        const attempts =
+          row.parked === 1
+            ? row.attempts
+            : Math.min(configuration.unchangedAttemptBudget, row.attempts + 1);
+        const parked = row.parked === 1 || attempts >= configuration.unchangedAttemptBudget ? 1 : 0;
+        const retryAt =
+          (yield* Clock.currentTimeMillis) +
+          retryDelay(attempts, configuration, parked === 1, initialDelay);
 
         yield* writeAttempts(row.storage_id, attempts, parked, retryAt, row.progress);
         if (parked === 1 && row.parked === 0) {
@@ -918,7 +1021,10 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         }
       });
 
-      const acknowledgeAlarm = Effect.fnUntraced(function* (row: AlarmRow) {
+      const acknowledgeAlarm = Effect.fnUntraced(function* (
+        row: AlarmRow,
+        configuration: ResolvedScheduleConfiguration,
+      ) {
         if (row.repeat_every_ms === null) {
           const cursor = yield* state.storage.sql.exec(
             `DELETE FROM effect_cf_scheduled_alarms WHERE ${sameRevisionSql}`,
@@ -939,7 +1045,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         const now = yield* Clock.currentTimeMillis;
         const cursor = yield* state.storage.sql.exec(
           `UPDATE effect_cf_scheduled_alarms SET run_at = ? WHERE ${sameRevisionSql}`,
-          now + Math.max(MIN_REPEAT_INTERVAL_MS, row.repeat_every_ms),
+          now + Math.max(configuration.minimumRepeatInterval, row.repeat_every_ms),
           row.storage_id,
           row.storage_id,
           row.revision,
@@ -960,9 +1066,11 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         handle: ProcessDueAlarmsHandler<R, E>,
         options?: ProcessDueAlarmsOptions<OnFailureR, OnFailureE>,
       ) {
+        const configuration = yield* getScheduleConfiguration(configurationDefaults);
+
         yield* ensureTable(state);
         const limit = yield* getProcessLimit(options);
-        const initialDelay = yield* getFailureRetryDelay(options);
+        const initialDelay = yield* getFailureRetryDelay(options, configuration);
         const now = yield* Clock.currentTimeMillis;
 
         const cursor = yield* state.storage.sql.exec<AlarmRow>(
@@ -1001,15 +1109,15 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           const delayExit = yield* Effect.exit(
             delayInput === undefined
               ? Effect.succeed(initialDelay)
-              : toFailureRescheduleMillis(delayInput),
+              : toFailureRescheduleMillis(delayInput, configuration.minimumRetryDelay),
           );
           const delay = Exit.isSuccess(delayExit) ? delayExit.value : initialDelay;
           const reports: string[] = [];
 
           yield* transaction(() =>
             actionMode === "skip-and-advance-repeat"
-              ? acknowledgeAlarm(row)
-              : rescheduleFailedAlarm(row, delay, reports),
+              ? acknowledgeAlarm(row, configuration)
+              : rescheduleFailedAlarm(row, delay, configuration, reports),
           );
           yield* reportParked(reports);
           if (Exit.isFailure(actionExit)) {
@@ -1051,7 +1159,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
             yield* inPass(handleFailure(row, event, handleExit.cause));
             continue;
           }
-          yield* transaction(() => acknowledgeAlarm(row));
+          yield* transaction(() => acknowledgeAlarm(row, configuration));
           handled.push(event);
         }
         yield* transaction(() => Effect.void);

@@ -47,7 +47,8 @@ expectTypeOf(composed).toEqualTypeOf<
     | DurableObjectStorage.StorageOperationError
     | DurableObjectAlarm.InvalidAlarmRefError
     | DurableObjectAlarm.InvalidAlarmPayloadError
-    | DurableObjectAlarm.InvalidRepeatEveryError,
+    | DurableObjectAlarm.InvalidRepeatEveryError
+    | DurableObjectAlarm.InvalidScheduleConfigurationError,
     Application | SqlClient.SqlClient | DurableObjectState.DurableObjectState
   >
 >();

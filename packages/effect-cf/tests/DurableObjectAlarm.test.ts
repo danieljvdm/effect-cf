@@ -18,6 +18,38 @@ const writeJob = (storage: DurableObjectStorage.DurableObjectStorage, status: st
     status,
   );
 
+test("DurableObject.make supplies application-layer configuration to its shared scheduler", async () => {
+  const fixture = makeAlarmFixture();
+  const ObjectWithPolicy = DurableObject.make(
+    Layer.succeed(DurableObjectAlarm.ScheduleConfiguration, {
+      unchangedAttemptBudget: 1,
+      minimumRepeatInterval: "10 seconds",
+    }),
+    {
+      rpc: {
+        run: Effect.fnUntraced(function* () {
+          const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
+          yield* alarms.scheduleAlarm({
+            tag: "job",
+            id: "a",
+            payload: null,
+            runAt: atMillis(0),
+            repeatEvery: "10 seconds",
+          });
+          yield* alarms.processDueAlarms(() => Effect.fail("failed"));
+
+          return yield* alarms.getAlarmStatus({ tag: "job", id: "a" });
+        }),
+      },
+    },
+  );
+  const instance = new ObjectWithPolicy(fixture.state, {});
+  const status = await instance.run();
+
+  expect(status).toMatchObject({ attempts: 1, parked: true });
+});
+
 it.effect("rejects self-rearms from a detached handler fiber after the pass completes", () =>
   Effect.gen(function* () {
     const fixture = makeAlarmFixture();

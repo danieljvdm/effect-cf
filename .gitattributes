@@ -1,0 +1,2 @@
+# Patch context markers precede the upstream source's tab indentation.
+patches/*.patch whitespace=-space-before-tab

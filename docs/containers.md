@@ -113,6 +113,8 @@ const writeTask = Effect.fn("writeTask")(function* () {
 
 The adapter accepts a structural `Files` instance, so importing `effect-cf` does not load either SDK version. See the SDK's [requirements](https://developers.cloudflare.com/sandbox/reference/) for image and Worker setup.
 
+SDK 1.0.0 can deadlock on file reads in local Docker development when stdout arrives before its opening control frame. This repository carries a [development SDK patch](../patches/README.md) for that bug. It is not shipped in `effect-cf` or applied to consumer installations; applications using SDK 1.0.0 locally need the same fix until an upstream SDK release includes it.
+
 ## Background processes and logs
 
 A native process handle and its streams belong to the request that created them. For a command observed entirely within that request, use `process.logs`, `process.outputText`, and `process.exitCode`. Reading output with a timeout does not itself kill a caller-owned process; use `execScoped` when the scope should own termination.

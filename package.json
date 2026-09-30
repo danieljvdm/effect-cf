@@ -67,5 +67,8 @@
     "vitest": "4.1.11",
     "vite-plus": "0.3.0",
     "wrangler": "4.144.0"
+  },
+  "patchedDependencies": {
+    "@cloudflare/sandbox@1.0.0": "patches/@cloudflare%2Fsandbox@1.0.0.patch"
   }
 }

@@ -10,6 +10,7 @@ export * as ContainerNamespace from "./ContainerNamespace";
 export * as D1 from "./D1";
 export * as DurableObject from "./DurableObject";
 export * as DurableObjectAlarm from "./DurableObjectAlarm";
+export * as DurableObjectContainer from "./DurableObjectContainer";
 export * as DurableObjectDefinition from "./DurableObjectDefinition";
 export * as DurableObjectNamespace from "./DurableObjectNamespace";
 export * as DurableObjectRpcWebSocket from "./DurableObjectRpcWebSocket";

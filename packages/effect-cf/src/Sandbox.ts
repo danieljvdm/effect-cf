@@ -1,3 +1,7 @@
+/**
+ * Adapter for the legacy `@cloudflare/sandbox` 0.13 namespace/client API.
+ * SDK 1.x utilities can instead use `DurableObjectContainer`'s native `raw` handle.
+ */
 import type {
   BackupOptions,
   CheckChangesOptions,

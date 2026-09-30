@@ -60,7 +60,7 @@ export const SessionObject = DurableObject.make(Layer.empty, {
 `scheduleAlarm` arms or replaces one `{tag, id}`. `scheduleAlarmEarlier` atomically
 min-merges that logical alarm's deadline, preserving the existing payload and
 repeat when its deadline is already earlier. Other logical alarms always retain
-their own deadlines; the scheduler reconciles the earliest eligible one.
+their own deadlines; the scheduler reconciles the earliest effective wake deadline.
 `cancelAlarm` removes that logical work and its attempt state.
 
 External enrollment without a source cursor starts a fresh budget and removes
@@ -85,17 +85,14 @@ Failures and unchanged self-rearms have a one-second floor and exponential
 backoff: 1, 2, 4, 8, 16, 32 and 64 seconds. The eighth unchanged attempt parks
 work for hourly recovery; later failures remain parked. `retryFailedAfter` and
 typed definitions' `retry.initialDelay` select the initial backoff, subject to
-the floor, budget and hourly cap. Returning `ordered` from a failure policy
-retains the failed row's logical position and holds later rows asleep behind
-its retry deadline. Isolated failures allow unrelated alarms to proceed.
-An unchanged self-rearm from the handler or failure hook keeps that ordering
-barrier; replacing the deadline or payload does not let a stale failure overwrite
-the replacement.
+the floor, budget and hourly cap. Failures retry independently so unrelated due
+alarms can proceed. A stale failure cannot overwrite a handler's replacement,
+and an unchanged self-rearm is charged only once per pass.
 
-Reconciliation uses an index of eligible wake deadlines rather than scanning
-retained work after each schedule or acknowledgement. When an ordered barrier
-moves, eligibility is updated once; unchanged retries update only their own row.
-Existing logical schedules and attempt state are migrated automatically.
+Dispatch and reconciliation use the same index of effective wake deadlines,
+ordered by deadline and then storage key. Backing-off and parked work does not
+block other alarms or require scanning the retained backlog. Existing logical
+schedules are migrated automatically; their logical `scheduledAt` is preserved.
 
 `repeatEvery` is a product schedule, with a **one-minute minimum**. It advances
 from completion time without catch-up invocations. Never use it to poll for a
@@ -112,9 +109,9 @@ when the handler becomes eligible again. Revision checks keep acknowledgements
 and retries from overwriting a newer schedule, including identical replacements.
 
 `processDueAlarms` returns new content-free `AlarmParked` events in `parked`.
-Ordered failures still fail the dispatcher, so install `AlarmReporter` to observe
-all parking transitions. The default emits a warning. A consumer can route the
-typed event to its own telemetry:
+Install `AlarmReporter` to observe parking transitions, including schedules
+outside dispatch. The default emits a warning. A consumer can route the typed
+event to its own telemetry:
 
 ```ts
 const reporting = Layer.succeed(DurableObjectAlarm.AlarmReporter, (event) =>
@@ -152,6 +149,12 @@ references and register their handlers on the Durable Object.
 | `storage.transaction(tx => tx.setAlarm(...))`              | `alarms.transaction(tx => tx.scheduleAlarm(...))`, with application writes through the same object's storage / SqlClient |
 | `storage.deleteAlarm()`                                    | `cancelAlarm({ tag, id })` for the logical work being cancelled                                                          |
 | An alarm re-arms to check another component's state        | Enroll on that component's completion/progress event; remove the polling loop                                            |
+
+Ordered failure handling and `ProcessDueAlarmsMode` have been removed. Remove
+`options.mode`, including `"isolated"`; independent retry is now the only dispatch
+behavior. Replace `failure: "ordered"` or an `onFailure` action of `"ordered"`
+with `"retry"`. Enroll dependent work from its predecessor's completion event
+instead of holding unrelated deadlines behind a failed alarm.
 
 Keep external RPC and network effects outside scheduler transactions. Native
 storage failures, interruption and defects before commit roll back logical

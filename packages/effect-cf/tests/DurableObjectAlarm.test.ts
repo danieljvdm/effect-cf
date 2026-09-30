@@ -608,40 +608,6 @@ it.effect("isolates logical failures by default and continues later due rows", (
   }),
 );
 
-it.effect("ordered mode preserves strict head-of-line failure behavior", () =>
-  Effect.gen(function* () {
-    const fixture = makeAlarmFixture();
-    const handled: Array<string> = [];
-
-    const exit = yield* fixture.run(
-      Effect.gen(function* () {
-        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
-
-        yield* alarms.scheduleAlarm({ tag: "jobs", id: "a", runAt: atMillis(0), payload: null });
-        yield* alarms.scheduleAlarm({ tag: "jobs", id: "b", runAt: atMillis(0), payload: null });
-        yield* alarms.scheduleAlarm({ tag: "jobs", id: "c", runAt: atMillis(0), payload: null });
-        yield* alarms.processDueAlarms(
-          (event) => {
-            if (event.id === "b") {
-              return Effect.fail("logical failure");
-            }
-
-            return Effect.sync(() => handled.push(event.id));
-          },
-          { mode: "ordered" },
-        );
-      }).pipe(Effect.exit),
-    );
-
-    assert.strictEqual(exit._tag, "Failure");
-    assert.deepStrictEqual(handled, ["a"]);
-    assert.strictEqual(fixture.row("jobs", "a"), undefined);
-    assert.strictEqual(fixture.row("jobs", "b")?.run_at, 0);
-    assert.strictEqual(fixture.row("jobs", "c")?.run_at, 0);
-    assert.strictEqual(fixture.currentAlarm(), 1_000);
-  }),
-);
-
 it.effect("surfaces invalid input as typed scheduler errors", () =>
   Effect.gen(function* () {
     const fixture = makeAlarmFixture();
@@ -863,49 +829,6 @@ it.effect("applies per-tag failure policies from typed alarm definitions", () =>
     assert.ok((fixture.row("heartbeat", "room")?.run_at ?? 0) > 0);
     assert.ok((fixture.currentAlarm() ?? 0) >= 60_000);
     assert.strictEqual(fixture.row("maintenance", "cleanup"), undefined);
-  }),
-);
-
-it.effect("supports per-tag ordered failure policies", () =>
-  Effect.gen(function* () {
-    const fixture = makeAlarmFixture();
-    const alarmsDefinition = DurableObjectAlarm.define({
-      billingSync: {
-        payload: Schema.Null,
-        failure: "ordered",
-      },
-      maintenance: Schema.Null,
-    });
-    const handled: Array<string> = [];
-
-    const exit = yield* fixture.run(
-      Effect.gen(function* () {
-        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
-
-        yield* alarms.scheduleAlarm({
-          tag: "billingSync",
-          id: "account-1",
-          runAt: atMillis(0),
-          payload: null,
-        });
-        yield* alarms.scheduleAlarm({
-          tag: "maintenance",
-          id: "cleanup",
-          runAt: atMillis(0),
-          payload: null,
-        });
-
-        yield* alarmsDefinition.handlers({
-          billingSync: () => Effect.fail("billing failed"),
-          maintenance: (event) => Effect.sync(() => handled.push(event.id)),
-        });
-      }).pipe(Effect.exit),
-    );
-
-    assert.strictEqual(exit._tag, "Failure");
-    assert.deepStrictEqual(handled, []);
-    assert.strictEqual(fixture.row("billingSync", "account-1")?.run_at, 0);
-    assert.strictEqual(fixture.row("maintenance", "cleanup")?.run_at, 0);
   }),
 );
 

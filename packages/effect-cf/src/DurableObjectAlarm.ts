@@ -20,31 +20,20 @@ CREATE TABLE IF NOT EXISTS effect_cf_scheduled_alarms (
   tag TEXT NOT NULL,
   run_at INTEGER NOT NULL,
   wake_at INTEGER NOT NULL DEFAULT 0,
-  blocking INTEGER NOT NULL DEFAULT 0,
-  eligible INTEGER NOT NULL DEFAULT -1,
   repeat_every_ms INTEGER,
   payload TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_effect_cf_scheduled_alarms_run_at_storage_id
-  ON effect_cf_scheduled_alarms (run_at, storage_id);
 CREATE TABLE IF NOT EXISTS effect_cf_alarm_attempts (
   storage_id TEXT PRIMARY KEY,
   revision TEXT NOT NULL,
   attempts INTEGER NOT NULL,
   parked INTEGER NOT NULL,
   retry_at INTEGER,
-  ordered INTEGER NOT NULL,
   progress INTEGER NOT NULL
 );
-CREATE TABLE IF NOT EXISTS effect_cf_alarm_ordering (
-  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-  storage_id TEXT,
-  run_at INTEGER
-);
-INSERT OR IGNORE INTO effect_cf_alarm_ordering (singleton) VALUES (1);
 `;
 
-const WAKE_INDEX = "idx_effect_cf_scheduled_alarms_eligible_wake_at_storage_id";
+const WAKE_INDEX = "idx_effect_cf_scheduled_alarms_wake_at_storage_id";
 
 const DEFAULT_PROCESS_DUE_ALARMS_LIMIT = 100;
 
@@ -77,14 +66,13 @@ interface AlarmRow extends Record<string, SqlStorageValue> {
   readonly revision: string;
   readonly parked: number;
   readonly retry_at: number | null;
-  readonly ordered: number;
   readonly progress: number;
 }
 
 const alarmRowsSql = `
   SELECT a.*, COALESCE(s.revision, '') AS revision,
          COALESCE(s.attempts, 0) AS attempts, COALESCE(s.parked, 0) AS parked,
-         s.retry_at, COALESCE(s.ordered, 0) AS ordered, COALESCE(s.progress, -1) AS progress
+         s.retry_at, COALESCE(s.progress, -1) AS progress
     FROM effect_cf_scheduled_alarms a
     LEFT JOIN effect_cf_alarm_attempts s USING (storage_id)`;
 
@@ -201,8 +189,6 @@ export type ScheduleAlarmInput<Tag extends string = string> = AlarmRef<Tag> & {
   readonly progress?: number;
 };
 
-export type ProcessDueAlarmsMode = "isolated" | "ordered";
-
 export interface ProcessDueAlarmsFailure {
   readonly cause: unknown;
   readonly event?: DurableObjectAlarmEvent;
@@ -218,12 +204,8 @@ export interface ProcessDueAlarmsResult {
 }
 
 export type ProcessDueAlarmsFailureAction =
-  | "ordered"
   | "retry"
   | "skip-and-advance-repeat"
-  | {
-      readonly mode: "ordered";
-    }
   | {
       readonly mode: "retry";
       readonly retryFailedAfter?: Duration.Input;
@@ -234,8 +216,6 @@ export type ProcessDueAlarmsFailureAction =
 
 export interface ProcessDueAlarmsOptions<OnFailureR = never, OnFailureE = never> {
   readonly limit?: number;
-  /** `isolated` retries only the failed row; `ordered` stops before later rows. */
-  readonly mode?: ProcessDueAlarmsMode;
   readonly onFailure?: (
     failure: ProcessDueAlarmsFailure,
   ) => Effect.Effect<ProcessDueAlarmsFailureAction | void, OnFailureE, OnFailureR>;
@@ -289,7 +269,10 @@ export type AlarmScheduler = {
     input: AlarmRef,
   ) => Effect.Effect<AlarmStatus | undefined, InvalidAlarmRefError | StorageOperationError>;
 
-  /** Acknowledge after handling. Conditional writes preserve handler replacements; alarms are at-least-once. */
+  /**
+   * Dispatch by effective wake deadline, then storage key. Failures retry independently.
+   * Conditional acknowledgements preserve handler replacements; alarms are at-least-once.
+   */
   readonly processDueAlarms: <R = never, E = never, OnFailureR = never, OnFailureE = never>(
     handle: ProcessDueAlarmsHandler<R, E>,
     options?: ProcessDueAlarmsOptions<OnFailureR, OnFailureE>,
@@ -343,32 +326,16 @@ const ensureTable = Effect.fnUntraced(function* (state: DurableObjectState["Serv
       "ALTER TABLE effect_cf_scheduled_alarms ADD COLUMN wake_at INTEGER NOT NULL DEFAULT 0",
     );
   }
-  if (!names.has("blocking")) {
-    yield* state.storage.sql.exec(
-      "ALTER TABLE effect_cf_scheduled_alarms ADD COLUMN blocking INTEGER NOT NULL DEFAULT 0",
-    );
-  }
-  if (!names.has("eligible")) {
-    yield* state.storage.sql.exec(
-      "ALTER TABLE effect_cf_scheduled_alarms ADD COLUMN eligible INTEGER NOT NULL DEFAULT -1",
-    );
-  }
   // Backfill once, including retained schedules from before attempt tracking existed.
   // The wake index is the durable migration marker and is created only after the backfill.
   yield* state.storage.sql.exec(`UPDATE effect_cf_scheduled_alarms SET
     wake_at = MAX(run_at, COALESCE((SELECT retry_at FROM effect_cf_alarm_attempts s
-      WHERE s.storage_id = effect_cf_scheduled_alarms.storage_id), run_at)),
-    blocking = COALESCE((SELECT ordered FROM effect_cf_alarm_attempts s
-      WHERE s.storage_id = effect_cf_scheduled_alarms.storage_id), 0), eligible = -1`);
-  yield* state.storage.sql.exec(`CREATE INDEX IF NOT EXISTS idx_effect_cf_scheduled_alarms_blocking
-    ON effect_cf_scheduled_alarms (run_at, storage_id) WHERE blocking = 1`);
-  yield* state.storage.sql.exec(`CREATE INDEX IF NOT EXISTS idx_effect_cf_scheduled_alarms_dirty
-    ON effect_cf_scheduled_alarms (storage_id) WHERE eligible = -1`);
-  yield* state.storage.sql
-    .exec(`CREATE INDEX IF NOT EXISTS idx_effect_cf_scheduled_alarms_eligible_run_at_storage_id
-    ON effect_cf_scheduled_alarms (run_at, storage_id) WHERE eligible = 1`);
+      WHERE s.storage_id = effect_cf_scheduled_alarms.storage_id), run_at))`);
+  yield* state.storage.sql.exec(
+    "DROP INDEX IF EXISTS idx_effect_cf_scheduled_alarms_run_at_storage_id",
+  );
   yield* state.storage.sql.exec(`CREATE INDEX IF NOT EXISTS ${WAKE_INDEX}
-    ON effect_cf_scheduled_alarms (wake_at, storage_id) WHERE eligible = 1`);
+    ON effect_cf_scheduled_alarms (wake_at, storage_id)`);
 });
 
 const toRepeatEveryMillis = (input: Duration.Input | undefined) => {
@@ -459,7 +426,7 @@ export const processDue = <R = never, E = never, OnFailureR = never, OnFailureE 
 
 export type AlarmPayloadSchema = S.Codec<any, any, never, never>;
 
-export type AlarmFailurePolicy = "ordered" | "retry" | "skip-and-advance-repeat";
+export type AlarmFailurePolicy = "retry" | "skip-and-advance-repeat";
 
 export interface AlarmRetryPolicy {
   readonly initialDelay?: Duration.Input;
@@ -730,48 +697,10 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         return (yield* cursor.toArray())[0];
       });
 
-      const firstOrderedAlarm = Effect.fnUntraced(function* () {
-        const cursor = yield* state.storage.sql.exec<Pick<AlarmRow, "run_at" | "storage_id">>(
-          `SELECT run_at, storage_id FROM effect_cf_scheduled_alarms
-            WHERE blocking = 1 ORDER BY run_at, storage_id LIMIT 1`,
-        );
-
-        return (yield* cursor.toArray())[0];
-      });
-
-      const reconcileEligibility = Effect.fnUntraced(function* () {
-        const barrier = yield* firstOrderedAlarm();
-        const previous = yield* state.storage.sql.exec<{
-          storage_id: string | null;
-          run_at: number | null;
-        }>("SELECT storage_id, run_at FROM effect_cf_alarm_ordering WHERE singleton = 1");
-        const applied = (yield* previous.toArray())[0];
-        const changed =
-          applied?.storage_id !== (barrier?.storage_id ?? null) ||
-          applied?.run_at !== (barrier?.run_at ?? null);
-
-        // Retained rows change eligibility only when the ordered boundary moves.
-        // Otherwise the partial dirty index limits this update to mutated deadlines.
-        yield* state.storage.sql.exec(
-          `UPDATE effect_cf_scheduled_alarms SET eligible =
-            ${barrier === undefined ? "1" : "CASE WHEN (run_at, storage_id) <= (?, ?) THEN 1 ELSE 0 END"}
-            ${changed ? "" : "WHERE eligible = -1"}`,
-          ...(barrier === undefined ? [] : [barrier.run_at, barrier.storage_id]),
-        );
-        if (changed) {
-          yield* state.storage.sql.exec(
-            "UPDATE effect_cf_alarm_ordering SET storage_id = ?, run_at = ? WHERE singleton = 1",
-            barrier?.storage_id ?? null,
-            barrier?.run_at ?? null,
-          );
-        }
-      });
-
       const reconcileAlarm = Effect.fn("DurableObjectAlarm.reconcileAlarm")(function* () {
-        yield* reconcileEligibility();
         const cursor = yield* state.storage.sql.exec<NextAlarmRow>(
           `SELECT wake_at AS run_at FROM effect_cf_scheduled_alarms
-            WHERE eligible = 1 ORDER BY wake_at, storage_id LIMIT 1`,
+            ORDER BY wake_at, storage_id LIMIT 1`,
         );
         const next = (yield* cursor.toArray())[0];
 
@@ -794,28 +723,25 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         attempts: number,
         parked: number,
         retryAt: number | null,
-        ordered: number,
         progress: number,
       ) {
         yield* state.storage.sql.exec(
           `INSERT OR REPLACE INTO effect_cf_alarm_attempts
-            (storage_id, revision, attempts, parked, retry_at, ordered, progress)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            (storage_id, revision, attempts, parked, retry_at, progress)
+           VALUES (?, ?, ?, ?, ?, ?)`,
           storageId,
           crypto.randomUUID(),
           attempts,
           parked,
           retryAt,
-          ordered,
           progress,
         );
-        // Materialize the effective wake and ordering barrier in the same transaction.
+        // Materialize the effective wake in the same transaction for indexed dispatch/reconciliation.
         yield* state.storage.sql.exec(
           `UPDATE effect_cf_scheduled_alarms
-            SET wake_at = MAX(run_at, COALESCE(?, run_at)), blocking = ?, eligible = -1
+            SET wake_at = MAX(run_at, COALESCE(?, run_at))
             WHERE storage_id = ?`,
           retryAt,
-          ordered,
           storageId,
         );
       });
@@ -886,17 +812,6 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         const scheduledPayload = keepEarlier ? existing.payload : payload;
         const scheduledRepeat = keepEarlier ? existing.repeat_every_ms : repeatEveryMillis;
         const nextProgress = Math.max(progress, input.progress ?? -1);
-        const ordered =
-          source !== undefined &&
-          source.storage_id === storageId &&
-          source.ordered === 1 &&
-          attempts > 0 &&
-          nextProgress === source.progress &&
-          scheduledAt === source.run_at &&
-          scheduledPayload === source.payload &&
-          scheduledRepeat === source.repeat_every_ms
-            ? 1
-            : 0;
 
         yield* state.storage.sql.exec(
           `INSERT OR REPLACE INTO effect_cf_scheduled_alarms
@@ -909,7 +824,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           scheduledRepeat,
           scheduledPayload,
         );
-        yield* writeAttempts(storageId, attempts, parked, retryAt, ordered, nextProgress);
+        yield* writeAttempts(storageId, attempts, parked, retryAt, nextProgress);
         if (parked === 1 && retryAt !== null && (existing?.parked ?? source?.parked ?? 0) === 0) {
           reports.push(storageId);
         }
@@ -987,48 +902,17 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
       const rescheduleFailedAlarm = Effect.fnUntraced(function* (
         row: AlarmRow,
         initialDelay: number,
-        ordered: boolean,
         reports: string[],
       ) {
         const current = yield* readRow(row.storage_id);
 
-        if (current === undefined) return;
-        if (current.revision !== row.revision) {
-          // An unchanged self-rearm already charged this pass. Preserve its revision/deadline,
-          // applying the failure's ordering policy. Real replacements survive.
-          if (
-            current.attempts > 0 &&
-            current.progress === row.progress &&
-            current.run_at === row.run_at &&
-            current.payload === row.payload &&
-            current.repeat_every_ms === row.repeat_every_ms
-          ) {
-            yield* state.storage.sql.exec(
-              "UPDATE effect_cf_alarm_attempts SET ordered = ? WHERE storage_id = ?",
-              ordered ? 1 : 0,
-              row.storage_id,
-            );
-            yield* state.storage.sql.exec(
-              "UPDATE effect_cf_scheduled_alarms SET blocking = ? WHERE storage_id = ?",
-              ordered ? 1 : 0,
-              row.storage_id,
-            );
-          }
-
-          return;
-        }
+        // A self-rearm already charged this pass; a newer schedule must survive a stale failure.
+        if (current === undefined || current.revision !== row.revision) return;
         const attempts = Math.min(UNCHANGED_ATTEMPT_BUDGET, row.attempts + 1);
         const retryAt = (yield* Clock.currentTimeMillis) + retryDelay(attempts, initialDelay);
         const parked = attempts >= UNCHANGED_ATTEMPT_BUDGET ? 1 : 0;
 
-        yield* writeAttempts(
-          row.storage_id,
-          attempts,
-          parked,
-          retryAt,
-          ordered ? 1 : 0,
-          row.progress,
-        );
+        yield* writeAttempts(row.storage_id, attempts, parked, retryAt, row.progress);
         if (parked === 1 && row.parked === 0) {
           reports.push(row.storage_id);
         }
@@ -1063,7 +947,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
 
         if ((yield* cursor.rowsWritten) > 0) {
           // A completed product occurrence is progress. Missed occurrences are never replayed.
-          yield* writeAttempts(row.storage_id, 0, 0, null, 0, row.progress);
+          yield* writeAttempts(row.storage_id, 0, 0, null, row.progress);
         }
       });
 
@@ -1077,17 +961,13 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         options?: ProcessDueAlarmsOptions<OnFailureR, OnFailureE>,
       ) {
         yield* ensureTable(state);
-        const mode = options?.mode ?? "isolated";
         const limit = yield* getProcessLimit(options);
         const initialDelay = yield* getFailureRetryDelay(options);
         const now = yield* Clock.currentTimeMillis;
 
-        yield* reconcileEligibility();
         const cursor = yield* state.storage.sql.exec<AlarmRow>(
           `${alarmRowsSql}
-            WHERE a.eligible = 1 AND a.run_at <= ? AND a.wake_at <= ?
-            ORDER BY a.run_at ASC, a.storage_id ASC LIMIT ?`,
-          now,
+            WHERE a.wake_at <= ? ORDER BY a.wake_at ASC, a.storage_id ASC LIMIT ?`,
           now,
           limit,
         );
@@ -1116,7 +996,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
               : Effect.suspend(() => options.onFailure!(failure)),
           );
           const action = Exit.isSuccess(actionExit) ? actionExit.value : undefined;
-          const actionMode = action === undefined ? mode : getFailureActionMode(action);
+          const actionMode = action === undefined ? "retry" : getFailureActionMode(action);
           const delayInput = action === undefined ? undefined : getFailureActionRetryDelay(action);
           const delayExit = yield* Effect.exit(
             delayInput === undefined
@@ -1129,7 +1009,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           yield* transaction(() =>
             actionMode === "skip-and-advance-repeat"
               ? acknowledgeAlarm(row)
-              : rescheduleFailedAlarm(row, delay, actionMode === "ordered", reports),
+              : rescheduleFailedAlarm(row, delay, reports),
           );
           yield* reportParked(reports);
           if (Exit.isFailure(actionExit)) {
@@ -1138,8 +1018,6 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           if (Exit.isFailure(delayExit)) {
             return yield* Effect.failCause(delayExit.cause);
           }
-
-          return actionMode === "ordered" ? ("stop" as const) : ("continue" as const);
         });
 
         for (const row of dueRows) {
@@ -1163,22 +1041,14 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           const eventExit = yield* Effect.exit(toAlarmDue(row));
 
           if (Exit.isFailure(eventExit)) {
-            const action = yield* inPass(handleFailure(row, undefined, eventExit.cause));
-
-            if (action === "stop") {
-              return yield* Effect.failCause(eventExit.cause);
-            }
+            yield* inPass(handleFailure(row, undefined, eventExit.cause));
             continue;
           }
           const event = eventExit.value;
           const handleExit = yield* Effect.exit(inPass(Effect.suspend(() => handle(event))));
 
           if (Exit.isFailure(handleExit)) {
-            const action = yield* inPass(handleFailure(row, event, handleExit.cause));
-
-            if (action === "stop") {
-              return yield* Effect.failCause(handleExit.cause);
-            }
+            yield* inPass(handleFailure(row, event, handleExit.cause));
             continue;
           }
           yield* transaction(() => acknowledgeAlarm(row));

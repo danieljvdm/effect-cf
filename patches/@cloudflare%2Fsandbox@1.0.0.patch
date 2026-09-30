@@ -1,0 +1,64 @@
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 46870d57d252eaed8fa6db4dfcc51a1db4488261..5218d5c5f492523238228f374ab7c8f56762a82c 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -989,7 +989,28 @@ async function readFile(container, path, options) {
+ 	try {
+ 		control = session.openStderrControl();
+ 		output = session.openStdoutReader();
+-		const opening = await control.readFrame();
++		const openingFrame = control.readFrame().then((frame) => ({ kind: "control", frame }));
++		const buffered = [];
++		let pendingRead = output.read();
++		let opening;
++		// Docker can deliver stdout before the opening stderr frame. Drain both channels
++		// until that frame arrives, then resume normal body backpressure.
++		while (true) {
++			const next = await session.waitFor(Promise.race([
++				openingFrame,
++				pendingRead.then((result) => ({ kind: "output", result }))
++			]));
++			if (next.kind === "control") {
++				opening = next.frame;
++				break;
++			}
++			if (next.result.done) {
++				opening = (await openingFrame).frame;
++				break;
++			}
++			buffered.push(next.result.value);
++			pendingRead = output.read();
++		}
+ 		if (opening.kind === "fileError") {
+ 			await control.expectEnd();
+ 			await session.settle();
+@@ -1001,17 +1022,26 @@ async function readFile(container, path, options) {
+ 		if (opening.kind !== "success") throw protocolError("sandbox-shim returned data before file bytes");
+ 		const terminal = readTerminalControl(control);
+ 		terminal.catch(() => void 0);
+-		return new Response(responseBody(session, control, output, terminal, path));
++		return new Response(responseBody(session, control, output, terminal, path, buffered, pendingRead));
+ 	} catch (error) {
+ 		terminateRead(session, control, output, error);
+ 		throw error;
+ 	}
+ }
+-function responseBody(session, control, output, terminalFrame, path) {
++function responseBody(session, control, output, terminalFrame, path, buffered, pendingRead) {
++	let offset = 0;
+ 	return new ReadableStream({
+ 		pull: async (controller) => {
+ 			try {
+-				const next = await session.waitFor(output.read());
++				if (offset < buffered.length) {
++					const chunk = buffered[offset];
++					buffered[offset++] = undefined;
++					controller.enqueue(chunk);
++					return;
++				}
++				const reading = pendingRead ?? output.read();
++				pendingRead = undefined;
++				const next = await session.waitFor(reading);
+ 				if (!next.done) {
+ 					controller.enqueue(next.value);
+ 					return;

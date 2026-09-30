@@ -6,11 +6,13 @@ Cloudflare entrypoints and bindings as Effect services.
 npm install effect-cf "effect@^4.0.0-rc.115"
 ```
 
-The repository tests against workerd `1.20260825.1` and `@cloudflare/workers-types@5.20260825.1`. Use `compatibility_date: "2026-08-25"` in Wrangler.
+The repository tests against workerd `1.20260926.1` and `@cloudflare/workers-types@5.20260926.1`. Use `compatibility_date: "2026-09-26"` in Wrangler.
 
 See the [runtime performance guide](https://github.com/danieljvdm/effect-cf/blob/main/docs/runtime-performance.md) for measured alarm batching and telemetry configuration guidance.
 
 For typed WebSocket RPC clients whose connection lifetime is owned by an Effect layer, see the [WebSocket RPC guide](https://github.com/danieljvdm/effect-cf/blob/main/docs/websocket-rpc.md).
+
+`DurableObjectContainer.layer` adds native `ctx.container` control to `DurableObject.make`: runtime image selection, command execution, filesystem snapshots, networking, and idle timeouts. See the [container guide](https://github.com/danieljvdm/effect-cf/blob/main/docs/containers.md) for setup and migration from the legacy Container and Sandbox classes.
 
 ## Worker
 
@@ -108,7 +110,7 @@ Enable tracing in `wrangler.jsonc`:
 
 ```jsonc
 {
-  "compatibility_date": "2026-08-25",
+  "compatibility_date": "2026-09-26",
   "observability": {
     "traces": { "enabled": true },
   },

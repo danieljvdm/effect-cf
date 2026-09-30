@@ -119,7 +119,7 @@ export const buildBenchmarks = Effect.fn("runtimeBench.buildBenchmarks")(
             {
               name: `runtime-bench-${selectedVariant}`,
               main: "index.ts",
-              compatibility_date: "2026-08-25",
+              compatibility_date: "2026-09-26",
               compatibility_flags: ["nodejs_compat", "new_module_registry"],
               minify: true,
               durable_objects:

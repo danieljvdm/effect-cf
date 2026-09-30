@@ -310,7 +310,7 @@ const configureWorker = Effect.fn("bundleSize.configureWorker")(function* (
       {
         name: `bundle-${fixture.name}`,
         main: `fixtures/${fixture.entry}`,
-        compatibility_date: "2026-08-25",
+        compatibility_date: "2026-09-26",
         compatibility_flags: ["nodejs_compat"],
         minify: true,
         kv_namespaces:

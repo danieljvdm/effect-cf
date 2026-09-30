@@ -60,10 +60,12 @@ export const ContainerState = S.Union([
 export type ContainerState = typeof ContainerState.Type;
 
 /**
- * Native Container stub shape exposed by a Container namespace binding.
+ * RPC stub exposed by the legacy `@cloudflare/containers` Container class.
  *
  * This is structural so using Container bindings does not make
  * `@cloudflare/containers` a runtime dependency of effect-cf.
+ * Use `DurableObjectContainer` inside a Durable Object for the native
+ * `ctx.container` API and the `durable_object` scheduling policy.
  */
 export interface ContainerStub {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;

@@ -225,6 +225,12 @@ export default defineConfig({
         dependsOn: ["effect-cf#build"],
         cache: false,
       },
+      "test:containers": {
+        command:
+          "EFFECT_CF_CONTAINER_TESTS=1 vp test --project node DurableObjectContainer.integration.test.ts",
+        dependsOn: ["effect-cf#build"],
+        cache: false,
+      },
       // Examples consume the publishable packages through their published
       // `dist` entrypoints.
       check: {

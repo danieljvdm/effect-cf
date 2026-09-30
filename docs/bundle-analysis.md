@@ -24,7 +24,7 @@ pipeline tools, recorded alongside the revisions and Effect versions.
 | Vite     | `vp build` with `@cloudflare/vite-plugin`        | Worker SSR environment, minification enabled, ES2022, code splitting                                          |
 | Alchemy  | Worker source resolver and its `build` operation | Normal Worker plugins and defaults, including purity transforms, name preservation, ES2024 and code splitting |
 
-These builds never deploy. All fixtures use compatibility date `2026-08-25` and
+These builds never deploy. All fixtures use compatibility date `2026-09-26` and
 `nodejs_compat`. The isolated `scripts/bundle-pipelines` project has its own
 lockfile: framework build tools can use newer Cloudflare tooling without changing
 the library's pinned runtime. Vite+ runs Vite; they are distinct tools.

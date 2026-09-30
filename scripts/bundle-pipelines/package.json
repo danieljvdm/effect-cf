@@ -11,7 +11,7 @@
     "rolldown": "1.1.5",
     "vite": "npm:@voidzero-dev/vite-plus-core@0.3.0",
     "vite-plus": "0.3.0",
-    "wrangler": "4.126.0"
+    "wrangler": "4.144.0"
   },
   "devDependencies": {
     "@types/node": "25.6.0",

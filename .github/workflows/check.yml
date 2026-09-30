@@ -49,6 +49,9 @@ jobs:
       - name: Lint
         run: vp lint
 
+      - name: Test native containers with Docker
+        run: vp run test:containers
+
       - name: Run tests
         run: vp test
 

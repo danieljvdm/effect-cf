@@ -32,7 +32,7 @@ Do not use `bun run`, `npm run`, `pnpm run`, or `yarn run` in this repository. D
 
 - `packages/effect-cf` and `packages/effect-webtransport` are the publishable packages.
 - `packages/effect-cf` holds Cloudflare-specific primitives; `packages/effect-webtransport` is a platform-generic Effect WebTransport library with no Cloudflare dependency.
-- `effect-cf` pins Cloudflare workerd `1.20260825.1` via the root catalog (`@cloudflare/workers-types@5.20260825.1`, `miniflare@5.20260825.0-alpha`, `wrangler@4.126.0`) and recommends `compatibility_date` `2026-08-25`. Keep the dated runtime packages and compatibility date in lockstep.
+- `effect-cf` pins Cloudflare workerd `1.20260926.1` via the root catalog (`@cloudflare/workers-types@5.20260926.1`, `miniflare@5.20260926.1-alpha`, `wrangler@4.144.0`) and recommends `compatibility_date` `2026-09-26`. Keep the dated runtime packages and compatibility date in lockstep.
 - `examples/` contains consumer and example applications.
 - Reusable package code belongs under a package's `src/` and must be exported from that package's `src/index.ts`.
 

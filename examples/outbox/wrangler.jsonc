@@ -2,7 +2,7 @@
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "effect-cf-outbox",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-25",
+  "compatibility_date": "2026-09-26",
   "compatibility_flags": ["nodejs_compat"],
   "durable_objects": {
     "bindings": [{ "name": "DOCUMENTS", "class_name": "DocumentDurableObject" }],

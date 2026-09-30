@@ -2,5 +2,5 @@
   "name": "effect-cf-declaration-consumer",
   "main": "src/wrangler/runtime-worker.ts",
   "tsconfig": "tsconfig.wrangler-types.json",
-  "compatibility_date": "2026-08-25",
+  "compatibility_date": "2026-09-26",
 }

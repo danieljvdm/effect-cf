@@ -1,0 +1,22 @@
+{
+  "$schema": "../../../../../node_modules/wrangler/config-schema.json",
+  "name": "effect-cf-native-container-test",
+  "main": "worker.ts",
+  "compatibility_date": "2026-09-26",
+  "compatibility_flags": ["nodejs_compat"],
+  "containers": [
+    {
+      "class_name": "IntegrationContainer",
+      "scheduling_policy": "durable_object",
+      "images": {
+        "base": { "dockerfile": "./Dockerfile" },
+      },
+    },
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "CONTAINER", "class_name": "IntegrationContainer" }],
+  },
+  "exports": {
+    "IntegrationContainer": { "type": "durable-object", "storage": "sqlite" },
+  },
+}

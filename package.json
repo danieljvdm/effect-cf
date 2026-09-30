@@ -54,7 +54,7 @@
   "packageManager": "bun@1.4.0",
   "catalog": {
     "@cloudflare/containers": "0.3.7",
-    "@cloudflare/workers-types": "5.20260825.1",
+    "@cloudflare/workers-types": "5.20260926.1",
     "@cloudflare/vitest-plugin": "1.0.0",
     "@effect/platform-node": "^4.0.0-rc.115",
     "@effect/sql-d1": "^4.0.0-rc.115",
@@ -62,10 +62,13 @@
     "@effect/sql-sqlite-do": "^4.0.0-rc.115",
     "@effect/vitest": "^4.0.0-rc.115",
     "effect": "^4.0.0-rc.115",
-    "miniflare": "5.20260825.0-alpha",
+    "miniflare": "5.20260926.1-alpha",
     "vite": "npm:@voidzero-dev/vite-plus-core@0.3.0",
     "vitest": "4.1.11",
     "vite-plus": "0.3.0",
-    "wrangler": "4.126.0"
+    "wrangler": "4.144.0"
+  },
+  "patchedDependencies": {
+    "@cloudflare/sandbox@1.0.0": "patches/@cloudflare%2Fsandbox@1.0.0.patch"
   }
 }

@@ -2,7 +2,7 @@
   "$schema": "../../../../node_modules/wrangler/config-schema.json",
   "name": "effect-cf-tests",
   "main": "./worker-fixture.ts",
-  "compatibility_date": "2026-08-25",
+  "compatibility_date": "2026-09-26",
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "./assets",

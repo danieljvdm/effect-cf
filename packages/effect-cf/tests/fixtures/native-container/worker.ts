@@ -115,20 +115,32 @@ export class IntegrationContainer extends DurableObject.make(DurableObjectContai
       const container = yield* DurableObjectContainer.DurableObjectContainer;
       const files = ContainerFiles.fromFiles(new Files(container.raw));
 
+      yield* Effect.log("Background: release job");
       yield* files.writeFile("/tmp/job/release", "");
 
+      yield* Effect.log("Background: start completion waiter");
       const completed = yield* container.execScoped([
         "sh",
         "-c",
         "while [ ! -f /tmp/job/exit-code ]; do sleep 0.01; done",
       ]);
 
+      yield* Effect.log("Background: await completion");
       yield* completed.output.pipe(Effect.timeout("10 seconds"));
 
+      yield* Effect.log("Background: read stdout");
+      const stdout = yield* files.readFileString("/tmp/job/stdout");
+
+      yield* Effect.log("Background: read stderr");
+      const stderr = yield* files.readFileString("/tmp/job/stderr");
+
+      yield* Effect.log("Background: read exit code");
+      const exitCode = Number(yield* files.readFileString("/tmp/job/exit-code"));
+
       return {
-        stdout: yield* files.readFileString("/tmp/job/stdout"),
-        stderr: yield* files.readFileString("/tmp/job/stderr"),
-        exitCode: Number(yield* files.readFileString("/tmp/job/exit-code")),
+        stdout,
+        stderr,
+        exitCode,
       };
     }),
     startPreview: Effect.fn("IntegrationContainer.startPreview")(function* () {

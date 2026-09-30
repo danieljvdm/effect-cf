@@ -88,6 +88,14 @@ typed definitions' `retry.initialDelay` select the initial backoff, subject to
 the floor, budget and hourly cap. Returning `ordered` from a failure policy
 retains the failed row's logical position and holds later rows asleep behind
 its retry deadline. Isolated failures allow unrelated alarms to proceed.
+An unchanged self-rearm from the handler or failure hook keeps that ordering
+barrier; replacing the deadline or payload does not let a stale failure overwrite
+the replacement.
+
+Reconciliation uses an index of eligible wake deadlines rather than scanning
+retained work after each schedule or acknowledgement. When an ordered barrier
+moves, eligibility is updated once; unchanged retries update only their own row.
+Existing logical schedules and attempt state are migrated automatically.
 
 `repeatEvery` is a product schedule, with a **one-minute minimum**. It advances
 from completion time without catch-up invocations. Never use it to poll for a

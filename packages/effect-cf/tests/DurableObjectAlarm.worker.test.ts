@@ -5,7 +5,13 @@ import { DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { SqlClient } from "effect/unstable/sql";
 
-import { DurableObjectAlarm, DurableObjectSqlite } from "../src/index";
+import { DurableObjectAlarm, DurableObjectSqlite, DurableObjectState } from "../src/index";
+import type {
+  SqlCursor,
+  SqlStorage,
+  SqlStorageValue,
+  StorageOperationError,
+} from "../src/DurableObjectStorage";
 import * as PoolWorkers from "../src/Vitest";
 
 const services = Layer.merge(
@@ -186,6 +192,330 @@ it.effect(
         assert.isNull(yield* state.storage.getAlarm());
       }).pipe(Effect.provide(services)),
     );
+  },
+);
+
+it.effect.each(["handler", "failure hook"] as const)(
+  "keeps an unchanged self-rearm from the %s behind its ordered failure barrier",
+  (from) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+        const calls: string[] = [];
+        const complete = (event: DurableObjectAlarm.DurableObjectAlarmEvent) =>
+          Effect.sync(() => {
+            calls.push(event.id);
+          });
+
+        yield* TestClock.setTime(deadline);
+        yield* alarms.transaction((tx) =>
+          Effect.gen(function* () {
+            yield* tx.scheduleAlarm(alarm("a", 0));
+            yield* tx.scheduleAlarm(alarm("b", 0));
+          }),
+        );
+        let now = deadline;
+        let attempts = 0;
+
+        for (const delay of [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 64_000, 3_600_000]) {
+          yield* alarms
+            .processDueAlarms(
+              (event) =>
+                Effect.gen(function* () {
+                  calls.push(event.id);
+                  if (from === "handler") yield* alarms.scheduleAlarm(alarm(event.id, 0));
+
+                  return yield* Effect.fail("unchanged failure");
+                }),
+              {
+                mode: "ordered",
+                onFailure:
+                  from === "failure hook" ? () => alarms.scheduleAlarm(alarm("a", 0)) : undefined,
+              },
+            )
+            .pipe(Effect.exit);
+          assert.strictEqual(yield* state.storage.getAlarm(), now + delay);
+          assert.strictEqual(
+            (yield* alarms.getAlarmStatus({ tag: "job", id: "a" }))!.attempts,
+            ++attempts,
+          );
+          yield* alarms.processDueAlarms(complete);
+          assert.deepStrictEqual(
+            calls,
+            Array.from({ length: attempts }, () => "a"),
+          );
+          now += delay;
+          yield* TestClock.setTime(now);
+        }
+        assert.isTrue((yield* alarms.getAlarmStatus({ tag: "job", id: "a" }))!.parked);
+        yield* alarms.processDueAlarms(complete);
+        yield* alarms.processDueAlarms(complete);
+        assert.deepStrictEqual(calls, [...Array.from({ length: 9 }, () => "a"), "b"]);
+        assert.isNull(yield* state.storage.getAlarm());
+      }).pipe(Effect.provide(services)),
+    );
+  },
+);
+
+it.effect("a retry policy releases an ordered barrier after an unchanged self-rearm", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
+      yield* TestClock.setTime(deadline);
+      yield* alarms.transaction((tx) =>
+        Effect.gen(function* () {
+          yield* tx.scheduleAlarm(alarm("a", 0));
+          yield* tx.scheduleAlarm(alarm("b", 0));
+        }),
+      );
+      yield* alarms
+        .processDueAlarms(() => Effect.fail("ordered"), { mode: "ordered" })
+        .pipe(Effect.exit);
+      yield* TestClock.setTime(deadline + 1_000);
+      yield* alarms.processDueAlarms(
+        (event) =>
+          alarms.scheduleAlarm(alarm(event.id, 0)).pipe(Effect.andThen(Effect.fail("isolated"))),
+        { onFailure: () => Effect.succeed("retry" as const) },
+      );
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline);
+      const result = yield* alarms.processDueAlarms(() => Effect.void);
+
+      assert.deepStrictEqual(
+        result.handled.map((event) => event.id),
+        ["b"],
+      );
+    }).pipe(Effect.provide(services)),
+  );
+});
+
+it.effect.each(["deadline", "payload", "repeat", "progress"] as const)(
+  "preserves a %s replacement when the original handler fails in ordered mode",
+  (kind) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
+        yield* TestClock.setTime(deadline);
+        yield* alarms.transaction((tx) =>
+          Effect.gen(function* () {
+            yield* tx.scheduleAlarm({ ...alarm("a", 0), progress: 1 });
+            yield* tx.scheduleAlarm(alarm("b", 0));
+          }),
+        );
+        yield* alarms
+          .processDueAlarms(
+            () =>
+              Effect.gen(function* () {
+                yield* alarms.scheduleAlarm({
+                  ...alarm("a", kind === "deadline" ? 60_000 : 0),
+                  payload: kind === "payload" ? "replacement" : null,
+                  repeatEvery: kind === "repeat" ? "1 minute" : undefined,
+                  progress: kind === "progress" ? 2 : 1,
+                });
+
+                return yield* Effect.fail("stale failure");
+              }),
+            { mode: "ordered" },
+          )
+          .pipe(Effect.exit);
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline);
+        const result = yield* alarms.processDueAlarms(() => Effect.void);
+
+        assert.deepStrictEqual(
+          result.handled.map((event) => event.id),
+          kind === "progress" ? ["a", "b"] : ["b"],
+        );
+      }).pipe(Effect.provide(services)),
+    );
+  },
+);
+
+it.effect.each(["legacy", "parked ordered"] as const)(
+  "migrates %s schedules atomically into the indexed wake queue",
+  (kind) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+        const id = "effect-cf-alarm:job:a";
+
+        yield* state.storage.sql.exec(`CREATE TABLE effect_cf_scheduled_alarms (
+          storage_id TEXT PRIMARY KEY, alarm_id TEXT NOT NULL, tag TEXT NOT NULL,
+          run_at INTEGER NOT NULL, repeat_every_ms INTEGER, payload TEXT NOT NULL
+        )`);
+        yield* state.storage.sql.exec(
+          "INSERT INTO effect_cf_scheduled_alarms VALUES (?, ?, ?, ?, NULL, ?)",
+          id,
+          "a",
+          "job",
+          deadline,
+          "null",
+        );
+        yield* state.storage.sql.exec(
+          "INSERT INTO effect_cf_scheduled_alarms VALUES (?, ?, ?, ?, NULL, ?)",
+          "effect-cf-alarm:job:b",
+          "b",
+          "job",
+          deadline,
+          "null",
+        );
+        if (kind === "parked ordered") {
+          yield* state.storage.sql.exec(`CREATE TABLE effect_cf_alarm_attempts (
+            storage_id TEXT PRIMARY KEY, revision TEXT NOT NULL, attempts INTEGER NOT NULL,
+            parked INTEGER NOT NULL, retry_at INTEGER, ordered INTEGER NOT NULL, progress INTEGER NOT NULL
+          )`);
+          yield* state.storage.sql.exec(
+            "INSERT INTO effect_cf_alarm_attempts VALUES (?, ?, 8, 1, ?, 1, 1)",
+            id,
+            "retained-revision",
+            deadline + 3_600_000,
+          );
+        }
+        const nativeDeadline = kind === "legacy" ? deadline : deadline + 3_600_000;
+
+        yield* Effect.promise(() => state.raw.storage.setAlarm(nativeDeadline));
+        yield* TestClock.setTime(deadline);
+        const aborted = yield* alarms
+          .transaction(() => Effect.fail("abort migration"))
+          .pipe(Effect.exit);
+        const columns = yield* state.storage.sql.exec<{ name: string }>(
+          "SELECT name FROM pragma_table_info('effect_cf_scheduled_alarms')",
+        );
+
+        assert.isTrue(Exit.isFailure(aborted));
+        assert.deepStrictEqual(
+          (yield* columns.toArray()).map((column) => column.name),
+          ["storage_id", "alarm_id", "tag", "run_at", "repeat_every_ms", "payload"],
+        );
+        assert.strictEqual(yield* state.storage.getAlarm(), nativeDeadline);
+        yield* alarms.transaction(() => Effect.void);
+        assert.strictEqual(yield* state.storage.getAlarm(), nativeDeadline);
+        const before = yield* alarms.processDueAlarms(() => Effect.void);
+
+        if (kind === "parked ordered") {
+          assert.deepStrictEqual(before.handled, []);
+          assert.strictEqual((yield* alarms.getAlarmStatus({ tag: "job", id: "a" }))!.attempts, 8);
+          yield* alarms.scheduleAlarm({ ...alarm("a", 0), progress: 2 });
+          assert.strictEqual(yield* state.storage.getAlarm(), deadline);
+          const resumed = yield* alarms.processDueAlarms(() => Effect.void);
+
+          assert.deepStrictEqual(
+            resumed.handled.map((event) => event.id),
+            ["a", "b"],
+          );
+        } else {
+          assert.deepStrictEqual(
+            before.handled.map((event) => event.id),
+            ["a", "b"],
+          );
+        }
+        assert.isNull(yield* state.storage.getAlarm());
+      }).pipe(Effect.provide(services)),
+    );
+  },
+);
+
+it.effect.each([100, 1_000])(
+  "keeps scheduler row reads bounded with %s retained deadlines",
+  (count) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) => {
+      let rowsRead = 0;
+      const measuredSql: SqlStorage = {
+        ...state.storage.sql,
+        exec: Effect.fnUntraced(function* <T extends Record<string, SqlStorageValue>>(
+          query: string,
+          ...bindings: SqlStorageValue[]
+        ): Effect.fn.Return<SqlCursor<T>, StorageOperationError> {
+          const cursor = yield* state.storage.sql.exec<T>(query, ...bindings);
+          let counted = yield* cursor.rowsRead;
+
+          rowsRead += counted;
+
+          return {
+            ...cursor,
+            toArray: Effect.fnUntraced(function* () {
+              const rows = yield* cursor.toArray();
+              const total = yield* cursor.rowsRead;
+
+              rowsRead += total - counted;
+              counted = total;
+
+              return rows;
+            }),
+          };
+        }),
+      };
+      const measuredState = Layer.succeed(DurableObjectState.DurableObjectState, {
+        ...state,
+        storage: { ...state.storage, sql: measuredSql },
+      });
+
+      return Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
+        yield* TestClock.setTime(deadline);
+        for (let i = 0; i < count; i++) {
+          yield* alarms.scheduleAlarm(alarm(`future-${i}`, 60_000 + i));
+        }
+        const enrollmentReads = rowsRead;
+
+        yield* alarms.transaction((tx) =>
+          Effect.gen(function* () {
+            for (let i = 0; i < 100; i++) yield* tx.scheduleAlarm(alarm(`due-${i}`, 0));
+          }),
+        );
+        rowsRead = 0;
+        const result = yield* alarms.processDueAlarms(() => Effect.void);
+        const dispatchReads = rowsRead;
+
+        assert.strictEqual(result.handled.length, 100);
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline + 60_000);
+        assert.isBelow(enrollmentReads, count * 20);
+        assert.isBelow(dispatchReads, 5_000);
+        yield* alarms.scheduleAlarm(alarm("ordered-head", 0));
+        yield* alarms
+          .processDueAlarms(() => Effect.fail("parked head"), {
+            mode: "ordered",
+            retryFailedAfter: "1 hour",
+          })
+          .pipe(Effect.exit);
+        rowsRead = 0;
+        for (let i = 0; i < 100; i++) yield* alarms.scheduleAlarm(alarm(`blocked-${i}`, 1_000));
+        const blockedReads = rowsRead;
+
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline + 3_600_000);
+        assert.isBelow(blockedReads, 5_000);
+        yield* TestClock.setTime(deadline + 3_600_000);
+        rowsRead = 0;
+        yield* alarms
+          .processDueAlarms(
+            (event) =>
+              alarms
+                .scheduleAlarm(alarm(event.id, 0))
+                .pipe(Effect.andThen(Effect.fail("unchanged head"))),
+            { mode: "ordered" },
+          )
+          .pipe(Effect.exit);
+        const retryReads = rowsRead;
+
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline + 3_602_000);
+        assert.isBelow(retryReads, 500);
+      }).pipe(
+        Effect.provide(
+          DurableObjectAlarm.DurableObjectAlarm.layer.pipe(Layer.provide(measuredState)),
+        ),
+      );
+    });
   },
 );
 

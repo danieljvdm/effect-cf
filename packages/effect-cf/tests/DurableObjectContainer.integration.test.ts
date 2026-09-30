@@ -6,6 +6,22 @@ import { createTestHarness } from "wrangler";
 
 import type { ContainerTestEnv } from "./fixtures/native-container/worker";
 
+const step = Effect.fnUntraced(function* <A>(
+  name: string,
+  evaluate: () => PromiseLike<A>,
+  timeout = 30_000,
+) {
+  yield* Effect.log(`Native container: ${name}`);
+
+  return yield* Effect.promise(evaluate).pipe(
+    Effect.interruptible,
+    Effect.timeoutOrElse({
+      duration: timeout,
+      orElse: () => Effect.die(new Error(`Native container step timed out: ${name}`)),
+    }),
+  );
+});
+
 const docker = Effect.fnUntraced(function* (args: ReadonlyArray<string>) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const child = yield* spawner.spawn(
@@ -40,14 +56,14 @@ it.live.runIf(process.env.EFFECT_CF_CONTAINER_TESTS === "1")(
             if (Exit.isFailure(exit)) {
               yield* Effect.sync(() => server.debug());
             }
-            yield* Effect.promise(() => server.close());
+            yield* step("close test harness", () => server.close());
           }),
       );
 
-      yield* Effect.promise(() => server.listen());
+      yield* step("start test harness", () => server.listen(), 90_000);
 
       const worker = server.getWorker<ContainerTestEnv>();
-      const env = yield* Effect.promise(() => worker.getEnv());
+      const env = yield* step("get Worker bindings", () => worker.getEnv());
       const container = env.CONTAINER.getByName(crypto.randomUUID());
       const proxyName = `workerd-effect-cf-native-container-test-IntegrationContainer-${container.id.toString()}-proxy`;
 
@@ -62,46 +78,56 @@ it.live.runIf(process.env.EFFECT_CF_CONTAINER_TESTS === "1")(
           }
         }).pipe(Effect.orDie),
       );
-      yield* Effect.addFinalizer(() => Effect.promise(() => container.stop()));
-      expect(yield* Effect.promise(() => container.isRunning())).toBe(false);
+      yield* Effect.addFinalizer(() =>
+        step("stop container during cleanup", () => container.stop()),
+      );
+      expect(yield* step("check stopped container", () => container.isRunning())).toBe(false);
       expect(
-        yield* Effect.promise(() => container.run(["printf", "%s", "hello from a real container"])),
+        yield* step("start container and execute command", () =>
+          container.run(["printf", "%s", "hello from a real container"]),
+        ),
       ).toEqual({ stdout: "hello from a real container", stderr: "", exitCode: 0 });
-      expect(yield* Effect.promise(() => container.isRunning())).toBe(true);
+      expect(yield* step("check running container", () => container.isRunning())).toBe(true);
 
       expect(
-        yield* Effect.promise(() =>
+        yield* step("collect nonzero command result", () =>
           container.run(["sh", "-c", "printf command-failed >&2; exit 7"]),
         ),
       ).toEqual({ stdout: "", stderr: "command-failed", exitCode: 7 });
-      expect(yield* Effect.promise(() => container.isRunning())).toBe(true);
+      expect(
+        yield* step("check container after command failure", () => container.isRunning()),
+      ).toBe(true);
 
-      expect(yield* Effect.promise(() => container.streamLogs())).toEqual({
+      expect(yield* step("stream command logs", () => container.streamLogs())).toEqual({
         stdout: "stdout",
         stderr: "stderr",
         exitCode: 7,
       });
-      expect(yield* Effect.promise(() => container.files())).toEqual({
+      expect(
+        yield* step("read and write files through sandbox-shim", () => container.files()),
+      ).toEqual({
         text: "hello from sandbox-shim",
         size: 23,
         names: ["saved.txt"],
         missing: { tag: "ContainerError", operation: "files.readFile", code: "ENOENT" },
       });
 
-      yield* Effect.promise(() => container.launchBackground());
-      expect(yield* Effect.promise(() => container.finishBackground())).toEqual({
+      yield* step("launch background process", () => container.launchBackground());
+      expect(
+        yield* step("collect background process result", () => container.finishBackground()),
+      ).toEqual({
         stdout: "started\nfinished\n",
         stderr: "background warning\n",
         exitCode: 7,
       });
 
-      const readiness = yield* Effect.promise(() => container.startPreview());
+      const readiness = yield* step("wait for preview readiness", () => container.startPreview());
 
       expect(readiness.error).toBe("");
       expect(readiness.ready).toBe(true);
       expect(readiness.closedPortError).toBe("ContainerReadinessTimeoutError");
 
-      const preview = yield* Effect.promise(() =>
+      const preview = yield* step("proxy preview request", () =>
         container.fetch("https://preview.example/echo?task=42", {
           method: "POST",
           headers: { "x-preview-request": "task-capability-route" },
@@ -111,18 +137,22 @@ it.live.runIf(process.env.EFFECT_CF_CONTAINER_TESTS === "1")(
 
       expect(preview.status).toBe(201);
       expect(preview.headers.get("x-preview-request")).toBe("task-capability-route");
-      expect(yield* Effect.promise(() => preview.text())).toBe("POST|task=42|preview body");
+      expect(yield* step("read preview response", () => preview.text())).toBe(
+        "POST|task=42|preview body",
+      );
 
-      const snapshot = yield* Effect.promise(() => container.snapshot());
+      const snapshot = yield* step("snapshot container", () => container.snapshot());
 
       expect(snapshot.id).not.toBe("");
 
-      yield* Effect.promise(() => container.stop());
-      expect(yield* Effect.promise(() => container.isRunning())).toBe(false);
-      expect(yield* Effect.promise(() => container.restore(snapshot))).toBe(
+      yield* step("stop container and observe monitor", () => container.stop());
+      expect(
+        yield* step("check stopped container after snapshot", () => container.isRunning()),
+      ).toBe(false);
+      expect(yield* step("restore container snapshot", () => container.restore(snapshot))).toBe(
         "hello from sandbox-shim",
       );
-      expect(yield* Effect.promise(() => container.isRunning())).toBe(true);
+      expect(yield* step("check restored container", () => container.isRunning())).toBe(true);
     }).pipe(Effect.provide(NodeServices.layer)),
   { timeout: 120_000 },
 );

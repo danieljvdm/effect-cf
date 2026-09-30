@@ -87,8 +87,8 @@ export interface LayerOptions {
   readonly attachmentKey?: string | undefined;
   /**
    * Heartbeat behavior. `"auto-response"` (the default) installs Cloudflare's
-   * hibernation-safe text Ping/Pong response while an RPC socket exists and no
-   * non-resumable RPC operation is active, then removes it while one is pending.
+   * hibernation-safe text Ping/Pong response for the lifetime of RPC sockets,
+   * including pending operations. Keepalives never dispatch application code.
    * `"passthrough"` leaves the Durable Object's existing auto-response
    * configuration unchanged and makes the application responsible for waking a
    * lost pending operation.
@@ -248,7 +248,6 @@ export const layer = (
         readonly request: RpcMessage.RequestEncoded;
       }> = [];
       let nextClientId = 0;
-      let activeNonResumableRequestCount = 0;
       let writeRequest:
         | ((clientId: number, data: RpcMessage.FromClientEncoded) => Effect.Effect<void>)
         | undefined;
@@ -383,8 +382,7 @@ export const layer = (
         heartbeatPolicy,
       );
 
-      const syncHeartbeat = () =>
-        heartbeat.setEnabled(connectionsBySocket.size > 0 && activeNonResumableRequestCount === 0);
+      const syncHeartbeat = () => heartbeat.setEnabled(connectionsBySocket.size > 0);
 
       const persistConnection = Effect.fn("DurableObjectRpcWebSocket.persistConnection")(function* (
         connection: RpcConnection,
@@ -430,7 +428,6 @@ export const layer = (
 
         connectionsBySocket.delete(socket.raw);
         connectionsById.delete(connection.id);
-        activeNonResumableRequestCount -= connection.nonResumableRequestIds.size;
         connection.requestIds.clear();
         connection.nonResumableRequestIds.clear();
         connection.subscriptionsByRequestId.clear();
@@ -511,7 +508,6 @@ export const layer = (
         } else {
           connection.requestIds.add(request.id);
           connection.nonResumableRequestIds.add(request.id);
-          activeNonResumableRequestCount++;
         }
 
         if (!(yield* persistOrReset(connection))) {
@@ -529,9 +525,7 @@ export const layer = (
         preserveAckFilter = false,
       ) {
         if (connection.requestIds.delete(requestId)) {
-          if (connection.nonResumableRequestIds.delete(requestId)) {
-            activeNonResumableRequestCount--;
-          }
+          connection.nonResumableRequestIds.delete(requestId);
 
           const subscription = removeSubscription(connection, requestId);
 
@@ -556,10 +550,6 @@ export const layer = (
       const completeAllRequests = Effect.fn("DurableObjectRpcWebSocket.completeAllRequests")(
         function* (connection: RpcConnection) {
           const hadRequests = connection.requestIds.size > 0;
-
-          if (connection.requestIds.size > 0) {
-            activeNonResumableRequestCount -= connection.nonResumableRequestIds.size;
-          }
 
           connection.requestIds.clear();
           connection.nonResumableRequestIds.clear();

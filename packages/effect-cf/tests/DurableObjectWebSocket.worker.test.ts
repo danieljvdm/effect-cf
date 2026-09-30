@@ -1,8 +1,44 @@
+import { env } from "cloudflare:workers";
+import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { assert, expect, it, test } from "@effect/vitest";
 import { Effect, Option, Schema as S } from "effect";
 
 import { DurableObjectState, DurableObjectWebSocket, Worker } from "../src/index";
 import { makePartialTestDouble } from "./TestDoubles";
+
+test("the keepalive helper responds without invoking the object while application frames still invoke it", async () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+  const upgrade = await stub.fetch(
+    new Request("https://example.test/keepalive", {
+      headers: { Upgrade: "websocket" },
+    }),
+  );
+  const client = upgrade.webSocket;
+
+  if (client === null) throw new Error("Expected a websocket upgrade");
+
+  client.accept();
+  await evictDurableObject(stub, { webSockets: "hibernate" });
+  const receive = () =>
+    new Promise<string>((resolve) => {
+      client.addEventListener("message", (event) => resolve(String(event.data)), { once: true });
+    });
+  const pong = receive();
+
+  client.send("effect-cf:ping");
+  expect(await pong).toBe("effect-cf:pong");
+  expect(
+    await runInDurableObject(stub, (_instance, state) => state.storage.get("socket-invocations")),
+  ).toBeUndefined();
+  const application = receive();
+
+  client.send("application-state");
+  expect(await application).toBe("application-state");
+  expect(
+    await runInDurableObject(stub, (_instance, state) => state.storage.get("socket-invocations")),
+  ).toBe(1);
+  client.close();
+});
 
 test("detects websocket upgrade requests", () => {
   expect(

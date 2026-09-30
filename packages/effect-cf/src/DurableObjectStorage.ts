@@ -1,7 +1,5 @@
 import * as Cause from "effect/Cause";
-import * as Clock from "effect/Clock";
 import * as Data from "effect/Data";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -91,15 +89,6 @@ export interface DurableObjectTransaction {
   delete(keys: Array<string>, options?: globalThis.DurableObjectPutOptions): StorageEffect<number>;
   rollback(): StorageEffect<void>;
   getAlarm(options?: globalThis.DurableObjectGetAlarmOptions): StorageEffect<number | null>;
-  setAlarm(
-    scheduledTime: number | Date,
-    options?: globalThis.DurableObjectSetAlarmOptions,
-  ): StorageEffect<void>;
-  setAlarmAfter(
-    delay: Duration.Input,
-    options?: globalThis.DurableObjectSetAlarmOptions,
-  ): StorageEffect<void>;
-  deleteAlarm(options?: globalThis.DurableObjectSetAlarmOptions): StorageEffect<void>;
 }
 
 export interface DurableObjectStorage {
@@ -110,20 +99,11 @@ export interface DurableObjectStorage {
   put<T>(key: string, value: T, options?: globalThis.DurableObjectPutOptions): StorageEffect<void>;
   delete(key: string, options?: globalThis.DurableObjectPutOptions): StorageEffect<boolean>;
   /**
-   * Deletes all stored data. On compatibility dates before 2026-02-24, Cloudflare
-   * documents that active alarms must be deleted separately with `deleteAlarm()`.
+   * Deletes all stored data, including logical schedules. Use the alarm scheduler
+   * to cancel individual alarms without deleting application data.
    */
   deleteAll(options?: globalThis.DurableObjectPutOptions): StorageEffect<void>;
   getAlarm(options?: globalThis.DurableObjectGetAlarmOptions): StorageEffect<number | null>;
-  setAlarm(
-    scheduledTime: number | Date,
-    options?: globalThis.DurableObjectSetAlarmOptions,
-  ): StorageEffect<void>;
-  setAlarmAfter(
-    delay: Duration.Input,
-    options?: globalThis.DurableObjectSetAlarmOptions,
-  ): StorageEffect<void>;
-  deleteAlarm(options?: globalThis.DurableObjectSetAlarmOptions): StorageEffect<void>;
   /**
    * SQLite-backed Durable Object storage only.
    *
@@ -164,21 +144,6 @@ const tryStoragePromise = <A>(operation: string, evaluate: () => Promise<A>): St
     try: evaluate,
     catch: (cause) => storageError(operation, cause),
   });
-
-const setAlarmAfter = Effect.fn("DurableObjectStorage.setAlarmAfter")(function* (
-  operation: string,
-  setAlarm: (
-    scheduledTime: number,
-    options?: globalThis.DurableObjectSetAlarmOptions,
-  ) => Promise<void>,
-  delay: Duration.Input,
-  options?: globalThis.DurableObjectSetAlarmOptions,
-) {
-  const now = yield* Clock.currentTimeMillis;
-  const delayMillis = Math.ceil(Duration.toMillis(delay));
-
-  yield* tryStoragePromise(operation, () => setAlarm(now + delayMillis, options));
-});
 
 const fromSqlCursor = <T extends Record<string, SqlStorageValue>>(
   cursor: globalThis.SqlStorageCursor<T>,
@@ -297,17 +262,6 @@ const fromDurableObjectTransaction = (
     rollback: () => tryStorageSync("transaction.rollback", () => txn.rollback()),
     getAlarm: (options?: globalThis.DurableObjectGetAlarmOptions) =>
       tryStoragePromise("transaction.getAlarm", () => txn.getAlarm(options)),
-    setAlarm: (scheduledTime: number | Date, options?: globalThis.DurableObjectSetAlarmOptions) =>
-      tryStoragePromise("transaction.setAlarm", () => txn.setAlarm(scheduledTime, options)),
-    setAlarmAfter: (delay: Duration.Input, options?: globalThis.DurableObjectSetAlarmOptions) =>
-      setAlarmAfter(
-        "transaction.setAlarm",
-        (scheduledTime, options) => txn.setAlarm(scheduledTime, options),
-        delay,
-        options,
-      ),
-    deleteAlarm: (options?: globalThis.DurableObjectSetAlarmOptions) =>
-      tryStoragePromise("transaction.deleteAlarm", () => txn.deleteAlarm(options)),
   }) as DurableObjectTransaction;
 
 export const fromDurableObjectStorage = (
@@ -323,17 +277,6 @@ export const fromDurableObjectStorage = (
     tryStoragePromise("deleteAll", () => storage.deleteAll(options)),
   getAlarm: (options?: globalThis.DurableObjectGetAlarmOptions) =>
     tryStoragePromise("getAlarm", () => storage.getAlarm(options)),
-  setAlarm: (scheduledTime: number | Date, options?: globalThis.DurableObjectSetAlarmOptions) =>
-    tryStoragePromise("setAlarm", () => storage.setAlarm(scheduledTime, options)),
-  setAlarmAfter: (delay: Duration.Input, options?: globalThis.DurableObjectSetAlarmOptions) =>
-    setAlarmAfter(
-      "setAlarm",
-      (scheduledTime, options) => storage.setAlarm(scheduledTime, options),
-      delay,
-      options,
-    ),
-  deleteAlarm: (options?: globalThis.DurableObjectSetAlarmOptions) =>
-    tryStoragePromise("deleteAlarm", () => storage.deleteAlarm(options)),
   transactionSync: <A, E, R>(closure: () => Effect.Effect<A, E, R>) =>
     Effect.context<R>().pipe(
       Effect.flatMap((context) =>

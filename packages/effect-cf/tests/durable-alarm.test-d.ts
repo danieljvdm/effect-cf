@@ -47,12 +47,24 @@ expectTypeOf(composed).toEqualTypeOf<
     | DurableObjectStorage.StorageOperationError
     | DurableObjectAlarm.InvalidAlarmRefError
     | DurableObjectAlarm.InvalidAlarmPayloadError
-    | DurableObjectAlarm.InvalidRepeatEveryError,
+    | DurableObjectAlarm.InvalidRepeatEveryError
+    | DurableObjectAlarm.InvalidScheduleConfigurationError,
     Application | SqlClient.SqlClient | DurableObjectState.DurableObjectState
   >
 >();
 
 declare const tx: DurableObjectAlarm.AlarmTransaction;
+declare const storage: DurableObjectStorage.DurableObjectStorage;
+declare const storageTx: DurableObjectStorage.DurableObjectTransaction;
+
+// @ts-expect-error Platform alarm writes are confined to the scheduler.
+storage.setAlarm(1);
+// @ts-expect-error Relative platform alarm writes cannot bypass the scheduler either.
+storage.setAlarmAfter("1 second");
+// @ts-expect-error Transactions must enroll logical alarms through alarms.transaction.
+storageTx.setAlarm(1);
+// @ts-expect-error Raw cancellation would erase other logical alarm deadlines.
+storageTx.deleteAlarm();
 
 // @ts-expect-error The callback only exposes mutations, not another transaction boundary.
 tx.transaction(() => Effect.void);
@@ -77,6 +89,8 @@ const archiveInput = {
 } as const;
 
 void documentAlarms.scheduleAlarm(archiveInput);
+void documentAlarms.scheduleAlarmEarlier(archiveInput);
+void documentAlarms.getAlarmStatus({ tag: "archive", id: "a" });
 // @ts-expect-error A schema definition alone does not provide scheduling.
 void DocumentAlarms.scheduleAlarm(archiveInput);
 // @ts-expect-error The tag must belong to this definition.

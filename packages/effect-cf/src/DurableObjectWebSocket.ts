@@ -7,6 +7,30 @@ import * as S from "effect/Schema";
 import { DurableObjectState } from "./DurableObjectState";
 import * as ErrorMessage from "./internal/ErrorMessage";
 
+export const DEFAULT_KEEPALIVE_REQUEST = "effect-cf:ping";
+export const DEFAULT_KEEPALIVE_RESPONSE = "effect-cf:pong";
+
+/**
+ * Registers exact text keepalives with Cloudflare so they never invoke the object.
+ * The pair applies to all hibernating sockets on this object; install in its constructor.
+ * Clients send the request text and consume the response outside their application protocol.
+ */
+export const installKeepalive = Effect.fn("DurableObjectWebSocket.installKeepalive")(function* (
+  request = DEFAULT_KEEPALIVE_REQUEST,
+  response = DEFAULT_KEEPALIVE_RESPONSE,
+) {
+  const state = yield* DurableObjectState;
+  const configured = yield* state.getWebSocketAutoResponse;
+
+  if (configured !== null && (configured.request !== request || configured.response !== response)) {
+    return yield* Effect.die(
+      new Error("Durable Object already has a different keepalive protocol"),
+    );
+  }
+
+  yield* state.setWebSocketAutoResponse(new WebSocketRequestResponsePair(request, response));
+});
+
 export type DurableWebSocketSendData = string | ArrayBuffer | ArrayBufferView;
 
 export class DurableWebSocketSendError extends Data.TaggedError("DurableWebSocketSendError")<{

@@ -164,7 +164,7 @@ it.effect("runs Effects inside Durable Objects with caller services and state", 
         assert.strictEqual(yield* DurableObjectState.DurableObjectState, state);
 
         yield* state.storage.put("count", { count: 41 });
-        yield* state.storage.setAlarm(new Date("2100-01-01T00:00:00Z"));
+        yield* Effect.promise(() => state.raw.storage.setAlarm(new Date("2100-01-01T00:00:00Z")));
 
         return yield* state.storage.get<{ count: number }>("count");
       }),

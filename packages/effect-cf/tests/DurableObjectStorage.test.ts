@@ -1,6 +1,5 @@
 import { assert, it } from "@effect/vitest";
-import { Cause, Context, Deferred, Duration, Effect, Fiber } from "effect";
-import { TestClock } from "effect/testing";
+import { Cause, Context, Deferred, Effect, Fiber } from "effect";
 
 const TransactionMessage = Context.Service<{ readonly message: string }>(
   "effect-cf/test/TransactionMessage",
@@ -27,27 +26,15 @@ it.effect("wraps transaction with Effect-native callbacks", () =>
   }),
 );
 
-it.effect("schedules alarms after Effect durations using the Effect clock", () =>
+it.effect("exposes no raw platform alarm mutations on storage or transactions", () =>
   Effect.gen(function* () {
-    const { raw, tracker } = makeRawDurableObjectStorage();
+    const { raw } = makeRawDurableObjectStorage();
     const storage = DurableObjectStorage.fromDurableObjectStorage(raw);
 
-    yield* TestClock.setTime(1_700_000_000_000);
-    yield* storage.setAlarmAfter(Duration.seconds(10), { allowUnconfirmed: true });
-    yield* storage.transaction((txn) => txn.setAlarmAfter("20 seconds"));
-
-    assert.deepStrictEqual(tracker.alarms, [
-      {
-        options: { allowUnconfirmed: true },
-        scheduledTime: 1_700_000_010_000,
-      },
-    ]);
-    assert.deepStrictEqual(tracker.transactionAlarms, [
-      {
-        options: undefined,
-        scheduledTime: 1_700_000_020_000,
-      },
-    ]);
+    for (const method of ["setAlarm", "setAlarmAfter", "deleteAlarm"]) {
+      assert.isFalse(method in storage);
+      yield* storage.transaction((txn) => Effect.sync(() => assert.isFalse(method in txn)));
+    }
   }),
 );
 

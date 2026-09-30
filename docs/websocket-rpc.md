@@ -92,6 +92,10 @@ serializer and upgraded when written. The check does not detect schema or codec
 changes that keep the same content type; coordinate those changes with clients.
 
 The default heartbeat mode owns the Durable Object's WebSocket auto-response
-pair and rejects a conflicting existing pair. Use `heartbeat: "passthrough"`
+pair for the lifetime of RPC sockets, including pending operations, and rejects
+a conflicting existing pair. Keepalives never invoke the object. Lost ordinary
+operations reset on the next application message after eviction; clients should
+use operation deadlines to recover them. See the [keepalive protocol and migration
+guide](durable-object-wakeups.md#keepalive-protocol). Use `heartbeat: "passthrough"`
 when the application manages that pair itself or shares the object with another
 WebSocket protocol.

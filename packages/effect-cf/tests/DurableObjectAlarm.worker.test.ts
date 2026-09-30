@@ -430,30 +430,32 @@ it.effect.each([100, 1_000])(
 
     return PoolWorkers.runInDurableObject(stub, (_instance, state) => {
       let rowsRead = 0;
+      const measureCursor = Effect.fnUntraced(function* <T extends Record<string, SqlStorageValue>>(
+        cursor: SqlCursor<T>,
+      ): Effect.fn.Return<SqlCursor<T>, StorageOperationError> {
+        let counted = yield* cursor.rowsRead;
+
+        rowsRead += counted;
+
+        return {
+          ...cursor,
+          toArray: Effect.fnUntraced(function* () {
+            const rows = yield* cursor.toArray();
+            const total = yield* cursor.rowsRead;
+
+            rowsRead += total - counted;
+            counted = total;
+
+            return rows;
+          }),
+        };
+      });
       const measuredSql: SqlStorage = {
         ...state.storage.sql,
-        exec: Effect.fnUntraced(function* <T extends Record<string, SqlStorageValue>>(
+        exec: <T extends Record<string, SqlStorageValue>>(
           query: string,
           ...bindings: SqlStorageValue[]
-        ): Effect.fn.Return<SqlCursor<T>, StorageOperationError> {
-          const cursor = yield* state.storage.sql.exec<T>(query, ...bindings);
-          let counted = yield* cursor.rowsRead;
-
-          rowsRead += counted;
-
-          return {
-            ...cursor,
-            toArray: Effect.fnUntraced(function* () {
-              const rows = yield* cursor.toArray();
-              const total = yield* cursor.rowsRead;
-
-              rowsRead += total - counted;
-              counted = total;
-
-              return rows;
-            }),
-          };
-        }),
+        ) => state.storage.sql.exec<T>(query, ...bindings).pipe(Effect.flatMap(measureCursor)),
       };
       const measuredState = Layer.succeed(DurableObjectState.DurableObjectState, {
         ...state,

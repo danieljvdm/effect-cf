@@ -52,6 +52,12 @@ jobs:
       - name: Run tests
         run: vp test
 
+      - name: Set up Docker for native containers
+        uses: docker/setup-docker-action@v5
+        with:
+          version: v29.8.0
+          set-host: true
+
       - name: Test native containers with Docker
         run: vp run test:containers
 

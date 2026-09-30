@@ -55,7 +55,6 @@ it.live.runIf(process.env.EFFECT_CF_CONTAINER_TESTS === "1")(
           Effect.gen(function* () {
             if (Exit.isFailure(exit)) {
               yield* Effect.sync(() => server.debug());
-              yield* Effect.logError(server.getLogs());
             }
             yield* step("close test harness", () => server.close());
           }),

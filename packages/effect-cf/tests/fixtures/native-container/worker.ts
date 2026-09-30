@@ -69,23 +69,13 @@ export class IntegrationContainer extends DurableObject.make(DurableObjectContai
       const container = yield* ensureContainer();
       const files = ContainerFiles.fromFiles(new Files(container.raw));
 
-      yield* Effect.log("Files: mkdir");
       yield* files.mkdir("/workspace", { recursive: true });
-      yield* Effect.log("Files: writeFile");
       yield* files.writeFile("/workspace/hello.txt", "hello from sandbox-shim");
-      yield* Effect.log("Files: rename");
       yield* files.rename("/workspace/hello.txt", "/workspace/saved.txt");
 
-      yield* Effect.log("Files: stat");
       const stat = yield* files.stat("/workspace/saved.txt");
-
-      yield* Effect.log("Files: readDirectory");
       const entries = yield* files.readDirectory("/workspace");
-
-      yield* Effect.log("Files: missing readFile");
       const missing = yield* Effect.flip(files.readFileString("/workspace/missing.txt"));
-
-      yield* Effect.log("Files: readFile");
 
       return {
         text: yield* files.readFileString("/workspace/saved.txt"),

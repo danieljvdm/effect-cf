@@ -127,6 +127,10 @@ it.live.runIf(process.env.EFFECT_CF_CONTAINER_TESTS === "1")(
       expect(readiness.ready).toBe(true);
       expect(readiness.closedPortError).toBe("ContainerReadinessTimeoutError");
 
+      expect(yield* step("close scoped TCP connection", () => container.scopedConnection())).toBe(
+        true,
+      );
+
       const preview = yield* step("proxy preview request", () =>
         container.fetch("https://preview.example/echo?task=42", {
           method: "POST",

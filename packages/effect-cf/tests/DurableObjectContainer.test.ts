@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest";
-import { Deferred, Duration, Effect, Fiber, Stream } from "effect";
+import { Cause, Deferred, Duration, Effect, Exit, Fiber, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
 import { DurableObjectContainer } from "../src/index";
@@ -248,5 +248,79 @@ it.effect("immediate scope closure does not signal a process whose exit is alrea
     const child = yield* container.execScoped(["true"]).pipe(Effect.scoped);
 
     assert.strictEqual(yield* child.exitCode, 0);
+  }),
+);
+
+// Native socket ownership follow-up to https://github.com/danieljvdm/effect-cf/pull/197.
+it.effect.each(["success", "interruption"] as const)(
+  "scoped TCP connections close after %s without replay",
+  (termination) =>
+    Effect.gen(function* () {
+      const acquired = yield* Deferred.make<void>();
+      let connections = 0;
+      let closes = 0;
+      const socket = makePartialTestDouble<Socket>({
+        close: async () => {
+          closes += 1;
+        },
+      });
+      const container = DurableObjectContainer.fromContainer(
+        makePartialTestDouble<Container>({
+          getTcpPort: () =>
+            makePartialTestDouble<Fetcher>({
+              connect: () => {
+                connections += 1;
+
+                return socket;
+              },
+            }),
+        }),
+      );
+      const port = yield* container.getTcpPort(8080);
+      const connection = port.connectScoped("localhost:8080");
+
+      assert.strictEqual(connections, 0);
+      const fiber = yield* Effect.forkChild(
+        Effect.gen(function* () {
+          assert.strictEqual(yield* connection, socket);
+          yield* Deferred.succeed(acquired, undefined);
+
+          if (termination === "interruption") return yield* Effect.never;
+        }).pipe(Effect.scoped),
+      );
+
+      yield* Deferred.await(acquired);
+      if (termination === "interruption") yield* Fiber.interrupt(fiber);
+      else yield* Fiber.join(fiber);
+      assert.strictEqual(connections, 1);
+      assert.strictEqual(closes, 1);
+    }),
+);
+
+it.effect("scoped TCP connections retain asynchronous close failures", () =>
+  Effect.gen(function* () {
+    const rejectedClose = new Error("Socket close failed");
+    const container = DurableObjectContainer.fromContainer(
+      makePartialTestDouble<Container>({
+        getTcpPort: () =>
+          makePartialTestDouble<Fetcher>({
+            connect: () =>
+              makePartialTestDouble<Socket>({
+                close: () => Promise.reject(rejectedClose),
+              }),
+          }),
+      }),
+    );
+    const port = yield* container.getTcpPort(8080);
+    const result = yield* port.connectScoped("localhost:8080").pipe(Effect.scoped, Effect.exit);
+
+    assert.isTrue(Exit.isFailure(result));
+    if (Exit.isFailure(result)) {
+      const error = Cause.squash(result.cause);
+
+      assert.instanceOf(error, DurableObjectContainer.ContainerError);
+      assert.strictEqual(error.operation, "getTcpPort.close");
+      assert.strictEqual(error.cause, rejectedClose);
+    }
   }),
 );

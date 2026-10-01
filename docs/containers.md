@@ -129,6 +129,8 @@ Applications migrating `getProcess`, `listProcesses`, replayable logs, or reconn
 
 Acquire a port with `yield* container.getTcpPort(8080)`, then use its `fetch` Effect or `connect` operation. Native port fetches require an `http:` URL; `proxy(request)` handles an incoming HTTPS preview request by changing its transport scheme to HTTP. Fetch cancellation preserves the request's signal and also responds to Effect interruption. The caller closes sockets returned by `connect`.
 
+`connectScoped(address, options)` opens a native TCP socket whose lifetime belongs to the current Effect scope. It awaits `socket.close()` on normal completion, failure, or interruption; a close failure is retained as a `ContainerError` defect. Use caller-owned `connect` only when deliberately managing the socket's lifetime yourself. HTTP `fetch` and `proxy` remain response-owned.
+
 `waitForHttp` probes an already-started container and can require a healthy route:
 
 ```ts
@@ -147,7 +149,7 @@ const waitForPreview = Effect.gen(function* () {
 
 All three durations accept Effect `Duration.Input`. Probes respond to interruption and their response bodies are canceled. Exhausting the overall deadline produces `ContainerReadinessTimeoutError`, retaining the last completed probe failure as its cause. Container stop fails the wait; monitor the container separately for its native stop cause. Readiness does not observe a particular child process, so applications replacing `process.waitForPort` also check their job's status. Choose allocation retries appropriate to the application, particularly when restarting shortly after a stop. The adapter does not retry commands or forward a caller's HTTP request more than once.
 
-For a non-HTTP service, perform its protocol's handshake over `getTcpPort(...).connect`, or execute an appropriate readiness command inside the container. Do not treat a native socket's `opened` promise alone as readiness: workerd [accepts the socket tunnel before the container connection completes](https://github.com/cloudflare/workerd/blob/main/src/workerd/api/container.c++). The HTTP helper waits for a response from the application.
+For a non-HTTP service, perform its protocol's handshake over `getTcpPort(...).connectScoped`, or execute an appropriate readiness command inside the container. Do not treat a native socket's `opened` promise alone as readiness: workerd [accepts the socket tunnel before the container connection completes](https://github.com/cloudflare/workerd/blob/main/src/workerd/api/container.c++). The HTTP helper waits for a response from the application.
 
 Replace SDK port exposure with the application's existing authorized preview route forwarding to the owning Durable Object. Its fetch handler can forward the original request to a fixed, approved port:
 

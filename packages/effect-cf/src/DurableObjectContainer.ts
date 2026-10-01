@@ -102,6 +102,10 @@ export interface ContainerTcpPort {
   readonly connect: (
     ...args: Parameters<globalThis.Fetcher["connect"]>
   ) => Effect.Effect<ReturnType<globalThis.Fetcher["connect"]>, ContainerError>;
+  /** Closes the socket when the scope ends, awaiting cleanup and preserving close failures as defects. */
+  readonly connectScoped: (
+    ...args: Parameters<globalThis.Fetcher["connect"]>
+  ) => Effect.Effect<ReturnType<globalThis.Fetcher["connect"]>, ContainerError, Scope.Scope>;
 }
 
 /** Direct container control inside a Durable Object; lifecycle policy belongs to the application. */
@@ -248,6 +252,9 @@ const fromTcpPort = (port: globalThis.Fetcher): ContainerTcpPort => {
       });
     });
 
+  const connect: ContainerTcpPort["connect"] = (...args) =>
+    attempt("getTcpPort.connect", () => port.connect(...args));
+
   return {
     raw: port,
     fetch,
@@ -259,7 +266,11 @@ const fromTcpPort = (port: globalThis.Fetcher): ContainerTcpPort => {
 
         return new Request(url, request);
       }).pipe(Effect.flatMap((forwarded) => fetch(forwarded))),
-    connect: (...args) => attempt("getTcpPort.connect", () => port.connect(...args)),
+    connect,
+    connectScoped: (...args) =>
+      Effect.acquireRelease(connect(...args), (socket) =>
+        attemptPromise("getTcpPort.close", () => socket.close()).pipe(Effect.orDie),
+      ),
   };
 };
 

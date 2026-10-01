@@ -175,6 +175,20 @@ export class IntegrationContainer extends DurableObject.make(DurableObjectContai
           }),
         );
     }),
+    scopedConnection: Effect.fn("IntegrationContainer.scopedConnection")(function* () {
+      const container = yield* ensureContainer();
+      const port = yield* container.getTcpPort(8080);
+      const socket = yield* port.connectScoped("localhost:8080").pipe(
+        Effect.tap((socket) => Effect.promise(() => socket.opened)),
+        Effect.scoped,
+      );
+
+      return yield* Effect.promise(() => socket.closed).pipe(
+        Effect.as(true),
+        Effect.timeoutOrElse({ duration: "1 second", orElse: () => Effect.succeed(false) }),
+        Effect.ensuring(Effect.promise(() => socket.close())),
+      );
+    }),
     snapshot: Effect.fn("IntegrationContainer.snapshot")(function* () {
       const container = yield* DurableObjectContainer.DurableObjectContainer;
 

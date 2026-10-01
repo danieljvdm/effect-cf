@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.52.0
+
+### Minor Changes
+
+- [#201](https://github.com/danieljvdm/effect-cf/pull/201) [`346d424`](https://github.com/danieljvdm/effect-cf/commit/346d42473a9ef76f85bd2bd7e3ebaa6a1467a87f) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add `ContainerTcpPort.connectScoped` to close native TCP sockets when their Effect scope ends. Cleanup awaits `socket.close()` on success, failure, or interruption and preserves close failures as `ContainerError` defects. The existing `connect` method remains caller-owned.
+
 ## 0.51.0
 
 ### Minor Changes

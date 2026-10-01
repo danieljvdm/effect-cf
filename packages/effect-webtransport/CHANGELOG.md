@@ -1,5 +1,11 @@
 # effect-webtransport
 
+## 0.6.0
+
+### Minor Changes
+
+- [#204](https://github.com/danieljvdm/effect-cf/pull/204) [`4b06e14`](https://github.com/danieljvdm/effect-cf/commit/4b06e147b9e0a7927d634e2c576d816ae7b7779b) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Require Effect 4.0 stable and migrate to its public module namespaces. Install `effect@^4.0.0` and, for `effect-cf` SQL adapters, matching stable `@effect/sql-*` drivers; prerelease Effect versions are no longer supported.
+
 ## 0.5.0
 
 ### Minor Changes

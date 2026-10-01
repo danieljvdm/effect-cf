@@ -1,6 +1,6 @@
 import { Console, Effect, FileSystem, Path, Schema, Stream } from "effect";
-import { Command, Flag } from "effect/unstable/cli";
-import { ChildProcess } from "effect/unstable/process";
+import { Command, Flag } from "effect/cli";
+import { ChildProcess } from "effect/process";
 import { build } from "esbuild";
 
 import { measureArtifacts, stageCheckout } from "./bundle-size.ts";

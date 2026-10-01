@@ -5,10 +5,10 @@ import * as Layer from "effect/Layer";
 import * as References from "effect/References";
 import * as Tracer from "effect/Tracer";
 import type { Cause, ManagedRuntime, Scope } from "effect";
-import * as HttpEffect from "effect/unstable/http/HttpEffect";
-import * as HttpMiddleware from "effect/unstable/http/HttpMiddleware";
-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+import * as HttpEffect from "effect/http/HttpEffect";
+import * as HttpMiddleware from "effect/http/HttpMiddleware";
+import * as HttpServerRequest from "effect/http/HttpServerRequest";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
 
 import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 import { fromMessage, fromMessageBatch, type QueueHandler } from "./Queue";

@@ -3,8 +3,8 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Scheduler from "effect/Scheduler";
-import * as Reactivity from "effect/unstable/reactivity/Reactivity";
-import { SqlClient } from "effect/unstable/sql";
+import * as Reactivity from "effect/reactivity/Reactivity";
+import { SqlClient } from "effect/sql";
 
 import { DurableObjectState } from "./DurableObjectState";
 

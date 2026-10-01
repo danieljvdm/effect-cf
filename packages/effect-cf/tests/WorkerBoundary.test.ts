@@ -11,8 +11,8 @@ import {
   Schema as S,
   Stream,
 } from "effect";
-import { HttpEffect, HttpServerResponse } from "effect/unstable/http";
-import { OtlpExporter } from "effect/unstable/observability";
+import { HttpEffect, HttpServerResponse } from "effect/http";
+import { OtlpExporter } from "effect/observability";
 import { expect, test } from "vite-plus/test";
 
 import {

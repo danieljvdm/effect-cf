@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Schema } from "effect";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
-import { OtlpSerialization, OtlpTracer } from "effect/unstable/observability";
+import { HttpClient, HttpClientResponse } from "effect/http";
+import { OtlpSerialization, OtlpTracer } from "effect/observability";
 
 import { DurableObject, RpcTracing, Worker } from "../src/index";
 

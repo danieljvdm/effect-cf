@@ -15,7 +15,7 @@ import * as Latch from "effect/Latch";
 import * as Layer from "effect/Layer";
 import * as Predicate from "effect/Predicate";
 import * as Scope from "effect/Scope";
-import * as Socket from "effect/unstable/socket/Socket";
+import * as Socket from "effect/socket/Socket";
 
 import * as WebTransport from "./WebTransport";
 

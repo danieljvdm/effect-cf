@@ -3,7 +3,7 @@
 WebTransport sessions, streams, and datagrams as Effect services.
 
 ```sh
-npm install effect-webtransport "effect@^4.0.0-rc.115"
+npm install effect-webtransport "effect@^4.0.0"
 ```
 
 Requires a platform WebTransport implementation. The constructor is an injectable service for platforms and tests.
@@ -27,7 +27,7 @@ Closing the scope closes the session and its streams, including on interruption.
 - [WebTransportSocket](src/WebTransportSocket.ts) adapts one bidirectional stream to Effect's scoped `Socket.reader` and `Socket.writer`. Pulls apply backpressure; every close, including peer FIN, fails with `SocketCloseError`. RPC needs self-delimiting serialization such as `RpcSerialization.layerNdjson` or `layerSchemaBinary()`.
 - [Fallback](src/Fallback.ts) selects WebTransport or WebSocket before application traffic. It never replays requests or switches an active session to another transport.
 
-With Effect RC 115, replace `socket.run(handler)` with a scoped reader loop:
+With Effect 4.0, replace `socket.run(handler)` with a scoped reader loop:
 
 ```ts
 const consume = Effect.gen(function* () {

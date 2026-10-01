@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import { SqliteClient } from "@effect/sql-sqlite-do";
 import { assert, it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Layer, ManagedRuntime, Scheduler } from "effect";
-import { SqlClient } from "effect/unstable/sql";
+import { SqlClient } from "effect/sql";
 
 import { DurableObjectSqlite, DurableObjectState } from "../src/index";
 import * as PoolWorkers from "../src/Vitest";

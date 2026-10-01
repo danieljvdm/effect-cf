@@ -3,7 +3,7 @@ import { expect, it } from "@effect/vitest";
 import { Effect, Exit, FileSystem, Path } from "effect";
 import { build } from "esbuild";
 
-import { compareBundles, measureArtifacts, stageCheckout } from "./bundle-size.ts";
+import { compareBundles, copyFixtures, measureArtifacts, stageCheckout } from "./bundle-size.ts";
 
 const write = Effect.fn("BundleAnalysis.write")(function* (
   root: string,
@@ -17,6 +17,57 @@ const write = Effect.fn("BundleAnalysis.write")(function* (
   yield* fs.makeDirectory(path.dirname(destination), { recursive: true });
   yield* fs.writeFileString(destination, contents);
 });
+
+it.live("builds the same outbox fixture against RC and stable HTTP namespaces", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const directory = yield* fs.makeTempDirectoryScoped({ prefix: "bundle-http-namespace-test-" });
+    const source = path.join(directory, "source");
+
+    yield* write(source, "packages/effect-cf/tests/fixtures/bundle/worker.ts", "export {};");
+    yield* write(
+      source,
+      "packages/effect-cf/tests/fixtures/durable-object-consumer.ts",
+      "export {};",
+    );
+    yield* write(source, "examples/outbox/src/index.ts", 'export { marker } from "effect/http";');
+    for (const namespace of ["unstable/http", "http"]) {
+      const stage = path.join(directory, namespace);
+
+      yield* write(
+        stage,
+        "node_modules/effect/package.json",
+        JSON.stringify({
+          name: "effect",
+          type: "module",
+          exports: { [`./${namespace}`]: "./http.js" },
+        }),
+      );
+      yield* write(
+        stage,
+        "node_modules/effect/http.js",
+        `export const marker = "implementation-from-${namespace}";`,
+      );
+      yield* copyFixtures(source, stage);
+      const bundle = yield* Effect.tryPromise(() =>
+        build({
+          absWorkingDir: stage,
+          entryPoints: ["fixtures/outbox/index.ts"],
+          bundle: true,
+          format: "esm",
+          write: false,
+          logLevel: "silent",
+        }),
+      );
+
+      expect(bundle.outputFiles[0]?.text).toContain(`implementation-from-${namespace}`);
+    }
+    expect(yield* fs.readFileString(path.join(source, "examples/outbox/src/index.ts"))).toBe(
+      'export { marker } from "effect/http";',
+    );
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
 
 it.live("isolates published dependencies and counts emitted shared and lazy chunks", () =>
   Effect.gen(function* () {

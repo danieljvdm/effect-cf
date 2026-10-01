@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
-import { SqlClient } from "effect/unstable/sql";
+import { SqlClient } from "effect/sql";
 
 import { DurableObjectSqlite, DurableObjectState } from "../src/index";
 import { makePartialTestDouble } from "./TestDoubles";

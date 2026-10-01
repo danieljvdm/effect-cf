@@ -9,7 +9,7 @@ import {
   Redacted,
   Schema as S,
 } from "effect";
-import { type HttpClient, FetchHttpClient } from "effect/unstable/http";
+import { type HttpClient, FetchHttpClient } from "effect/http";
 
 import { AnalyticsEngine, Binding, WorkerEnvironment } from "../src/index";
 import { makePartialTestDouble } from "./TestDoubles";

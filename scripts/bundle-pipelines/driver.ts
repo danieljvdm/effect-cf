@@ -9,8 +9,8 @@ import {
   resolveSource,
 } from "./node_modules/alchemy/lib/Cloudflare/Workers/Source.js";
 import { Effect, FileSystem, Path, Schema, Stream } from "effect";
-import { Command, Flag } from "effect/unstable/cli";
-import { ChildProcess } from "effect/unstable/process";
+import { Command, Flag } from "effect/cli";
+import { ChildProcess } from "effect/process";
 import { build as parseImports } from "esbuild";
 import { versions as viteVersions } from "vite-plus/versions";
 
@@ -399,13 +399,13 @@ export const buildPipeline = Effect.fn("bundlePipelines.build")(
 export const command = Command.make(
   "bundle-pipeline",
   {
-    pipeline: Flag.choice("pipeline", ["wrangler", "vite", "alchemy"]),
-    project: Flag.string("project-dir").pipe(
+    pipeline: Flag.Literals("pipeline", ["wrangler", "vite", "alchemy"]),
+    project: Flag.String("project-dir").pipe(
       Flag.withDescription(
         "Prepared consumer project with wrangler.json and installed dependencies.",
       ),
     ),
-    output: Flag.string("out-dir").pipe(
+    output: Flag.String("out-dir").pipe(
       Flag.withDescription("Directory for emitted modules, diagnostics, and bundle.json."),
     ),
   },

@@ -7,9 +7,9 @@ import {
   HttpServer,
   HttpServerRequest,
   HttpServerResponse,
-} from "effect/unstable/http";
-import { OtlpExporter } from "effect/unstable/observability";
-import { NetAddress } from "effect/unstable/net";
+} from "effect/http";
+import { OtlpExporter } from "effect/observability";
+import { NetAddress } from "effect/net";
 import process from "node:process";
 
 import { CloudflareOtlp, DurableObject, Worker, WorkerDefinition } from "../src/index";

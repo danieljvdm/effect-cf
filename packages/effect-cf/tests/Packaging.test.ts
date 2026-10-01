@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
 import { beforeAll, expect, it } from "@effect/vitest";
 import { Effect, FileSystem, Path, Stream } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { build, type Plugin } from "esbuild";
 
 const run = Effect.fn("Packaging.run")(function* (args: ReadonlyArray<string>) {

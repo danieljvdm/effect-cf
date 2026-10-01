@@ -11,7 +11,7 @@ Keep schemas in a module that both the client and Durable Object can import.
 ```ts
 // counter-rpcs.ts
 import { Schema } from "effect";
-import { Rpc, RpcGroup } from "effect/unstable/rpc";
+import { Rpc, RpcGroup } from "effect/rpc";
 
 export class CounterRpcs extends RpcGroup.make(Rpc.make("increment", { success: Schema.Finite })) {}
 ```
@@ -22,9 +22,9 @@ Use the browser-safe subpath to avoid importing Cloudflare runtime modules.
 
 ```ts
 import { Context, Effect, Layer } from "effect";
-import { RpcClient } from "effect/unstable/rpc";
-import type { RpcClientError } from "effect/unstable/rpc/RpcClientError";
-import * as Socket from "effect/unstable/socket/Socket";
+import { RpcClient } from "effect/rpc";
+import type { RpcClientError } from "effect/rpc/RpcClientError";
+import * as Socket from "effect/socket/Socket";
 import * as RpcWebSocketClient from "effect-cf/rpc-websocket-client";
 import { CounterRpcs } from "./counter-rpcs";
 

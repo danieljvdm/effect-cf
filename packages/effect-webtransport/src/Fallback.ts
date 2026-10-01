@@ -19,7 +19,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import type { Array as Arr, Duration } from "effect";
-import * as Socket from "effect/unstable/socket/Socket";
+import * as Socket from "effect/socket/Socket";
 
 import * as WebTransport from "./WebTransport";
 import * as WebTransportSocket from "./WebTransportSocket";

@@ -21,9 +21,9 @@ import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import type { JsonSchema } from "effect";
-import * as AiError from "effect/unstable/ai/AiError";
-import * as Tool from "effect/unstable/ai/Tool";
-import type { Toolkit } from "effect/unstable/ai";
+import * as AiError from "effect/ai/AiError";
+import * as Tool from "effect/ai/Tool";
+import type { Toolkit } from "effect/ai";
 
 import { NativeRequest } from "./Worker";
 import { runNativeCallback } from "./internal/NativeCallback";
@@ -424,7 +424,7 @@ const registerToolkitTool = <Tools extends Record<string, Tool.Any>>(
  *
  * ```ts
  * import { Effect, Layer, Option } from "effect"
- * import { HttpRouter } from "effect/unstable/http"
+ * import { HttpRouter } from "effect/http"
  * import { Worker } from "effect-cf"
  * import * as Mcp from "effect-cf/mcp"
  *

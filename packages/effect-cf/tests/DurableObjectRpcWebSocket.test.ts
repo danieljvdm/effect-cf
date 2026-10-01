@@ -14,14 +14,14 @@ import {
   Scope,
   Stream,
 } from "effect";
-import * as Rpc from "effect/unstable/rpc/Rpc";
-import * as RpcClient from "effect/unstable/rpc/RpcClient";
-import { RpcClientError } from "effect/unstable/rpc/RpcClientError";
-import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
-import * as RpcMessage from "effect/unstable/rpc/RpcMessage";
-import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization";
-import * as RpcServer from "effect/unstable/rpc/RpcServer";
-import * as Socket from "effect/unstable/socket/Socket";
+import * as Rpc from "effect/rpc/Rpc";
+import * as RpcClient from "effect/rpc/RpcClient";
+import { RpcClientError } from "effect/rpc/RpcClientError";
+import * as RpcGroup from "effect/rpc/RpcGroup";
+import * as RpcMessage from "effect/rpc/RpcMessage";
+import * as RpcSerialization from "effect/rpc/RpcSerialization";
+import * as RpcServer from "effect/rpc/RpcServer";
+import * as Socket from "effect/socket/Socket";
 
 import {
   DurableObjectRpcWebSocket,

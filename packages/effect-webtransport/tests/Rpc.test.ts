@@ -1,8 +1,8 @@
 import { assert, it } from "@effect/vitest";
 import { Effect, Layer, Result, Schema } from "effect";
-import { NetAddress } from "effect/unstable/net";
-import { Rpc, RpcClient, RpcGroup, RpcSerialization, RpcServer } from "effect/unstable/rpc";
-import { Socket, SocketServer } from "effect/unstable/socket";
+import { NetAddress } from "effect/net";
+import { Rpc, RpcClient, RpcGroup, RpcSerialization, RpcServer } from "effect/rpc";
+import { Socket, SocketServer } from "effect/socket";
 
 import * as WebTransport from "../src/WebTransport";
 import * as WebTransportSocket from "../src/WebTransportSocket";

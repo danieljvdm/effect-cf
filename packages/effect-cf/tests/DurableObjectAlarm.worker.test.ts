@@ -3,7 +3,7 @@ import { evictDurableObject } from "cloudflare:test";
 import { assert, it } from "@effect/vitest";
 import { DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema } from "effect";
 import { TestClock } from "effect/testing";
-import { SqlClient } from "effect/unstable/sql";
+import { SqlClient } from "effect/sql";
 
 import { DurableObjectAlarm, DurableObjectSqlite, DurableObjectState } from "../src/index";
 import type {

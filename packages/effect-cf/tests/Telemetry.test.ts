@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import { Clock, Effect, Fiber, Layer } from "effect";
 import { TestClock } from "effect/testing";
-import { OtlpExporter } from "effect/unstable/observability";
+import { OtlpExporter } from "effect/observability";
 
 import { DurableObject, Worker } from "../src/index";
 import { scheduleTelemetryFlush } from "../src/internal/Telemetry";

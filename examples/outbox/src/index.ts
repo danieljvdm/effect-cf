@@ -1,5 +1,5 @@
 import { Effect, Layer, Option } from "effect";
-import { HttpServerRequest } from "effect/unstable/http";
+import { HttpServerRequest } from "effect/http";
 import { Worker } from "effect-cf";
 
 import { Archive, Documents } from "./document";

@@ -1,0 +1,178 @@
+diff --git a/src/core/Docker.ts b/src/core/Docker.ts
+--- a/src/core/Docker.ts
++++ b/src/core/Docker.ts
+@@ -7,8 +7,8 @@
+ import * as Path from "effect/Path";
+ import type * as Scope from "effect/Scope";
+ import * as Stream from "effect/Stream";
+-import * as ChildProcess from "effect/unstable/process/ChildProcess";
+-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
++import * as ChildProcess from "effect/process/ChildProcess";
++import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+ import * as NodeChildProcess from "node:child_process";
+ import * as NodeHttp from "node:http";
+ import * as NodeStream from "node:stream";
+@@ -72,11 +72,11 @@
+     : "unix:///var/run/docker.sock";
+ const DEV_CONTAINER_PREFIX = "alchemy-dev";
+ 
+-const DockerHost = Config.string("DOCKER_HOST");
+-const DockerBin = Config.string("DOCKER_BIN").pipe(
++const DockerHost = Config.String("DOCKER_HOST");
++const DockerBin = Config.String("DOCKER_BIN").pipe(
+   Config.orElse(() => Config.succeed("docker")),
+ );
+-const ContainerEgressInterceptorImage = Config.string(
++const ContainerEgressInterceptorImage = Config.String(
+   "CONTAINER_EGRESS_INTERCEPTOR_IMAGE",
+ ).pipe(
+   Config.orElse(() =>
+diff --git a/src/core/globals/LoopbackServer.ts b/src/core/globals/LoopbackServer.ts
+--- a/src/core/globals/LoopbackServer.ts
++++ b/src/core/globals/LoopbackServer.ts
+@@ -2,9 +2,9 @@
+ import * as Effect from "effect/Effect";
+ import * as Layer from "effect/Layer";
+ import * as MutableHashMap from "effect/MutableHashMap";
+-import * as HttpServerError from "effect/unstable/http/HttpServerError";
+-import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+-import type * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++import * as HttpServerError from "effect/http/HttpServerError";
++import type * as HttpServerRequest from "effect/http/HttpServerRequest";
++import type * as HttpServerResponse from "effect/http/HttpServerResponse";
+ import * as NodeCrypto from "node:crypto";
+ import * as NodeHttp from "node:http";
+ import type { RuntimeError } from "../RuntimeError.shared.ts";
+diff --git a/src/core/internal/Paths.ts b/src/core/internal/Paths.ts
+--- a/src/core/internal/Paths.ts
++++ b/src/core/internal/Paths.ts
+@@ -35,7 +35,7 @@
+     const makeWith =
+       (options: { env: string; fallback: Array<string> }) =>
+       (...prefix: Array<string>) =>
+-        Config.string(options.env).pipe(
++        Config.String(options.env).pipe(
+           Effect.orElseSucceed(() => path.join(home, ...options.fallback)),
+           Effect.map((root) => path.join(root, ...prefix)),
+           Effect.tap((path) =>
+diff --git a/src/core/internal/System.ts b/src/core/internal/System.ts
+--- a/src/core/internal/System.ts
++++ b/src/core/internal/System.ts
+@@ -2,10 +2,10 @@
+ import * as Effect from "effect/Effect";
+ import * as NodeOs from "node:os";
+ 
+-export const home = Config.string("CLOUDFLARE_RUNTIME_HOME").pipe(
++export const home = Config.String("CLOUDFLARE_RUNTIME_HOME").pipe(
+   Effect.orElseSucceed(() => NodeOs.homedir()),
+ );
+ 
+-export const fileSystemSupportsWatcher = Config.boolean(
++export const fileSystemSupportsWatcher = Config.Boolean(
+   "CLOUDFLARE_RUNTIME_FILE_SYSTEM_SUPPORTS_WATCHER",
+ ).pipe(Effect.orElseSucceed(() => NodeOs.platform() !== "win32"));
+diff --git a/src/core/platform-proxy/getPlatformProxy.ts b/src/core/platform-proxy/getPlatformProxy.ts
+--- a/src/core/platform-proxy/getPlatformProxy.ts
++++ b/src/core/platform-proxy/getPlatformProxy.ts
+@@ -14,7 +14,7 @@
+ import * as Exit from "effect/Exit";
+ import * as Layer from "effect/Layer";
+ import * as Scope from "effect/Scope";
+-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
++import * as FetchHttpClient from "effect/http/FetchHttpClient";
+ import * as Docker from "../Docker.ts";
+ import * as Globals from "../globals/Globals.ts";
+ import * as Internet from "../globals/Internet.ts";
+diff --git a/src/core/registry/RegistryProxy.ts b/src/core/registry/RegistryProxy.ts
+--- a/src/core/registry/RegistryProxy.ts
++++ b/src/core/registry/RegistryProxy.ts
+@@ -2,8 +2,8 @@
+ import * as Effect from "effect/Effect";
+ import * as Layer from "effect/Layer";
+ import * as Stream from "effect/Stream";
+-import * as HttpBody from "effect/unstable/http/HttpBody";
+-import * as HttpClient from "effect/unstable/http/HttpClient";
++import * as HttpBody from "effect/http/HttpBody";
++import * as HttpClient from "effect/http/HttpClient";
+ import * as NodeCrypto from "node:crypto";
+ const RegistryProxyWorker = {
+   worker: () =>
+diff --git a/src/core/remote-bindings/Access.ts b/src/core/remote-bindings/Access.ts
+--- a/src/core/remote-bindings/Access.ts
++++ b/src/core/remote-bindings/Access.ts
+@@ -4,8 +4,8 @@
+ import * as Effect from "effect/Effect";
+ import * as Layer from "effect/Layer";
+ import * as Stream from "effect/Stream";
+-import * as ChildProcess from "effect/unstable/process/ChildProcess";
+-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
++import * as ChildProcess from "effect/process/ChildProcess";
++import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+ import { ConfigError, SystemError } from "../RuntimeError.shared.ts";
+ 
+ export class Access extends Context.Service<
+@@ -75,7 +75,7 @@
+       );
+ 
+     const getEnv = (name: string) =>
+-      Config.string(name).pipe(
++      Config.String(name).pipe(
+         Effect.catchTag("ConfigError", () => Effect.succeed(undefined)),
+       );
+ 
+diff --git a/src/core/remote-bindings/RemoteBindings.ts b/src/core/remote-bindings/RemoteBindings.ts
+--- a/src/core/remote-bindings/RemoteBindings.ts
++++ b/src/core/remote-bindings/RemoteBindings.ts
+@@ -4,8 +4,8 @@
+ import * as Fiber from "effect/Fiber";
+ import * as Hash from "effect/Hash";
+ import * as Layer from "effect/Layer";
+-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++import * as HttpServerRequest from "effect/http/HttpServerRequest";
++import * as HttpServerResponse from "effect/http/HttpServerResponse";
+ const ClientWorker = {
+   worker: () =>
+     loadInternalWorker(
+diff --git a/src/core/remote-bindings/RemoteWorker.ts b/src/core/remote-bindings/RemoteWorker.ts
+--- a/src/core/remote-bindings/RemoteWorker.ts
++++ b/src/core/remote-bindings/RemoteWorker.ts
+@@ -6,7 +6,7 @@
+ import * as Effect from "effect/Effect";
+ import * as Layer from "effect/Layer";
+ import * as Result from "effect/Result";
+-import * as HttpClient from "effect/unstable/http/HttpClient";
++import * as HttpClient from "effect/http/HttpClient";
+ import * as NodeCrypto from "node:crypto";
+ const RemoteWorkerScript = {
+   worker: () =>
+diff --git a/src/vite/dev-server.ts b/src/vite/dev-server.ts
+--- a/src/vite/dev-server.ts
++++ b/src/vite/dev-server.ts
+@@ -16,10 +16,10 @@
+ import * as Layer from "effect/Layer";
+ import * as Option from "effect/Option";
+ import * as Scope from "effect/Scope";
+-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
+-import * as Headers from "effect/unstable/http/Headers";
+-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++import * as FetchHttpClient from "effect/http/FetchHttpClient";
++import * as Headers from "effect/http/Headers";
++import * as HttpServerRequest from "effect/http/HttpServerRequest";
++import * as HttpServerResponse from "effect/http/HttpServerResponse";
+ import * as NodeFs from "node:fs/promises";
+ import * as NodeHttp from "node:http";
+ import type * as vite from "vite";
+diff --git a/src/vite/preview-server.ts b/src/vite/preview-server.ts
+--- a/src/vite/preview-server.ts
++++ b/src/vite/preview-server.ts
+@@ -6,7 +6,7 @@
+ import * as Exit from "effect/Exit";
+ import * as Layer from "effect/Layer";
+ import * as Scope from "effect/Scope";
+-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
++import * as FetchHttpClient from "effect/http/FetchHttpClient";
+ import * as NodeFs from "node:fs/promises";
+ import * as NodePath from "node:path";
+ import type { CloudflareVitePluginOptions } from "./plugin.ts";

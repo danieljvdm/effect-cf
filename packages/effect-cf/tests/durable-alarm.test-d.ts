@@ -1,6 +1,6 @@
 import { expectTypeOf } from "vitest";
 import { Context, DateTime, Effect, Layer, Schema } from "effect";
-import { SqlClient, type SqlError } from "effect/unstable/sql";
+import { SqlClient, type SqlError } from "effect/sql";
 
 import {
   DurableObject,

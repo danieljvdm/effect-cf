@@ -1,8 +1,8 @@
 import { gzip } from "node:zlib";
 
 import { Console, Effect, FileSystem, Path, Schema, Stream } from "effect";
-import { Command, Flag } from "effect/unstable/cli";
-import { ChildProcess } from "effect/unstable/process";
+import { Command, Flag } from "effect/cli";
+import { ChildProcess } from "effect/process";
 import { build } from "esbuild";
 
 class BundleSizeError extends Schema.TaggedError<BundleSizeError>()("BundleSizeError", {
@@ -57,6 +57,9 @@ const Manifest = Schema.Struct({
   exports: Schema.Record(Schema.String, Schema.Unknown),
 });
 const PackageVersion = Schema.fromJsonString(Schema.Struct({ version: Schema.String }));
+const EffectExports = Schema.fromJsonString(
+  Schema.Struct({ exports: Schema.Record(Schema.String, Schema.Unknown) }),
+);
 const packages = ["effect-cf", "effect-webtransport"];
 const pipelines = [
   { id: "wrangler", name: "Wrangler" },
@@ -275,7 +278,10 @@ export const stageCheckout = Effect.fn("bundleSize.stageCheckout")(function* (
   return available;
 });
 
-const copyFixtures = Effect.fn("bundleSize.copyFixtures")(function* (root: string, stage: string) {
+export const copyFixtures = Effect.fn("bundleSize.copyFixtures")(function* (
+  root: string,
+  stage: string,
+) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
@@ -289,6 +295,23 @@ const copyFixtures = Effect.fn("bundleSize.copyFixtures")(function* (root: strin
     path.join(stage, "fixtures/cf/durable-object-consumer.ts"),
   );
   yield* fs.copy(path.join(root, "examples/outbox/src"), path.join(stage, "fixtures/outbox"));
+  const effect = yield* Schema.decodeEffect(EffectExports)(
+    yield* fs.readFileString(path.join(stage, "node_modules/effect/package.json")),
+  );
+
+  // Compare the same consumer across the RC-to-stable namespace move, using
+  // each checkout's own HTTP implementation.
+  if (
+    !Object.hasOwn(effect.exports, "./http") &&
+    Object.hasOwn(effect.exports, "./unstable/http")
+  ) {
+    const entry = path.join(stage, "fixtures/outbox/index.ts");
+
+    yield* fs.writeFileString(
+      entry,
+      (yield* fs.readFileString(entry)).replaceAll('"effect/http"', '"effect/unstable/http"'),
+    );
+  }
 });
 
 const configureWorker = Effect.fn("bundleSize.configureWorker")(function* (

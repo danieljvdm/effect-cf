@@ -183,7 +183,7 @@ export type WebTransportErrorReason =
 
 /**
  * Tagged error that wraps WebTransport failures while preserving the
- * underlying reason, mirroring `effect/unstable/socket` `SocketError`.
+ * underlying reason, mirroring `effect/socket` `SocketError`.
  */
 export class WebTransportError extends Schema.TaggedError<WebTransportError>(
   WebTransportErrorTypeId,

@@ -29,10 +29,12 @@ These builds never deploy. All fixtures use compatibility date `2026-09-26` and
 lockfile: framework build tools can use newer Cloudflare tooling without changing
 the library's pinned runtime. Vite+ runs Vite; they are distinct tools.
 
-The Alchemy build tool remains on Effect RC 112 because its pinned release uses
-the pre-RC 113 Config and Socket APIs. This is isolated from the libraries and
-examples, which use RC 115. Each measured consumer still resolves the Effect
-version from its own checkout; the build tool's version is not bundled in its place.
+The build tools use Effect 4.0 stable. Local package-manager patches adapt the
+pinned Alchemy build dependency graph to the stable namespaces and Config APIs;
+see [patch details](../scripts/bundle-pipelines/patches/README.md). Each measured
+consumer still resolves Effect from its own checkout. When comparing against an
+RC checkout, the staged outbox fixture uses that checkout's HTTP namespace; its
+application behavior and dependency implementation remain the same.
 
 ## Read the report
 

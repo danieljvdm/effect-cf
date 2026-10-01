@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Schema, Scope } from "effect";
-import { Socket } from "effect/unstable/socket";
+import { Socket } from "effect/socket";
 
 import * as WebTransport from "../src/WebTransport";
 import * as WebTransportSocket from "../src/WebTransportSocket";

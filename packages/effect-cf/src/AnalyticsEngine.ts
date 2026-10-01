@@ -8,10 +8,10 @@ import * as Predicate from "effect/Predicate";
 import * as Result from "effect/Result";
 import * as S from "effect/Schema";
 import type { Redacted } from "effect";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
-import * as HttpClient from "effect/unstable/http/HttpClient";
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
-import type { Headers, HttpClientResponse } from "effect/unstable/http";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientRequest from "effect/http/HttpClientRequest";
+import type { Headers, HttpClientResponse } from "effect/http";
 
 import * as Binding from "./Binding";
 import type { WorkerEnvironment } from "./Environment";

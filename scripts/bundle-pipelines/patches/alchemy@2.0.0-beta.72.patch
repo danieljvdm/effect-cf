@@ -1,0 +1,1529 @@
+diff --git a/lib/Auth/Env.js b/lib/Auth/Env.js
+--- a/lib/Auth/Env.js
++++ b/lib/Auth/Env.js
+@@ -2,10 +2,10 @@
+ import * as Effect from "effect/Effect";
+ import * as Clank from "../Util/Clank.js";
+ import { AuthError } from "./AuthProvider.js";
+-export const getEnv = (key) => Config.string(key).pipe(Effect.orElseSucceed(() => undefined));
+-export const getEnvRequired = (key) => Config.string(key).pipe(Effect.catch(() => Effect.fail(new AuthError({ message: `Missing required env: ${key}` }))));
+-export const getEnvRedacted = (key) => Config.redacted(key).pipe(Effect.orElseSucceed(() => undefined));
+-export const getEnvRedactedRequired = (key) => Config.redacted(key).pipe(Effect.catch(() => Effect.fail(new AuthError({ message: `Missing required env: ${key}` }))));
++export const getEnv = (key) => Config.String(key).pipe(Effect.orElseSucceed(() => undefined));
++export const getEnvRequired = (key) => Config.String(key).pipe(Effect.catch(() => Effect.fail(new AuthError({ message: `Missing required env: ${key}` }))));
++export const getEnvRedacted = (key) => Config.Redacted(key).pipe(Effect.orElseSucceed(() => undefined));
++export const getEnvRedactedRequired = (key) => Config.Redacted(key).pipe(Effect.catch(() => Effect.fail(new AuthError({ message: `Missing required env: ${key}` }))));
+ export const retryOnce = (self) => self.pipe(Effect.retry({
+     times: 1,
+     while: (e) => e instanceof Clank.PromptCancelled,
+diff --git a/lib/Auth/Profile.js b/lib/Auth/Profile.js
+--- a/lib/Auth/Profile.js
++++ b/lib/Auth/Profile.js
+@@ -15,7 +15,7 @@
+  * `fromEnvironment` layers to pick which named profile in
+  * `~/.alchemy/profiles.json` to use. Defaults to `"default"`.
+  */
+-export const ALCHEMY_PROFILE = Config.string("ALCHEMY_PROFILE").pipe(Config.withDefault("default"));
++export const ALCHEMY_PROFILE = Config.String("ALCHEMY_PROFILE").pipe(Config.withDefault("default"));
+ export const CONFIG_VERSION = 0;
+ export class AlchemyConfig extends Context.Service()("Alchemy::Profiles") {
+ }
+diff --git a/lib/Cloudflare/AI/Gateway.d.ts b/lib/Cloudflare/AI/Gateway.d.ts
+--- a/lib/Cloudflare/AI/Gateway.d.ts
++++ b/lib/Cloudflare/AI/Gateway.d.ts
+@@ -286,7 +286,7 @@
+  *
+  * AI Gateway gives your application a stable gateway ID and account-scoped
+  * endpoint that can route model requests through Cloudflare. Once bound to a
+- * Worker, `aiGateway.model({...})` returns an `effect/unstable/ai`
++ * Worker, `aiGateway.model({...})` returns an `effect/ai`
+  * `LanguageModel` Layer so you use the standard `generateText` / `streamText`
+  * APIs — provider-agnostic, with caching, rate limiting, retries, and a
+  * unified request log handled by the gateway.
+@@ -368,8 +368,8 @@
+  * `AiError` to a defect (a 500); use `Effect.catchTag("AiError", …)` for typed
+  * handling instead.
+  * ```typescript
+- * import { LanguageModel } from "effect/unstable/ai";
+- * import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++ * import { LanguageModel } from "effect/ai";
++ * import * as HttpServerResponse from "effect/http/HttpServerResponse";
+  *
+  * fetch: Effect.gen(function* () {
+  *   const response = yield* LanguageModel.generateText({
+@@ -391,10 +391,10 @@
+  * `Stream.provide(languageModel)` keeps the model available for the whole
+  * stream lifetime; pipe through `Sse.encode` for an SSE response.
+  * ```typescript
+- * import { LanguageModel } from "effect/unstable/ai";
++ * import { LanguageModel } from "effect/ai";
+  * import * as Stream from "effect/Stream";
+- * import * as Sse from "effect/unstable/encoding/Sse";
+- * import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++ * import * as Sse from "effect/encoding/Sse";
++ * import * as HttpServerResponse from "effect/http/HttpServerResponse";
+  *
+  * const stream = LanguageModel.streamText({ prompt }).pipe(
+  *   Stream.provide(languageModel),
+diff --git a/lib/Cloudflare/AI/Gateway.js b/lib/Cloudflare/AI/Gateway.js
+--- a/lib/Cloudflare/AI/Gateway.js
++++ b/lib/Cloudflare/AI/Gateway.js
+@@ -18,7 +18,7 @@
+  *
+  * AI Gateway gives your application a stable gateway ID and account-scoped
+  * endpoint that can route model requests through Cloudflare. Once bound to a
+- * Worker, `aiGateway.model({...})` returns an `effect/unstable/ai`
++ * Worker, `aiGateway.model({...})` returns an `effect/ai`
+  * `LanguageModel` Layer so you use the standard `generateText` / `streamText`
+  * APIs — provider-agnostic, with caching, rate limiting, retries, and a
+  * unified request log handled by the gateway.
+@@ -100,8 +100,8 @@
+  * `AiError` to a defect (a 500); use `Effect.catchTag("AiError", …)` for typed
+  * handling instead.
+  * ```typescript
+- * import { LanguageModel } from "effect/unstable/ai";
+- * import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++ * import { LanguageModel } from "effect/ai";
++ * import * as HttpServerResponse from "effect/http/HttpServerResponse";
+  *
+  * fetch: Effect.gen(function* () {
+  *   const response = yield* LanguageModel.generateText({
+@@ -123,10 +123,10 @@
+  * `Stream.provide(languageModel)` keeps the model available for the whole
+  * stream lifetime; pipe through `Sse.encode` for an SSE response.
+  * ```typescript
+- * import { LanguageModel } from "effect/unstable/ai";
++ * import { LanguageModel } from "effect/ai";
+  * import * as Stream from "effect/Stream";
+- * import * as Sse from "effect/unstable/encoding/Sse";
+- * import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++ * import * as Sse from "effect/encoding/Sse";
++ * import * as HttpServerResponse from "effect/http/HttpServerResponse";
+  *
+  * const stream = LanguageModel.streamText({ prompt }).pipe(
+  *   Stream.provide(languageModel),
+diff --git a/lib/Cloudflare/AI/SearchInstance.d.ts b/lib/Cloudflare/AI/SearchInstance.d.ts
+--- a/lib/Cloudflare/AI/SearchInstance.d.ts
++++ b/lib/Cloudflare/AI/SearchInstance.d.ts
+@@ -433,8 +433,8 @@
+  * ```typescript
+  * import * as Cloudflare from "alchemy/Cloudflare";
+  * import * as Effect from "effect/Effect";
+- * import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
+- * import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++ * import { HttpServerRequest } from "effect/http/HttpServerRequest";
++ * import * as HttpServerResponse from "effect/http/HttpServerResponse";
+  *
+  * export default class Api extends Cloudflare.Worker<Api>()(
+  *   "api",
+diff --git a/lib/Cloudflare/AI/SearchInstance.js b/lib/Cloudflare/AI/SearchInstance.js
+--- a/lib/Cloudflare/AI/SearchInstance.js
++++ b/lib/Cloudflare/AI/SearchInstance.js
+@@ -179,8 +179,8 @@
+  * ```typescript
+  * import * as Cloudflare from "alchemy/Cloudflare";
+  * import * as Effect from "effect/Effect";
+- * import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
+- * import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++ * import { HttpServerRequest } from "effect/http/HttpServerRequest";
++ * import * as HttpServerResponse from "effect/http/HttpServerResponse";
+  *
+  * export default class Api extends Cloudflare.Worker<Api>()(
+  *   "api",
+diff --git a/lib/Cloudflare/AI/SearchNamespace.d.ts b/lib/Cloudflare/AI/SearchNamespace.d.ts
+--- a/lib/Cloudflare/AI/SearchNamespace.d.ts
++++ b/lib/Cloudflare/AI/SearchNamespace.d.ts
+@@ -109,8 +109,8 @@
+  * ```typescript
+  * import * as Cloudflare from "alchemy/Cloudflare";
+  * import * as Effect from "effect/Effect";
+- * import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
+- * import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++ * import { HttpServerRequest } from "effect/http/HttpServerRequest";
++ * import * as HttpServerResponse from "effect/http/HttpServerResponse";
+  *
+  * export default class Api extends Cloudflare.Worker<Api>()(
+  *   "api",
+diff --git a/lib/Cloudflare/AI/SearchNamespace.js b/lib/Cloudflare/AI/SearchNamespace.js
+--- a/lib/Cloudflare/AI/SearchNamespace.js
++++ b/lib/Cloudflare/AI/SearchNamespace.js
+@@ -76,8 +76,8 @@
+  * ```typescript
+  * import * as Cloudflare from "alchemy/Cloudflare";
+  * import * as Effect from "effect/Effect";
+- * import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
+- * import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++ * import { HttpServerRequest } from "effect/http/HttpServerRequest";
++ * import * as HttpServerResponse from "effect/http/HttpServerResponse";
+  *
+  * export default class Api extends Cloudflare.Worker<Api>()(
+  *   "api",
+diff --git a/lib/Cloudflare/Auth/AuthProvider.js b/lib/Cloudflare/Auth/AuthProvider.js
+--- a/lib/Cloudflare/Auth/AuthProvider.js
++++ b/lib/Cloudflare/Auth/AuthProvider.js
+@@ -6,8 +6,8 @@
+ import * as Layer from "effect/Layer";
+ import * as Match from "effect/Match";
+ import * as Redacted from "effect/Redacted";
+-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
+-import * as HttpClient from "effect/unstable/http/HttpClient";
++import * as FetchHttpClient from "effect/http/FetchHttpClient";
++import * as HttpClient from "effect/http/HttpClient";
+ import { AuthError, AuthProviderLayer, } from "../../Auth/AuthProvider.js";
+ import { CredentialsStore, displayRedacted } from "../../Auth/Credentials.js";
+ import { getEnv, getEnvRedacted, getEnvRequired, retryOnce, } from "../../Auth/Env.js";
+diff --git a/lib/Cloudflare/CloudflareEnvironment.js b/lib/Cloudflare/CloudflareEnvironment.js
+--- a/lib/Cloudflare/CloudflareEnvironment.js
++++ b/lib/Cloudflare/CloudflareEnvironment.js
+@@ -9,7 +9,7 @@
+ export class CloudflareEnvironment extends Context.Service()("Cloudflare::CloudflareEnvironment") {
+     kind = "Environment";
+ }
+-const CLOUDFLARE_ACCOUNT_ID = Config.string("CLOUDFLARE_ACCOUNT_ID");
++const CLOUDFLARE_ACCOUNT_ID = Config.String("CLOUDFLARE_ACCOUNT_ID");
+ export const fromEnv = () => Layer.effect(CloudflareEnvironment, Effect.gen(function* () {
+     const accountId = yield* CLOUDFLARE_ACCOUNT_ID.pipe(Config.option, Config.map(Option.getOrUndefined));
+     return { account: accountId };
+@@ -18,7 +18,7 @@
+     const profile = yield* AlchemyProfile;
+     const auth = yield* getAuthProvider(CLOUDFLARE_AUTH_PROVIDER_NAME);
+     const profileName = yield* ALCHEMY_PROFILE;
+-    const ci = yield* Config.boolean("CI").pipe(Config.withDefault(false));
++    const ci = yield* Config.Boolean("CI").pipe(Config.withDefault(false));
+     // `loadOrConfigure` reads the persisted config under the canonical
+     // provider name (`Cloudflare`); only runs `configure` (and persists the
+     // result) if no stored config exists.
+diff --git a/lib/Cloudflare/D1/CloneDatabase.js b/lib/Cloudflare/D1/CloneDatabase.js
+--- a/lib/Cloudflare/D1/CloneDatabase.js
++++ b/lib/Cloudflare/D1/CloneDatabase.js
+@@ -1,6 +1,6 @@
+ import * as Effect from "effect/Effect";
+-import * as HttpClient from "effect/unstable/http/HttpClient";
+-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
++import * as HttpClient from "effect/http/HttpClient";
++import * as HttpClientRequest from "effect/http/HttpClientRequest";
+ import { exportDatabase } from "./ExportDatabase.js";
+ import { importD1Database } from "./ImportDatabase.js";
+ /**
+diff --git a/lib/Cloudflare/D1/Database.d.ts b/lib/Cloudflare/D1/Database.d.ts
+--- a/lib/Cloudflare/D1/Database.d.ts
++++ b/lib/Cloudflare/D1/Database.d.ts
+@@ -1,7 +1,7 @@
+ import type { RuntimeServices } from "@alchemy.run/cloudflare-runtime/core";
+ import * as d1 from "@distilled.cloud/cloudflare/d1";
+ import * as Layer from "effect/Layer";
+-import * as HttpClient from "effect/unstable/http/HttpClient";
++import * as HttpClient from "effect/http/HttpClient";
+ import * as Provider from "../../Provider.ts";
+ import { Resource } from "../../Resource.ts";
+ import { CloudflareEnvironment } from "../CloudflareEnvironment.ts";
+@@ -245,5 +245,5 @@
+  * registration.
+  */
+ export declare const ProviderLocal: () => Layer.Layer<Provider.Provider<Database>, never, import("../../AlchemyContext.ts").AlchemyContext | import("../../Artifacts.ts").ArtifactStore | CloudflareEnvironment | import("effect/FileSystem").FileSystem | HttpClient.HttpClient | import("effect/Path").Path | import("../../Stack.ts").Stack | import("../../Stage.ts").Stage | RuntimeServices>;
+-export declare const DatabaseProvider: () => Layer.Layer<Provider.Provider<Database>, import("effect/Config").ConfigError | import("@alchemy.run/cloudflare-runtime/core").ConfigError | import("effect/PlatformError").PlatformError | import("@alchemy.run/cloudflare-runtime/core").SystemError, import("../../AlchemyContext.ts").AlchemyContext | import("../../Artifacts.ts").ArtifactStore | import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner | CloudflareEnvironment | import("effect/FileSystem").FileSystem | import("effect/Path").Path | import("../../Stack.ts").Stack | import("../../Stage.ts").Stage | d1.CloudflareOpContext>;
++export declare const DatabaseProvider: () => Layer.Layer<Provider.Provider<Database>, import("effect/Config").ConfigError | import("@alchemy.run/cloudflare-runtime/core").ConfigError | import("effect/PlatformError").PlatformError | import("@alchemy.run/cloudflare-runtime/core").SystemError, import("../../AlchemyContext.ts").AlchemyContext | import("../../Artifacts.ts").ArtifactStore | import("effect/process/ChildProcessSpawner").ChildProcessSpawner | CloudflareEnvironment | import("effect/FileSystem").FileSystem | import("effect/Path").Path | import("../../Stack.ts").Stack | import("../../Stage.ts").Stage | d1.CloudflareOpContext>;
+ //# sourceMappingURL=Database.d.ts.map
+\ No newline at end of file
+diff --git a/lib/Cloudflare/D1/Database.js b/lib/Cloudflare/D1/Database.js
+--- a/lib/Cloudflare/D1/Database.js
++++ b/lib/Cloudflare/D1/Database.js
+@@ -3,7 +3,7 @@
+ import * as Layer from "effect/Layer";
+ import * as Option from "effect/Option";
+ import * as Stream from "effect/Stream";
+-import * as HttpClient from "effect/unstable/http/HttpClient";
++import * as HttpClient from "effect/http/HttpClient";
+ import { isResolved } from "../../Diff.js";
+ import * as ProviderLayer from "../../Local/ProviderLayer.js";
+ import * as RpcProvider from "../../Local/RpcProvider.js";
+diff --git a/lib/Cloudflare/D1/ExportDatabase.d.ts b/lib/Cloudflare/D1/ExportDatabase.d.ts
+--- a/lib/Cloudflare/D1/ExportDatabase.d.ts
++++ b/lib/Cloudflare/D1/ExportDatabase.d.ts
+@@ -1,7 +1,7 @@
+ import type { Credentials } from "@distilled.cloud/cloudflare/Credentials";
+ import * as d1 from "@distilled.cloud/cloudflare/d1";
+ import * as Effect from "effect/Effect";
+-import type * as HttpClient from "effect/unstable/http/HttpClient";
++import type * as HttpClient from "effect/http/HttpClient";
+ export interface ExportD1DatabaseOptions {
+     accountId: string;
+     databaseId: string;
+diff --git a/lib/Cloudflare/D1/ImportDatabase.d.ts b/lib/Cloudflare/D1/ImportDatabase.d.ts
+--- a/lib/Cloudflare/D1/ImportDatabase.d.ts
++++ b/lib/Cloudflare/D1/ImportDatabase.d.ts
+@@ -17,5 +17,5 @@
+  *   3. POST `action: "ingest"` -> returns `at_bookmark`
+  *   4. POST `action: "poll"` until `status === "complete"`
+  */
+-export declare const importD1Database: (options: ImportDatabaseOptions) => Effect.Effect<ImportDatabaseResult, import("@distilled.cloud/axiom").BadGateway | import("@distilled.cloud/cloudflare").CloudflareError | import("@distilled.cloud/cloudflare").CloudflareHttpError | import("@distilled.cloud/cloudflare").CloudflareParseError | import("@distilled.cloud/cloudflare").CloudflareRateLimited | import("@distilled.cloud/axiom").ConfigError | import("@distilled.cloud/axiom").GatewayTimeout | import("effect/unstable/http/HttpClientError").HttpClientError | import("@distilled.cloud/axiom").InternalServerError | d1.InvalidObjectIdentifier | import("@distilled.cloud/cloudflare").InvalidRoute | import("@distilled.cloud/cloudflare").OAuthRefreshError | import("@distilled.cloud/axiom").ServiceUnavailable | import("@distilled.cloud/axiom").TooManyRequests | import("@distilled.cloud/axiom").Unauthorized | import("@distilled.cloud/cloudflare").UnknownCloudflareError, d1.CloudflareOpContext>;
++export declare const importD1Database: (options: ImportDatabaseOptions) => Effect.Effect<ImportDatabaseResult, import("@distilled.cloud/axiom").BadGateway | import("@distilled.cloud/cloudflare").CloudflareError | import("@distilled.cloud/cloudflare").CloudflareHttpError | import("@distilled.cloud/cloudflare").CloudflareParseError | import("@distilled.cloud/cloudflare").CloudflareRateLimited | import("@distilled.cloud/axiom").ConfigError | import("@distilled.cloud/axiom").GatewayTimeout | import("effect/http/HttpClientError").HttpClientError | import("@distilled.cloud/axiom").InternalServerError | d1.InvalidObjectIdentifier | import("@distilled.cloud/cloudflare").InvalidRoute | import("@distilled.cloud/cloudflare").OAuthRefreshError | import("@distilled.cloud/axiom").ServiceUnavailable | import("@distilled.cloud/axiom").TooManyRequests | import("@distilled.cloud/axiom").Unauthorized | import("@distilled.cloud/cloudflare").UnknownCloudflareError, d1.CloudflareOpContext>;
+ //# sourceMappingURL=ImportDatabase.d.ts.map
+\ No newline at end of file
+diff --git a/lib/Cloudflare/D1/ImportDatabase.js b/lib/Cloudflare/D1/ImportDatabase.js
+--- a/lib/Cloudflare/D1/ImportDatabase.js
++++ b/lib/Cloudflare/D1/ImportDatabase.js
+@@ -1,8 +1,8 @@
+ import { Credentials, formatHeaders, } from "@distilled.cloud/cloudflare/Credentials";
+ import * as d1 from "@distilled.cloud/cloudflare/d1";
+ import * as Effect from "effect/Effect";
+-import * as HttpClient from "effect/unstable/http/HttpClient";
+-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
++import * as HttpClient from "effect/http/HttpClient";
++import * as HttpClientRequest from "effect/http/HttpClientRequest";
+ import { md5 } from "../../Util/md5.js";
+ /**
+  * Import SQL into a D1 database via the multi-step Cloudflare flow:
+diff --git a/lib/Cloudflare/Fetcher.d.ts b/lib/Cloudflare/Fetcher.d.ts
+--- a/lib/Cloudflare/Fetcher.d.ts
++++ b/lib/Cloudflare/Fetcher.d.ts
+@@ -1,13 +1,13 @@
+ import type * as cf from "@cloudflare/workers-types";
+ import * as Effect from "effect/Effect";
+-import * as HttpClient from "effect/unstable/http/HttpClient";
+-import { HttpClientError } from "effect/unstable/http/HttpClientError";
+-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+-import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
+-import type { HttpServerError } from "effect/unstable/http/HttpServerError";
+-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+-import * as Socket from "effect/unstable/socket/Socket";
++import * as HttpClient from "effect/http/HttpClient";
++import { HttpClientError } from "effect/http/HttpClientError";
++import * as HttpClientRequest from "effect/http/HttpClientRequest";
++import * as HttpClientResponse from "effect/http/HttpClientResponse";
++import type { HttpServerError } from "effect/http/HttpServerError";
++import * as HttpServerRequest from "effect/http/HttpServerRequest";
++import * as HttpServerResponse from "effect/http/HttpServerResponse";
++import * as Socket from "effect/socket/Socket";
+ export type SocketAddress = cf.SocketAddress;
+ export type SocketOptions = cf.SocketOptions;
+ export interface Fetcher {
+diff --git a/lib/Cloudflare/Fetcher.js b/lib/Cloudflare/Fetcher.js
+--- a/lib/Cloudflare/Fetcher.js
++++ b/lib/Cloudflare/Fetcher.js
+@@ -6,14 +6,14 @@
+ import * as Latch from "effect/Latch";
+ import * as Schedule from "effect/Schedule";
+ import * as Scope from "effect/Scope";
+-import * as HttpBody from "effect/unstable/http/HttpBody";
+-import * as HttpClient from "effect/unstable/http/HttpClient";
+-import { HttpClientError, TransportError, } from "effect/unstable/http/HttpClientError";
+-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+-import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
+-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+-import * as Socket from "effect/unstable/socket/Socket";
++import * as HttpBody from "effect/http/HttpBody";
++import * as HttpClient from "effect/http/HttpClient";
++import { HttpClientError, TransportError, } from "effect/http/HttpClientError";
++import * as HttpClientRequest from "effect/http/HttpClientRequest";
++import * as HttpClientResponse from "effect/http/HttpClientResponse";
++import * as HttpServerRequest from "effect/http/HttpServerRequest";
++import * as HttpServerResponse from "effect/http/HttpServerResponse";
++import * as Socket from "effect/socket/Socket";
+ export const toCloudflareFetcher = Effect.fn(function* (fetcher) {
+     const context = yield* Effect.context();
+     return {
+diff --git a/lib/Cloudflare/Hyperdrive/Connection.js b/lib/Cloudflare/Hyperdrive/Connection.js
+--- a/lib/Cloudflare/Hyperdrive/Connection.js
++++ b/lib/Cloudflare/Hyperdrive/Connection.js
+@@ -29,7 +29,7 @@
+  *     port: 5432,
+  *     database: "app",
+  *     user: "app",
+- *     password: yield* Config.redacted("DB_PASSWORD"),
++ *     password: yield* Config.Redacted("DB_PASSWORD"),
+  *   },
+  * });
+  * ```
+diff --git a/lib/Cloudflare/Images/Images.d.ts b/lib/Cloudflare/Images/Images.d.ts
+--- a/lib/Cloudflare/Images/Images.d.ts
++++ b/lib/Cloudflare/Images/Images.d.ts
+@@ -31,7 +31,7 @@
+  * @section Effect-style Worker (recommended)
+  * @example Read image format and dimensions from the request body
+  * ```typescript
+- * import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
++ * import { HttpServerRequest } from "effect/http/HttpServerRequest";
+  *
+  * Cloudflare.Worker("ImageWorker", { main: import.meta.url },
+  *   Effect.gen(function* () {
+diff --git a/lib/Cloudflare/LocalGateway.d.ts b/lib/Cloudflare/LocalGateway.d.ts
+--- a/lib/Cloudflare/LocalGateway.d.ts
++++ b/lib/Cloudflare/LocalGateway.d.ts
+@@ -10,7 +10,7 @@
+  * to the providers' shared runtime — same `.alchemy/local` storage
+  * directory — so it reads and writes the same simulator data.
+  */
+-export declare const localGatewayRuntime: Layer.Layer<import("@alchemy.run/cloudflare-runtime/core/bindings/analytics-engine").AnalyticsEngine | import("@alchemy.run/cloudflare-runtime/core/bindings/assets/Assets").Assets | import("@alchemy.run/cloudflare-runtime/core/bindings/browser").Browser | import("@alchemy.run/cloudflare-runtime/core/bindings/cache").Cache | import("@alchemy.run/cloudflare-runtime/core/bindings/d1").D1 | import("@alchemy.run/cloudflare-runtime/core/bindings/dispatch-namespace").DispatchNamespace | import("@alchemy.run/cloudflare-runtime/core/bindings/hyperdrive").Hyperdrive | import("@alchemy.run/cloudflare-runtime/core/bindings/images").Images | import("@alchemy.run/cloudflare-runtime/core/bindings/kv-namespace").KvNamespace | import("@alchemy.run/cloudflare-runtime/core/globals/Loopback").Loopback | import("@alchemy.run/cloudflare-runtime/core/bindings/queue").Queue | import("@alchemy.run/cloudflare-runtime/core/bindings/r2-bucket").R2Bucket | import("@alchemy.run/cloudflare-runtime/core/bindings/rate-limit").RateLimit | import("@alchemy.run/cloudflare-runtime/core/registry/RegistryProxy").RegistryProxy | import("@alchemy.run/cloudflare-runtime/core/remote-bindings/RemoteBindings").RemoteBindings | import("@alchemy.run/cloudflare-runtime/core").Runtime | import("@alchemy.run/cloudflare-runtime/core/bindings/secrets-store").SecretsStore | import("@alchemy.run/cloudflare-runtime/core/bindings/send-email").SendEmail | import("@alchemy.run/cloudflare-runtime/core/bindings/stream").Stream | import("@alchemy.run/cloudflare-runtime/core/proxy/WorkerProxy").WorkerProxy | import("@alchemy.run/cloudflare-runtime/core/bindings/workflows").Workflows, import("effect/Config").ConfigError | import("@alchemy.run/cloudflare-runtime/core").ConfigError | import("effect/PlatformError").PlatformError | import("@alchemy.run/cloudflare-runtime/core").SystemError, AlchemyContext | import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner | CloudflareEnvironment | import("@distilled.cloud/cloudflare").Credentials | import("effect/FileSystem").FileSystem | import("effect/unstable/http/HttpClient").HttpClient | Path.Path>;
++export declare const localGatewayRuntime: Layer.Layer<import("@alchemy.run/cloudflare-runtime/core/bindings/analytics-engine").AnalyticsEngine | import("@alchemy.run/cloudflare-runtime/core/bindings/assets/Assets").Assets | import("@alchemy.run/cloudflare-runtime/core/bindings/browser").Browser | import("@alchemy.run/cloudflare-runtime/core/bindings/cache").Cache | import("@alchemy.run/cloudflare-runtime/core/bindings/d1").D1 | import("@alchemy.run/cloudflare-runtime/core/bindings/dispatch-namespace").DispatchNamespace | import("@alchemy.run/cloudflare-runtime/core/bindings/hyperdrive").Hyperdrive | import("@alchemy.run/cloudflare-runtime/core/bindings/images").Images | import("@alchemy.run/cloudflare-runtime/core/bindings/kv-namespace").KvNamespace | import("@alchemy.run/cloudflare-runtime/core/globals/Loopback").Loopback | import("@alchemy.run/cloudflare-runtime/core/bindings/queue").Queue | import("@alchemy.run/cloudflare-runtime/core/bindings/r2-bucket").R2Bucket | import("@alchemy.run/cloudflare-runtime/core/bindings/rate-limit").RateLimit | import("@alchemy.run/cloudflare-runtime/core/registry/RegistryProxy").RegistryProxy | import("@alchemy.run/cloudflare-runtime/core/remote-bindings/RemoteBindings").RemoteBindings | import("@alchemy.run/cloudflare-runtime/core").Runtime | import("@alchemy.run/cloudflare-runtime/core/bindings/secrets-store").SecretsStore | import("@alchemy.run/cloudflare-runtime/core/bindings/send-email").SendEmail | import("@alchemy.run/cloudflare-runtime/core/bindings/stream").Stream | import("@alchemy.run/cloudflare-runtime/core/proxy/WorkerProxy").WorkerProxy | import("@alchemy.run/cloudflare-runtime/core/bindings/workflows").Workflows, import("effect/Config").ConfigError | import("@alchemy.run/cloudflare-runtime/core").ConfigError | import("effect/PlatformError").PlatformError | import("@alchemy.run/cloudflare-runtime/core").SystemError, AlchemyContext | import("effect/process/ChildProcessSpawner").ChildProcessSpawner | CloudflareEnvironment | import("@distilled.cloud/cloudflare").Credentials | import("effect/FileSystem").FileSystem | import("effect/http/HttpClient").HttpClient | Path.Path>;
+ /** Sanitize an id into a workerd instance-name-safe suffix. */
+ export declare const gatewayName: (prefix: string, id: string) => string;
+ /**
+diff --git a/lib/Cloudflare/LocalRuntime.d.ts b/lib/Cloudflare/LocalRuntime.d.ts
+--- a/lib/Cloudflare/LocalRuntime.d.ts
++++ b/lib/Cloudflare/LocalRuntime.d.ts
+@@ -46,7 +46,7 @@
+  * per stack build (a fresh build gets a fresh instance via its own memo
+  * map; the layer blueprint itself is immutable).
+  */
+-export declare const localRuntimeServices: () => Layer.Layer<import("@alchemy.run/cloudflare-runtime/core/bindings/analytics-engine").AnalyticsEngine | import("@alchemy.run/cloudflare-runtime/core/bindings/assets/Assets").Assets | import("@alchemy.run/cloudflare-runtime/core/bindings/browser").Browser | import("@alchemy.run/cloudflare-runtime/core/bindings/cache").Cache | import("@alchemy.run/cloudflare-runtime/core/bindings/d1").D1 | import("@alchemy.run/cloudflare-runtime/core/bindings/dispatch-namespace").DispatchNamespace | import("@alchemy.run/cloudflare-runtime/core/bindings/hyperdrive").Hyperdrive | import("@alchemy.run/cloudflare-runtime/core/bindings/images").Images | import("@alchemy.run/cloudflare-runtime/core/bindings/kv-namespace").KvNamespace | LocalRuntimeState | import("@alchemy.run/cloudflare-runtime/core/globals/Loopback").Loopback | import("@alchemy.run/cloudflare-runtime/core/bindings/queue").Queue | import("@alchemy.run/cloudflare-runtime/core/bindings/r2-bucket").R2Bucket | import("@alchemy.run/cloudflare-runtime/core/bindings/rate-limit").RateLimit | import("@alchemy.run/cloudflare-runtime/core/registry/RegistryProxy").RegistryProxy | import("@alchemy.run/cloudflare-runtime/core/remote-bindings/RemoteBindings").RemoteBindings | import("@alchemy.run/cloudflare-runtime/core").Runtime | import("@alchemy.run/cloudflare-runtime/core/bindings/secrets-store").SecretsStore | import("@alchemy.run/cloudflare-runtime/core/bindings/send-email").SendEmail | import("@alchemy.run/cloudflare-runtime/core/bindings/stream").Stream | import("@alchemy.run/cloudflare-runtime/core/proxy/WorkerProxy").WorkerProxy | import("@alchemy.run/cloudflare-runtime/core/bindings/workflows").Workflows, import("effect/Config").ConfigError | import("@alchemy.run/cloudflare-runtime/core").ConfigError | import("effect/PlatformError").PlatformError | import("@alchemy.run/cloudflare-runtime/core").SystemError, AlchemyContext | import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner | CloudflareEnvironment | import("@distilled.cloud/cloudflare").Credentials | import("effect/FileSystem").FileSystem | import("effect/unstable/http/HttpClient").HttpClient | Path.Path>;
++export declare const localRuntimeServices: () => Layer.Layer<import("@alchemy.run/cloudflare-runtime/core/bindings/analytics-engine").AnalyticsEngine | import("@alchemy.run/cloudflare-runtime/core/bindings/assets/Assets").Assets | import("@alchemy.run/cloudflare-runtime/core/bindings/browser").Browser | import("@alchemy.run/cloudflare-runtime/core/bindings/cache").Cache | import("@alchemy.run/cloudflare-runtime/core/bindings/d1").D1 | import("@alchemy.run/cloudflare-runtime/core/bindings/dispatch-namespace").DispatchNamespace | import("@alchemy.run/cloudflare-runtime/core/bindings/hyperdrive").Hyperdrive | import("@alchemy.run/cloudflare-runtime/core/bindings/images").Images | import("@alchemy.run/cloudflare-runtime/core/bindings/kv-namespace").KvNamespace | LocalRuntimeState | import("@alchemy.run/cloudflare-runtime/core/globals/Loopback").Loopback | import("@alchemy.run/cloudflare-runtime/core/bindings/queue").Queue | import("@alchemy.run/cloudflare-runtime/core/bindings/r2-bucket").R2Bucket | import("@alchemy.run/cloudflare-runtime/core/bindings/rate-limit").RateLimit | import("@alchemy.run/cloudflare-runtime/core/registry/RegistryProxy").RegistryProxy | import("@alchemy.run/cloudflare-runtime/core/remote-bindings/RemoteBindings").RemoteBindings | import("@alchemy.run/cloudflare-runtime/core").Runtime | import("@alchemy.run/cloudflare-runtime/core/bindings/secrets-store").SecretsStore | import("@alchemy.run/cloudflare-runtime/core/bindings/send-email").SendEmail | import("@alchemy.run/cloudflare-runtime/core/bindings/stream").Stream | import("@alchemy.run/cloudflare-runtime/core/proxy/WorkerProxy").WorkerProxy | import("@alchemy.run/cloudflare-runtime/core/bindings/workflows").Workflows, import("effect/Config").ConfigError | import("@alchemy.run/cloudflare-runtime/core").ConfigError | import("effect/PlatformError").PlatformError | import("@alchemy.run/cloudflare-runtime/core").SystemError, AlchemyContext | import("effect/process/ChildProcessSpawner").ChildProcessSpawner | CloudflareEnvironment | import("@distilled.cloud/cloudflare").Credentials | import("effect/FileSystem").FileSystem | import("effect/http/HttpClient").HttpClient | Path.Path>;
+ export declare const isLocalId: (id: string | undefined) => id is string;
+ export declare const isLiveId: (id: string | undefined) => id is string;
+ export declare const generateLocalId: () => string;
+diff --git a/lib/Cloudflare/Queues/Consumer.d.ts b/lib/Cloudflare/Queues/Consumer.d.ts
+--- a/lib/Cloudflare/Queues/Consumer.d.ts
++++ b/lib/Cloudflare/Queues/Consumer.d.ts
+@@ -126,5 +126,5 @@
+ export declare const detachQueueConsumersOfScript: (accountId: string, scriptName: string) => Effect.Effect<void, queues.InvalidRequestBody | queues.InvalidRoute | queues.CloudflareOpError, queues.CloudflareOpContext>;
+ export declare const ConsumerProviderLive: () => Layer.Layer<Provider.Provider<Consumer>, never, CloudflareEnvironment | Stack | queues.CloudflareOpContext>;
+ export declare const ConsumerProviderLocal: () => Layer.Layer<Provider.Provider<Consumer>, never, import("../../AlchemyContext.ts").AlchemyContext | import("../../Artifacts.ts").ArtifactStore | CloudflareEnvironment | LocalRuntimeState | Stack | queues.CloudflareOpContext>;
+-export declare const ConsumerProvider: () => Layer.Layer<Provider.Provider<Consumer>, import("effect/Config").ConfigError | import("@alchemy.run/cloudflare-runtime/core").ConfigError | import("effect/PlatformError").PlatformError | import("@alchemy.run/cloudflare-runtime/core").SystemError, import("../../AlchemyContext.ts").AlchemyContext | import("../../Artifacts.ts").ArtifactStore | import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner | CloudflareEnvironment | import("effect/FileSystem").FileSystem | import("effect/Path").Path | Stack | queues.CloudflareOpContext>;
++export declare const ConsumerProvider: () => Layer.Layer<Provider.Provider<Consumer>, import("effect/Config").ConfigError | import("@alchemy.run/cloudflare-runtime/core").ConfigError | import("effect/PlatformError").PlatformError | import("@alchemy.run/cloudflare-runtime/core").SystemError, import("../../AlchemyContext.ts").AlchemyContext | import("../../Artifacts.ts").ArtifactStore | import("effect/process/ChildProcessSpawner").ChildProcessSpawner | CloudflareEnvironment | import("effect/FileSystem").FileSystem | import("effect/Path").Path | Stack | queues.CloudflareOpContext>;
+ //# sourceMappingURL=Consumer.d.ts.map
+\ No newline at end of file
+diff --git a/lib/Cloudflare/Queues/Queue.d.ts b/lib/Cloudflare/Queues/Queue.d.ts
+--- a/lib/Cloudflare/Queues/Queue.d.ts
++++ b/lib/Cloudflare/Queues/Queue.d.ts
+@@ -51,8 +51,8 @@
+  * ```typescript
+  * import * as Cloudflare from "alchemy/Cloudflare";
+  * import * as Effect from "effect/Effect";
+- * import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
+- * import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++ * import { HttpServerRequest } from "effect/http/HttpServerRequest";
++ * import * as HttpServerResponse from "effect/http/HttpServerResponse";
+  *
+  * export const Queue = Cloudflare.Queues.Queue("Queue");
+  *
+@@ -83,5 +83,5 @@
+ export declare const Queue: import("../../Resource.ts").ResourceClass<Queue>;
+ export declare const ProviderLive: () => Layer.Layer<Provider.Provider<Queue>, never, CloudflareEnvironment | Stack | import("../../Stage.ts").Stage | queues.CloudflareOpContext>;
+ export declare const ProviderLocal: () => Layer.Layer<Provider.Provider<Queue>, never, import("../../AlchemyContext.ts").AlchemyContext | import("../../Artifacts.ts").ArtifactStore | CloudflareEnvironment | LocalRuntimeState | Stack | import("../../Stage.ts").Stage | queues.CloudflareOpContext>;
+-export declare const QueueProvider: () => Layer.Layer<Provider.Provider<Queue>, import("effect/Config").ConfigError | import("@alchemy.run/cloudflare-runtime/core").ConfigError | import("effect/PlatformError").PlatformError | import("@alchemy.run/cloudflare-runtime/core").SystemError, import("../../AlchemyContext.ts").AlchemyContext | import("../../Artifacts.ts").ArtifactStore | import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner | CloudflareEnvironment | import("effect/FileSystem").FileSystem | import("effect/Path").Path | Stack | import("../../Stage.ts").Stage | queues.CloudflareOpContext>;
++export declare const QueueProvider: () => Layer.Layer<Provider.Provider<Queue>, import("effect/Config").ConfigError | import("@alchemy.run/cloudflare-runtime/core").ConfigError | import("effect/PlatformError").PlatformError | import("@alchemy.run/cloudflare-runtime/core").SystemError, import("../../AlchemyContext.ts").AlchemyContext | import("../../Artifacts.ts").ArtifactStore | import("effect/process/ChildProcessSpawner").ChildProcessSpawner | CloudflareEnvironment | import("effect/FileSystem").FileSystem | import("effect/Path").Path | Stack | import("../../Stage.ts").Stage | queues.CloudflareOpContext>;
+ //# sourceMappingURL=Queue.d.ts.map
+\ No newline at end of file
+diff --git a/lib/Cloudflare/Queues/Queue.js b/lib/Cloudflare/Queues/Queue.js
+--- a/lib/Cloudflare/Queues/Queue.js
++++ b/lib/Cloudflare/Queues/Queue.js
+@@ -49,8 +49,8 @@
+  * ```typescript
+  * import * as Cloudflare from "alchemy/Cloudflare";
+  * import * as Effect from "effect/Effect";
+- * import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
+- * import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++ * import { HttpServerRequest } from "effect/http/HttpServerRequest";
++ * import * as HttpServerResponse from "effect/http/HttpServerResponse";
+  *
+  * export const Queue = Cloudflare.Queues.Queue("Queue");
+  *
+diff --git a/lib/Cloudflare/SecretsStore/Secret.d.ts b/lib/Cloudflare/SecretsStore/Secret.d.ts
+--- a/lib/Cloudflare/SecretsStore/Secret.d.ts
++++ b/lib/Cloudflare/SecretsStore/Secret.d.ts
+@@ -2,7 +2,7 @@
+ import * as secretsStore from "@distilled.cloud/cloudflare/secrets-store";
+ import * as Layer from "effect/Layer";
+ import * as Redacted from "effect/Redacted";
+-import * as HttpClient from "effect/unstable/http/HttpClient";
++import * as HttpClient from "effect/http/HttpClient";
+ import * as Provider from "../../Provider.ts";
+ import { Resource } from "../../Resource.ts";
+ import { CloudflareEnvironment } from "../CloudflareEnvironment.ts";
+@@ -95,5 +95,5 @@
+  * registration.
+  */
+ export declare const SecretProviderLocal: () => Layer.Layer<Provider.Provider<Secret>, never, import("../../AlchemyContext.ts").AlchemyContext | import("../../Artifacts.ts").ArtifactStore | HttpClient.HttpClient | import("../../Stack.ts").Stack | RuntimeServices>;
+-export declare const StoreSecretProvider: () => Layer.Layer<Provider.Provider<Secret>, import("effect/Config").ConfigError | import("@alchemy.run/cloudflare-runtime/core").ConfigError | import("effect/PlatformError").PlatformError | import("@alchemy.run/cloudflare-runtime/core").SystemError, import("../../AlchemyContext.ts").AlchemyContext | import("../../Artifacts.ts").ArtifactStore | import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner | CloudflareEnvironment | import("effect/FileSystem").FileSystem | import("effect/Path").Path | import("../../Stack.ts").Stack | secretsStore.CloudflareOpContext>;
++export declare const StoreSecretProvider: () => Layer.Layer<Provider.Provider<Secret>, import("effect/Config").ConfigError | import("@alchemy.run/cloudflare-runtime/core").ConfigError | import("effect/PlatformError").PlatformError | import("@alchemy.run/cloudflare-runtime/core").SystemError, import("../../AlchemyContext.ts").AlchemyContext | import("../../Artifacts.ts").ArtifactStore | import("effect/process/ChildProcessSpawner").ChildProcessSpawner | CloudflareEnvironment | import("effect/FileSystem").FileSystem | import("effect/Path").Path | import("../../Stack.ts").Stack | secretsStore.CloudflareOpContext>;
+ //# sourceMappingURL=Secret.d.ts.map
+\ No newline at end of file
+diff --git a/lib/Cloudflare/SecretsStore/Secret.js b/lib/Cloudflare/SecretsStore/Secret.js
+--- a/lib/Cloudflare/SecretsStore/Secret.js
++++ b/lib/Cloudflare/SecretsStore/Secret.js
+@@ -6,7 +6,7 @@
+ import * as Redacted from "effect/Redacted";
+ import * as Schedule from "effect/Schedule";
+ import * as Stream from "effect/Stream";
+-import * as HttpClient from "effect/unstable/http/HttpClient";
++import * as HttpClient from "effect/http/HttpClient";
+ import { Unowned } from "../../AdoptPolicy.js";
+ import { isResolved } from "../../Diff.js";
+ import * as ProviderLayer from "../../Local/ProviderLayer.js";
+diff --git a/lib/Cloudflare/Workers/AI.d.ts b/lib/Cloudflare/Workers/AI.d.ts
+--- a/lib/Cloudflare/Workers/AI.d.ts
++++ b/lib/Cloudflare/Workers/AI.d.ts
+@@ -1,6 +1,6 @@
+ import type * as Effect from "effect/Effect";
+ import type * as Layer from "effect/Layer";
+-import type { LanguageModel } from "effect/unstable/ai/LanguageModel";
++import type { LanguageModel } from "effect/ai/LanguageModel";
+ import type { RuntimeContext } from "../../RuntimeContext.ts";
+ import type { LanguageModelOptions } from "../AI/LanguageModel.ts";
+ import type { AIBinding } from "./AIBinding.ts";
+@@ -110,7 +110,7 @@
+  * Effect-native client for a Cloudflare Workers AI binding. Wraps the runtime
+  * `Ai` handle so each operation returns an Effect tagged with
+  * {@link WorkersAIError}, and provides a `model(options)` factory that
+- * produces an `effect/unstable/ai` `LanguageModel` `Layer`.
++ * produces an `effect/ai` `LanguageModel` `Layer`.
+  */
+ export interface AIClient {
+     /**
+@@ -128,7 +128,7 @@
+      */
+     models(params?: AiModelsSearchParams): Effect.Effect<AiModelsSearchObject[], WorkersAIError, RuntimeContext>;
+     /**
+-     * Provide an `effect/unstable/ai` `LanguageModel` layer backed by this
++     * Provide an `effect/ai` `LanguageModel` layer backed by this
+      * binding and the given Workers AI model.
+      */
+     model(options: Omit<LanguageModelOptions, "client">): Layer.Layer<LanguageModel, never, RuntimeContext>;
+diff --git a/lib/Cloudflare/Workers/Assets.d.ts b/lib/Cloudflare/Workers/Assets.d.ts
+--- a/lib/Cloudflare/Workers/Assets.d.ts
++++ b/lib/Cloudflare/Workers/Assets.d.ts
+@@ -199,6 +199,6 @@
+ }, AssetTooLargeError | PlatformError | TooManyAssetsError, FileSystem.FileSystem | Path.Path>;
+ export declare const uploadAssets: (accountId: string, workerName: string, assets: AssetReadResult, args_3: ScopedPlanStatusSession) => Effect.Effect<{
+     jwt: string;
+-}, AssetNotFoundError | AssetUploadSessionError | import("@distilled.cloud/axiom").BadGateway | import("@distilled.cloud/cloudflare").CloudflareError | import("@distilled.cloud/cloudflare").CloudflareHttpError | import("@distilled.cloud/cloudflare").CloudflareParseError | import("@distilled.cloud/cloudflare").CloudflareRateLimited | import("@distilled.cloud/axiom").ConfigError | FailedToReadAssetError | import("@distilled.cloud/axiom").GatewayTimeout | import("effect/unstable/http/HttpClientError").HttpClientError | import("@distilled.cloud/axiom").InternalServerError | import("@distilled.cloud/cloudflare").InvalidRoute | workers.InvalidRoute | import("@distilled.cloud/cloudflare").OAuthRefreshError | import("@distilled.cloud/axiom").ServiceUnavailable | import("@distilled.cloud/axiom").TooManyRequests | import("@distilled.cloud/axiom").Unauthorized | import("@distilled.cloud/cloudflare").UnknownCloudflareError, FileSystem.FileSystem | Path.Path | workers.CloudflareOpContext>;
++}, AssetNotFoundError | AssetUploadSessionError | import("@distilled.cloud/axiom").BadGateway | import("@distilled.cloud/cloudflare").CloudflareError | import("@distilled.cloud/cloudflare").CloudflareHttpError | import("@distilled.cloud/cloudflare").CloudflareParseError | import("@distilled.cloud/cloudflare").CloudflareRateLimited | import("@distilled.cloud/axiom").ConfigError | FailedToReadAssetError | import("@distilled.cloud/axiom").GatewayTimeout | import("effect/http/HttpClientError").HttpClientError | import("@distilled.cloud/axiom").InternalServerError | import("@distilled.cloud/cloudflare").InvalidRoute | workers.InvalidRoute | import("@distilled.cloud/cloudflare").OAuthRefreshError | import("@distilled.cloud/axiom").ServiceUnavailable | import("@distilled.cloud/axiom").TooManyRequests | import("@distilled.cloud/axiom").Unauthorized | import("@distilled.cloud/cloudflare").UnknownCloudflareError, FileSystem.FileSystem | Path.Path | workers.CloudflareOpContext>;
+ export {};
+ //# sourceMappingURL=Assets.d.ts.map
+\ No newline at end of file
+diff --git a/lib/Cloudflare/Workers/DurableObject.d.ts b/lib/Cloudflare/Workers/DurableObject.d.ts
+--- a/lib/Cloudflare/Workers/DurableObject.d.ts
++++ b/lib/Cloudflare/Workers/DurableObject.d.ts
+@@ -3,9 +3,9 @@
+ import * as Effect from "effect/Effect";
+ import * as Layer from "effect/Layer";
+ import type { Scope } from "effect/Scope";
+-import type { HttpServerError } from "effect/unstable/http/HttpServerError";
+-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++import type { HttpServerError } from "effect/http/HttpServerError";
++import * as HttpServerRequest from "effect/http/HttpServerRequest";
++import * as HttpServerResponse from "effect/http/HttpServerResponse";
+ import type { Dependencies } from "../../Dependencies.ts";
+ import type { HttpEffect } from "../../Http.ts";
+ import type { Input } from "../../Input.ts";
+diff --git a/lib/Cloudflare/Workers/DurableObject.js b/lib/Cloudflare/Workers/DurableObject.js
+--- a/lib/Cloudflare/Workers/DurableObject.js
++++ b/lib/Cloudflare/Workers/DurableObject.js
+@@ -1,8 +1,8 @@
+ import * as Context from "effect/Context";
+ import * as Effect from "effect/Effect";
+ import * as Layer from "effect/Layer";
+-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++import * as HttpServerRequest from "effect/http/HttpServerRequest";
++import * as HttpServerResponse from "effect/http/HttpServerResponse";
+ import * as Output from "../../Output.js";
+ import { ALCHEMY_PHASE } from "../../Phase.js";
+ import { effectClass, taggedFunction } from "../../Util/effect.js";
+diff --git a/lib/Cloudflare/Workers/HttpServer.js b/lib/Cloudflare/Workers/HttpServer.js
+--- a/lib/Cloudflare/Workers/HttpServer.js
++++ b/lib/Cloudflare/Workers/HttpServer.js
+@@ -2,9 +2,9 @@
+ import * as Effect from "effect/Effect";
+ import * as Layer from "effect/Layer";
+ import * as Option from "effect/Option";
+-import * as EffectHttp from "effect/unstable/http/HttpEffect";
+-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++import * as EffectHttp from "effect/http/HttpEffect";
++import * as HttpServerRequest from "effect/http/HttpServerRequest";
++import * as HttpServerResponse from "effect/http/HttpServerResponse";
+ import * as Http from "../../Http.js";
+ import { Request } from "./Request.js";
+ import { isWorkerEvent } from "./Worker.js";
+diff --git a/lib/Cloudflare/Workers/Rpc.d.ts b/lib/Cloudflare/Workers/Rpc.d.ts
+--- a/lib/Cloudflare/Workers/Rpc.d.ts
++++ b/lib/Cloudflare/Workers/Rpc.d.ts
+@@ -1,8 +1,8 @@
+ import type * as cf from "@cloudflare/workers-types";
+ import * as Effect from "effect/Effect";
+ import * as Layer from "effect/Layer";
+-import { RpcClient, RpcSerialization, type Rpc, type RpcGroup } from "effect/unstable/rpc";
+-import type * as RpcClientError from "effect/unstable/rpc/RpcClientError";
++import { RpcClient, RpcSerialization, type Rpc, type RpcGroup } from "effect/rpc";
++import type * as RpcClientError from "effect/rpc/RpcClientError";
+ export * from "../../Rpc.ts";
+ /**
+  * Wrap a Cloudflare service-binding stub (or an `Effect` that resolves
+diff --git a/lib/Cloudflare/Workers/Rpc.js b/lib/Cloudflare/Workers/Rpc.js
+--- a/lib/Cloudflare/Workers/Rpc.js
++++ b/lib/Cloudflare/Workers/Rpc.js
+@@ -1,7 +1,7 @@
+ import * as Effect from "effect/Effect";
+ import * as Layer from "effect/Layer";
+-import * as HttpClient from "effect/unstable/http/HttpClient";
+-import { RpcClient, RpcSerialization, } from "effect/unstable/rpc";
++import * as HttpClient from "effect/http/HttpClient";
++import { RpcClient, RpcSerialization, } from "effect/rpc";
+ import { asEffectOrStream, decodeRpcResult, RpcCallError } from "../../Rpc.js";
+ import { isYieldableEffect } from "../../Util/effect.js";
+ import { fromCloudflareFetcher } from "../Fetcher.js";
+diff --git a/lib/Cloudflare/Workers/Source.d.ts b/lib/Cloudflare/Workers/Source.d.ts
+--- a/lib/Cloudflare/Workers/Source.d.ts
++++ b/lib/Cloudflare/Workers/Source.d.ts
+@@ -6,7 +6,7 @@
+ import type { PlatformError } from "effect/PlatformError";
+ import type * as Scope from "effect/Scope";
+ import type * as Stream from "effect/Stream";
+-import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner";
++import type { ChildProcessSpawner } from "effect/process/ChildProcessSpawner";
+ import type { Artifacts } from "../../Artifacts.ts";
+ import type * as Bundle from "../../Bundle/Bundle.ts";
+ import type { WorkflowExport } from "../Workflows/Workflow.ts";
+diff --git a/lib/Cloudflare/Workers/Sources/Python.d.ts b/lib/Cloudflare/Workers/Sources/Python.d.ts
+--- a/lib/Cloudflare/Workers/Sources/Python.d.ts
++++ b/lib/Cloudflare/Workers/Sources/Python.d.ts
+@@ -66,14 +66,14 @@
+  *    Wrangler's vendored-module layout, which both the upload API and
+  *    workerd resolve at runtime.
+  */
+-export declare const readPythonWorkerBundle: (options: PythonWorkerBundleOptions) => Effect.Effect<Bundle.BundleOutput, Bundle.BundleError, import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner | FileSystem.FileSystem | import("effect/Scope").Scope>;
++export declare const readPythonWorkerBundle: (options: PythonWorkerBundleOptions) => Effect.Effect<Bundle.BundleOutput, Bundle.BundleError, import("effect/process/ChildProcessSpawner").ChildProcessSpawner | FileSystem.FileSystem | import("effect/Scope").Scope>;
+ /**
+  * Watch a Python Worker for changes: emits the initial build, then
+  * rebuilds whenever a file under the entry's directory changes (debounced).
+  * Mirrors the {@link Bundle.BundleWatchEvent} protocol of the rolldown
+  * watcher so local dev can consume either stream interchangeably.
+  */
+-export declare const watchPythonWorkerBundle: (options: PythonWorkerBundleOptions) => Stream.Stream<Bundle.BundleWatchEvent, never, import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner | FileSystem.FileSystem | import("effect/Scope").Scope>;
++export declare const watchPythonWorkerBundle: (options: PythonWorkerBundleOptions) => Stream.Stream<Bundle.BundleWatchEvent, never, import("effect/process/ChildProcessSpawner").ChildProcessSpawner | FileSystem.FileSystem | import("effect/Scope").Scope>;
+ /**
+  * Source provider for Python workers (`.py` entry): no bundling — the
+  * entry plus sibling `.py` files upload as Python modules with
+diff --git a/lib/Cloudflare/Workers/Sources/Python.js b/lib/Cloudflare/Workers/Sources/Python.js
+--- a/lib/Cloudflare/Workers/Sources/Python.js
++++ b/lib/Cloudflare/Workers/Sources/Python.js
+@@ -1,7 +1,7 @@
+ import * as Effect from "effect/Effect";
+ import * as FileSystem from "effect/FileSystem";
+ import * as Stream from "effect/Stream";
+-import * as ChildProcess from "effect/unstable/process/ChildProcess";
++import * as ChildProcess from "effect/process/ChildProcess";
+ import fg from "fast-glob";
+ import path from "pathe";
+ import * as Artifacts from "../../../Artifacts.js";
+diff --git a/lib/Cloudflare/Workers/WebSocket.d.ts b/lib/Cloudflare/Workers/WebSocket.d.ts
+--- a/lib/Cloudflare/Workers/WebSocket.d.ts
++++ b/lib/Cloudflare/Workers/WebSocket.d.ts
+@@ -1,6 +1,6 @@
+ import type * as cf from "@cloudflare/workers-types";
+ import * as Effect from "effect/Effect";
+-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++import * as HttpServerResponse from "effect/http/HttpServerResponse";
+ import { DurableObjectState } from "./DurableObjectState.ts";
+ export type RawWebSocket = cf.WebSocket;
+ export interface WebSocket {
+diff --git a/lib/Cloudflare/Workers/WebSocket.js b/lib/Cloudflare/Workers/WebSocket.js
+--- a/lib/Cloudflare/Workers/WebSocket.js
++++ b/lib/Cloudflare/Workers/WebSocket.js
+@@ -1,6 +1,6 @@
+ import * as Effect from "effect/Effect";
+-import * as HttpBody from "effect/unstable/http/HttpBody";
+-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++import * as HttpBody from "effect/http/HttpBody";
++import * as HttpServerResponse from "effect/http/HttpServerResponse";
+ import { DurableObjectState } from "./DurableObjectState.js";
+ export const fromWebSocket = (ws) => ({
+     ws,
+diff --git a/lib/Cloudflare/Workers/WorkerLoader.d.ts b/lib/Cloudflare/Workers/WorkerLoader.d.ts
+--- a/lib/Cloudflare/Workers/WorkerLoader.d.ts
++++ b/lib/Cloudflare/Workers/WorkerLoader.d.ts
+@@ -79,9 +79,9 @@
+  * ```typescript
+  * import * as Cloudflare from "alchemy/Cloudflare";
+  * import * as Effect from "effect/Effect";
+- * import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
+- * import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+- * import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
++ * import { HttpServerRequest } from "effect/http/HttpServerRequest";
++ * import * as HttpServerResponse from "effect/http/HttpServerResponse";
++ * import * as HttpClientRequest from "effect/http/HttpClientRequest";
+  *
+  * export default class EvalWorker extends Cloudflare.Worker<EvalWorker>()(
+  *   "EvalWorker",
+diff --git a/lib/Cloudflare/Workers/WorkerLoader.js b/lib/Cloudflare/Workers/WorkerLoader.js
+--- a/lib/Cloudflare/Workers/WorkerLoader.js
++++ b/lib/Cloudflare/Workers/WorkerLoader.js
+@@ -39,9 +39,9 @@
+  * ```typescript
+  * import * as Cloudflare from "alchemy/Cloudflare";
+  * import * as Effect from "effect/Effect";
+- * import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
+- * import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+- * import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
++ * import { HttpServerRequest } from "effect/http/HttpServerRequest";
++ * import * as HttpServerResponse from "effect/http/HttpServerResponse";
++ * import * as HttpClientRequest from "effect/http/HttpClientRequest";
+  *
+  * export default class EvalWorker extends Cloudflare.Worker<EvalWorker>()(
+  *   "EvalWorker",
+diff --git a/lib/Cloudflare/Zone/lookup.d.ts b/lib/Cloudflare/Zone/lookup.d.ts
+--- a/lib/Cloudflare/Zone/lookup.d.ts
++++ b/lib/Cloudflare/Zone/lookup.d.ts
+@@ -1,7 +1,7 @@
+ import { Credentials } from "@distilled.cloud/cloudflare/Credentials";
+ import * as zones from "@distilled.cloud/cloudflare/zones";
+ import * as Effect from "effect/Effect";
+-import type * as HttpClient from "effect/unstable/http/HttpClient";
++import type * as HttpClient from "effect/http/HttpClient";
+ /**
+  * Reference to an existing Cloudflare Zone. Accepts:
+  *   - a zone id (32 hex characters),
+diff --git a/lib/Http.d.ts b/lib/Http.d.ts
+--- a/lib/Http.d.ts
++++ b/lib/Http.d.ts
+@@ -3,10 +3,10 @@
+ import * as Effect from "effect/Effect";
+ import * as Layer from "effect/Layer";
+ import type { Scope } from "effect/Scope";
+-import type { HttpBodyError } from "effect/unstable/http/HttpBody";
+-import { type HttpServerError } from "effect/unstable/http/HttpServerError";
+-import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
+-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++import type { HttpBodyError } from "effect/http/HttpBody";
++import { type HttpServerError } from "effect/http/HttpServerError";
++import { HttpServerRequest } from "effect/http/HttpServerRequest";
++import * as HttpServerResponse from "effect/http/HttpServerResponse";
+ export type HttpEffect<Req = never> = Effect.Effect<HttpServerResponse.HttpServerResponse, HttpServerError | HttpBodyError, HttpServerRequest | Scope | Req>;
+ /**
+  * `effect`'s HttpEffect brands a request scope as "ejected" when ownership
+diff --git a/lib/Http.js b/lib/Http.js
+--- a/lib/Http.js
++++ b/lib/Http.js
+@@ -5,9 +5,9 @@
+ import * as ErrorReporter from "effect/ErrorReporter";
+ import * as Layer from "effect/Layer";
+ import * as Option from "effect/Option";
+-import { causeResponse, } from "effect/unstable/http/HttpServerError";
+-import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
+-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++import { causeResponse, } from "effect/http/HttpServerError";
++import { HttpServerRequest } from "effect/http/HttpServerRequest";
++import * as HttpServerResponse from "effect/http/HttpServerResponse";
+ /**
+  * `effect`'s HttpEffect brands a request scope as "ejected" when ownership
+  * is transferred to a consumer that outlives the handler's return — a
+@@ -61,7 +61,7 @@
+ };
+ export const resolvePort = (options) => options?.port !== undefined
+     ? Effect.succeed(options.port)
+-    : Config.number("PORT").pipe(Config.withDefault(3000));
++    : Config.Number("PORT").pipe(Config.withDefault(3000));
+ export const BunHttpServer = (serverOptions) => Layer.effect(HttpServer, Effect.gen(function* () {
+     const BunHttpServerPlatform = yield* Effect.promise(() => import("@effect/platform-bun/BunHttpServer"));
+     return {
+diff --git a/lib/Local/RpcProviderProxy.d.ts b/lib/Local/RpcProviderProxy.d.ts
+--- a/lib/Local/RpcProviderProxy.d.ts
++++ b/lib/Local/RpcProviderProxy.d.ts
+@@ -2,7 +2,7 @@
+ import * as Context from "effect/Context";
+ import * as Effect from "effect/Effect";
+ import * as Layer from "effect/Layer";
+-import * as HttpClient from "effect/unstable/http/HttpClient";
++import * as HttpClient from "effect/http/HttpClient";
+ import { AlchemyContext } from "../AlchemyContext.ts";
+ import type { ProviderService } from "../Provider.ts";
+ import type { ResourceLike } from "../Resource.ts";
+diff --git a/lib/Local/RpcProviderProxy.js b/lib/Local/RpcProviderProxy.js
+--- a/lib/Local/RpcProviderProxy.js
++++ b/lib/Local/RpcProviderProxy.js
+@@ -4,8 +4,8 @@
+ import * as Context from "effect/Context";
+ import * as Effect from "effect/Effect";
+ import * as Layer from "effect/Layer";
+-import * as HttpBody from "effect/unstable/http/HttpBody";
+-import * as HttpClient from "effect/unstable/http/HttpClient";
++import * as HttpBody from "effect/http/HttpBody";
++import * as HttpClient from "effect/http/HttpClient";
+ import { AlchemyContext } from "../AlchemyContext.js";
+ import { Stack } from "../Stack.js";
+ import { unwrapRpcHandlers } from "./RpcSerialization.js";
+@@ -47,5 +47,5 @@
+     });
+ });
+ export const layer = (url) => Layer.effect(RpcProviderProxy, make(url));
+-export const fromEnv = () => Layer.effect(RpcProviderProxy, Config.string(SPAWNER_URL_ENV_KEY).pipe(Effect.flatMap(make)));
++export const fromEnv = () => Layer.effect(RpcProviderProxy, Config.String(SPAWNER_URL_ENV_KEY).pipe(Effect.flatMap(make)));
+ //# sourceMappingURL=RpcProviderProxy.js.map
+\ No newline at end of file
+diff --git a/lib/Phase.js b/lib/Phase.js
+--- a/lib/Phase.js
++++ b/lib/Phase.js
+@@ -1,6 +1,6 @@
+ import * as Config from "effect/Config";
+ import * as Effect from "effect/Effect";
+-export const ALCHEMY_PHASE = Config.string("ALCHEMY_PHASE").pipe(Config.withDefault("plan"), Config.mapOrFail((value) => {
++export const ALCHEMY_PHASE = Config.String("ALCHEMY_PHASE").pipe(Config.withDefault("plan"), Config.mapEffect((value) => {
+     if (value !== "plan" && value !== "runtime") {
+         return Effect.die(new Error(`Invalid ALCHEMY_PHASE: ${value}`));
+     }
+@@ -27,5 +27,5 @@
+  * });
+  * ```
+  */
+-export const ALCHEMY_DEV = Config.boolean("ALCHEMY_DEV").pipe(Config.withDefault(false));
++export const ALCHEMY_DEV = Config.Boolean("ALCHEMY_DEV").pipe(Config.withDefault(false));
+ //# sourceMappingURL=Phase.js.map
+\ No newline at end of file
+diff --git a/lib/Platform.d.ts b/lib/Platform.d.ts
+--- a/lib/Platform.d.ts
++++ b/lib/Platform.d.ts
+@@ -5,8 +5,8 @@
+ import * as Layer from "effect/Layer";
+ import { Scope } from "effect/Scope";
+ import type * as Stream from "effect/Stream";
+-import type { HttpClient } from "effect/unstable/http/HttpClient";
+-import type { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
++import type { HttpClient } from "effect/http/HttpClient";
++import type { HttpServerRequest } from "effect/http/HttpServerRequest";
+ import type { Dependencies } from "./Dependencies.ts";
+ import type { HttpEffect } from "./Http.ts";
+ import type { InputProps } from "./Input.ts";
+diff --git a/lib/Platform.js b/lib/Platform.js
+--- a/lib/Platform.js
++++ b/lib/Platform.js
+@@ -8,7 +8,7 @@
+ import * as Option from "effect/Option";
+ import * as Redacted from "effect/Redacted";
+ import { Scope } from "effect/Scope";
+-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++import * as HttpServerResponse from "effect/http/HttpServerResponse";
+ import * as Output from "./Output.js";
+ import { ALCHEMY_PHASE } from "./Phase.js";
+ import { Resource } from "./Resource.js";
+diff --git a/lib/Rpc.d.ts b/lib/Rpc.d.ts
+--- a/lib/Rpc.d.ts
++++ b/lib/Rpc.d.ts
+@@ -1,9 +1,9 @@
+ import * as Cause from "effect/Cause";
+ import * as Effect from "effect/Effect";
+ import * as Stream from "effect/Stream";
+-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+-import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
+-import * as Socket from "effect/unstable/socket/Socket";
++import * as HttpClientRequest from "effect/http/HttpClientRequest";
++import type * as HttpClientResponse from "effect/http/HttpClientResponse";
++import * as Socket from "effect/socket/Socket";
+ import type { HttpEffect } from "./Http.ts";
+ export type Rpc<Shape> = {
+     "~alchemy/rpc": Shape;
+diff --git a/lib/Rpc.js b/lib/Rpc.js
+--- a/lib/Rpc.js
++++ b/lib/Rpc.js
+@@ -5,10 +5,10 @@
+ import * as Result from "effect/Result";
+ import * as Sink from "effect/Sink";
+ import * as Stream from "effect/Stream";
+-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+-import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
+-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+-import * as Socket from "effect/unstable/socket/Socket";
++import * as HttpClientRequest from "effect/http/HttpClientRequest";
++import { HttpServerRequest } from "effect/http/HttpServerRequest";
++import * as HttpServerResponse from "effect/http/HttpServerResponse";
++import * as Socket from "effect/socket/Socket";
+ // ---------------------------------------------------------------------------
+ // Wire protocol shared by every transport (native Cloudflare JSRPC and the
+ // plain-`fetch` transport below). The marker tags travel as structured-clone
+diff --git a/lib/Server/Process.d.ts b/lib/Server/Process.d.ts
+--- a/lib/Server/Process.d.ts
++++ b/lib/Server/Process.d.ts
+@@ -4,7 +4,7 @@
+ import type { Path } from "effect/Path";
+ import type { Stdio } from "effect/Stdio";
+ import type { Terminal } from "effect/Terminal";
+-import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner";
++import type { ChildProcessSpawner } from "effect/process/ChildProcessSpawner";
+ import type { HttpEffect } from "../Http.ts";
+ import { type BaseRuntimeContext } from "../RuntimeContext.ts";
+ export type ProcessServices = ChildProcessSpawner | FileSystem | Path | Stdio | Terminal;
+diff --git a/lib/Stack.d.ts b/lib/Stack.d.ts
+--- a/lib/Stack.d.ts
++++ b/lib/Stack.d.ts
+@@ -5,8 +5,8 @@
+ import * as Layer from "effect/Layer";
+ import { Path } from "effect/Path";
+ import * as Scope from "effect/Scope";
+-import type { HttpClient } from "effect/unstable/http/HttpClient";
+-import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner";
++import type { HttpClient } from "effect/http/HttpClient";
++import type { ChildProcessSpawner } from "effect/process/ChildProcessSpawner";
+ import type { ActionLike } from "./Action.ts";
+ import { AlchemyContext } from "./AlchemyContext.ts";
+ import { type ArtifactStore } from "./Artifacts.ts";
+diff --git a/lib/Stack.js b/lib/Stack.js
+--- a/lib/Stack.js
++++ b/lib/Stack.js
+@@ -7,7 +7,7 @@
+ import * as Option from "effect/Option";
+ import { Path } from "effect/Path";
+ import * as Scope from "effect/Scope";
+-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
++import * as FetchHttpClient from "effect/http/FetchHttpClient";
+ import { AlchemyContext, AlchemyContextLive } from "./AlchemyContext.js";
+ import { provideFreshArtifactStore } from "./Artifacts.js";
+ import { AuthProviders } from "./Auth/AuthProvider.js";
+diff --git a/lib/Util/Clank.d.ts b/lib/Util/Clank.d.ts
+--- a/lib/Util/Clank.d.ts
++++ b/lib/Util/Clank.d.ts
+@@ -40,6 +40,6 @@
+  * `&` in OAuth URLs as a command separator, and `explorer.exe` treats
+  * its arg as a path.
+  */
+-export declare const openUrl: (url: string) => Effect.Effect<void, import("effect/PlatformError").PlatformError, import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner>;
++export declare const openUrl: (url: string) => Effect.Effect<void, import("effect/PlatformError").PlatformError, import("effect/process/ChildProcessSpawner").ChildProcessSpawner>;
+ export {};
+ //# sourceMappingURL=Clank.d.ts.map
+\ No newline at end of file
+diff --git a/lib/Util/Clank.js b/lib/Util/Clank.js
+--- a/lib/Util/Clank.js
++++ b/lib/Util/Clank.js
+@@ -1,7 +1,7 @@
+ import * as p from "@clack/prompts";
+ import * as Data from "effect/Data";
+ import * as Effect from "effect/Effect";
+-import { ChildProcess } from "effect/unstable/process";
++import { ChildProcess } from "effect/process";
+ export class PromptCancelled extends Data.TaggedError("PromptCancelled") {
+ }
+ export const retryIfCancelled = Effect.retry({
+diff --git a/lib/Util/PlatformServices.d.ts b/lib/Util/PlatformServices.d.ts
+--- a/lib/Util/PlatformServices.d.ts
++++ b/lib/Util/PlatformServices.d.ts
+@@ -5,10 +5,10 @@
+ import { type Teardown } from "effect/Runtime";
+ import type { Stdio } from "effect/Stdio";
+ import type { Terminal } from "effect/Terminal";
+-import type { HttpServer } from "effect/unstable/http/HttpServer";
+-import type { ServeError } from "effect/unstable/http/HttpServerError";
+-import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner";
+-import type { WebSocketConstructor } from "effect/unstable/socket/Socket";
++import type { HttpServer } from "effect/http/HttpServer";
++import type { ServeError } from "effect/http/HttpServerError";
++import type { ChildProcessSpawner } from "effect/process/ChildProcessSpawner";
++import type { WebSocketConstructor } from "effect/socket/Socket";
+ /**
+  * Constructs a layer with different implementations for Bun and Node.
+  */
+diff --git a/lib/Util/exec.d.ts b/lib/Util/exec.d.ts
+--- a/lib/Util/exec.d.ts
++++ b/lib/Util/exec.d.ts
+@@ -1,8 +1,8 @@
+ import * as Effect from "effect/Effect";
+-import type { ChildProcess } from "effect/unstable/process";
++import type { ChildProcess } from "effect/process";
+ export declare const exec: (command: ChildProcess.Command) => Effect.Effect<{
+-    exitCode: import("effect/unstable/process/ChildProcessSpawner").ExitCode;
++    exitCode: import("effect/process/ChildProcessSpawner").ExitCode;
+     stdout: string;
+     stderr: string;
+-}, import("effect/PlatformError").PlatformError, import("effect/unstable/process/ChildProcessSpawner").ChildProcessSpawner | import("effect/Scope").Scope>;
++}, import("effect/PlatformError").PlatformError, import("effect/process/ChildProcessSpawner").ChildProcessSpawner | import("effect/Scope").Scope>;
+ //# sourceMappingURL=exec.d.ts.map
+\ No newline at end of file
+diff --git a/src/Auth/Env.ts b/src/Auth/Env.ts
+--- a/src/Auth/Env.ts
++++ b/src/Auth/Env.ts
+@@ -4,20 +4,20 @@
+ import { AuthError } from "./AuthProvider.ts";
+ 
+ export const getEnv = (key: string) =>
+-  Config.string(key).pipe(Effect.orElseSucceed(() => undefined));
++  Config.String(key).pipe(Effect.orElseSucceed(() => undefined));
+ 
+ export const getEnvRequired = (key: string) =>
+-  Config.string(key).pipe(
++  Config.String(key).pipe(
+     Effect.catch(() =>
+       Effect.fail(new AuthError({ message: `Missing required env: ${key}` })),
+     ),
+   );
+ 
+ export const getEnvRedacted = (key: string) =>
+-  Config.redacted(key).pipe(Effect.orElseSucceed(() => undefined));
++  Config.Redacted(key).pipe(Effect.orElseSucceed(() => undefined));
+ 
+ export const getEnvRedactedRequired = (key: string) =>
+-  Config.redacted(key).pipe(
++  Config.Redacted(key).pipe(
+     Effect.catch(() =>
+       Effect.fail(new AuthError({ message: `Missing required env: ${key}` })),
+     ),
+diff --git a/src/Auth/Profile.ts b/src/Auth/Profile.ts
+--- a/src/Auth/Profile.ts
++++ b/src/Auth/Profile.ts
+@@ -19,7 +19,7 @@
+  * `fromEnvironment` layers to pick which named profile in
+  * `~/.alchemy/profiles.json` to use. Defaults to `"default"`.
+  */
+-export const ALCHEMY_PROFILE = Config.string("ALCHEMY_PROFILE").pipe(
++export const ALCHEMY_PROFILE = Config.String("ALCHEMY_PROFILE").pipe(
+   Config.withDefault("default"),
+ );
+ 
+diff --git a/src/Cloudflare/AI/Gateway.ts b/src/Cloudflare/AI/Gateway.ts
+--- a/src/Cloudflare/AI/Gateway.ts
++++ b/src/Cloudflare/AI/Gateway.ts
+@@ -310,7 +310,7 @@
+  *
+  * AI Gateway gives your application a stable gateway ID and account-scoped
+  * endpoint that can route model requests through Cloudflare. Once bound to a
+- * Worker, `aiGateway.model({...})` returns an `effect/unstable/ai`
++ * Worker, `aiGateway.model({...})` returns an `effect/ai`
+  * `LanguageModel` Layer so you use the standard `generateText` / `streamText`
+  * APIs — provider-agnostic, with caching, rate limiting, retries, and a
+  * unified request log handled by the gateway.
+@@ -392,8 +392,8 @@
+  * `AiError` to a defect (a 500); use `Effect.catchTag("AiError", …)` for typed
+  * handling instead.
+  * ```typescript
+- * import { LanguageModel } from "effect/unstable/ai";
+- * import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++ * import { LanguageModel } from "effect/ai";
++ * import * as HttpServerResponse from "effect/http/HttpServerResponse";
+  *
+  * fetch: Effect.gen(function* () {
+  *   const response = yield* LanguageModel.generateText({
+@@ -415,10 +415,10 @@
+  * `Stream.provide(languageModel)` keeps the model available for the whole
+  * stream lifetime; pipe through `Sse.encode` for an SSE response.
+  * ```typescript
+- * import { LanguageModel } from "effect/unstable/ai";
++ * import { LanguageModel } from "effect/ai";
+  * import * as Stream from "effect/Stream";
+- * import * as Sse from "effect/unstable/encoding/Sse";
+- * import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++ * import * as Sse from "effect/encoding/Sse";
++ * import * as HttpServerResponse from "effect/http/HttpServerResponse";
+  *
+  * const stream = LanguageModel.streamText({ prompt }).pipe(
+  *   Stream.provide(languageModel),
+diff --git a/src/Cloudflare/AI/SearchInstance.ts b/src/Cloudflare/AI/SearchInstance.ts
+--- a/src/Cloudflare/AI/SearchInstance.ts
++++ b/src/Cloudflare/AI/SearchInstance.ts
+@@ -483,8 +483,8 @@
+  * ```typescript
+  * import * as Cloudflare from "alchemy/Cloudflare";
+  * import * as Effect from "effect/Effect";
+- * import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
+- * import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++ * import { HttpServerRequest } from "effect/http/HttpServerRequest";
++ * import * as HttpServerResponse from "effect/http/HttpServerResponse";
+  *
+  * export default class Api extends Cloudflare.Worker<Api>()(
+  *   "api",
+diff --git a/src/Cloudflare/AI/SearchNamespace.ts b/src/Cloudflare/AI/SearchNamespace.ts
+--- a/src/Cloudflare/AI/SearchNamespace.ts
++++ b/src/Cloudflare/AI/SearchNamespace.ts
+@@ -125,8 +125,8 @@
+  * ```typescript
+  * import * as Cloudflare from "alchemy/Cloudflare";
+  * import * as Effect from "effect/Effect";
+- * import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
+- * import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++ * import { HttpServerRequest } from "effect/http/HttpServerRequest";
++ * import * as HttpServerResponse from "effect/http/HttpServerResponse";
+  *
+  * export default class Api extends Cloudflare.Worker<Api>()(
+  *   "api",
+diff --git a/src/Cloudflare/Auth/AuthProvider.ts b/src/Cloudflare/Auth/AuthProvider.ts
+--- a/src/Cloudflare/Auth/AuthProvider.ts
++++ b/src/Cloudflare/Auth/AuthProvider.ts
+@@ -6,8 +6,8 @@
+ import * as Layer from "effect/Layer";
+ import * as Match from "effect/Match";
+ import * as Redacted from "effect/Redacted";
+-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
+-import * as HttpClient from "effect/unstable/http/HttpClient";
++import * as FetchHttpClient from "effect/http/FetchHttpClient";
++import * as HttpClient from "effect/http/HttpClient";
+ import {
+   AuthError,
+   AuthProviderLayer,
+diff --git a/src/Cloudflare/CloudflareEnvironment.ts b/src/Cloudflare/CloudflareEnvironment.ts
+--- a/src/Cloudflare/CloudflareEnvironment.ts
++++ b/src/Cloudflare/CloudflareEnvironment.ts
+@@ -18,7 +18,7 @@
+   readonly kind = "Environment" as const;
+ }
+ 
+-const CLOUDFLARE_ACCOUNT_ID = Config.string("CLOUDFLARE_ACCOUNT_ID");
++const CLOUDFLARE_ACCOUNT_ID = Config.String("CLOUDFLARE_ACCOUNT_ID");
+ 
+ export const fromEnv = () =>
+   Layer.effect(
+@@ -42,7 +42,7 @@
+         CloudflareResolvedCredentials
+       >(CLOUDFLARE_AUTH_PROVIDER_NAME);
+       const profileName = yield* ALCHEMY_PROFILE;
+-      const ci = yield* Config.boolean("CI").pipe(Config.withDefault(false));
++      const ci = yield* Config.Boolean("CI").pipe(Config.withDefault(false));
+       // `loadOrConfigure` reads the persisted config under the canonical
+       // provider name (`Cloudflare`); only runs `configure` (and persists the
+       // result) if no stored config exists.
+diff --git a/src/Cloudflare/D1/CloneDatabase.ts b/src/Cloudflare/D1/CloneDatabase.ts
+--- a/src/Cloudflare/D1/CloneDatabase.ts
++++ b/src/Cloudflare/D1/CloneDatabase.ts
+@@ -1,6 +1,6 @@
+ import * as Effect from "effect/Effect";
+-import * as HttpClient from "effect/unstable/http/HttpClient";
+-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
++import * as HttpClient from "effect/http/HttpClient";
++import * as HttpClientRequest from "effect/http/HttpClientRequest";
+ import { exportDatabase } from "./ExportDatabase.ts";
+ import { importD1Database } from "./ImportDatabase.ts";
+ 
+diff --git a/src/Cloudflare/D1/Database.ts b/src/Cloudflare/D1/Database.ts
+--- a/src/Cloudflare/D1/Database.ts
++++ b/src/Cloudflare/D1/Database.ts
+@@ -4,7 +4,7 @@
+ import * as Layer from "effect/Layer";
+ import * as Option from "effect/Option";
+ import * as Stream from "effect/Stream";
+-import * as HttpClient from "effect/unstable/http/HttpClient";
++import * as HttpClient from "effect/http/HttpClient";
+ 
+ import { isResolved } from "../../Diff.ts";
+ import * as ProviderLayer from "../../Local/ProviderLayer.ts";
+diff --git a/src/Cloudflare/D1/ExportDatabase.ts b/src/Cloudflare/D1/ExportDatabase.ts
+--- a/src/Cloudflare/D1/ExportDatabase.ts
++++ b/src/Cloudflare/D1/ExportDatabase.ts
+@@ -1,7 +1,7 @@
+ import type { Credentials } from "@distilled.cloud/cloudflare/Credentials";
+ import * as d1 from "@distilled.cloud/cloudflare/d1";
+ import * as Effect from "effect/Effect";
+-import type * as HttpClient from "effect/unstable/http/HttpClient";
++import type * as HttpClient from "effect/http/HttpClient";
+ 
+ export interface ExportD1DatabaseOptions {
+   accountId: string;
+diff --git a/src/Cloudflare/D1/ImportDatabase.ts b/src/Cloudflare/D1/ImportDatabase.ts
+--- a/src/Cloudflare/D1/ImportDatabase.ts
++++ b/src/Cloudflare/D1/ImportDatabase.ts
+@@ -4,8 +4,8 @@
+ } from "@distilled.cloud/cloudflare/Credentials";
+ import * as d1 from "@distilled.cloud/cloudflare/d1";
+ import * as Effect from "effect/Effect";
+-import * as HttpClient from "effect/unstable/http/HttpClient";
+-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
++import * as HttpClient from "effect/http/HttpClient";
++import * as HttpClientRequest from "effect/http/HttpClientRequest";
+ import { md5 } from "../../Util/md5.ts";
+ 
+ export interface ImportDatabaseOptions {
+diff --git a/src/Cloudflare/Fetcher.ts b/src/Cloudflare/Fetcher.ts
+--- a/src/Cloudflare/Fetcher.ts
++++ b/src/Cloudflare/Fetcher.ts
+@@ -7,18 +7,18 @@
+ import * as Latch from "effect/Latch";
+ import * as Schedule from "effect/Schedule";
+ import * as Scope from "effect/Scope";
+-import * as HttpBody from "effect/unstable/http/HttpBody";
+-import * as HttpClient from "effect/unstable/http/HttpClient";
++import * as HttpBody from "effect/http/HttpBody";
++import * as HttpClient from "effect/http/HttpClient";
+ import {
+   HttpClientError,
+   TransportError,
+-} from "effect/unstable/http/HttpClientError";
+-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+-import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
+-import type { HttpServerError } from "effect/unstable/http/HttpServerError";
+-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+-import * as Socket from "effect/unstable/socket/Socket";
++} from "effect/http/HttpClientError";
++import * as HttpClientRequest from "effect/http/HttpClientRequest";
++import * as HttpClientResponse from "effect/http/HttpClientResponse";
++import type { HttpServerError } from "effect/http/HttpServerError";
++import * as HttpServerRequest from "effect/http/HttpServerRequest";
++import * as HttpServerResponse from "effect/http/HttpServerResponse";
++import * as Socket from "effect/socket/Socket";
+ 
+ export type SocketAddress = cf.SocketAddress;
+ 
+diff --git a/src/Cloudflare/Hyperdrive/Connection.ts b/src/Cloudflare/Hyperdrive/Connection.ts
+--- a/src/Cloudflare/Hyperdrive/Connection.ts
++++ b/src/Cloudflare/Hyperdrive/Connection.ts
+@@ -145,7 +145,7 @@
+  *     port: 5432,
+  *     database: "app",
+  *     user: "app",
+- *     password: yield* Config.redacted("DB_PASSWORD"),
++ *     password: yield* Config.Redacted("DB_PASSWORD"),
+  *   },
+  * });
+  * ```
+diff --git a/src/Cloudflare/Images/Images.ts b/src/Cloudflare/Images/Images.ts
+--- a/src/Cloudflare/Images/Images.ts
++++ b/src/Cloudflare/Images/Images.ts
+@@ -31,7 +31,7 @@
+  * @section Effect-style Worker (recommended)
+  * @example Read image format and dimensions from the request body
+  * ```typescript
+- * import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
++ * import { HttpServerRequest } from "effect/http/HttpServerRequest";
+  *
+  * Cloudflare.Worker("ImageWorker", { main: import.meta.url },
+  *   Effect.gen(function* () {
+diff --git a/src/Cloudflare/Queues/Queue.ts b/src/Cloudflare/Queues/Queue.ts
+--- a/src/Cloudflare/Queues/Queue.ts
++++ b/src/Cloudflare/Queues/Queue.ts
+@@ -79,8 +79,8 @@
+  * ```typescript
+  * import * as Cloudflare from "alchemy/Cloudflare";
+  * import * as Effect from "effect/Effect";
+- * import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
+- * import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++ * import { HttpServerRequest } from "effect/http/HttpServerRequest";
++ * import * as HttpServerResponse from "effect/http/HttpServerResponse";
+  *
+  * export const Queue = Cloudflare.Queues.Queue("Queue");
+  *
+diff --git a/src/Cloudflare/SecretsStore/Secret.ts b/src/Cloudflare/SecretsStore/Secret.ts
+--- a/src/Cloudflare/SecretsStore/Secret.ts
++++ b/src/Cloudflare/SecretsStore/Secret.ts
+@@ -7,7 +7,7 @@
+ import * as Redacted from "effect/Redacted";
+ import * as Schedule from "effect/Schedule";
+ import * as Stream from "effect/Stream";
+-import * as HttpClient from "effect/unstable/http/HttpClient";
++import * as HttpClient from "effect/http/HttpClient";
+ import { Unowned } from "../../AdoptPolicy.ts";
+ import { isResolved } from "../../Diff.ts";
+ import * as ProviderLayer from "../../Local/ProviderLayer.ts";
+diff --git a/src/Cloudflare/Workers/AI.ts b/src/Cloudflare/Workers/AI.ts
+--- a/src/Cloudflare/Workers/AI.ts
++++ b/src/Cloudflare/Workers/AI.ts
+@@ -3,7 +3,7 @@
+ import * as Data from "effect/Data";
+ import type * as Effect from "effect/Effect";
+ import type * as Layer from "effect/Layer";
+-import type { LanguageModel } from "effect/unstable/ai/LanguageModel";
++import type { LanguageModel } from "effect/ai/LanguageModel";
+ import type { RuntimeContext } from "../../RuntimeContext.ts";
+ import type { LanguageModelOptions } from "../AI/LanguageModel.ts";
+ import type { AIBinding } from "./AIBinding.ts";
+@@ -120,7 +120,7 @@
+  * Effect-native client for a Cloudflare Workers AI binding. Wraps the runtime
+  * `Ai` handle so each operation returns an Effect tagged with
+  * {@link WorkersAIError}, and provides a `model(options)` factory that
+- * produces an `effect/unstable/ai` `LanguageModel` `Layer`.
++ * produces an `effect/ai` `LanguageModel` `Layer`.
+  */
+ export interface AIClient {
+   /**
+@@ -148,7 +148,7 @@
+     params?: AiModelsSearchParams,
+   ): Effect.Effect<AiModelsSearchObject[], WorkersAIError, RuntimeContext>;
+   /**
+-   * Provide an `effect/unstable/ai` `LanguageModel` layer backed by this
++   * Provide an `effect/ai` `LanguageModel` layer backed by this
+    * binding and the given Workers AI model.
+    */
+   model(
+diff --git a/src/Cloudflare/Workers/DurableObject.ts b/src/Cloudflare/Workers/DurableObject.ts
+--- a/src/Cloudflare/Workers/DurableObject.ts
++++ b/src/Cloudflare/Workers/DurableObject.ts
+@@ -3,9 +3,9 @@
+ import * as Effect from "effect/Effect";
+ import * as Layer from "effect/Layer";
+ import type { Scope } from "effect/Scope";
+-import type { HttpServerError } from "effect/unstable/http/HttpServerError";
+-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++import type { HttpServerError } from "effect/http/HttpServerError";
++import * as HttpServerRequest from "effect/http/HttpServerRequest";
++import * as HttpServerResponse from "effect/http/HttpServerResponse";
+ import type { Dependencies } from "../../Dependencies.ts";
+ import type { HttpEffect } from "../../Http.ts";
+ import type { Input } from "../../Input.ts";
+diff --git a/src/Cloudflare/Workers/HttpServer.ts b/src/Cloudflare/Workers/HttpServer.ts
+--- a/src/Cloudflare/Workers/HttpServer.ts
++++ b/src/Cloudflare/Workers/HttpServer.ts
+@@ -3,9 +3,9 @@
+ import * as Effect from "effect/Effect";
+ import * as Layer from "effect/Layer";
+ import * as Option from "effect/Option";
+-import * as EffectHttp from "effect/unstable/http/HttpEffect";
+-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
+-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++import * as EffectHttp from "effect/http/HttpEffect";
++import * as HttpServerRequest from "effect/http/HttpServerRequest";
++import * as HttpServerResponse from "effect/http/HttpServerResponse";
+ import * as Http from "../../Http.ts";
+ import { Request } from "./Request.ts";
+ import { isWorkerEvent, type WorkerServices } from "./Worker.ts";
+diff --git a/src/Cloudflare/Workers/Rpc.ts b/src/Cloudflare/Workers/Rpc.ts
+--- a/src/Cloudflare/Workers/Rpc.ts
++++ b/src/Cloudflare/Workers/Rpc.ts
+@@ -2,14 +2,14 @@
+ 
+ import * as Effect from "effect/Effect";
+ import * as Layer from "effect/Layer";
+-import * as HttpClient from "effect/unstable/http/HttpClient";
++import * as HttpClient from "effect/http/HttpClient";
+ import {
+   RpcClient,
+   RpcSerialization,
+   type Rpc,
+   type RpcGroup,
+-} from "effect/unstable/rpc";
+-import type * as RpcClientError from "effect/unstable/rpc/RpcClientError";
++} from "effect/rpc";
++import type * as RpcClientError from "effect/rpc/RpcClientError";
+ import { asEffectOrStream, decodeRpcResult, RpcCallError } from "../../Rpc.ts";
+ import { isYieldableEffect } from "../../Util/effect.ts";
+ import { fromCloudflareFetcher } from "../Fetcher.ts";
+diff --git a/src/Cloudflare/Workers/Source.ts b/src/Cloudflare/Workers/Source.ts
+--- a/src/Cloudflare/Workers/Source.ts
++++ b/src/Cloudflare/Workers/Source.ts
+@@ -15,7 +15,7 @@
+ import type { PlatformError } from "effect/PlatformError";
+ import type * as Scope from "effect/Scope";
+ import type * as Stream from "effect/Stream";
+-import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner";
++import type { ChildProcessSpawner } from "effect/process/ChildProcessSpawner";
+ import type { Artifacts } from "../../Artifacts.ts";
+ import type * as Bundle from "../../Bundle/Bundle.ts";
+ import type { WorkflowExport } from "../Workflows/Workflow.ts";
+diff --git a/src/Cloudflare/Workers/Sources/Python.ts b/src/Cloudflare/Workers/Sources/Python.ts
+--- a/src/Cloudflare/Workers/Sources/Python.ts
++++ b/src/Cloudflare/Workers/Sources/Python.ts
+@@ -1,7 +1,7 @@
+ import * as Effect from "effect/Effect";
+ import * as FileSystem from "effect/FileSystem";
+ import * as Stream from "effect/Stream";
+-import * as ChildProcess from "effect/unstable/process/ChildProcess";
++import * as ChildProcess from "effect/process/ChildProcess";
+ import fg from "fast-glob";
+ import path from "pathe";
+ import * as Artifacts from "../../../Artifacts.ts";
+diff --git a/src/Cloudflare/Workers/WebSocket.ts b/src/Cloudflare/Workers/WebSocket.ts
+--- a/src/Cloudflare/Workers/WebSocket.ts
++++ b/src/Cloudflare/Workers/WebSocket.ts
+@@ -1,7 +1,7 @@
+ import type * as cf from "@cloudflare/workers-types";
+ import * as Effect from "effect/Effect";
+-import * as HttpBody from "effect/unstable/http/HttpBody";
+-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++import * as HttpBody from "effect/http/HttpBody";
++import * as HttpServerResponse from "effect/http/HttpServerResponse";
+ import { DurableObjectState } from "./DurableObjectState.ts";
+ 
+ export type RawWebSocket = cf.WebSocket;
+diff --git a/src/Cloudflare/Workers/WorkerLoader.ts b/src/Cloudflare/Workers/WorkerLoader.ts
+--- a/src/Cloudflare/Workers/WorkerLoader.ts
++++ b/src/Cloudflare/Workers/WorkerLoader.ts
+@@ -112,9 +112,9 @@
+  * ```typescript
+  * import * as Cloudflare from "alchemy/Cloudflare";
+  * import * as Effect from "effect/Effect";
+- * import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
+- * import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+- * import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
++ * import { HttpServerRequest } from "effect/http/HttpServerRequest";
++ * import * as HttpServerResponse from "effect/http/HttpServerResponse";
++ * import * as HttpClientRequest from "effect/http/HttpClientRequest";
+  *
+  * export default class EvalWorker extends Cloudflare.Worker<EvalWorker>()(
+  *   "EvalWorker",
+diff --git a/src/Cloudflare/Zone/lookup.ts b/src/Cloudflare/Zone/lookup.ts
+--- a/src/Cloudflare/Zone/lookup.ts
++++ b/src/Cloudflare/Zone/lookup.ts
+@@ -5,7 +5,7 @@
+ import * as zones from "@distilled.cloud/cloudflare/zones";
+ import * as Effect from "effect/Effect";
+ import * as Stream from "effect/Stream";
+-import type * as HttpClient from "effect/unstable/http/HttpClient";
++import type * as HttpClient from "effect/http/HttpClient";
+ 
+ /**
+  * Reference to an existing Cloudflare Zone. Accepts:
+diff --git a/src/Http.ts b/src/Http.ts
+--- a/src/Http.ts
++++ b/src/Http.ts
+@@ -6,13 +6,13 @@
+ import * as Layer from "effect/Layer";
+ import * as Option from "effect/Option";
+ import type { Scope } from "effect/Scope";
+-import type { HttpBodyError } from "effect/unstable/http/HttpBody";
++import type { HttpBodyError } from "effect/http/HttpBody";
+ import {
+   causeResponse,
+   type HttpServerError,
+-} from "effect/unstable/http/HttpServerError";
+-import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
+-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++} from "effect/http/HttpServerError";
++import { HttpServerRequest } from "effect/http/HttpServerRequest";
++import * as HttpServerResponse from "effect/http/HttpServerResponse";
+ 
+ export type HttpEffect<Req = never> = Effect.Effect<
+   HttpServerResponse.HttpServerResponse,
+@@ -129,7 +129,7 @@
+ export const resolvePort = (options: { port?: number } | undefined) =>
+   options?.port !== undefined
+     ? Effect.succeed(options.port)
+-    : Config.number("PORT").pipe(Config.withDefault(3000));
++    : Config.Number("PORT").pipe(Config.withDefault(3000));
+ 
+ export interface BunHttpServerOptions {
+   /**
+diff --git a/src/Local/RpcProviderProxy.ts b/src/Local/RpcProviderProxy.ts
+--- a/src/Local/RpcProviderProxy.ts
++++ b/src/Local/RpcProviderProxy.ts
+@@ -4,8 +4,8 @@
+ import * as Context from "effect/Context";
+ import * as Effect from "effect/Effect";
+ import * as Layer from "effect/Layer";
+-import * as HttpBody from "effect/unstable/http/HttpBody";
+-import * as HttpClient from "effect/unstable/http/HttpClient";
++import * as HttpBody from "effect/http/HttpBody";
++import * as HttpClient from "effect/http/HttpClient";
+ import { AlchemyContext } from "../AlchemyContext.ts";
+ import type { ProviderService } from "../Provider.ts";
+ import type { ResourceLike } from "../Resource.ts";
+@@ -85,5 +85,5 @@
+ export const fromEnv = () =>
+   Layer.effect(
+     RpcProviderProxy,
+-    Config.string(SPAWNER_URL_ENV_KEY).pipe(Effect.flatMap(make)),
++    Config.String(SPAWNER_URL_ENV_KEY).pipe(Effect.flatMap(make)),
+   );
+diff --git a/src/Phase.ts b/src/Phase.ts
+--- a/src/Phase.ts
++++ b/src/Phase.ts
+@@ -19,9 +19,9 @@
+ 
+ export type AlchemyPhase = "plan" | "runtime";
+ 
+-export const ALCHEMY_PHASE = Config.string("ALCHEMY_PHASE").pipe(
++export const ALCHEMY_PHASE = Config.String("ALCHEMY_PHASE").pipe(
+   Config.withDefault("plan"),
+-  Config.mapOrFail((value) => {
++  Config.mapEffect((value) => {
+     if (value !== "plan" && value !== "runtime") {
+       return Effect.die(new Error(`Invalid ALCHEMY_PHASE: ${value}`));
+     }
+@@ -51,6 +51,6 @@
+  * });
+  * ```
+  */
+-export const ALCHEMY_DEV = Config.boolean("ALCHEMY_DEV").pipe(
++export const ALCHEMY_DEV = Config.Boolean("ALCHEMY_DEV").pipe(
+   Config.withDefault(false),
+ );
+diff --git a/src/Platform.ts b/src/Platform.ts
+--- a/src/Platform.ts
++++ b/src/Platform.ts
+@@ -11,9 +11,9 @@
+ import * as Redacted from "effect/Redacted";
+ import { Scope } from "effect/Scope";
+ import type * as Stream from "effect/Stream";
+-import type { HttpClient } from "effect/unstable/http/HttpClient";
+-import type { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
+-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
++import type { HttpClient } from "effect/http/HttpClient";
++import type { HttpServerRequest } from "effect/http/HttpServerRequest";
++import * as HttpServerResponse from "effect/http/HttpServerResponse";
+ import type { Dependencies } from "./Dependencies.ts";
+ import type { HttpEffect } from "./Http.ts";
+ import type { InputProps } from "./Input.ts";
+diff --git a/src/Rpc.ts b/src/Rpc.ts
+--- a/src/Rpc.ts
++++ b/src/Rpc.ts
+@@ -5,11 +5,11 @@
+ import * as Result from "effect/Result";
+ import * as Sink from "effect/Sink";
+ import * as Stream from "effect/Stream";
+-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+-import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
+-import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
+-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+-import * as Socket from "effect/unstable/socket/Socket";
++import * as HttpClientRequest from "effect/http/HttpClientRequest";
++import type * as HttpClientResponse from "effect/http/HttpClientResponse";
++import { HttpServerRequest } from "effect/http/HttpServerRequest";
++import * as HttpServerResponse from "effect/http/HttpServerResponse";
++import * as Socket from "effect/socket/Socket";
+ import type { HttpEffect } from "./Http.ts";
+ 
+ export type Rpc<Shape> = {
+diff --git a/src/Server/Process.ts b/src/Server/Process.ts
+--- a/src/Server/Process.ts
++++ b/src/Server/Process.ts
+@@ -4,7 +4,7 @@
+ import type { Path } from "effect/Path";
+ import type { Stdio } from "effect/Stdio";
+ import type { Terminal } from "effect/Terminal";
+-import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner";
++import type { ChildProcessSpawner } from "effect/process/ChildProcessSpawner";
+ import type { HttpEffect } from "../Http.ts";
+ import * as Http from "../Http.ts";
+ import * as Output from "../Output.ts";
+diff --git a/src/Stack.ts b/src/Stack.ts
+--- a/src/Stack.ts
++++ b/src/Stack.ts
+@@ -8,9 +8,9 @@
+ import * as Option from "effect/Option";
+ import { Path } from "effect/Path";
+ import * as Scope from "effect/Scope";
+-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
+-import type { HttpClient } from "effect/unstable/http/HttpClient";
+-import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner";
++import * as FetchHttpClient from "effect/http/FetchHttpClient";
++import type { HttpClient } from "effect/http/HttpClient";
++import type { ChildProcessSpawner } from "effect/process/ChildProcessSpawner";
+ import type { ActionLike } from "./Action.ts";
+ import { AlchemyContext, AlchemyContextLive } from "./AlchemyContext.ts";
+ import { type ArtifactStore, provideFreshArtifactStore } from "./Artifacts.ts";
+diff --git a/src/Util/Clank.ts b/src/Util/Clank.ts
+--- a/src/Util/Clank.ts
++++ b/src/Util/Clank.ts
+@@ -1,7 +1,7 @@
+ import * as p from "@clack/prompts";
+ import * as Data from "effect/Data";
+ import * as Effect from "effect/Effect";
+-import { ChildProcess } from "effect/unstable/process";
++import { ChildProcess } from "effect/process";
+ 
+ export class PromptCancelled extends Data.TaggedError("PromptCancelled") {}
+ export const retryIfCancelled = Effect.retry({
+diff --git a/src/Util/PlatformServices.ts b/src/Util/PlatformServices.ts
+--- a/src/Util/PlatformServices.ts
++++ b/src/Util/PlatformServices.ts
+@@ -6,10 +6,10 @@
+ import { defaultTeardown, type Teardown } from "effect/Runtime";
+ import type { Stdio } from "effect/Stdio";
+ import type { Terminal } from "effect/Terminal";
+-import type { HttpServer } from "effect/unstable/http/HttpServer";
+-import type { ServeError } from "effect/unstable/http/HttpServerError";
+-import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner";
+-import type { WebSocketConstructor } from "effect/unstable/socket/Socket";
++import type { HttpServer } from "effect/http/HttpServer";
++import type { ServeError } from "effect/http/HttpServerError";
++import type { ChildProcessSpawner } from "effect/process/ChildProcessSpawner";
++import type { WebSocketConstructor } from "effect/socket/Socket";
+ 
+ const isBun = typeof Bun !== "undefined";
+ 
+diff --git a/src/Util/exec.ts b/src/Util/exec.ts
+--- a/src/Util/exec.ts
++++ b/src/Util/exec.ts
+@@ -1,6 +1,6 @@
+ import * as Effect from "effect/Effect";
+ import * as Stream from "effect/Stream";
+-import type { ChildProcess } from "effect/unstable/process";
++import type { ChildProcess } from "effect/process";
+ 
+ export const exec = Effect.fn("exec")(function* (
+   command: ChildProcess.Command,

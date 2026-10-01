@@ -1,8 +1,8 @@
 import { expectTypeOf } from "vitest";
 import { Config, Effect, Layer, Option, Redacted, Schema } from "effect";
 import type { PgClient } from "@effect/sql-pg";
-import type { HttpClient } from "effect/unstable/http";
-import type { SqlClient, SqlError } from "effect/unstable/sql";
+import type { HttpClient } from "effect/http";
+import type { SqlClient, SqlError } from "effect/sql";
 
 import {
   type Binding,

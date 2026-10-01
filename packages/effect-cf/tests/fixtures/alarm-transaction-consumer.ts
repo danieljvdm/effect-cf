@@ -1,5 +1,5 @@
 import { DateTime, Effect, Schema } from "effect";
-import { SqlClient } from "effect/unstable/sql";
+import { SqlClient } from "effect/sql";
 import { DurableObjectAlarm, DurableObjectSqlite } from "effect-cf";
 
 // Register JobAlarms.handlers(...) on the DO that uses this application layer.

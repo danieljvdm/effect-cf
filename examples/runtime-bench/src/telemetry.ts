@@ -5,8 +5,8 @@ import * as Layer from "effect/Layer";
 import * as Metric from "effect/Metric";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
-import * as OtlpExporter from "effect/unstable/observability/OtlpExporter";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import * as OtlpExporter from "effect/observability/OtlpExporter";
 import { CloudflareOtlp, Worker, WorkerEnvironment } from "effect-cf";
 
 import { BatchValidator } from "./order-validation";

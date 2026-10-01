@@ -4,7 +4,7 @@ import type {
   WorkflowStepContext as NativeStepContext,
 } from "cloudflare:workers";
 import { Data, Effect, Layer, Stream } from "effect";
-import { HttpServerResponse } from "effect/unstable/http";
+import { HttpServerResponse } from "effect/http";
 
 import { DurableObject, DurableObjectNamespace, Worker, Workflow } from "../src/index";
 import { makePartialTestDouble } from "./TestDoubles";

@@ -3,7 +3,7 @@
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { createExecutionContext } from "cloudflare:test";
 import { Context, Effect, Layer, Option, Schema } from "effect";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 import { expect, test } from "vite-plus/test";
 
 import * as Mcp from "../src/Mcp";

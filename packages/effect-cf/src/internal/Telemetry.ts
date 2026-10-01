@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import { Flusher } from "effect/unstable/observability/OtlpExporter";
+import { Flusher } from "effect/observability/OtlpExporter";
 
 /** Maximum event lifetime spent on an internally scheduled telemetry flush. */
 const scheduledFlushTimeout = "2 seconds";

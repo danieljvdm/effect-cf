@@ -4,9 +4,9 @@
   "type": "module",
   "dependencies": {
     "@cloudflare/vite-plugin": "1.54.6",
-    "@effect/platform-node": "4.0.0-rc.112",
+    "@effect/platform-node": "4.0.0",
     "alchemy": "2.0.0-beta.72",
-    "effect": "4.0.0-rc.112",
+    "effect": "4.0.0",
     "esbuild": "0.28.1",
     "rolldown": "1.1.5",
     "vite": "npm:@voidzero-dev/vite-plus-core@0.3.0",
@@ -18,13 +18,19 @@
     "typescript": "7.0.2"
   },
   "overrides": {
-    "@effect/platform-node": "4.0.0-rc.112",
-    "@effect/platform-node-shared": "4.0.0-rc.112",
-    "@effect/sql-d1": "4.0.0-rc.112",
-    "@effect/sql-sqlite-do": "4.0.0-rc.112",
-    "@effect/vitest": "4.0.0-rc.112",
-    "effect": "4.0.0-rc.112",
+    "@effect/platform-node": "4.0.0",
+    "@effect/platform-node-shared": "4.0.0",
+    "@effect/sql-d1": "4.0.0",
+    "@effect/sql-sqlite-do": "4.0.0",
+    "@effect/vitest": "4.0.0",
+    "effect": "4.0.0",
     "vite": "npm:@voidzero-dev/vite-plus-core@0.3.0"
   },
-  "packageManager": "bun@1.4.0"
+  "packageManager": "bun@1.4.0",
+  "patchedDependencies": {
+    "alchemy@2.0.0-beta.72": "patches/alchemy@2.0.0-beta.72.patch",
+    "@distilled.cloud/core@1.0.0-rc.4": "patches/@distilled.cloud%2Fcore@1.0.0-rc.4.patch",
+    "@distilled.cloud/cloudflare@1.0.0-rc.4": "patches/@distilled.cloud%2Fcloudflare@1.0.0-rc.4.patch",
+    "@alchemy.run/cloudflare-runtime@2.0.0-beta.72": "patches/@alchemy.run%2Fcloudflare-runtime@2.0.0-beta.72.patch"
+  }
 }

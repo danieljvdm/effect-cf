@@ -1,7 +1,7 @@
 import { Context, Effect, Layer, Schema } from "effect";
-import { Rpc, RpcClient, RpcGroup } from "effect/unstable/rpc";
-import type { RpcClientError } from "effect/unstable/rpc/RpcClientError";
-import * as Socket from "effect/unstable/socket/Socket";
+import { Rpc, RpcClient, RpcGroup } from "effect/rpc";
+import type { RpcClientError } from "effect/rpc/RpcClientError";
+import * as Socket from "effect/socket/Socket";
 import * as RpcWebSocketClient from "effect-cf/rpc-websocket-client";
 
 export class CounterRpcs extends RpcGroup.make(Rpc.make("increment", { success: Schema.Finite })) {}

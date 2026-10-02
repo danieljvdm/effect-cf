@@ -5,7 +5,13 @@ import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import type { Scope, Tracer } from "effect";
 
-import { WorkerConfig, WorkerEnvironment, type WorkerEnv } from "../Environment";
+import {
+  WorkerConfig,
+  WorkerEnvironment,
+  WorkerExports,
+  type WorkerEnv,
+  type WorkerExportsService,
+} from "../Environment";
 import * as RpcTargets from "../RpcTargets";
 import { provideEntrypointServices } from "./Entrypoint";
 
@@ -52,19 +58,22 @@ const runPromise = <A, E, R, LayerError>(
  * classes (Worker, Durable Object, Workflow).
  *
  * The entrypoint-specific services are merged with the env-backed
- * `ConfigProvider` and `WorkerEnvironment`, then provided to the user-supplied
- * layer so the resulting runtime satisfies both the user services and the
- * platform services.
+ * `ConfigProvider`, `WorkerEnvironment`, and the entrypoint's `ctx.exports`,
+ * then provided to the user-supplied layer so the resulting runtime satisfies
+ * both the user services and the platform services.
  */
 export const makeEntrypointRuntime = <ROut, LayerError, Services>(
   layer: Layer.Layer<ROut, LayerError, Services | WorkerEnvironment>,
   env: WorkerEnv,
   services: Layer.Layer<Services>,
+  exports: WorkerExportsService | undefined,
 ): ManagedRuntime.ManagedRuntime<ROut | Services | WorkerEnvironment, LayerError> => {
   const entrypointServices = Layer.mergeAll(
     services,
     ConfigProvider.layer(WorkerConfig.providerFromEnv(env)),
     Layer.succeed(WorkerEnvironment, env),
+    // Runtimes without `ctx.exports` leave the property undefined.
+    Layer.succeed(WorkerExports, exports ?? {}),
   );
 
   return ManagedRuntime.make(provideEntrypointServices(layer, entrypointServices));

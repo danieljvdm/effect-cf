@@ -149,8 +149,7 @@ export type Options<
   readonly rpc: Handlers<NoInfer<ROut> | REvent | NoInfer<RAlarm>, Self>;
 };
 
-export type LayerOptions = {
-  readonly binding: string;
+export type LayerOptions = DurableObjectNamespace.LayerOptions & {
   readonly rpcTracing?: boolean;
 };
 

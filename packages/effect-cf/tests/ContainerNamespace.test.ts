@@ -123,7 +123,7 @@ const makeFake = (options?: {
   const env = makePartialTestDouble<WorkerEnv & { readonly CONTAINERS: typeof namespace }>({
     CONTAINERS: namespace,
   });
-  const live = TestContainers.layer({ binding: "CONTAINERS" }).pipe(
+  const live = TestContainers.layer({ binding: Binding.unchecked("CONTAINERS") }).pipe(
     Layer.provide(Layer.succeed(WorkerEnvironment, env)),
   );
 
@@ -244,7 +244,7 @@ it.effect("defers lookup and reports synchronous namespace lookup failures", () 
   const env = makePartialTestDouble<WorkerEnv & { readonly CONTAINERS: typeof namespace }>({
     CONTAINERS: namespace,
   });
-  const live = TestContainers.layer({ binding: "CONTAINERS" }).pipe(
+  const live = TestContainers.layer({ binding: Binding.unchecked("CONTAINERS") }).pipe(
     Layer.provide(Layer.succeed(WorkerEnvironment, env)),
   );
   const raw = TestContainers.byName("deferred").rawUnsafe;
@@ -310,7 +310,7 @@ it.effect("reports missing and invalid bindings through Binding errors", () =>
     const missing = yield* Effect.flip(
       TestContainers.getByName("missing").pipe(
         Effect.provide(
-          TestContainers.layer({ binding: "CONTAINERS" }).pipe(
+          TestContainers.layer({ binding: Binding.unchecked("CONTAINERS") }).pipe(
             Layer.provide(Layer.succeed(WorkerEnvironment, {})),
           ),
         ),
@@ -322,7 +322,7 @@ it.effect("reports missing and invalid bindings through Binding errors", () =>
     const invalid = yield* Effect.flip(
       TestContainers.getByName("invalid").pipe(
         Effect.provide(
-          TestContainers.layer({ binding: "CONTAINERS" }).pipe(
+          TestContainers.layer({ binding: Binding.unchecked("CONTAINERS") }).pipe(
             Layer.provide(
               Layer.succeed(
                 WorkerEnvironment,

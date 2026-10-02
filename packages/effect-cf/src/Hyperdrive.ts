@@ -29,7 +29,7 @@ export interface HyperdriveService<Id extends string> {
 }
 
 export type LayerOptions = {
-  readonly binding: string;
+  readonly binding: Binding.Name<Hyperdrive>;
 };
 
 export interface TagClass<Self, Id extends string> extends Context.ServiceClass<
@@ -60,7 +60,7 @@ export const makeClient =
 
 export const layer = <Self>(
   tag: Context.Service<Self, HyperdriveClient>,
-  definition: HyperdriveDefinition,
+  definition: LayerOptions,
 ) =>
   Binding.layer(tag, definition.binding, isHyperdrive, makeClient(definition), {
     expected: expectedHyperdrive,

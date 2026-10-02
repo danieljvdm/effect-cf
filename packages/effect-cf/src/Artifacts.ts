@@ -289,7 +289,7 @@ export interface ArtifactsService<Id extends string> {
 }
 
 export type LayerOptions = {
-  readonly binding: string;
+  readonly binding: Binding.Name<globalThis.Artifacts | ArtifactsBinding>;
 };
 
 interface MutableArtifactsErrorDetails {
@@ -525,7 +525,7 @@ export const makeClient =
 
 export const layer = <Self>(
   tag: Context.Service<Self, ArtifactsClient>,
-  definition: ArtifactsDefinition,
+  definition: LayerOptions,
 ) =>
   Binding.layer(tag, definition.binding, isArtifactsBinding, makeClient(definition), {
     expected: expectedArtifactsBinding,

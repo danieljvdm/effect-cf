@@ -142,7 +142,8 @@ export interface BrowserRenderingService<Id extends string> {
 }
 
 export type LayerOptions = {
-  readonly binding: string;
+  /** Wrangler declares browser bindings as `Fetcher` before 4.96 and `BrowserRun` after. */
+  readonly binding: Binding.Name<globalThis.BrowserRun | Fetcher>;
 };
 
 export interface TagClass<Self, Id extends string> extends Context.ServiceClass<
@@ -327,7 +328,7 @@ export const makeClient =
 
 export const layer = <Self>(
   tag: Context.Service<Self, BrowserRenderingClient>,
-  definition: BrowserRenderingDefinition,
+  definition: LayerOptions,
 ) =>
   Binding.layer(tag, definition.binding, isBrowserRenderingBinding, makeClient(definition), {
     expected: expectedBrowserRenderingBinding,

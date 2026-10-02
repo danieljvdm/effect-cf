@@ -114,7 +114,7 @@ export interface WorkersAiService<Id extends string> {
 }
 
 export type LayerOptions = {
-  readonly binding: string;
+  readonly binding: Binding.Name<Ai>;
 };
 
 export interface TagClass<
@@ -238,7 +238,7 @@ export const makeClient =
 
 export const layer = <Self, ModelList extends AiModelListType = AiModels>(
   tag: Context.Service<Self, WorkersAiClient<ModelList>>,
-  definition: WorkersAiDefinition,
+  definition: LayerOptions,
 ) =>
   Binding.layer(
     tag,

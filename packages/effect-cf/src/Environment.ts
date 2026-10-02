@@ -14,6 +14,18 @@ export class WorkerEnvironment extends Context.Service<WorkerEnvironment, Worker
   "effect-cf/WorkerEnvironment",
 ) {}
 
+export type WorkerExportsService = Partial<Cloudflare.Exports>;
+
+/**
+ * Loopback bindings for the main module's exports (`ctx.exports`).
+ *
+ * Worker, Durable Object, and Workflow entrypoints provide their own
+ * `ctx.exports`. Elsewhere it defaults to no exports.
+ */
+export const WorkerExports = Context.Reference<WorkerExportsService>("effect-cf/WorkerExports", {
+  defaultValue: () => ({}),
+});
+
 type ScalarConfigValue = string | number | boolean;
 
 type ScalarConfigKey = Extract<

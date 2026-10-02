@@ -107,7 +107,7 @@ export interface VectorizeService<Id extends string> {
 }
 
 export type LayerOptions = {
-  readonly binding: string;
+  readonly binding: Binding.Name<VectorizeBinding>;
 };
 
 export interface TagClass<Self, Id extends string> extends Context.ServiceClass<
@@ -247,7 +247,7 @@ export const makeClient =
 
 export const layer = <Self>(
   tag: Context.Service<Self, VectorizeClient>,
-  definition: VectorizeDefinition,
+  definition: LayerOptions,
 ) =>
   Binding.layer(tag, definition.binding, isVectorizeBinding, makeClient(definition), {
     expected: expectedVectorizeBinding,

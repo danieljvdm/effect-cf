@@ -210,7 +210,7 @@ export type ContainerNamespaceStaticClient<
 };
 
 export type LayerOptions = {
-  readonly binding: string;
+  readonly binding: Binding.Name<globalThis.DurableObjectNamespace>;
 };
 
 export interface TagClass<
@@ -408,7 +408,7 @@ export const makeClient =
 
 export const layer = <Self, Namespace extends ContainerNamespaceResource>(
   tag: Context.Service<Self, ContainerNamespaceClient<Namespace>>,
-  definition: ContainerNamespaceDefinition,
+  definition: LayerOptions,
 ) =>
   Binding.layer(
     tag,

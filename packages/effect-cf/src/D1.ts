@@ -16,7 +16,7 @@ export type TypeId = typeof TypeId;
 const expectedD1Database = "D1 database binding with prepare(), batch(), and exec()";
 
 export interface D1Definition {
-  readonly binding: string;
+  readonly binding: Binding.Name<D1Database>;
 }
 
 export type D1SqlLayerOptions = Omit<D1Client.D1ClientConfig, "db">;

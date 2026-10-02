@@ -129,7 +129,7 @@ export interface EmailService<Id extends string> {
 }
 
 export type LayerOptions = {
-  readonly binding: string;
+  readonly binding: Binding.Name<EmailBinding>;
   readonly send?: EmailSendOptions;
 };
 

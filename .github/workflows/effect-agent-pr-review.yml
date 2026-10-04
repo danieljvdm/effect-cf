@@ -54,7 +54,7 @@ jobs:
           permission-pull-requests: write
 
       - name: Review the pull request
-        uses: danieljvdm/effect-agent/action@action-v1
+        uses: yielded-dev/agent/action@action-v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           github-token: ${{ steps.app-token.outputs.token }}
@@ -66,6 +66,7 @@ jobs:
           automatic-review-limit: 2
           expected-head: ${{ github.event.pull_request.head.sha || '' }}
           model: gpt-6-astra
+          web-search: "true"
           effort: medium
           priority: fast
           base-cost-usd: "7.50"

@@ -42,4 +42,10 @@ export * as WorkersAi from "./WorkersAi";
 export * as Workflow from "./Workflow";
 export * as WorkflowBinding from "./WorkflowBinding";
 export * as WorkflowDefinition from "./WorkflowDefinition";
-export { WorkerConfig, WorkerEnvironment, type WorkerEnv } from "./Environment";
+export {
+  WorkerConfig,
+  WorkerEnvironment,
+  WorkerExports,
+  type WorkerEnv,
+  type WorkerExportsService,
+} from "./Environment";

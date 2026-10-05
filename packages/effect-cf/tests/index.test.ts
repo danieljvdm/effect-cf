@@ -98,7 +98,7 @@ class Counter extends DurableObject.Tag<Counter>()("Counter", {
 const provideCounters = <A, E>(effect: Effect.Effect<A, E, Counter>, env: Cloudflare.Env) =>
   effect.pipe(
     Effect.provide(
-      Counter.layer({ binding: "COUNTERS" }).pipe(
+      Counter.layer({ binding: Binding.unchecked("COUNTERS") }).pipe(
         Layer.provide(Layer.succeed(WorkerEnvironment, env)),
       ),
     ),
@@ -116,7 +116,7 @@ const EchoService = EchoWorker;
 const provideEchoService = <A, E>(effect: Effect.Effect<A, E, EchoWorker>, env: Cloudflare.Env) =>
   effect.pipe(
     Effect.provide(
-      EchoService.layer({ binding: "ECHO" }).pipe(
+      EchoService.layer({ binding: Binding.unchecked("ECHO") }).pipe(
         Layer.provide(Layer.succeed(WorkerEnvironment, env)),
       ),
     ),

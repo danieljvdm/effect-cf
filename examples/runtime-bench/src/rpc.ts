@@ -5,6 +5,14 @@ import { Worker } from "effect-cf";
 import { ProductCatalog, ProductSchema, Sku } from "./catalog-service";
 import { headers, mark } from "./instrumentation";
 
+declare global {
+  namespace Cloudflare {
+    interface Env {
+      CATALOG: Fetcher;
+    }
+  }
+}
+
 export class CatalogApi extends Worker.Tag<CatalogApi>()("hot-bench/CatalogApi", {
   lookup: Worker.method({ args: [Schema.String, Sku], success: Schema.NullOr(ProductSchema) }),
 }) {}

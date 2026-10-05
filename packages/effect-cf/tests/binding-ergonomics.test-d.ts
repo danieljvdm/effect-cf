@@ -563,7 +563,7 @@ const aiGatewayProgram = Effect.gen(function* () {
 
 export class Browser extends BrowserRendering.Tag<Browser>()("Browser") {}
 
-export const BrowserLayer = Browser.layer({ binding: "MYBROWSER" });
+export const BrowserLayer = Browser.layer({ binding: "BROWSER" });
 
 declare const launch: BrowserRendering.BrowserRenderingLaunch<
   BrowserRendering.BrowserRenderingBinding,

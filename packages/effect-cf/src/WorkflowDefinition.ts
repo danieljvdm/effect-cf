@@ -48,9 +48,9 @@ export interface Options<ROut, Self extends Definition.Any> {
   readonly run: Handler<ROut, Self>;
 }
 
-export type LayerOptions = {
-  readonly binding: string;
-};
+export type LayerOptions<
+  Payload extends RpcDefinition.ServiceFreeSchema = RpcDefinition.ServiceFreeSchema,
+> = WorkflowBinding.LayerOptions<Payload>;
 
 export type TagClass<
   Self,
@@ -70,7 +70,7 @@ export type TagClass<
     options: Options<ROut, Definition<Id, Payload, Result>>,
   ) => WorkflowEntrypoint.WorkflowClass<S.Codec.Encoded<Payload>, S.Codec.Encoded<Result>, ROut>;
   readonly layer: (
-    options: LayerOptions,
+    options: LayerOptions<Payload>,
   ) => Layer.Layer<
     Self,
     Binding.BindingNotFoundError | Binding.BindingValidationError,
@@ -163,7 +163,7 @@ export const Tag =
       `effect-cf/Workflow/${id}` as const,
     );
 
-    const layer = (binding: LayerOptions) =>
+    const layer = (binding: LayerOptions<Payload>) =>
       WorkflowBinding.layer(tag, {
         ...binding,
         payload: definition.payload,

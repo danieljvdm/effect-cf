@@ -220,3 +220,48 @@ it.live.each(["tsconfig.wrangler-types.json", "tsconfig.wrangler-types-composite
     }).pipe(Effect.provide(NodeServices.layer)),
   60_000,
 );
+
+it.live(
+  "Wrangler-generated Env types check binding names for every binding kind",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const packageRoot = yield* path.fromFileUrl(new URL("../", import.meta.url));
+      const repoRoot = path.resolve(packageRoot, "../..");
+      const temporaryConsumer = yield* fs.makeTempDirectoryScoped({
+        prefix: "effect-cf-binding-names-",
+      });
+      const consumer = yield* fs.realPath(temporaryConsumer);
+      const installedPackage = path.join(consumer, "node_modules/effect-cf");
+
+      yield* fs.copy(path.join(packageRoot, "tests/fixtures/binding-names"), consumer);
+      yield* fs.makeDirectory(installedPackage, { recursive: true });
+      yield* fs.copy(path.join(packageRoot, "dist"), path.join(installedPackage, "dist"));
+      yield* fs.copy(
+        path.join(packageRoot, "package.json"),
+        path.join(installedPackage, "package.json"),
+      );
+      yield* fs.symlink(
+        path.join(repoRoot, "node_modules/effect"),
+        path.join(consumer, "node_modules/effect"),
+      );
+      yield* run([
+        "exec",
+        "wrangler",
+        "types",
+        path.join(consumer, "worker-configuration.d.ts"),
+        "--config",
+        path.join(consumer, "wrangler.jsonc"),
+      ]);
+      // The fixture's `@ts-expect-error` lines fail this typecheck if a wrong name is accepted.
+      yield* run([
+        "run",
+        "--no-cache",
+        "effect-cf#typecheck",
+        "-p",
+        path.join(consumer, "tsconfig.wrangler-types.json"),
+      ]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  60_000,
+);

@@ -17,6 +17,7 @@ import {
   type QueueBinding,
   type Rpc,
   type ServiceBinding,
+  Binding,
   ContainerNamespace,
   DurableObject,
   DurableObjectDefinition,
@@ -365,7 +366,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
   });
 
   layer(
-    ArtifactWorkflow.layer({ binding: "ARTIFACT_WORKFLOW" }).pipe(
+    ArtifactWorkflow.layer({ binding: Binding.unchecked("ARTIFACT_WORKFLOW") }).pipe(
       Layer.provide(Layer.succeed(WorkerEnvironment, env)),
     ),
   )("definition-backed Workflow bindings", (it) => {
@@ -493,7 +494,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
   });
 
   layer(
-    TestService.layer({ binding: "TEST_SERVICE" }).pipe(
+    TestService.layer({ binding: Binding.unchecked("TEST_SERVICE") }).pipe(
       Layer.provide(Layer.succeed(WorkerEnvironment, env)),
     ),
   )("definition-backed service bindings", (it) => {
@@ -549,7 +550,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
   });
 
   layer(
-    StringNumberService.layer({ binding: "STRING_NUMBER_SERVICE" }).pipe(
+    StringNumberService.layer({ binding: Binding.unchecked("STRING_NUMBER_SERVICE") }).pipe(
       Layer.provide(Layer.succeed(WorkerEnvironment, env)),
     ),
   )("definition-backed transformed service bindings", (it) => {
@@ -619,7 +620,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
   });
 
   layer(
-    TestService.layer({ binding: "TEST_SERVICE" }).pipe(
+    TestService.layer({ binding: Binding.unchecked("TEST_SERVICE") }).pipe(
       Layer.provide(Layer.succeed(WorkerEnvironment, env)),
     ),
   )("definition-backed invalid service bindings", (it) => {
@@ -697,7 +698,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
   void assertNumberRoomTypes;
 
   layer(
-    NumberRooms.layer({ binding: "NUMBER_ROOMS" }).pipe(
+    NumberRooms.layer({ binding: Binding.unchecked("NUMBER_ROOMS") }).pipe(
       Layer.provide(Layer.succeed(WorkerEnvironment, env)),
     ),
   )("definition-backed transformed Durable Object namespaces", (it) => {
@@ -784,7 +785,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
   });
 
   layer(
-    TestRooms.layer({ binding: "TEST_ROOMS" }).pipe(
+    TestRooms.layer({ binding: Binding.unchecked("TEST_ROOMS") }).pipe(
       Layer.provide(Layer.succeed(WorkerEnvironment, env)),
     ),
   )("definition-backed value-style Durable Object namespaces", (it) => {
@@ -909,7 +910,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
   });
 
   layer(
-    TaskRoom.layer({ binding: "TASK_ROOMS" }).pipe(
+    TaskRoom.layer({ binding: Binding.unchecked("TASK_ROOMS") }).pipe(
       Layer.provide(Layer.succeed(WorkerEnvironment, env)),
     ),
   )("definition-backed Durable Object RPC with declaration schemas", (it) => {
@@ -1010,9 +1011,9 @@ test("queue, workflow, and container definitions with the same id resolve indepe
     },
   });
   const live = Layer.mergeAll(
-    SharedQueue.layer({ binding: "SHARED_QUEUE" }),
-    SharedWorkflow.layer({ binding: "SHARED_WORKFLOW" }),
-    SharedContainers.layer({ binding: "SHARED_CONTAINERS" }),
+    SharedQueue.layer({ binding: Binding.unchecked("SHARED_QUEUE") }),
+    SharedWorkflow.layer({ binding: Binding.unchecked("SHARED_WORKFLOW") }),
+    SharedContainers.layer({ binding: Binding.unchecked("SHARED_CONTAINERS") }),
   ).pipe(Layer.provide(Layer.succeed(WorkerEnvironment, env)));
 
   await Effect.runPromise(

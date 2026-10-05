@@ -25,6 +25,22 @@ declare global {
       ARTIFACTS?: EffectArtifacts.ArtifactsBinding;
       RECIPE_VECTORS?: Vectorize;
       MYBROWSER?: unknown;
+      // Bindings named by the binding ergonomics type tests.
+      API_WORKER?: Fetcher;
+      ARTIFACT_BUCKET?: R2Bucket;
+      AVATAR_QUEUE?: Queue;
+      BROWSER?: BrowserRun;
+      // Browser binding as Wrangler 4.1-4.95 declares it.
+      LEGACY_BROWSER?: Fetcher;
+      COUNTER_DURABLE_OBJECTS?: DurableObjectNamespace;
+      FETCH_ONLY_WORKER?: Fetcher;
+      REPORT_WORKFLOW?: Workflow;
+      SANDBOX?: DurableObjectNamespace;
+      SESSION_KV?: KVNamespace;
+      // Declared with no possible value; must not match any resource.
+      RETIRED_BINDING?: null;
+      // Typed like `cf workers types` output, to exercise payload checks.
+      TYPED_JOBS?: Queue<{ readonly userId: string; readonly attempts: number }>;
       DATABASE_URL?: string;
       CLOUDFLARE_ACCOUNT_ID?: string;
       CLOUDFLARE_API_TOKEN?: string;

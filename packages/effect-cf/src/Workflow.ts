@@ -272,6 +272,7 @@ export const make = <ROut, LayerError, Payload = unknown, Result = unknown>(
           Layer.succeed(ExecutionContext, ctx),
           Layer.succeed(WorkerContext, fromExecutionContext(ctx)),
         ),
+        ctx.exports,
       );
     }
 

@@ -389,7 +389,7 @@ test("Artifacts layer reports a missing configured binding", async () => {
         yield* TestArtifacts;
       }).pipe(
         Effect.provide(
-          TestArtifacts.layer({ binding: "MISSING_ARTIFACTS" }).pipe(
+          TestArtifacts.layer({ binding: Binding.unchecked("MISSING_ARTIFACTS") }).pipe(
             Layer.provide(Layer.succeed(WorkerEnvironment, {})),
           ),
         ),

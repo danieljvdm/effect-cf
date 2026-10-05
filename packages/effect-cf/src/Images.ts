@@ -161,7 +161,7 @@ export interface ImagesService<Id extends string> {
 }
 
 export type LayerOptions = {
-  readonly binding: string;
+  readonly binding: Binding.Name<globalThis.ImagesBinding | ImagesRuntimeBinding>;
 };
 
 export interface TagClass<Self, Id extends string> extends Context.ServiceClass<
@@ -343,10 +343,7 @@ export const makeClient =
     };
   };
 
-export const layer = <Self>(
-  tag: Context.Service<Self, ImagesClient>,
-  definition: ImagesDefinition,
-) =>
+export const layer = <Self>(tag: Context.Service<Self, ImagesClient>, definition: LayerOptions) =>
   Binding.layer(tag, definition.binding, isImagesBinding, makeClient(definition), {
     expected: expectedImagesBinding,
   });

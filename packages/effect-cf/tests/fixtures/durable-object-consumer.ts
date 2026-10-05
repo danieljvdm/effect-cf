@@ -5,7 +5,7 @@ class Counter extends DurableObject.Tag<Counter>()("Counter", {
   read: DurableObject.method({ success: Schema.Finite }),
 }) {}
 
-export const CounterLive = Counter.layer({ binding: "COUNTERS", rpcTracing: true });
+export const CounterLive = Counter.layer({ binding: "TEST_COUNTER_DO", rpcTracing: true });
 
 const CounterBase = Counter.make(Layer.empty, {
   rpcTracing: { service: "COUNTERS" },

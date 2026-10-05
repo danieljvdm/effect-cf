@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "lib": ["ESNext"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["./worker-configuration.d.ts"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "paths": {
+      "effect-cf": ["./node_modules/effect-cf/dist/index.d.mts"],
+      "effect-cf/sandbox": ["./node_modules/effect-cf/dist/Sandbox.d.mts"]
+    }
+  },
+  "include": ["src/*.ts"]
+}

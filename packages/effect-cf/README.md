@@ -81,6 +81,8 @@ const greeting = Effect.gen(function* () {
 
 Declare `SETTINGS` in `wrangler.jsonc` and pass `SettingsLive` to `Worker.make`. Other bindings use the same tag/layer pattern.
 
+With generated types from `wrangler types` or `cf workers types`, binding names are checked at compile time: a misspelled name, or a KV binding passed to an R2 layer, is a type error. Durable Object layers can also use the Worker's own exports instead of a binding: `Counters.layer({ exportName: "CounterDurableObject" })`. See the [binding names guide](https://github.com/danieljvdm/effect-cf/blob/main/docs/binding-names.md).
+
 The [document outbox example](https://github.com/danieljvdm/effect-cf/tree/main/examples/outbox) saves document revisions and their delivery alarms atomically, then archives them to R2 outside the transaction.
 
 For atomic application writes and alarm changes, see the [alarm transaction example](tests/fixtures/alarm-transaction-consumer.ts) and [API contract](src/DurableObjectAlarm.ts).

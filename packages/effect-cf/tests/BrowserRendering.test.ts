@@ -29,7 +29,7 @@ const makeFakeBrowser = (page = makeFakePage()) =>
   }) satisfies BrowserRendering.BrowserRenderingBrowserLike<typeof page>;
 
 const browserLayer = (binding: BrowserRendering.BrowserRenderingBinding) =>
-  TestBrowser.layer({ binding: "MYBROWSER" }).pipe(
+  TestBrowser.layer({ binding: Binding.unchecked("MYBROWSER") }).pipe(
     Layer.provide(Layer.succeed(WorkerEnvironment, { MYBROWSER: binding })),
   );
 
@@ -64,7 +64,7 @@ test("Browser Rendering layer validates the binding shape", async () => {
         yield* rendering.rawUnsafe;
       }).pipe(
         Effect.provide(
-          TestBrowser.layer({ binding: "MYBROWSER" }).pipe(
+          TestBrowser.layer({ binding: Binding.unchecked("MYBROWSER") }).pipe(
             Layer.provide(Layer.succeed(WorkerEnvironment, { MYBROWSER: "bad" })),
           ),
         ),

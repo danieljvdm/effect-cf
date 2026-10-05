@@ -242,13 +242,19 @@ export const makeClient = <
   });
 };
 
+export type LayerOptions<
+  Payload extends RpcDefinition.ServiceFreeSchema = RpcDefinition.ServiceFreeSchema,
+> = {
+  readonly binding: Binding.WorkflowName<S.Codec.Encoded<Payload>>;
+};
+
 export const layer = <
   Self,
   Payload extends RpcDefinition.ServiceFreeSchema,
   Result extends RpcDefinition.ServiceFreeSchema,
 >(
   tag: Context.Service<Self, WorkflowBindingClient<Payload, Result>>,
-  definition: WorkflowBindingDefinition<Payload, Result>,
+  definition: WorkflowBindingDefinition<Payload, Result> & LayerOptions<Payload>,
 ) =>
   Binding.layer(
     tag,

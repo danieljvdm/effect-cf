@@ -128,7 +128,7 @@ export interface R2Service<Id extends string> {
 }
 
 export type LayerOptions = {
-  readonly binding: string;
+  readonly binding: Binding.Name<R2Bucket>;
 };
 
 export interface TagClass<Self, Id extends string> extends Context.ServiceClass<
@@ -358,7 +358,7 @@ export const makeClient = (definition: R2Definition): ((bucket: R2Bucket) => R2C
   };
 };
 
-export const layer = <Self>(tag: Context.Service<Self, R2Client>, definition: R2Definition) =>
+export const layer = <Self>(tag: Context.Service<Self, R2Client>, definition: LayerOptions) =>
   Binding.layer(tag, definition.binding, isR2Bucket, makeClient(definition), {
     expected: expectedR2Bucket,
   });

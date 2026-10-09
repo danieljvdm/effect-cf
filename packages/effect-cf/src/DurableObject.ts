@@ -11,7 +11,7 @@ import { DurableObjectState, fromDurableObjectState } from "./DurableObjectState
 import {
   DurableObjectAlarm,
   define as defineAlarms,
-  withWakeups,
+  dispatchRawAlarm,
   type AlarmRegistration,
   type AlarmService,
   type InvalidAlarmRegistrationError,
@@ -374,10 +374,7 @@ export function make<
       const fallback =
         rawAlarm === undefined
           ? defineAlarms({}).handlers({}).pipe(Effect.asVoid)
-          : withWakeups({
-              layer: Layer.empty,
-              run: rawAlarm.pipe(Effect.as({ failed: [], handled: [], parked: [] })),
-            }).run.pipe(Effect.asVoid);
+          : dispatchRawAlarm(rawAlarm);
       const alarmEffect =
         logicalAlarms !== undefined && rawAlarm !== undefined
           ? Effect.gen(function* () {

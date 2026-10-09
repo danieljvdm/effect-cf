@@ -157,6 +157,10 @@ const PrepareWakeups: unique symbol = Symbol("effect-cf/DurableObjectAlarm/Prepa
 const WakeupsPrepared = Context.Reference<boolean>("effect-cf/DurableObjectAlarm/WakeupsPrepared", {
   defaultValue: () => false,
 });
+const CurrentRawDispatch = Context.Reference<{ processed: boolean } | undefined>(
+  "effect-cf/DurableObjectAlarm/CurrentRawDispatch",
+  { defaultValue: () => undefined },
+);
 
 interface NextAlarmRow extends Record<string, SqlStorageValue> {
   readonly run_at: number;
@@ -1003,6 +1007,26 @@ export const define = <const Definitions extends AlarmDefinitions>(definitions: 
   handlers: makeDefinition(definitions).handlers,
 });
 
+/** @internal Recover retained schedules without overriding a raw hook's own dispatcher. */
+export const dispatchRawAlarm = <E, R>(
+  rawAlarm: Effect.Effect<void, E, R>,
+): Effect.Effect<void, E | DurableObjectAlarmError, R | DurableObjectAlarm> =>
+  makeRegistration(Layer.empty, {
+    services: [],
+    wakeups: [],
+    managed: Effect.suspend(() => {
+      const pass = { processed: false };
+
+      return rawAlarm.pipe(
+        Effect.onExit(() =>
+          pass.processed ? Effect.void : makeDefinition({}).handlers({}).pipe(Effect.asVoid),
+        ),
+        Effect.provideService(CurrentRawDispatch, pass),
+        Effect.as(emptyResult),
+      );
+    }),
+  }).run.pipe(Effect.asVoid);
+
 /** The typed scheduler becomes available when its handlers are registered on a Durable Object. */
 export const Tag =
   <Self>() =>
@@ -1501,6 +1525,10 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         const limit = yield* getProcessLimit(options);
         const initialDelay = yield* getFailureRetryDelay(options, configuration);
         const now = yield* Clock.currentTimeMillis;
+        const rawDispatch = yield* CurrentRawDispatch;
+
+        // A validated dispatcher owns its remaining batch, including newly enrolled work.
+        if (rawDispatch !== undefined) rawDispatch.processed = true;
 
         const cursor = yield* state.storage.sql.exec<AlarmRow>(
           `${alarmRowsSql}

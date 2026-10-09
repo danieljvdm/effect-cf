@@ -369,6 +369,99 @@ it.effect.each([false, true])(
   },
 );
 
+it.effect.each(["success", "failure"] as const)(
+  "bounds retained application alarms when a raw-only hook exits with %s",
+  (outcome) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+        let now = deadline;
+
+        yield* TestClock.setTime(now);
+        yield* alarms.scheduleAlarm(alarm("removed", 0));
+        const CurrentObject = DurableObject.make(
+          Layer.merge(
+            Layer.succeed(Clock.Clock, yield* Clock.Clock),
+            Layer.succeed(DurableObjectAlarm.ScheduleConfiguration, { unchangedAttemptBudget: 2 }),
+          ),
+          { alarm: () => (outcome === "success" ? Effect.void : Effect.fail("raw hook failed")) },
+        );
+        const instance = new CurrentObject(state.raw, {});
+        const dispatch = Effect.promise(async () => {
+          await instance.alarm?.();
+        }).pipe(Effect.exit);
+
+        for (const [index, delay] of [1_000, DurableObjectAlarm.PARKED_RETRY_DELAY_MS].entries()) {
+          assert.strictEqual(Exit.isFailure(yield* dispatch), outcome === "failure");
+          const status = (yield* alarms.getAlarmStatus({ tag: "job", id: "removed" }))!;
+
+          assert.strictEqual(status.attempts, index + 1);
+          assert.strictEqual(status.parked, index === 1);
+          assert.strictEqual(yield* state.storage.getAlarm(), now + delay);
+          yield* dispatch;
+          assert.strictEqual(
+            (yield* alarms.getAlarmStatus({ tag: "job", id: "removed" }))!.attempts,
+            index + 1,
+          );
+          now += delay;
+          yield* TestClock.setTime(now);
+        }
+        yield* dispatch;
+        assert.strictEqual(
+          yield* state.storage.getAlarm(),
+          now + DurableObjectAlarm.PARKED_RETRY_DELAY_MS,
+        );
+        yield* alarms.cancelAlarm({ tag: "job", id: "removed" });
+      }).pipe(Effect.provide(services)),
+    );
+  },
+);
+
+it.effect(
+  "preserves a raw dispatcher's batch limit without charging unvisited application alarms",
+  () => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+        const handled: string[] = [];
+
+        yield* TestClock.setTime(deadline);
+        yield* alarms.scheduleAlarm(alarm("a", 0));
+        yield* alarms.scheduleAlarm(alarm("b", 0));
+        const CurrentObject = DurableObject.make(Layer.succeed(Clock.Clock, yield* Clock.Clock), {
+          alarm: () =>
+            DurableObjectAlarm.processDue(
+              (event) =>
+                Effect.sync(() => {
+                  handled.push(event.id);
+                }),
+              { limit: 1 },
+            ).pipe(Effect.asVoid),
+        });
+        const instance = new CurrentObject(state.raw, {});
+        const dispatch = Effect.promise(async () => {
+          await instance.alarm?.();
+        });
+
+        yield* dispatch;
+        assert.deepStrictEqual(handled, ["a"]);
+        const pending = (yield* alarms.getAlarmStatus({ tag: "job", id: "b" }))!;
+
+        assert.strictEqual(pending.attempts, 0);
+        assert.isUndefined(pending.retryAt);
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline);
+        yield* dispatch;
+        assert.deepStrictEqual(handled, ["a", "b"]);
+        assert.isNull(yield* state.storage.getAlarm());
+      }).pipe(Effect.provide(services)),
+    );
+  },
+);
+
 it.effect.each([
   { withManaged: true, withRaw: false },
   { withManaged: false, withRaw: false },

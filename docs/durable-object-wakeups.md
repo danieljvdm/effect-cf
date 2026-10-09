@@ -193,6 +193,9 @@ no registered handler, the dispatcher retains it for hourly recovery and reports
 `InvalidAlarmRegistrationError` after allowing other due work to run. Reinstalling
 the handler can recover it, including when the deployment kept only a raw `alarm`
 hook; deployments do not silently delete retained work.
+Raw hooks that call `processDue` retain their dispatcher and batch limits. If a raw
+hook does not dispatch application alarms, retained application schedules receive
+the default unknown-tag backoff and parking policy, even when that hook fails.
 
 ## Configure scheduling policy
 

@@ -10,8 +10,10 @@ import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 import { DurableObjectState, fromDurableObjectState } from "./DurableObjectState";
 import {
   DurableObjectAlarm,
+  define as defineAlarms,
   type AlarmRegistration,
   type AlarmService,
+  type InvalidAlarmRegistrationError,
 } from "./DurableObjectAlarm";
 import { fromWebSocket, type DurableWebSocket } from "./DurableObjectWebSocket";
 import * as RpcDefinition from "./RpcDefinition";
@@ -279,7 +281,10 @@ export function make<
   )?.pipe(Effect.asVoid);
 
   class EffectDurableObject extends CloudflareDurableObject<WorkerEnv> {
-    readonly runtime: ManagedRuntime.ManagedRuntime<RuntimeContext<ROut | RAlarm>, LayerError>;
+    readonly runtime: ManagedRuntime.ManagedRuntime<
+      RuntimeContext<ROut | RAlarm>,
+      LayerError | InvalidAlarmRegistrationError
+    >;
 
     constructor(state: globalThis.DurableObjectState, env: WorkerEnv) {
       super(state, env);
@@ -290,12 +295,16 @@ export function make<
       // SAFETY: RAlarm is inferred only from the registration's layer; without a registration it is never.
       const services = (registration?.layer ?? Layer.empty).pipe(
         Layer.provideMerge(baseServices),
-      ) as Layer.Layer<DurableObjectState | DurableObjectAlarm | RAlarm>;
+      ) as Layer.Layer<
+        DurableObjectState | DurableObjectAlarm | RAlarm,
+        InvalidAlarmRegistrationError
+      >;
 
       this.runtime = Runtime.makeEntrypointRuntime<
         ROut,
         LayerError,
-        DurableObjectState | DurableObjectAlarm | RAlarm
+        DurableObjectState | DurableObjectAlarm | RAlarm,
+        InvalidAlarmRegistrationError
       >(layer, env, services);
 
       const initialize = options.initialize;
@@ -341,7 +350,7 @@ export function make<
         RuntimeContext<ROut | RAlarm>,
         REvent,
         EventLayerError,
-        LayerError
+        LayerError | InvalidAlarmRegistrationError
       >(this.runtime, effect, eventLayer, parentSpan, runOptions.onFailure);
     }
 
@@ -357,7 +366,7 @@ export function make<
       });
     }
 
-    alarm(alarmInfo?: globalThis.AlarmInvocationInfo): Promise<void> | void {
+    alarm(alarmInfo?: globalThis.AlarmInvocationInfo): Promise<void> {
       const rawAlarm = options.alarm?.(alarmInfo);
       const alarmEffect =
         logicalAlarms !== undefined && rawAlarm !== undefined
@@ -365,13 +374,12 @@ export function make<
               yield* logicalAlarms;
               yield* rawAlarm;
             })
-          : (logicalAlarms ?? rawAlarm);
+          : (logicalAlarms ?? rawAlarm ?? defineAlarms({}).handlers({}).pipe(Effect.asVoid));
 
-      if (alarmEffect !== undefined) {
-        return this[RunSymbol](alarmEffect.pipe(Effect.onExit(() => scheduleTelemetryFlush)), {
-          event: "alarm",
-        });
-      }
+      // A deployment can remove its last registration while durable checkpoints remain.
+      return this[RunSymbol](alarmEffect.pipe(Effect.onExit(() => scheduleTelemetryFlush)), {
+        event: "alarm",
+      });
     }
 
     webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> | void {

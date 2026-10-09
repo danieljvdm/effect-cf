@@ -56,11 +56,14 @@ const runPromise = <A, E, R, LayerError>(
  * layer so the resulting runtime satisfies both the user services and the
  * platform services.
  */
-export const makeEntrypointRuntime = <ROut, LayerError, Services>(
+export const makeEntrypointRuntime = <ROut, LayerError, Services, ServicesError = never>(
   layer: Layer.Layer<ROut, LayerError, Services | WorkerEnvironment>,
   env: WorkerEnv,
-  services: Layer.Layer<Services>,
-): ManagedRuntime.ManagedRuntime<ROut | Services | WorkerEnvironment, LayerError> => {
+  services: Layer.Layer<Services, ServicesError>,
+): ManagedRuntime.ManagedRuntime<
+  ROut | Services | WorkerEnvironment,
+  LayerError | ServicesError
+> => {
   const entrypointServices = Layer.mergeAll(
     services,
     ConfigProvider.layer(WorkerConfig.providerFromEnv(env)),

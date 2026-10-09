@@ -16,7 +16,8 @@ The effect-cf primitives enforce these rules:
 - One scheduler owns the platform alarm. Logical deadlines, attempt state and
   native alarm reconciliation commit or roll back together.
 
-These guarantees cover effect-cf's scheduler and hibernating socket helpers.
+Managed alarms enforce the retry and progress budget; named wakeups let an
+existing durable queue retain its own policy under the same platform alarm owner.
 `DurableObjectState.raw` remains an explicit native interoperability boundary;
 writing its platform alarm bypasses the scheduler and invalidates its ownership.
 
@@ -100,6 +101,82 @@ schedules are migrated automatically; their logical `scheduledAt` is preserved.
 from completion time without catch-up invocations. Never use it to poll for a
 receipt, settlement, lease, connection heartbeat or a state change. Existing
 stored repeats below the configured floor advance at that floor after their next completion.
+
+## Share the alarm with an existing durable queue
+
+Use `Wakeup` when a library already owns durable work, claims, leases and retry
+budgets. It contributes one named checkpoint to the shared scheduler. Application
+alarms and other queues keep their deadlines when that checkpoint changes or is
+cancelled. All operations return Effects.
+
+```mermaid
+flowchart LR
+  A[Application alarms] --> S[effect-cf scheduler]
+  Q[Named queue checkpoints] --> S
+  S --> N[One native Durable Object alarm]
+```
+
+```ts
+class Maintenance extends DurableObjectAlarm.Wakeup<Maintenance>()("library/maintenance") {}
+
+const alarms = DurableObjectAlarm.withWakeups(
+  Expirations.handlers({ expire: ({ id }) => Effect.log("Expired", id) }),
+  Maintenance.handler(maintenancePass),
+);
+
+// Pass this registration as DurableObject.make(applicationLayer, { alarms, ... }).
+```
+
+`maintenancePass` is the queue's existing bounded Effect. `withWakeups` accepts
+one managed-alarm registration and one or more named wakeup registrations; a
+wakeup's `handler` registration also works alone. Stable service keys identify
+persisted checkpoints. Duplicate keys, including collisions with the managed
+alarm service, fail with `InvalidAlarmRegistrationError` before application
+services initialize. Providing a service layer alone does not register its handler.
+
+Enroll source work and its deadline in the same transaction:
+
+```ts
+const enroll = Effect.gen(function* () {
+  const state = yield* DurableObjectState.DurableObjectState;
+  const maintenance = yield* Maintenance;
+
+  yield* maintenance.transaction((tx) =>
+    Effect.gen(function* () {
+      yield* state.storage.put("pending-job", job);
+      yield* tx.scheduleEarlier(DateTime.makeUnsafe(deadline));
+    }),
+  );
+});
+```
+
+`scheduleAt` replaces this queue's deadline; `scheduleEarlier` min-merges it.
+`scheduledAt` reads the retained checkpoint, and `cancel` removes only this
+queue's checkpoint. Transaction handles have the same fiber and lifetime rules
+as managed alarms. The raw scheduler also exposes `wakeup(key)`, including on its
+transaction handle, for integration with source writes and managed alarms in
+one transaction. Register the matching named handler before scheduling it.
+
+Before dispatch, the scheduler atomically moves due named checkpoints to
+`now + parkedRetryDelay` (at least one hour), including reconciliation of the
+native alarm. It then runs application alarms and a bounded pool of queue
+handlers independently. A failure or defect in one handler does not cancel the
+others; parent interruption still interrupts the pass. The fallback survives
+process loss and handler success or failure. There is no automatic acknowledgement
+or second attempt budget over the queue's own work.
+
+After external work, **re-read the authoritative queue and replace or cancel its
+checkpoint in the same transaction as source changes**. Include outstanding
+lease and retry deadlines. Cancelling from a stale idle observation can erase
+another request's enrollment in the same queue. Keep external effects outside
+the transaction, preserve the queue's fencing and idempotency rules, and cancel
+when it is idle. This API supplies shared scheduling, not queue ownership or
+protection against a consumer that repeatedly re-arms unchanged work.
+
+Cancel a queue's checkpoint before removing its handler. If a due checkpoint has
+no registered handler, the dispatcher retains it for hourly recovery and reports
+`InvalidAlarmRegistrationError` after allowing other due work to run. Reinstalling
+the handler can recover it; deployments do not silently delete retained work.
 
 ## Configure scheduling policy
 

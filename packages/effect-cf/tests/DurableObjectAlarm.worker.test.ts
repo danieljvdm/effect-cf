@@ -1,11 +1,16 @@
 import { env } from "cloudflare:workers";
 import { evictDurableObject } from "cloudflare:test";
 import { assert, it } from "@effect/vitest";
-import { DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema } from "effect";
+import { Clock, DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { SqlClient } from "effect/sql";
 
-import { DurableObjectAlarm, DurableObjectSqlite, DurableObjectState } from "../src/index";
+import {
+  DurableObject,
+  DurableObjectAlarm,
+  DurableObjectSqlite,
+  DurableObjectState,
+} from "../src/index";
 import type {
   SqlCursor,
   SqlStorage,
@@ -27,6 +32,250 @@ const alarm = (id: string, offset: number) =>
     runAt: DateTime.makeUnsafe(deadline + offset),
     payload: null,
   }) satisfies DurableObjectAlarm.ScheduleAlarmInput<"job">;
+
+class Maintenance extends DurableObjectAlarm.Wakeup<Maintenance>()("test/Maintenance") {}
+class Reminders extends DurableObjectAlarm.Tag<Reminders>()("test/Reminders", {
+  reminder: Schema.Null,
+}) {}
+
+it.effect("named wakeups and application alarms preserve each other's deadlines", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+  const registration = DurableObjectAlarm.withWakeups(
+    Reminders.handlers({ reminder: () => Effect.void }),
+    Maintenance.handler(Effect.flatMap(Maintenance, (wakeup) => wakeup.cancel)),
+  );
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const reminders = yield* Reminders;
+      const maintenance = yield* Maintenance;
+      const input = {
+        tag: "reminder",
+        id: "a",
+        payload: null,
+        runAt: DateTime.makeUnsafe(deadline + 1_000),
+      } as const;
+
+      yield* TestClock.setTime(deadline);
+      yield* reminders.scheduleAlarm(input);
+      yield* maintenance.scheduleAt(DateTime.makeUnsafe(deadline));
+      yield* maintenance.cancel;
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 1_000);
+
+      yield* maintenance.scheduleAt(DateTime.makeUnsafe(deadline + 2_000));
+      yield* reminders.cancelAlarm(input);
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 2_000);
+      yield* maintenance.scheduleEarlier(DateTime.makeUnsafe(deadline + 3_000));
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 2_000);
+      yield* maintenance.scheduleEarlier(DateTime.makeUnsafe(deadline));
+      yield* reminders.scheduleAlarm(input);
+      yield* registration.run;
+      assert.isUndefined(yield* maintenance.scheduledAt);
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 1_000);
+
+      yield* maintenance.scheduleAt(DateTime.makeUnsafe(deadline + 2_000));
+      yield* TestClock.setTime(deadline + 1_000);
+      yield* registration.run;
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 2_000);
+      yield* TestClock.setTime(deadline + 2_000);
+      yield* registration.run;
+      assert.isNull(yield* state.storage.getAlarm());
+    }).pipe(Effect.provide(registration.layer.pipe(Layer.provideMerge(services)))),
+  );
+});
+
+it.effect(
+  "checkpoints named wakeups before dispatch and isolates failures without another attempt budget",
+  () => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+    let remindersHandled = 0;
+    let maintenanceHandled = 0;
+    const recoveryAt = deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS;
+    const registration = DurableObjectAlarm.withWakeups(
+      Reminders.handlers({
+        reminder: () =>
+          Effect.sync(() => {
+            remindersHandled++;
+          }),
+      }),
+      Maintenance.handler(
+        Effect.gen(function* () {
+          const maintenance = yield* Maintenance;
+          const scheduled = yield* maintenance.scheduledAt;
+
+          assert.strictEqual(DateTime.toEpochMillis(scheduled!), recoveryAt);
+          maintenanceHandled++;
+          if (maintenanceHandled === 1) {
+            // Replacing a checkpoint before failing must preserve the owner's new deadline.
+            yield* maintenance.scheduleAt(DateTime.makeUnsafe(deadline));
+          }
+
+          return yield* Effect.fail("maintenance failed");
+        }),
+      ),
+    );
+    const layer = registration.layer.pipe(Layer.provideMerge(services));
+
+    return Effect.gen(function* () {
+      yield* PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+        Effect.gen(function* () {
+          const reminders = yield* Reminders;
+          const maintenance = yield* Maintenance;
+
+          yield* TestClock.setTime(deadline);
+          yield* reminders.scheduleAlarm({
+            tag: "reminder",
+            id: "a",
+            payload: null,
+            runAt: DateTime.makeUnsafe(deadline),
+          });
+          yield* maintenance.scheduleAt(DateTime.makeUnsafe(deadline));
+          assert.isTrue(Exit.isFailure(yield* registration.run.pipe(Effect.exit)));
+          assert.strictEqual(remindersHandled, 1);
+          assert.strictEqual(maintenanceHandled, 1);
+          assert.strictEqual(yield* state.storage.getAlarm(), deadline);
+
+          assert.isTrue(Exit.isFailure(yield* registration.run.pipe(Effect.exit)));
+          assert.strictEqual(maintenanceHandled, 2);
+          assert.strictEqual(yield* state.storage.getAlarm(), recoveryAt);
+          yield* registration.run;
+          assert.strictEqual(maintenanceHandled, 2);
+        }).pipe(Effect.provide(layer)),
+      );
+      yield* Effect.promise(() => evictDurableObject(stub));
+      yield* PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+        Effect.gen(function* () {
+          const maintenance = yield* Maintenance;
+
+          assert.strictEqual(DateTime.toEpochMillis((yield* maintenance.scheduledAt)!), recoveryAt);
+          assert.strictEqual(yield* state.storage.getAlarm(), recoveryAt);
+          yield* maintenance.cancel;
+          assert.isNull(yield* state.storage.getAlarm());
+        }).pipe(Effect.provide(layer)),
+      );
+    });
+  },
+);
+
+it.effect(
+  "named wakeups roll back with source writes and reject escaped transaction handles",
+  () => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+    const registration = Maintenance.handler(Effect.void);
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const maintenance = yield* Maintenance;
+        let escaped: DurableObjectAlarm.WakeupTransaction | undefined;
+
+        yield* maintenance.transaction((tx) =>
+          Effect.gen(function* () {
+            yield* state.storage.put("source", "before");
+            yield* tx.scheduleAt(DateTime.makeUnsafe(deadline));
+            escaped = tx;
+          }),
+        );
+        const exit = yield* maintenance
+          .transaction((tx) =>
+            Effect.gen(function* () {
+              yield* state.storage.put("source", "after");
+              yield* tx.cancel;
+
+              return yield* Effect.fail("rollback");
+            }),
+          )
+          .pipe(Effect.exit);
+
+        assert.isTrue(Exit.isFailure(exit));
+        assert.strictEqual(yield* state.storage.get("source"), "before");
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline);
+        assert.strictEqual(
+          (yield* escaped!.cancel.pipe(Effect.flip))._tag,
+          "StorageOperationError",
+        );
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline);
+        yield* maintenance.cancel;
+      }).pipe(Effect.provide(registration.layer.pipe(Layer.provideMerge(services)))),
+    );
+  },
+);
+
+it.effect.each([true, false])(
+  "retains a removed named handler's checkpoint with managed registration: %s",
+  (withManaged) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+    const previous = Maintenance.handler(Effect.void);
+    const current = Reminders.handlers({ reminder: () => Effect.void });
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const maintenance = yield* Maintenance;
+        const reminders = yield* Reminders;
+
+        yield* TestClock.setTime(deadline);
+        yield* maintenance.scheduleAt(DateTime.makeUnsafe(deadline));
+        if (withManaged) {
+          yield* reminders.scheduleAlarm({
+            tag: "reminder",
+            id: "a",
+            payload: null,
+            runAt: DateTime.makeUnsafe(deadline),
+          });
+        }
+        const clock = Layer.succeed(Clock.Clock, yield* Clock.Clock);
+        const CurrentObject = withManaged
+          ? DurableObject.make(clock, { alarms: current })
+          : DurableObject.make(clock);
+        const instance = new CurrentObject(state.raw, {});
+        const dispatch = Effect.promise(async () => {
+          await instance.alarm?.();
+        });
+
+        assert.isTrue(Exit.isFailure(yield* dispatch.pipe(Effect.exit)));
+        assert.isUndefined(yield* reminders.getAlarmStatus({ tag: "reminder", id: "a" }));
+        assert.strictEqual(
+          yield* state.storage.getAlarm(),
+          deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS,
+        );
+        yield* dispatch;
+        yield* maintenance.cancel;
+      }).pipe(
+        Effect.provide(
+          Layer.merge(previous.layer, current.layer).pipe(Layer.provideMerge(services)),
+        ),
+      ),
+    );
+  },
+);
+
+it.effect.each(["duplicate wakeup", "service collision"] as const)(
+  "rejects %s before building application services",
+  (kind) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+    const wakeup = Maintenance.handler(Effect.void);
+
+    class Conflicting extends DurableObjectAlarm.Wakeup<Conflicting>()("test/Reminders") {}
+    const registration: DurableObjectAlarm.AlarmRegistration<never> =
+      kind === "duplicate wakeup"
+        ? DurableObjectAlarm.withWakeups(wakeup, wakeup)
+        : DurableObjectAlarm.withWakeups(
+            Reminders.handlers({ reminder: () => Effect.void }),
+            Conflicting.handler(Effect.void),
+          );
+    let built = false;
+
+    return PoolWorkers.runInDurableObject(stub, () =>
+      Effect.gen(function* () {
+        const exit = yield* Effect.sync(() => {
+          built = true;
+        }).pipe(Effect.provide(registration.layer.pipe(Layer.provideMerge(services))), Effect.exit);
+
+        assert.isTrue(Exit.isFailure(exit));
+        assert.isFalse(built);
+      }),
+    );
+  },
+);
 
 const customConfiguration = {
   minimumRetryDelay: "2 seconds",

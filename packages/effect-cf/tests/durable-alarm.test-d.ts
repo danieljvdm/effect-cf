@@ -198,3 +198,57 @@ DurableObject.make(applicationLayer, {
 // @ts-expect-error Application layers cannot use an unregistered alarm service.
 // @effect-diagnostics-next-line missingLayerContext:off
 DurableObject.make(applicationLayer);
+
+class Maintenance extends DurableObjectAlarm.Wakeup<Maintenance>()("test/Maintenance") {}
+class Lifecycle extends DurableObjectAlarm.Wakeup<Lifecycle>()("test/Lifecycle") {}
+declare const maintenance: Maintenance["Service"];
+expectTypeOf(maintenance.transaction(() => application)).toEqualTypeOf<
+  Effect.Effect<number, ApplicationError | DurableObjectStorage.StorageOperationError, Application>
+>();
+expectTypeOf(maintenance.scheduleAt(runAt)).toEqualTypeOf<
+  Effect.Effect<
+    void,
+    DurableObjectAlarm.InvalidWakeupError | DurableObjectStorage.StorageOperationError
+  >
+>();
+const maintenanceRegistration = Maintenance.handler(application.pipe(Effect.asVoid));
+
+expectTypeOf(maintenanceRegistration.run).toEqualTypeOf<
+  Effect.Effect<
+    DurableObjectAlarm.ProcessDueAlarmsResult,
+    ApplicationError | DurableObjectAlarm.DurableObjectAlarmError,
+    Application | DurableObjectAlarm.DurableObjectAlarm
+  >
+>();
+const armMaintenance = Effect.flatMap(Maintenance, (wakeup) => wakeup.scheduleAt(runAt));
+const together = DurableObjectAlarm.withWakeups(
+  registration,
+  maintenanceRegistration,
+  Lifecycle.handler(Effect.void),
+);
+const appService = Layer.succeed(Application, { id: "app" });
+
+DurableObject.make(appService, {
+  alarms: together,
+  rpc: { save: schedule, armMaintenance: () => armMaintenance },
+});
+Documents.make(appService, { alarms: together, rpc: { save: schedule } });
+// @ts-expect-error A named wakeup requires its own handler registration.
+// @effect-diagnostics-next-line missingEffectContext:off
+DurableObject.make(Layer.empty, { rpc: { armMaintenance: () => armMaintenance } });
+DurableObject.make(Layer.empty, {
+  alarms: registration,
+  // @ts-expect-error A managed-alarm registration does not register named wakeups.
+  rpc: { armMaintenance: () => armMaintenance },
+});
+// @ts-expect-error Installing a wakeup service layer alone cannot install its dispatcher.
+DurableObject.make(maintenanceRegistration.layer);
+// @ts-expect-error This combinator accepts named wakeups, not a second managed-alarm dispatcher.
+DurableObjectAlarm.withWakeups(registration, otherRegistration);
+
+void maintenance.transaction((wakeupTx) => {
+  // @ts-expect-error A wakeup transaction cannot open nested transactions.
+  void wakeupTx.transaction(() => Effect.void);
+
+  return wakeupTx.cancel;
+});

@@ -367,6 +367,7 @@ export interface WakeupTransaction {
  */
 export interface WakeupScheduler extends WakeupTransaction {
   readonly [TypedAlarmSchedulerTypeId]: typeof TypedAlarmSchedulerTypeId;
+  readonly withWakesDeferred: AlarmScheduler["withWakesDeferred"];
   readonly scheduledAt: Effect.Effect<
     DateTime.Utc | undefined,
     InvalidWakeupError | StorageOperationError
@@ -387,6 +388,17 @@ export interface AlarmStatus {
 export type AlarmScheduler = {
   /** Prefer Wakeup services, whose handler registration is checked by DurableObject.make. */
   readonly wakeup: (key: string) => WakeupScheduler;
+  /**
+   * Keep a native recovery alarm armed while coalescing checkpoint changes across this
+   * object's concurrent and nested scopes. Source/checkpoint transactions still commit;
+   * the last scope reconciles their current deadlines on success, failure or interruption.
+   * Run outside transactions, around bounded maintenance or inline work. The first scope's
+   * parkedRetryDelay bounds the shared guard; renew it if it expires and is consumed while
+   * scopes remain active. A process loss before exit recovers at that retained alarm.
+   */
+  readonly withWakesDeferred: <A, E, R>(
+    body: Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E | InvalidScheduleConfigurationError | StorageOperationError, R>;
   /** @internal Commits recovery checkpoints before any named wakeup handler can run. */
   readonly [PrepareWakeups]: Effect.Effect<readonly string[], DurableObjectAlarmError>;
   /**
@@ -726,35 +738,40 @@ const makeRegistration = <Self, R, E>(
     run: Effect.gen(function* () {
       yield* validate;
       const alarms = yield* DurableObjectAlarm;
-      const due = yield* alarms[PrepareWakeups];
-      const runWakeup = (key: string) =>
-        Effect.suspend<void, E | InvalidAlarmRegistrationError, R>(() => {
-          const handler = handlers.get(key);
 
-          if (handler === undefined) return Effect.fail(missingWakeup(key));
-          const pass = { active: true };
+      return yield* alarms.withWakesDeferred(
+        Effect.gen(function* () {
+          const due = yield* alarms[PrepareWakeups];
+          const runWakeup = (key: string) =>
+            Effect.suspend<void, E | InvalidAlarmRegistrationError, R>(() => {
+              const handler = handlers.get(key);
 
-          return handler.pipe(
-            Effect.provideService(CurrentWakeupPass, pass),
-            Effect.ensuring(
-              Effect.sync(() => {
-                pass.active = false;
-              }),
-            ),
+              if (handler === undefined) return Effect.fail(missingWakeup(key));
+              const pass = { active: true };
+
+              return handler.pipe(
+                Effect.provideService(CurrentWakeupPass, pass),
+                Effect.ensuring(
+                  Effect.sync(() => {
+                    pass.active = false;
+                  }),
+                ),
+              );
+            });
+          // The managed branch always has its own slot. A failed handler cannot interrupt another.
+          const [managed, wakeups] = yield* Effect.all(
+            [
+              parts.managed.pipe(Effect.provideService(WakeupsPrepared, true), Effect.exit),
+              Effect.forEach(due, (key) => Effect.exit(runWakeup(key)), { concurrency: 4 }),
+            ],
+            { concurrency: 2 },
           );
-        });
-      // The managed branch always has its own slot. A failed handler cannot interrupt another.
-      const [managed, wakeups] = yield* Effect.all(
-        [
-          parts.managed.pipe(Effect.provideService(WakeupsPrepared, true), Effect.exit),
-          Effect.forEach(due, (key) => Effect.exit(runWakeup(key)), { concurrency: 4 }),
-        ],
-        { concurrency: 2 },
+
+          yield* Exit.asVoidAll([managed, ...wakeups]);
+
+          return Exit.isSuccess(managed) ? managed.value : emptyResult;
+        }),
       );
-
-      yield* Exit.asVoidAll([managed, ...wakeups]);
-
-      return Exit.isSuccess(managed) ? managed.value : emptyResult;
     }),
   };
 };
@@ -1017,6 +1034,9 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
     Effect.gen(function* () {
       const state = yield* DurableObjectState;
       const configurationDefaults = { ...(yield* ScheduleConfiguration) };
+      let wakeDeferrals = 0;
+      let deferredRecoveryDelay = PARKED_RETRY_DELAY_MS;
+      let deferredRecoveryAt = 0;
 
       const readRow = Effect.fnUntraced(function* (storageId: string) {
         const cursor = yield* state.storage.sql.exec<AlarmRow>(
@@ -1027,7 +1047,35 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         return (yield* cursor.toArray())[0];
       });
 
+      // The scheduler is the sole alarm writer. Raw storage is confined to this boundary.
+      const writeNativeAlarm = (runAt: number | null) =>
+        Effect.tryPromise({
+          try: () =>
+            runAt === null ? state.raw.storage.deleteAlarm() : state.raw.storage.setAlarm(runAt),
+          catch: (cause) =>
+            new StorageOperationError({
+              operation: runAt === null ? "deleteAlarm" : "setAlarm",
+              cause,
+            }),
+        });
+
       const reconcileAlarm = Effect.fn("DurableObjectAlarm.reconcileAlarm")(function* () {
+        if (wakeDeferrals > 0) {
+          const current = yield* state.storage.getAlarm();
+          const now = yield* Clock.currentTimeMillis;
+
+          if (current === null && deferredRecoveryAt <= now) {
+            deferredRecoveryAt = now + deferredRecoveryDelay;
+          }
+
+          // Commit the guard before user work. Later transactions keep it even when
+          // logical deadlines move earlier or every checkpoint is cancelled.
+          if (current === null || current > deferredRecoveryAt) {
+            yield* writeNativeAlarm(deferredRecoveryAt);
+          }
+
+          return;
+        }
         const cursor = yield* state.storage.sql.exec<NextAlarmRow>(
           `SELECT run_at FROM (
              SELECT wake_at AS run_at FROM effect_cf_scheduled_alarms
@@ -1038,18 +1086,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         );
         const next = (yield* cursor.toArray())[0];
 
-        // The scheduler is the sole alarm writer. Raw storage is confined to this boundary.
-        yield* Effect.tryPromise({
-          try: () =>
-            next === undefined
-              ? state.raw.storage.deleteAlarm()
-              : state.raw.storage.setAlarm(next.run_at),
-          catch: (cause) =>
-            new StorageOperationError({
-              operation: next === undefined ? "deleteAlarm" : "setAlarm",
-              cause,
-            }),
-        });
+        yield* writeNativeAlarm(next?.run_at ?? null);
       });
 
       const decodeWakeupKey = (key: string) =>
@@ -1305,8 +1342,29 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         return result;
       });
 
+      const withWakesDeferred: AlarmScheduler["withWakesDeferred"] = (body) =>
+        Effect.acquireUseRelease(
+          Effect.gen(function* () {
+            const configuration = yield* getScheduleConfiguration(configurationDefaults);
+            const now = yield* Clock.currentTimeMillis;
+
+            if (wakeDeferrals === 0) {
+              deferredRecoveryDelay = configuration.parkedRetryDelay;
+              deferredRecoveryAt = now + deferredRecoveryDelay;
+            }
+            wakeDeferrals++;
+          }),
+          () => transaction(() => Effect.void).pipe(Effect.andThen(body)),
+          () =>
+            Effect.gen(function* () {
+              wakeDeferrals--;
+              if (wakeDeferrals === 0) yield* transaction(() => Effect.void);
+            }),
+        );
+
       const wakeup = (key: string): WakeupScheduler => ({
         [TypedAlarmSchedulerTypeId]: TypedAlarmSchedulerTypeId,
+        withWakesDeferred,
         scheduleAt: (runAt) => transaction((tx) => tx.wakeup(key).scheduleAt(runAt)),
         scheduleEarlier: (runAt) => transaction((tx) => tx.wakeup(key).scheduleEarlier(runAt)),
         cancel: transaction((tx) => tx.wakeup(key).cancel),
@@ -1544,6 +1602,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
 
       return DurableObjectAlarm.of({
         wakeup,
+        withWakesDeferred,
         [PrepareWakeups]: prepareWakeups,
         cancelAlarm: (input) => transaction((alarms) => alarms.cancelAlarm(input)),
         getAlarmStatus: Effect.fnUntraced(function* (input) {

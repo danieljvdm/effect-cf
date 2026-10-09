@@ -205,6 +205,15 @@ declare const maintenance: Maintenance["Service"];
 expectTypeOf(maintenance.transaction(() => application)).toEqualTypeOf<
   Effect.Effect<number, ApplicationError | DurableObjectStorage.StorageOperationError, Application>
 >();
+expectTypeOf(maintenance.withWakesDeferred(application)).toEqualTypeOf<
+  Effect.Effect<
+    number,
+    | ApplicationError
+    | DurableObjectAlarm.InvalidScheduleConfigurationError
+    | DurableObjectStorage.StorageOperationError,
+    Application
+  >
+>();
 expectTypeOf(maintenance.scheduleAt(runAt)).toEqualTypeOf<
   Effect.Effect<
     void,

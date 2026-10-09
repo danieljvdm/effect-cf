@@ -14,7 +14,8 @@ The effect-cf primitives enforce these rules:
   automatic attempt per hour until progress resumes it; consumers can choose
   a longer recovery interval.
 - One scheduler owns the platform alarm. Logical deadlines, attempt state and
-  native alarm reconciliation commit or roll back together.
+  native alarm reconciliation commit or roll back together. Deferred processing
+  retains a committed recovery alarm until its final reconciliation.
 
 Managed alarms enforce the retry and progress budget; named wakeups let an
 existing durable queue retain its own policy under the same platform alarm owner.
@@ -143,8 +144,8 @@ const enroll = Effect.gen(function* () {
 
   yield* maintenance.transaction((tx) =>
     Effect.gen(function* () {
-      yield* state.storage.put("pending-job", job);
       yield* tx.scheduleEarlier(DateTime.makeUnsafe(deadline));
+      yield* state.storage.put("pending-job", job);
     }),
   );
 });
@@ -156,19 +157,33 @@ queue's checkpoint. Transaction handles have the same fiber and lifetime rules
 as managed alarms. The raw scheduler also exposes `wakeup(key)`, including on its
 transaction handle, for integration with source writes and managed alarms in
 one transaction. Register the matching named handler before scheduling it.
+For work outside that transaction, commit the checkpoint and dirty generation
+first, before starting a mutation or external effect that can fail independently.
 
-Before dispatch, the scheduler atomically moves due named checkpoints to
-`now + parkedRetryDelay` (at least one hour), including reconciliation of the
-native alarm. It then runs application alarms and a bounded pool of queue
+Before dispatch, the scheduler commits a native recovery alarm and atomically
+moves due named checkpoints to `now + parkedRetryDelay` (at least one hour).
+It then runs application alarms and a bounded pool of queue
 handlers independently. A failure or defect in one handler does not cancel the
 others; parent interruption still interrupts the pass. The fallback survives
 process loss and handler success or failure. There is no automatic acknowledgement
 or second attempt budget over the queue's own work.
 
+Registrations defer native alarm changes during dispatch. For inline processing,
+use `maintenance.withWakesDeferred(inlinePass)` outside any storage transaction.
+The scope commits a recovery alarm before running the body, then keeps it armed
+while source and checkpoint transactions commit. Nested and concurrent scopes
+share the deferral across the object, including changes made by other requests.
+The last scope reconciles the earliest remaining deadline on success, failure or
+interruption; a cancelled checkpoint is not revived by a buffered hint. Keep the
+work bounded: eviction before final reconciliation can delay it until the retained
+recovery alarm, rather than the newly requested deadline.
+
 After external work, **re-read the authoritative queue and replace or cancel its
 checkpoint in the same transaction as source changes**. Include outstanding
 lease and retry deadlines. Cancelling from a stale idle observation can erase
-another request's enrollment in the same queue. Keep external effects outside
+another request's enrollment in the same queue. Keep generation, dirty tracking
+and per-lane retry floors in the queue; compare its observed generation inside
+that transaction before acknowledging a pass. Keep external effects outside
 the transaction, preserve the queue's fencing and idempotency rules, and cancel
 when it is idle. This API supplies shared scheduling, not queue ownership or
 protection against a consumer that repeatedly re-arms unchanged work.
@@ -176,7 +191,8 @@ protection against a consumer that repeatedly re-arms unchanged work.
 Cancel a queue's checkpoint before removing its handler. If a due checkpoint has
 no registered handler, the dispatcher retains it for hourly recovery and reports
 `InvalidAlarmRegistrationError` after allowing other due work to run. Reinstalling
-the handler can recover it; deployments do not silently delete retained work.
+the handler can recover it, including when the deployment kept only a raw `alarm`
+hook; deployments do not silently delete retained work.
 
 ## Configure scheduling policy
 

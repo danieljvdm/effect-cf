@@ -104,6 +104,60 @@ it.effect("rolls back a failure's retry budget when native reconciliation fails"
   }),
 );
 
+it.effect(
+  "deferred work cannot start without a guard and survives failed exit reconciliation",
+  () =>
+    Effect.gen(function* () {
+      const fixture = makeAlarmFixture();
+
+      yield* fixture.run(
+        Effect.gen(function* () {
+          const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+          const wakeup = alarms.wakeup("test/maintenance");
+
+          fixture.failNextSetAlarm();
+          const rejected = yield* wakeup
+            .withWakesDeferred(writeJob(fixture.storage, "unsafe"))
+            .pipe(Effect.exit);
+
+          assert.isTrue(Exit.isFailure(rejected));
+          assert.isUndefined(fixture.job("job"));
+          assert.isNull(fixture.currentAlarm());
+
+          const failedFlush = yield* wakeup
+            .withWakesDeferred(
+              Effect.gen(function* () {
+                yield* wakeup.transaction((tx) =>
+                  Effect.gen(function* () {
+                    yield* tx.scheduleAt(atMillis(1_000));
+                    yield* writeJob(fixture.storage, "ready");
+                  }),
+                );
+                yield* wakeup.scheduleEarlier(atMillis(500));
+                yield* wakeup.scheduleEarlier(atMillis(250));
+                assert.deepStrictEqual(fixture.tracker.setAlarms, [
+                  DurableObjectAlarm.PARKED_RETRY_DELAY_MS,
+                ]);
+                fixture.failNextSetAlarm();
+              }),
+            )
+            .pipe(Effect.exit);
+
+          assert.isTrue(Exit.isFailure(failedFlush));
+          assert.strictEqual(fixture.job("job"), "ready");
+          assert.strictEqual(DateTime.toEpochMillis((yield* wakeup.scheduledAt)!), 250);
+          assert.strictEqual(fixture.currentAlarm(), DurableObjectAlarm.PARKED_RETRY_DELAY_MS);
+          yield* wakeup.withWakesDeferred(Effect.void);
+          assert.strictEqual(fixture.currentAlarm(), 250);
+          assert.deepStrictEqual(fixture.tracker.setAlarms, [
+            DurableObjectAlarm.PARKED_RETRY_DELAY_MS,
+            250,
+          ]);
+        }),
+      );
+    }),
+);
+
 it.effect("commits application writes and mixed alarm mutations in one transaction", () =>
   Effect.gen(function* () {
     const fixture = makeAlarmFixture();

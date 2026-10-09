@@ -38,6 +38,99 @@ class Reminders extends DurableObjectAlarm.Tag<Reminders>()("test/Reminders", {
   reminder: Schema.Null,
 }) {}
 
+it.effect("coalesces nested and concurrent wake changes until deferred work exits", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+  const registration = DurableObjectAlarm.withWakeups(
+    Reminders.handlers({ reminder: () => Effect.void }),
+    Maintenance.handler(Effect.void),
+  );
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const maintenance = yield* Maintenance;
+      const reminders = yield* Reminders;
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+
+      yield* TestClock.setTime(deadline);
+      yield* maintenance.scheduleAt(DateTime.makeUnsafe(deadline + 10_000));
+      const running = yield* maintenance
+        .withWakesDeferred(
+          Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))),
+        )
+        .pipe(Effect.forkChild);
+
+      yield* Deferred.await(entered);
+      // This caller does not inherit the running scope's Effect context.
+      yield* maintenance.scheduleEarlier(DateTime.makeUnsafe(deadline));
+      yield* maintenance.withWakesDeferred(
+        Effect.gen(function* () {
+          yield* reminders.scheduleAlarm({
+            tag: "reminder",
+            id: "a",
+            payload: null,
+            runAt: DateTime.makeUnsafe(deadline + 5_000),
+          });
+          yield* maintenance.scheduleAt(DateTime.makeUnsafe(deadline + 2_000));
+        }),
+      );
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 10_000);
+      assert.strictEqual(
+        DateTime.toEpochMillis((yield* maintenance.scheduledAt)!),
+        deadline + 2_000,
+      );
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(running);
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 2_000);
+      yield* maintenance.cancel;
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 5_000);
+      yield* reminders.cancelAlarm({ tag: "reminder", id: "a" });
+      assert.isNull(yield* state.storage.getAlarm());
+    }).pipe(Effect.provide(registration.layer.pipe(Layer.provideMerge(services)))),
+  );
+});
+
+it.effect.each(["failure", "interruption"] as const)(
+  "pre-arms deferred source writes and reconciles after %s",
+  (outcome) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+    const registration = Maintenance.handler(Effect.void);
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const maintenance = yield* Maintenance;
+
+        yield* TestClock.setTime(deadline);
+        const running = yield* maintenance
+          .withWakesDeferred(
+            Effect.gen(function* () {
+              const recoveryAt = deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS;
+
+              assert.strictEqual(yield* state.storage.getAlarm(), recoveryAt);
+              yield* maintenance.transaction((tx) =>
+                Effect.gen(function* () {
+                  yield* tx.scheduleEarlier(DateTime.makeUnsafe(deadline));
+                  yield* state.storage.put("source", "ready");
+                }),
+              );
+              assert.strictEqual(yield* state.storage.getAlarm(), recoveryAt);
+
+              return yield* outcome === "failure" ? Effect.fail("failed") : Effect.interrupt;
+            }),
+          )
+          .pipe(Effect.forkChild);
+        const exit = yield* Fiber.await(running);
+
+        assert.isTrue(Exit.isFailure(exit));
+        assert.strictEqual(yield* state.storage.get("source"), "ready");
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline);
+        yield* maintenance.cancel;
+        assert.isNull(yield* state.storage.getAlarm());
+      }).pipe(Effect.provide(registration.layer.pipe(Layer.provideMerge(services)))),
+    );
+  },
+);
+
 it.effect("named wakeups and application alarms preserve each other's deadlines", () => {
   const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
   const registration = DurableObjectAlarm.withWakeups(
@@ -199,6 +292,42 @@ it.effect(
     );
   },
 );
+
+it.effect("enrolls wakeups inside the source's SQL transaction and rolls back with it", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+  const registration = Maintenance.handler(Effect.void);
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const maintenance = yield* Maintenance;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`CREATE TABLE source (generation INTEGER NOT NULL)`;
+      yield* sql.withTransaction(
+        Effect.gen(function* () {
+          yield* maintenance.scheduleEarlier(DateTime.makeUnsafe(deadline));
+          yield* sql`INSERT INTO source VALUES (1)`;
+        }),
+      );
+      const aborted = yield* sql
+        .withTransaction(
+          Effect.gen(function* () {
+            yield* maintenance.scheduleAt(DateTime.makeUnsafe(deadline + 1_000));
+            yield* sql`UPDATE source SET generation = 2`;
+
+            return yield* Effect.fail("rollback source and checkpoint");
+          }),
+        )
+        .pipe(Effect.exit);
+
+      assert.isTrue(Exit.isFailure(aborted));
+      assert.deepStrictEqual(yield* sql`SELECT generation FROM source`, [{ generation: 1 }]);
+      assert.strictEqual(DateTime.toEpochMillis((yield* maintenance.scheduledAt)!), deadline);
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline);
+      yield* maintenance.cancel;
+    }).pipe(Effect.provide(registration.layer.pipe(Layer.provideMerge(services)))),
+  );
+});
 
 it.effect.each([
   { withManaged: true, withRaw: false },

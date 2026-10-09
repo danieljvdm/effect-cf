@@ -371,7 +371,7 @@ export interface WakeupTransaction {
  */
 export interface WakeupScheduler extends WakeupTransaction {
   readonly [TypedAlarmSchedulerTypeId]: typeof TypedAlarmSchedulerTypeId;
-  readonly withWakesDeferred: AlarmScheduler["withWakesDeferred"];
+  readonly deferWakes: AlarmScheduler["deferWakes"];
   readonly scheduledAt: Effect.Effect<
     DateTime.Utc | undefined,
     InvalidWakeupError | StorageOperationError
@@ -400,7 +400,7 @@ export type AlarmScheduler = {
    * parkedRetryDelay bounds the shared guard; renew it if it expires and is consumed while
    * scopes remain active. A process loss before exit recovers at that retained alarm.
    */
-  readonly withWakesDeferred: <A, E, R>(
+  readonly deferWakes: <A, E, R>(
     body: Effect.Effect<A, E, R>,
   ) => Effect.Effect<A, E | InvalidScheduleConfigurationError | StorageOperationError, R>;
   /** @internal Commits recovery checkpoints before any named wakeup handler can run. */
@@ -744,7 +744,7 @@ const makeRegistration = <Self, R, E>(
       yield* validate;
       const alarms = yield* DurableObjectAlarm;
 
-      return yield* alarms.withWakesDeferred(
+      return yield* alarms.deferWakes(
         Effect.gen(function* () {
           const due = yield* alarms[PrepareWakeups];
           const runWakeup = (key: string) =>
@@ -822,7 +822,7 @@ type WakeupEffect<Registration extends WakeupRegistration<never, unknown, unknow
   Registration[typeof RegistrationParts]["wakeups"][number]["run"];
 
 /** Compose one managed-alarm registration with named queues under the same platform alarm owner. */
-export function withWakeups<
+export function addWakeups<
   Self,
   R,
   E,
@@ -836,7 +836,7 @@ export function withWakeups<
   E | Effect.Error<WakeupEffect<Wakeups[number]>>
 >;
 // The overload preserves each heterogeneous registration's service, error and requirement types.
-export function withWakeups(
+export function addWakeups(
   registration: AlarmRegistration<never, unknown, unknown>,
   ...wakeups: readonly WakeupRegistration<never, unknown, unknown>[]
 ): AlarmRegistration<never, unknown, unknown> {
@@ -1410,7 +1410,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         return result;
       });
 
-      const withWakesDeferred: AlarmScheduler["withWakesDeferred"] = (body) =>
+      const deferWakes: AlarmScheduler["deferWakes"] = (body) =>
         Effect.acquireUseRelease(
           Effect.gen(function* () {
             const configuration = yield* getScheduleConfiguration(configurationDefaults);
@@ -1432,7 +1432,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
 
       const wakeup = (key: string): WakeupScheduler => ({
         [TypedAlarmSchedulerTypeId]: TypedAlarmSchedulerTypeId,
-        withWakesDeferred,
+        deferWakes,
         scheduleAt: (runAt) => transaction((tx) => tx.wakeup(key).scheduleAt(runAt)),
         scheduleEarlier: (runAt) => transaction((tx) => tx.wakeup(key).scheduleEarlier(runAt)),
         cancel: transaction((tx) => tx.wakeup(key).cancel),
@@ -1674,7 +1674,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
 
       return DurableObjectAlarm.of({
         wakeup,
-        withWakesDeferred,
+        deferWakes,
         [PrepareWakeups]: prepareWakeups,
         cancelAlarm: (input) => transaction((alarms) => alarms.cancelAlarm(input)),
         getAlarmStatus: Effect.fnUntraced(function* (input) {

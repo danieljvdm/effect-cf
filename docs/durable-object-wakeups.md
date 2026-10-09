@@ -120,7 +120,7 @@ flowchart LR
 ```ts
 class Maintenance extends DurableObjectAlarm.Wakeup<Maintenance>()("library/maintenance") {}
 
-const alarms = DurableObjectAlarm.withWakeups(
+const alarms = DurableObjectAlarm.addWakeups(
   Expirations.handlers({ expire: ({ id }) => Effect.log("Expired", id) }),
   Maintenance.handler(maintenancePass),
 );
@@ -128,7 +128,7 @@ const alarms = DurableObjectAlarm.withWakeups(
 // Pass this registration as DurableObject.make(applicationLayer, { alarms, ... }).
 ```
 
-`maintenancePass` is the queue's existing bounded Effect. `withWakeups` accepts
+`maintenancePass` is the queue's existing bounded Effect. `addWakeups` accepts
 one managed-alarm registration and one or more named wakeup registrations; a
 wakeup's `handler` registration also works alone. Stable service keys identify
 persisted checkpoints. Duplicate keys, including collisions with the managed
@@ -169,7 +169,7 @@ process loss and handler success or failure. There is no automatic acknowledgeme
 or second attempt budget over the queue's own work.
 
 Registrations defer native alarm changes during dispatch. For inline processing,
-use `maintenance.withWakesDeferred(inlinePass)` outside any storage transaction.
+use `maintenance.deferWakes(inlinePass)` outside any storage transaction.
 The scope commits a recovery alarm before running the body, then keeps it armed
 while source and checkpoint transactions commit. Nested and concurrent scopes
 share the deferral across the object, including changes made by other requests.

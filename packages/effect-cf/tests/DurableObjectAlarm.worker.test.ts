@@ -119,7 +119,7 @@ it.effect.each(["processDue", "define"] as const)(
         yield* alarms.wakeup(Maintenance.key).scheduleAt(DateTime.makeUnsafe(deadline));
         const CurrentObject = DurableObject.make(Layer.succeed(Clock.Clock, yield* Clock.Clock), {
           alarms:
-            kind === "processDue" ? registration : DurableObjectAlarm.withWakeups(registration),
+            kind === "processDue" ? registration : DurableObjectAlarm.addWakeups(registration),
           alarm: () =>
             (kind === "processDue"
               ? DurableObjectAlarm.processDue(handle)
@@ -142,7 +142,7 @@ it.effect.each(["processDue", "define"] as const)(
 
 it.effect("coalesces nested and concurrent wake changes until deferred work exits", () => {
   const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
-  const registration = DurableObjectAlarm.withWakeups(
+  const registration = DurableObjectAlarm.addWakeups(
     Reminders.handlers({ reminder: () => Effect.void }),
     Maintenance.handler(Effect.void),
   );
@@ -157,7 +157,7 @@ it.effect("coalesces nested and concurrent wake changes until deferred work exit
       yield* TestClock.setTime(deadline);
       yield* maintenance.scheduleAt(DateTime.makeUnsafe(deadline + 10_000));
       const running = yield* maintenance
-        .withWakesDeferred(
+        .deferWakes(
           Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))),
         )
         .pipe(Effect.forkChild);
@@ -165,7 +165,7 @@ it.effect("coalesces nested and concurrent wake changes until deferred work exit
       yield* Deferred.await(entered);
       // This caller does not inherit the running scope's Effect context.
       yield* maintenance.scheduleEarlier(DateTime.makeUnsafe(deadline));
-      yield* maintenance.withWakesDeferred(
+      yield* maintenance.deferWakes(
         Effect.gen(function* () {
           yield* reminders.scheduleAlarm({
             tag: "reminder",
@@ -204,7 +204,7 @@ it.effect.each(["failure", "interruption"] as const)(
 
         yield* TestClock.setTime(deadline);
         const running = yield* maintenance
-          .withWakesDeferred(
+          .deferWakes(
             Effect.gen(function* () {
               const recoveryAt = deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS;
 
@@ -235,7 +235,7 @@ it.effect.each(["failure", "interruption"] as const)(
 
 it.effect("named wakeups and application alarms preserve each other's deadlines", () => {
   const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
-  const registration = DurableObjectAlarm.withWakeups(
+  const registration = DurableObjectAlarm.addWakeups(
     Reminders.handlers({ reminder: () => Effect.void }),
     Maintenance.handler(Effect.flatMap(Maintenance, (wakeup) => wakeup.cancel)),
   );
@@ -286,7 +286,7 @@ it.effect(
     let remindersHandled = 0;
     let maintenanceHandled = 0;
     const recoveryAt = deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS;
-    const registration = DurableObjectAlarm.withWakeups(
+    const registration = DurableObjectAlarm.addWakeups(
       Reminders.handlers({
         reminder: () =>
           Effect.sync(() => {
@@ -649,8 +649,8 @@ it.effect.each(["duplicate wakeup", "service collision"] as const)(
     class Conflicting extends DurableObjectAlarm.Wakeup<Conflicting>()("test/Reminders") {}
     const registration: DurableObjectAlarm.AlarmRegistration<never> =
       kind === "duplicate wakeup"
-        ? DurableObjectAlarm.withWakeups(wakeup, wakeup)
-        : DurableObjectAlarm.withWakeups(
+        ? DurableObjectAlarm.addWakeups(wakeup, wakeup)
+        : DurableObjectAlarm.addWakeups(
             Reminders.handlers({ reminder: () => Effect.void }),
             Conflicting.handler(Effect.void),
           );

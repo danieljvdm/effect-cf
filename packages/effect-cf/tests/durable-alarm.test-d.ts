@@ -205,7 +205,7 @@ declare const maintenance: Maintenance["Service"];
 expectTypeOf(maintenance.transaction(() => application)).toEqualTypeOf<
   Effect.Effect<number, ApplicationError | DurableObjectStorage.StorageOperationError, Application>
 >();
-expectTypeOf(maintenance.withWakesDeferred(application)).toEqualTypeOf<
+expectTypeOf(maintenance.deferWakes(application)).toEqualTypeOf<
   Effect.Effect<
     number,
     | ApplicationError
@@ -230,7 +230,7 @@ expectTypeOf(maintenanceRegistration.run).toEqualTypeOf<
   >
 >();
 const armMaintenance = Effect.flatMap(Maintenance, (wakeup) => wakeup.scheduleAt(runAt));
-const together = DurableObjectAlarm.withWakeups(
+const together = DurableObjectAlarm.addWakeups(
   registration,
   maintenanceRegistration,
   Lifecycle.handler(Effect.void),
@@ -254,7 +254,7 @@ DurableObject.make(Layer.empty, {
 // @ts-expect-error Installing a wakeup service layer alone cannot install its dispatcher.
 DurableObject.make(maintenanceRegistration.layer);
 // @ts-expect-error This combinator accepts named wakeups, not a second managed-alarm dispatcher.
-DurableObjectAlarm.withWakeups(registration, otherRegistration);
+DurableObjectAlarm.addWakeups(registration, otherRegistration);
 
 void maintenance.transaction((wakeupTx) => {
   // @ts-expect-error A wakeup transaction cannot open nested transactions.

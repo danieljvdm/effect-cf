@@ -117,7 +117,7 @@ it.effect(
 
           fixture.failNextSetAlarm();
           const rejected = yield* wakeup
-            .withWakesDeferred(writeJob(fixture.storage, "unsafe"))
+            .deferWakes(writeJob(fixture.storage, "unsafe"))
             .pipe(Effect.exit);
 
           assert.isTrue(Exit.isFailure(rejected));
@@ -125,7 +125,7 @@ it.effect(
           assert.isNull(fixture.currentAlarm());
 
           const failedFlush = yield* wakeup
-            .withWakesDeferred(
+            .deferWakes(
               Effect.gen(function* () {
                 yield* wakeup.transaction((tx) =>
                   Effect.gen(function* () {
@@ -147,7 +147,7 @@ it.effect(
           assert.strictEqual(fixture.job("job"), "ready");
           assert.strictEqual(DateTime.toEpochMillis((yield* wakeup.scheduledAt)!), 250);
           assert.strictEqual(fixture.currentAlarm(), DurableObjectAlarm.PARKED_RETRY_DELAY_MS);
-          yield* wakeup.withWakesDeferred(Effect.void);
+          yield* wakeup.deferWakes(Effect.void);
           assert.strictEqual(fixture.currentAlarm(), 250);
           assert.deepStrictEqual(fixture.tracker.setAlarms, [
             DurableObjectAlarm.PARKED_RETRY_DELAY_MS,

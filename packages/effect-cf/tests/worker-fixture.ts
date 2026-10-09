@@ -180,6 +180,18 @@ const TestCounterLive = TestCounterDefinition.make(Layer.empty, {
     }),
 });
 
+export class TestLegacyAlarmDurableObject extends DurableObject.make(Layer.empty, {
+  alarm: () =>
+    Effect.gen(function* () {
+      const state = yield* DurableObjectState.DurableObjectState;
+      const count = (yield* state.storage.get<number>("raw-alarm-invocations")) ?? 0;
+      const next = yield* state.storage.get<number>("raw-alarm-next");
+
+      yield* state.storage.put("raw-alarm-invocations", count + 1);
+      if (next !== undefined) yield* Effect.promise(() => state.raw.storage.setAlarm(next));
+    }),
+}) {}
+
 export class TestCounterDurableObject extends TestCounterLive {
   readonly instanceId = crypto.randomUUID();
 }

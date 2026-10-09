@@ -196,6 +196,10 @@ hook; deployments do not silently delete retained work.
 Raw hooks that call `processDue` retain their dispatcher and batch limits. If a raw
 hook does not dispatch application alarms, retained application schedules receive
 the default unknown-tag backoff and parking policy, even when that hook fails.
+Wakeup-only registrations compose with a raw application dispatcher; explicit
+managed registrations retain their own dispatcher. Raw-only hooks without
+scheduler tables retain native alarm ownership, including on legacy KV-backed
+objects. Managed alarms and named wakeups require SQLite storage.
 
 ## Configure scheduling policy
 

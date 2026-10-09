@@ -692,6 +692,7 @@ interface WakeupHandler<R, E> {
 interface RegistrationParts<R, E> {
   readonly services: readonly string[];
   readonly wakeups: readonly WakeupHandler<R, E>[];
+  readonly hasManaged: boolean;
   readonly managed: AlarmRegistration<never, R, E>["run"];
 }
 
@@ -798,6 +799,7 @@ export const Wakeup =
         const parts: RegistrationParts<R, E> = {
           services: [id],
           wakeups: [{ key: id, run: handler }],
+          hasManaged: false,
           managed: makeDefinition({}).handlers({}),
         };
 
@@ -841,6 +843,7 @@ export function withWakeups(
   const parts = registration[RegistrationParts] ?? {
     services: [],
     wakeups: [],
+    hasManaged: true,
     managed: registration.run,
   };
 
@@ -855,6 +858,7 @@ export function withWakeups(
         ...parts.wakeups,
         ...wakeups.flatMap((wakeup) => wakeup[RegistrationParts].wakeups),
       ],
+      hasManaged: parts.hasManaged,
       managed: parts.managed,
     },
   );
@@ -1007,25 +1011,64 @@ export const define = <const Definitions extends AlarmDefinitions>(definitions: 
   handlers: makeDefinition(definitions).handlers,
 });
 
-/** @internal Recover retained schedules without overriding a raw hook's own dispatcher. */
-export const dispatchRawAlarm = <E, R>(
+/** @internal Compose raw dispatch with named wakeups, retaining explicit managed dispatchers. */
+export const dispatchRawAlarm = <Self, E, R>(
   rawAlarm: Effect.Effect<void, E, R>,
-): Effect.Effect<void, E | DurableObjectAlarmError, R | DurableObjectAlarm> =>
-  makeRegistration(Layer.empty, {
-    services: [],
-    wakeups: [],
-    managed: Effect.suspend(() => {
-      const pass = { processed: false };
+  registration?: AlarmRegistration<Self, R, E>,
+): Effect.Effect<void, E | DurableObjectAlarmError, R | DurableObjectAlarm | DurableObjectState> =>
+  Effect.gen(function* () {
+    const parts = registration?.[RegistrationParts];
 
-      return rawAlarm.pipe(
-        Effect.onExit(() =>
-          pass.processed ? Effect.void : makeDefinition({}).handlers({}).pipe(Effect.asVoid),
+    if (registration !== undefined && (parts === undefined || parts.hasManaged)) {
+      yield* registration.run;
+
+      return yield* rawAlarm;
+    }
+    if (registration === undefined) {
+      const state = yield* DurableObjectState;
+      const hasScheduler = yield* Effect.gen(function* () {
+        if (state.raw.storage.sql === undefined) return false;
+        // Inspect without creating tables: raw-only objects retain native alarm ownership.
+        const tables = yield* state.storage.sql.exec(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?) LIMIT 1",
+          "effect_cf_scheduled_alarms",
+          "effect_cf_alarm_wakeups",
+        );
+
+        return (yield* tables.toArray()).length > 0;
+      }).pipe(
+        Effect.catchIf(
+          (error) =>
+            error.cause instanceof Error &&
+            (error.cause.message.startsWith("SQL is not enabled for this Durable Object class") ||
+              error.cause.message.startsWith(
+                "This Durable Object is not backed by SQLite storage",
+              )),
+          () => Effect.succeed(false),
         ),
-        Effect.provideService(CurrentRawDispatch, pass),
-        Effect.as(emptyResult),
       );
-    }),
-  }).run.pipe(Effect.asVoid);
+
+      // Legacy KV objects also support raw alarms but cannot contain scheduler SQL tables.
+      if (!hasScheduler) return yield* rawAlarm;
+    }
+
+    return yield* makeRegistration(Layer.empty, {
+      services: parts?.services ?? [],
+      wakeups: parts?.wakeups ?? [],
+      hasManaged: true,
+      managed: Effect.suspend(() => {
+        const pass = { processed: false };
+
+        return rawAlarm.pipe(
+          Effect.onExit(() =>
+            pass.processed ? Effect.void : makeDefinition({}).handlers({}).pipe(Effect.asVoid),
+          ),
+          Effect.provideService(CurrentRawDispatch, pass),
+          Effect.as(emptyResult),
+        );
+      }),
+    }).run.pipe(Effect.asVoid);
+  });
 
 /** The typed scheduler becomes available when its handlers are registered on a Durable Object. */
 export const Tag =
@@ -1045,6 +1088,7 @@ export const Tag =
         makeRegistration(Layer.effect(tag, Effect.map(DurableObjectAlarm, definition.make)), {
           services: [id],
           wakeups: [],
+          hasManaged: true,
           managed: definition.handlers(handlers, options),
         }),
     });

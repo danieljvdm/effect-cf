@@ -38,6 +38,108 @@ class Reminders extends DurableObjectAlarm.Tag<Reminders>()("test/Reminders", {
   reminder: Schema.Null,
 }) {}
 
+it.effect("preserves native rearming on raw-only SQLite objects without managed schedules", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const CurrentObject = DurableObject.make(Layer.empty, {
+        alarm: () => Effect.promise(() => state.raw.storage.setAlarm(deadline + 1_000)),
+      });
+      const instance = new CurrentObject(state.raw, {});
+
+      yield* Effect.promise(() => state.raw.storage.setAlarm(deadline));
+      yield* Effect.promise(async () => {
+        await instance.alarm?.();
+      });
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 1_000);
+    }),
+  );
+});
+
+it.effect("runs and rearms raw hooks on legacy KV-backed Durable Objects", () => {
+  const stub = env.TEST_LEGACY_ALARM_DO!.getByName(crypto.randomUUID());
+
+  return Effect.gen(function* () {
+    yield* PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        assert.throws(
+          () => state.raw.storage.sql.databaseSize,
+          /SQL is not enabled|not backed by SQLite/,
+        );
+        yield* state.storage.put("raw-alarm-next", deadline + 1_000);
+        yield* Effect.promise(() => state.raw.storage.setAlarm(deadline));
+      }),
+    );
+    assert.isTrue(yield* PoolWorkers.runDurableObjectAlarm(stub));
+    yield* PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        assert.strictEqual(yield* state.storage.get("raw-alarm-invocations"), 1);
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline + 1_000);
+      }),
+    );
+  });
+});
+
+it.effect("settles retained legacy KV alarms after their raw hook is removed", () => {
+  const stub = env.TEST_LEGACY_ALARM_DO!.getByName(crypto.randomUUID());
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const CurrentObject = DurableObject.make(Layer.empty);
+      const instance = new CurrentObject(state.raw, {});
+
+      yield* Effect.promise(() => state.raw.storage.setAlarm(deadline));
+      yield* Effect.promise(async () => {
+        await instance.alarm?.();
+      });
+    }),
+  );
+});
+
+it.effect.each(["processDue", "define"] as const)(
+  "composes a wakeup-only registration with a raw %s application dispatcher",
+  (kind) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+    const registration = Maintenance.handler(
+      Effect.flatMap(Maintenance, (wakeup) => wakeup.cancel),
+    );
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+        const handled: string[] = [];
+        const handle = (event: { readonly id: string }) =>
+          Effect.sync(() => {
+            handled.push(event.id);
+          });
+
+        yield* TestClock.setTime(deadline);
+        yield* alarms.scheduleAlarm(alarm("raw", 0));
+        yield* alarms.wakeup(Maintenance.key).scheduleAt(DateTime.makeUnsafe(deadline));
+        const CurrentObject = DurableObject.make(Layer.succeed(Clock.Clock, yield* Clock.Clock), {
+          alarms:
+            kind === "processDue" ? registration : DurableObjectAlarm.withWakeups(registration),
+          alarm: () =>
+            (kind === "processDue"
+              ? DurableObjectAlarm.processDue(handle)
+              : DurableObjectAlarm.define({ job: Schema.Null }).handlers({ job: handle })
+            ).pipe(Effect.asVoid),
+        });
+        const instance = new CurrentObject(state.raw, {});
+
+        yield* Effect.promise(async () => {
+          await instance.alarm?.();
+        });
+        assert.deepStrictEqual(handled, ["raw"]);
+        assert.isUndefined(yield* alarms.wakeup(Maintenance.key).scheduledAt);
+        assert.isUndefined(yield* alarms.getAlarmStatus({ tag: "job", id: "raw" }));
+        assert.isNull(yield* state.storage.getAlarm());
+      }).pipe(Effect.provide(services)),
+    );
+  },
+);
+
 it.effect("coalesces nested and concurrent wake changes until deferred work exits", () => {
   const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
   const registration = DurableObjectAlarm.withWakeups(
@@ -419,9 +521,9 @@ it.effect.each(["success", "failure"] as const)(
   },
 );
 
-it.effect(
-  "preserves a raw dispatcher's batch limit without charging unvisited application alarms",
-  () => {
+it.effect.each([false, true])(
+  "preserves a raw dispatcher's batch limit without charging unvisited alarms, with wakeups: %s",
+  (withWakeups) => {
     const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
 
     return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
@@ -432,16 +534,24 @@ it.effect(
         yield* TestClock.setTime(deadline);
         yield* alarms.scheduleAlarm(alarm("a", 0));
         yield* alarms.scheduleAlarm(alarm("b", 0));
-        const CurrentObject = DurableObject.make(Layer.succeed(Clock.Clock, yield* Clock.Clock), {
-          alarm: () =>
-            DurableObjectAlarm.processDue(
-              (event) =>
-                Effect.sync(() => {
-                  handled.push(event.id);
-                }),
-              { limit: 1 },
-            ).pipe(Effect.asVoid),
-        });
+        if (withWakeups) {
+          yield* alarms.wakeup(Maintenance.key).scheduleAt(DateTime.makeUnsafe(deadline));
+        }
+        const clock = Layer.succeed(Clock.Clock, yield* Clock.Clock);
+        const raw = () =>
+          DurableObjectAlarm.processDue(
+            (event) =>
+              Effect.sync(() => {
+                handled.push(event.id);
+              }),
+            { limit: 1 },
+          ).pipe(Effect.asVoid);
+        const CurrentObject = withWakeups
+          ? DurableObject.make(clock, {
+              alarms: Maintenance.handler(Effect.flatMap(Maintenance, (wakeup) => wakeup.cancel)),
+              alarm: raw,
+            })
+          : DurableObject.make(clock, { alarm: raw });
         const instance = new CurrentObject(state.raw, {});
         const dispatch = Effect.promise(async () => {
           await instance.alarm?.();

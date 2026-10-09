@@ -10,7 +10,6 @@ import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 import { DurableObjectState, fromDurableObjectState } from "./DurableObjectState";
 import {
   DurableObjectAlarm,
-  define as defineAlarms,
   dispatchRawAlarm,
   type AlarmRegistration,
   type AlarmService,
@@ -369,19 +368,14 @@ export function make<
 
     alarm(alarmInfo?: globalThis.AlarmInvocationInfo): Promise<void> {
       const rawAlarm = options.alarm?.(alarmInfo);
-      // A deployment can remove its last registration while durable checkpoints remain.
-      // A raw-only hook may dispatch application alarms itself; recover wakeups around it.
-      const fallback =
-        rawAlarm === undefined
-          ? defineAlarms({}).handlers({}).pipe(Effect.asVoid)
-          : dispatchRawAlarm(rawAlarm);
+      // Keep recovery active after registrations are removed, and let a raw dispatcher
+      // share the invocation with a wakeup-only registration.
       const alarmEffect =
-        logicalAlarms !== undefined && rawAlarm !== undefined
-          ? Effect.gen(function* () {
-              yield* logicalAlarms;
-              yield* rawAlarm;
-            })
-          : (logicalAlarms ?? fallback);
+        rawAlarm === undefined
+          ? (logicalAlarms ?? dispatchRawAlarm(Effect.void))
+          : logicalAlarms !== undefined && registration === undefined
+            ? logicalAlarms.pipe(Effect.andThen(rawAlarm))
+            : dispatchRawAlarm(rawAlarm, registration);
 
       return this[RunSymbol](alarmEffect.pipe(Effect.onExit(() => scheduleTelemetryFlush)), {
         event: "alarm",

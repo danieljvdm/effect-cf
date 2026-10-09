@@ -1291,7 +1291,8 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
             let active = true;
             const requireActive = <A, E>(effect: Effect.Effect<A, E>) =>
               Effect.withFiber<A, E | StorageOperationError>((fiber) =>
-                active && fiber === owner
+                // A queued or suspended transaction can outlive the handler that admitted it.
+                active && fiber === owner && (pass === undefined || pass.active)
                   ? effect
                   : Effect.fail(
                       new StorageOperationError({

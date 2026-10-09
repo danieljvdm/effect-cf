@@ -88,6 +88,78 @@ it.effect("rejects self-rearms from a detached handler fiber after the pass comp
   }),
 );
 
+it.effect.each(["scheduleAlarm", "scheduleAlarmEarlier", "cancelAlarm"] as const)(
+  "rejects %s from an expired handler in an admitted transaction",
+  (mutation) =>
+    Effect.gen(function* () {
+      const acknowledged = Promise.withResolvers<void>();
+      let acknowledgementCall = Number.POSITIVE_INFINITY;
+      const fixture = makeAlarmFixture({
+        onTransaction: (calls) => {
+          if (calls === acknowledgementCall) acknowledged.resolve();
+        },
+      });
+
+      yield* fixture.run(
+        Effect.gen(function* () {
+          const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+          const entered = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+          const input = { tag: "job", id: "a", payload: null, runAt: atMillis(0) };
+          const future = { ...input, id: "future", runAt: atMillis(1_000) };
+          const fibers: Fiber.Fiber<void, DurableObjectAlarm.DurableObjectAlarmError>[] = [];
+
+          yield* alarms.transaction((tx) =>
+            tx.scheduleAlarm(input).pipe(Effect.andThen(tx.scheduleAlarm(future))),
+          );
+          // The child owns the next transaction; acknowledgement queues behind it only
+          // after the handler lifetime has ended. This is the release barrier.
+          acknowledgementCall = fixture.tracker.transactionCalls + 2;
+          const processing = yield* alarms
+            .processDueAlarms(() =>
+              Effect.gen(function* () {
+                fibers.push(
+                  yield* alarms
+                    .transaction((tx) =>
+                      Effect.gen(function* () {
+                        yield* Deferred.succeed(entered, undefined);
+                        yield* Deferred.await(release);
+                        yield* tx[mutation](mutation === "cancelAlarm" ? future : input);
+                      }),
+                    )
+                    .pipe(Effect.forkChild),
+                );
+                yield* Deferred.await(entered);
+              }),
+            )
+            .pipe(Effect.forkChild);
+
+          yield* Effect.gen(function* () {
+            yield* Effect.promise(() => acknowledged.promise);
+            yield* Deferred.succeed(release, undefined);
+            const result = yield* Fiber.join(fibers[0]!).pipe(Effect.exit);
+
+            assert.isTrue(Exit.isFailure(result));
+            if (Exit.isFailure(result)) {
+              assert.instanceOf(
+                Cause.squash(result.cause),
+                DurableObjectStorage.StorageOperationError,
+              );
+            }
+            yield* Fiber.join(processing);
+            assert.isUndefined(yield* alarms.getAlarmStatus(input));
+            assert.strictEqual(
+              DateTime.toEpochMillis((yield* alarms.getAlarmStatus(future))!.runAt),
+              1_000,
+            );
+            assert.strictEqual(fixture.currentAlarm(), 1_000);
+            assert.strictEqual(fixture.tracker.transactionRollbacks, 1);
+          }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
+        }),
+      );
+    }),
+);
+
 it.effect("rolls back a failure's retry budget when native reconciliation fails", () =>
   Effect.gen(function* () {
     const fixture = makeAlarmFixture();
@@ -995,6 +1067,7 @@ interface AlarmFixtureTracker {
 }
 
 interface AlarmFixtureOptions {
+  readonly onTransaction?: (calls: number) => void;
   readonly afterCommit?: () => Promise<void>;
   readonly afterSetAlarm?: () => Promise<void>;
 }
@@ -1041,6 +1114,7 @@ function makeAlarmFixture(options: AlarmFixtureOptions = {}) {
     },
     transaction: async <T>(closure: (txn: globalThis.DurableObjectTransaction) => Promise<T>) => {
       tracker.transactionCalls += 1;
+      options.onTransaction?.(tracker.transactionCalls);
       // Model workerd's serial admission of independent native transactions.
       // Nested transactions are outside this fixture's supported operations.
       const previous = transactionTail;

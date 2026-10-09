@@ -372,7 +372,7 @@ export const HasDueAlarms: unique symbol = Symbol("effect-cf/DurableObjectAlarm/
 export type AlarmScheduler = {
   /** @internal DurableObject.make shares this scoped event across native and post-event dispatch. */
   readonly [RunAlarm]: <R>(
-    event: Effect.Effect<void, unknown, R>,
+    event: (beginDispatch: Effect.Effect<void>) => Effect.Effect<void, unknown, R>,
     native: boolean,
   ) => Effect.Effect<void, unknown, R>;
   /** @internal Read the current event's opt-in without acquiring another event layer. */
@@ -1372,7 +1372,9 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
       const runAlarm: AlarmScheduler[typeof RunAlarm] = (event, native) =>
         Effect.flatMap(hasSchedulerTables(state), (managed) =>
           !managed
-            ? event
+            ? native
+              ? event(Effect.void)
+              : Effect.void
             : Effect.uninterruptibleMask((restore) =>
                 Effect.suspend(() => {
                   const pending = pendingAlarm;
@@ -1386,6 +1388,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                     );
                   }
                   const completed = Deferred.makeUnsafe<void, unknown>();
+                  let dispatchStarted = false;
 
                   pendingAlarm = completed;
 
@@ -1396,16 +1399,23 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                       if (native && wakesReady !== undefined) yield* transaction(() => Effect.void);
                       yield* awaitWakes;
                       dispatchActive = true;
-                      yield* event;
+                      yield* event(
+                        Effect.sync(() => {
+                          dispatchStarted = true;
+                        }),
+                      );
                     }),
                   ).pipe(
                     Effect.onExit((exit) =>
                       Effect.gen(function* () {
                         // The event includes its scope finalizers. Late enrollments cannot be
                         // swallowed by a native delivery that joined after the final checkpoint.
-                        dispatchActive = false;
+                        // Acquisition failure never reached a dispatcher: keep a future guard
+                        // instead of rearming untouched due rows into an immediate retry loop.
+                        dispatchActive = Exit.isFailure(exit) && !dispatchStarted;
                         const reconciled = yield* transaction(() => Effect.void).pipe(Effect.exit);
 
+                        dispatchActive = false;
                         pendingAlarm = undefined;
                         yield* Deferred.done(completed, Exit.asVoidAll([exit, reconciled]));
                         yield* reconciled;

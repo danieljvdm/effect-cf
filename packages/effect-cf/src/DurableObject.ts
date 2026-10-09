@@ -405,26 +405,30 @@ export function make<
     }
 
     #runAlarm(native: boolean, alarmInfo?: globalThis.AlarmInvocationInfo): Promise<void> {
-      const alarmEffect = Effect.gen(function* () {
-        const alarms = yield* DurableObjectAlarm;
+      const event = (beginDispatch: Effect.Effect<void>) => {
+        const alarmEffect = Effect.gen(function* () {
+          const alarms = yield* DurableObjectAlarm;
 
-        if (!native && !(yield* alarms[HasDueAlarms])) return;
-        const rawAlarm = options.alarm?.(alarmInfo);
-        const customAlarm =
-          legacyAlarms === undefined
-            ? (rawAlarm ?? Effect.void)
-            : legacyAlarms.pipe(Effect.andThen(rawAlarm ?? Effect.void));
+          if (!native && !(yield* alarms[HasDueAlarms])) return;
+          const rawAlarm = options.alarm?.(alarmInfo);
+          const customAlarm =
+            legacyAlarms === undefined
+              ? (rawAlarm ?? Effect.void)
+              : legacyAlarms.pipe(Effect.andThen(rawAlarm ?? Effect.void));
 
-        // Custom dispatchers, including Effect-form alarms, recover retained checkpoints.
-        yield* registration === undefined || rawAlarm !== undefined
-          ? dispatchRawAlarm(customAlarm, registration)
-          : registration.run.pipe(Effect.asVoid);
-      }).pipe(Effect.onExit(() => scheduleTelemetryFlush));
-      const event = Runtime.scopeEvent(
-        options.eventLayer === undefined
-          ? alarmEffect
-          : alarmEffect.pipe(Effect.provide(options.eventLayer, { local: true })),
-      );
+          yield* beginDispatch;
+          // Custom dispatchers, including Effect-form alarms, recover retained checkpoints.
+          yield* registration === undefined || rawAlarm !== undefined
+            ? dispatchRawAlarm(customAlarm, registration)
+            : registration.run.pipe(Effect.asVoid);
+        }).pipe(Effect.onExit(() => scheduleTelemetryFlush));
+
+        return Runtime.scopeEvent(
+          options.eventLayer === undefined
+            ? alarmEffect
+            : alarmEffect.pipe(Effect.provide(options.eventLayer, { local: true })),
+        );
+      };
 
       return this[RunSymbol](
         Effect.flatMap(DurableObjectAlarm, (alarms) => alarms[RunAlarm](event, native)),

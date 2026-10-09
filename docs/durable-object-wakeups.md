@@ -225,6 +225,8 @@ the pass's final checkpoint remains armed. `deferWakes` blocks dispatch until it
 last region exits; deadlines still commit while it is active. Future deadlines
 are left to the native alarm. Post-event dispatch is a promptness hint, and a
 lost hint or process eviction still recovers from durable native scheduling.
+Failure while acquiring the event layer retains a future recovery alarm without
+acknowledging pending work or immediately rearming its expired deadline.
 
 This option trades response latency for earlier processing: on a cold Object,
 synchronous processing shares the single JavaScript thread and can delay when

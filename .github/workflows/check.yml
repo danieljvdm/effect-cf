@@ -49,6 +49,25 @@ jobs:
       - name: Lint
         run: vp lint
 
+      # Keep the pinned Docker Hub images while avoiding shared-runner pull limits.
+      # Uncached images fall back to Docker Hub: https://docs.cloud.google.com/artifact-registry/docs/pull-cached-dockerhub-images
+      - name: Configure Docker image cache
+        run: |
+          sudo python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("/etc/docker/daemon.json")
+          configuration = json.loads(path.read_text()) if path.exists() else {}
+          mirrors = configuration.setdefault("registry-mirrors", [])
+          if "https://mirror.gcr.io" not in mirrors:
+              mirrors.append("https://mirror.gcr.io")
+          path.parent.mkdir(parents=True, exist_ok=True)
+          path.write_text(json.dumps(configuration) + "\n")
+          PY
+          sudo systemctl restart docker
+          docker info --format '{{json .RegistryConfig.Mirrors}}'
+
       - name: Test native containers with Docker
         run: vp run test:containers
 

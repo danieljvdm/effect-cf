@@ -27,6 +27,7 @@ export * as Kv from "./Kv";
 export * as Queue from "./Queue";
 export * as QueueBinding from "./QueueBinding";
 export * as QueueDefinition from "./QueueDefinition";
+export * as RateLimit from "./RateLimit";
 export * as R2 from "./R2";
 export * as Rpc from "./Rpc";
 export * as RpcDefinition from "./RpcDefinition";

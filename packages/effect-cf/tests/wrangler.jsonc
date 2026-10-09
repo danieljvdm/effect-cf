@@ -8,6 +8,13 @@
     "directory": "./assets",
     "binding": "ASSETS",
   },
+  "ratelimits": [
+    {
+      "name": "TEST_RATE_LIMITER",
+      "namespace_id": "1001",
+      "simple": { "limit": 2, "period": 60 },
+    },
+  ],
   "vars": {
     "APP_NAME": "effect-cf-tests",
   },

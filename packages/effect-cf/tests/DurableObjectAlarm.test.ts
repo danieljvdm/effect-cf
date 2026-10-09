@@ -11,6 +11,12 @@ import {
 import { makePartialTestDouble } from "./TestDoubles";
 
 const Application = Context.Service<{ readonly result: number }>("test/AlarmApplication");
+const maintenanceRef = { tag: "maintenance", id: "maintenance" } as const;
+const maintenanceInput = (runAt: DateTime.Utc) => ({ ...maintenanceRef, payload: null, runAt });
+
+class Maintenance extends DurableObjectAlarm.Tag<Maintenance>()("test/Maintenance", {
+  maintenance: { payload: Schema.Null, lifecycle: "manual" },
+}) {}
 const writeJob = (storage: DurableObjectStorage.DurableObjectStorage, status: string) =>
   storage.sql.exec(
     "INSERT OR REPLACE INTO application_jobs (id, status) VALUES (?, ?)",
@@ -112,11 +118,10 @@ it.effect(
 
       yield* fixture.run(
         Effect.gen(function* () {
-          const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
-          const wakeup = alarms.wakeup("test/maintenance");
+          const maintenance = yield* Maintenance;
 
           fixture.failNextSetAlarm();
-          const rejected = yield* wakeup
+          const rejected = yield* maintenance
             .deferWakes(writeJob(fixture.storage, "unsafe"))
             .pipe(Effect.exit);
 
@@ -124,17 +129,17 @@ it.effect(
           assert.isUndefined(fixture.job("job"));
           assert.isNull(fixture.currentAlarm());
 
-          const failedFlush = yield* wakeup
+          const failedFlush = yield* maintenance
             .deferWakes(
               Effect.gen(function* () {
-                yield* wakeup.transaction((tx) =>
+                yield* maintenance.transaction((tx) =>
                   Effect.gen(function* () {
-                    yield* tx.scheduleAt(atMillis(1_000));
+                    yield* tx.scheduleAlarm(maintenanceInput(atMillis(1_000)));
                     yield* writeJob(fixture.storage, "ready");
                   }),
                 );
-                yield* wakeup.scheduleEarlier(atMillis(500));
-                yield* wakeup.scheduleEarlier(atMillis(250));
+                yield* maintenance.scheduleAlarmEarlier(maintenanceInput(atMillis(500)));
+                yield* maintenance.scheduleAlarmEarlier(maintenanceInput(atMillis(250)));
                 assert.deepStrictEqual(fixture.tracker.setAlarms, [
                   DurableObjectAlarm.PARKED_RETRY_DELAY_MS,
                 ]);
@@ -145,15 +150,18 @@ it.effect(
 
           assert.isTrue(Exit.isFailure(failedFlush));
           assert.strictEqual(fixture.job("job"), "ready");
-          assert.strictEqual(DateTime.toEpochMillis((yield* wakeup.scheduledAt)!), 250);
+          assert.strictEqual(
+            DateTime.toEpochMillis((yield* maintenance.getAlarmStatus(maintenanceRef))!.runAt),
+            250,
+          );
           assert.strictEqual(fixture.currentAlarm(), DurableObjectAlarm.PARKED_RETRY_DELAY_MS);
-          yield* wakeup.deferWakes(Effect.void);
+          yield* maintenance.deferWakes(Effect.void);
           assert.strictEqual(fixture.currentAlarm(), 250);
           assert.deepStrictEqual(fixture.tracker.setAlarms, [
             DurableObjectAlarm.PARKED_RETRY_DELAY_MS,
             250,
           ]);
-        }),
+        }).pipe(Effect.provide(Maintenance.handlers({ maintenance: () => Effect.void }).layer)),
       );
     }),
 );
@@ -1004,7 +1012,7 @@ function makeAlarmFixture(options: AlarmFixtureOptions = {}) {
   let currentAlarm: number | null = null;
   let rejectNextSetAlarm = false;
   let rejectNextDeleteAlarm = false;
-  let inTransaction = false;
+  let transactionTail = Promise.resolve();
 
   const sql = makeSqlStorage(database);
   const rawStorageImplementation = {
@@ -1033,31 +1041,37 @@ function makeAlarmFixture(options: AlarmFixtureOptions = {}) {
     },
     transaction: async <T>(closure: (txn: globalThis.DurableObjectTransaction) => Promise<T>) => {
       tracker.transactionCalls += 1;
-      if (inTransaction) {
-        throw new Error("Nested transactions are not supported");
-      }
-      inTransaction = true;
-      database.exec("BEGIN");
-      const alarmSnapshot = currentAlarm;
-      const setAlarmsLength = tracker.setAlarms.length;
-      const deletedAlarmsLength = tracker.deletedAlarms.length;
+      // Model workerd's serial admission of independent native transactions.
+      // Nested transactions are outside this fixture's supported operations.
+      const previous = transactionTail;
+      const gate = Promise.withResolvers<void>();
+
+      transactionTail = gate.promise;
+      await previous;
       let result: T;
 
       try {
-        result = await closure(
-          makePartialTestDouble<globalThis.DurableObjectTransaction>({ rollback: () => {} }),
-        );
-      } catch (error) {
-        database.exec("ROLLBACK");
-        currentAlarm = alarmSnapshot;
-        tracker.setAlarms.length = setAlarmsLength;
-        tracker.deletedAlarms.length = deletedAlarmsLength;
-        tracker.transactionRollbacks += 1;
-        throw error;
+        database.exec("BEGIN");
+        const alarmSnapshot = currentAlarm;
+        const setAlarmsLength = tracker.setAlarms.length;
+        const deletedAlarmsLength = tracker.deletedAlarms.length;
+
+        try {
+          result = await closure(
+            makePartialTestDouble<globalThis.DurableObjectTransaction>({ rollback: () => {} }),
+          );
+        } catch (error) {
+          database.exec("ROLLBACK");
+          currentAlarm = alarmSnapshot;
+          tracker.setAlarms.length = setAlarmsLength;
+          tracker.deletedAlarms.length = deletedAlarmsLength;
+          tracker.transactionRollbacks += 1;
+          throw error;
+        }
+        database.exec("COMMIT");
       } finally {
-        inTransaction = false;
+        gate.resolve();
       }
-      database.exec("COMMIT");
       // Commit is complete. A failed or interrupted reply cannot roll it back.
       await options.afterCommit?.();
 

@@ -12,6 +12,7 @@ declare global {
       TEST_COMPUTER_DO?: DurableObjectNamespace<TestWorkerModule.TestComputerWorkspaceDurableObject>;
       TEST_HIBERNATION_RPC_DO?: DurableObjectNamespace<TestWorkerModule.TestHibernationRpcDurableObject>;
       TRACE_OBJECTS?: DurableObjectNamespace<TestWorkerModule.TestTracingDurableObject>;
+      TEST_RATE_LIMITER?: RateLimit;
       TEST_KV?: KVNamespace;
       TEST_DB?: D1Database;
       TEST_SECRET?: SecretsStoreSecret;

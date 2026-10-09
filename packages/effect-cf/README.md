@@ -220,6 +220,12 @@ Applications own SERVER spans. Override the exported `DurableObject.RunSymbol` o
 
 This metadata belongs only to the live native call. Do not store it in domain envelopes, alarms, queues, or WebSocket attachments, or reuse it for resumed work. Sampling and exporter configuration remain application choices.
 
+## Native rate limiting
+
+Use `RateLimit.Tag` or `RateLimit.make` to call a native binding as an Effect:
+`yield* requests.limit({ key })` returns `{ success }`, including ordinary denial.
+See [binding configuration and usage](../../docs/rate-limiting.md).
+
 ## API
 
 See the [exports](src/index.ts) and [tests](https://github.com/danieljvdm/effect-cf/tree/main/packages/effect-cf/tests) for the remaining APIs.

@@ -44,7 +44,6 @@ it.effect("reuses RPC targets per invocation and replaces failed channels", () =
     });
     const observed: number[] = [];
     const Live = DurableObject.make(Layer.empty, {
-      alarms: Effect.void,
       alarm: () =>
         Effect.gen(function* () {
           const first = yield* ping;

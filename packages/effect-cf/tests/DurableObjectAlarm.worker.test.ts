@@ -521,9 +521,9 @@ it.effect.each(["success", "failure"] as const)(
   },
 );
 
-it.effect.each([false, true])(
-  "preserves a raw dispatcher's batch limit without charging unvisited alarms, with wakeups: %s",
-  (withWakeups) => {
+it.effect.each(["raw", "wakeup", "effect", "effect-and-raw"] as const)(
+  "preserves the %s dispatcher's batch limit without charging unvisited alarms",
+  (kind) => {
     const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
 
     return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
@@ -534,7 +534,7 @@ it.effect.each([false, true])(
         yield* TestClock.setTime(deadline);
         yield* alarms.scheduleAlarm(alarm("a", 0));
         yield* alarms.scheduleAlarm(alarm("b", 0));
-        if (withWakeups) {
+        if (kind === "wakeup") {
           yield* alarms.wakeup(Maintenance.key).scheduleAt(DateTime.makeUnsafe(deadline));
         }
         const clock = Layer.succeed(Clock.Clock, yield* Clock.Clock);
@@ -546,12 +546,18 @@ it.effect.each([false, true])(
               }),
             { limit: 1 },
           ).pipe(Effect.asVoid);
-        const CurrentObject = withWakeups
-          ? DurableObject.make(clock, {
-              alarms: Maintenance.handler(Effect.flatMap(Maintenance, (wakeup) => wakeup.cancel)),
-              alarm: raw,
-            })
-          : DurableObject.make(clock, { alarm: raw });
+        const CurrentObject =
+          kind === "wakeup"
+            ? DurableObject.make(clock, {
+                alarms: Maintenance.handler(Effect.flatMap(Maintenance, (wakeup) => wakeup.cancel)),
+                alarm: raw,
+              })
+            : kind === "raw"
+              ? DurableObject.make(clock, { alarm: raw })
+              : DurableObject.make(clock, {
+                  alarms: raw(),
+                  alarm: kind === "effect-and-raw" ? () => Effect.void : undefined,
+                });
         const instance = new CurrentObject(state.raw, {});
         const dispatch = Effect.promise(async () => {
           await instance.alarm?.();
@@ -573,66 +579,66 @@ it.effect.each([false, true])(
 );
 
 it.effect.each([
-  { withManaged: true, withRaw: false },
-  { withManaged: false, withRaw: false },
-  { withManaged: true, withRaw: true },
-  { withManaged: false, withRaw: true },
-])(
-  "recovers a removed wakeup with managed registration $withManaged and raw hook $withRaw",
-  ({ withManaged, withRaw }) => {
-    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
-    const previous = Maintenance.handler(Effect.flatMap(Maintenance, (wakeup) => wakeup.cancel));
-    const current = Reminders.handlers({ reminder: () => Effect.void });
+  { kind: "managed", withRaw: false },
+  { kind: "none", withRaw: false },
+  { kind: "effect", withRaw: false },
+  { kind: "managed", withRaw: true },
+  { kind: "none", withRaw: true },
+  { kind: "effect", withRaw: true },
+])("recovers a removed wakeup with $kind alarms and raw hook $withRaw", ({ kind, withRaw }) => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+  const previous = Maintenance.handler(Effect.flatMap(Maintenance, (wakeup) => wakeup.cancel));
+  const current = Reminders.handlers({ reminder: () => Effect.void });
 
-    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
-      Effect.gen(function* () {
-        const maintenance = yield* Maintenance;
-        const reminders = yield* Reminders;
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const maintenance = yield* Maintenance;
+      const reminders = yield* Reminders;
 
-        yield* TestClock.setTime(deadline);
-        yield* maintenance.scheduleAt(DateTime.makeUnsafe(deadline));
-        if (withManaged) {
-          yield* reminders.scheduleAlarm({
-            tag: "reminder",
-            id: "a",
-            payload: null,
-            runAt: DateTime.makeUnsafe(deadline),
-          });
-        }
-        const clock = Layer.succeed(Clock.Clock, yield* Clock.Clock);
-        const raw = withRaw ? () => Effect.void : undefined;
-        const CurrentObject = withManaged
+      yield* TestClock.setTime(deadline);
+      yield* maintenance.scheduleAt(DateTime.makeUnsafe(deadline));
+      if (kind === "managed") {
+        yield* reminders.scheduleAlarm({
+          tag: "reminder",
+          id: "a",
+          payload: null,
+          runAt: DateTime.makeUnsafe(deadline),
+        });
+      }
+      const clock = Layer.succeed(Clock.Clock, yield* Clock.Clock);
+      const raw = withRaw ? () => Effect.void : undefined;
+      const CurrentObject =
+        kind === "managed"
           ? DurableObject.make(clock, { alarms: current, alarm: raw })
-          : DurableObject.make(clock, { alarm: raw });
-        const instance = new CurrentObject(state.raw, {});
-        const dispatch = Effect.promise(async () => {
-          await instance.alarm?.();
-        });
+          : kind === "effect"
+            ? DurableObject.make(clock, { alarms: Effect.void, alarm: raw })
+            : DurableObject.make(clock, { alarm: raw });
+      const instance = new CurrentObject(state.raw, {});
+      const dispatch = Effect.promise(async () => {
+        await instance.alarm?.();
+      });
 
-        assert.isTrue(Exit.isFailure(yield* dispatch.pipe(Effect.exit)));
-        assert.isUndefined(yield* reminders.getAlarmStatus({ tag: "reminder", id: "a" }));
-        assert.strictEqual(
-          yield* state.storage.getAlarm(),
-          deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS,
-        );
-        yield* dispatch;
-        yield* TestClock.setTime(deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS);
-        const RestoredObject = DurableObject.make(clock, { alarms: previous, alarm: raw });
-        const restored = new RestoredObject(state.raw, {});
+      assert.isTrue(Exit.isFailure(yield* dispatch.pipe(Effect.exit)));
+      assert.isUndefined(yield* reminders.getAlarmStatus({ tag: "reminder", id: "a" }));
+      assert.strictEqual(
+        yield* state.storage.getAlarm(),
+        deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS,
+      );
+      yield* dispatch;
+      yield* TestClock.setTime(deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS);
+      const RestoredObject = DurableObject.make(clock, { alarms: previous, alarm: raw });
+      const restored = new RestoredObject(state.raw, {});
 
-        yield* Effect.promise(async () => {
-          await restored.alarm?.();
-        });
-        assert.isUndefined(yield* maintenance.scheduledAt);
-        assert.isNull(yield* state.storage.getAlarm());
-      }).pipe(
-        Effect.provide(
-          Layer.merge(previous.layer, current.layer).pipe(Layer.provideMerge(services)),
-        ),
-      ),
-    );
-  },
-);
+      yield* Effect.promise(async () => {
+        await restored.alarm?.();
+      });
+      assert.isUndefined(yield* maintenance.scheduledAt);
+      assert.isNull(yield* state.storage.getAlarm());
+    }).pipe(
+      Effect.provide(Layer.merge(previous.layer, current.layer).pipe(Layer.provideMerge(services))),
+    ),
+  );
+});
 
 it.effect.each(["duplicate wakeup", "service collision"] as const)(
   "rejects %s before building application services",

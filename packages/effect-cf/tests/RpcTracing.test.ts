@@ -424,7 +424,6 @@ it.effect(
         {
           ...options,
           fetch: Effect.succeed(new Response("ok")),
-          alarms: Effect.void,
           alarm: () => Effect.void,
           webSocketMessage: () => Effect.void,
           webSocketClose: () => Effect.void,

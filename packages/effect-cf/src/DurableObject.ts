@@ -276,9 +276,9 @@ export function make<
 ): DurableObjectClass<Rpc, ROut | REvent | RAlarm> {
   const registration =
     options.alarms !== undefined && !Effect.isEffect(options.alarms) ? options.alarms : undefined;
-  const logicalAlarms = (
-    registration?.run ?? (Effect.isEffect(options.alarms) ? options.alarms : undefined)
-  )?.pipe(Effect.asVoid);
+  const legacyAlarms = Effect.isEffect(options.alarms)
+    ? options.alarms.pipe(Effect.asVoid)
+    : undefined;
 
   class EffectDurableObject extends CloudflareDurableObject<WorkerEnv> {
     readonly runtime: ManagedRuntime.ManagedRuntime<
@@ -368,14 +368,15 @@ export function make<
 
     alarm(alarmInfo?: globalThis.AlarmInvocationInfo): Promise<void> {
       const rawAlarm = options.alarm?.(alarmInfo);
-      // Keep recovery active after registrations are removed, and let a raw dispatcher
-      // share the invocation with a wakeup-only registration.
+      const customAlarm =
+        legacyAlarms === undefined
+          ? (rawAlarm ?? Effect.void)
+          : legacyAlarms.pipe(Effect.andThen(rawAlarm ?? Effect.void));
+      // Custom dispatchers, including Effect-form alarms, must recover retained checkpoints.
       const alarmEffect =
-        rawAlarm === undefined
-          ? (logicalAlarms ?? dispatchRawAlarm(Effect.void))
-          : logicalAlarms !== undefined && registration === undefined
-            ? logicalAlarms.pipe(Effect.andThen(rawAlarm))
-            : dispatchRawAlarm(rawAlarm, registration);
+        registration === undefined || rawAlarm !== undefined
+          ? dispatchRawAlarm(customAlarm, registration)
+          : registration.run.pipe(Effect.asVoid);
 
       return this[RunSymbol](alarmEffect.pipe(Effect.onExit(() => scheduleTelemetryFlush)), {
         event: "alarm",

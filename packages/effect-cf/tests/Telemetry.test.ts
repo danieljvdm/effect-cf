@@ -155,7 +155,7 @@ it.effect("Durable Object alarms hand a bounded telemetry flush to waitUntil", (
     const clock = yield* Clock.Clock;
     const Live = DurableObject.make(
       Layer.mergeAll(NeverFlusher, Layer.succeed(Clock.Clock, clock)),
-      { alarms: Effect.void, alarm: () => Effect.void },
+      { alarm: () => Effect.void },
     );
     const { state, waitUntilPromises } = makeWaitUntilDurableObjectState();
     const durableObject = new Live(state, makePartialTestDouble<Cloudflare.Env>({}));

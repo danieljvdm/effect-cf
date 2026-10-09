@@ -200,11 +200,16 @@ it.effect(
   },
 );
 
-it.effect.each([true, false])(
-  "retains a removed named handler's checkpoint with managed registration: %s",
-  (withManaged) => {
+it.effect.each([
+  { withManaged: true, withRaw: false },
+  { withManaged: false, withRaw: false },
+  { withManaged: true, withRaw: true },
+  { withManaged: false, withRaw: true },
+])(
+  "recovers a removed wakeup with managed registration $withManaged and raw hook $withRaw",
+  ({ withManaged, withRaw }) => {
     const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
-    const previous = Maintenance.handler(Effect.void);
+    const previous = Maintenance.handler(Effect.flatMap(Maintenance, (wakeup) => wakeup.cancel));
     const current = Reminders.handlers({ reminder: () => Effect.void });
 
     return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
@@ -223,9 +228,10 @@ it.effect.each([true, false])(
           });
         }
         const clock = Layer.succeed(Clock.Clock, yield* Clock.Clock);
+        const raw = withRaw ? () => Effect.void : undefined;
         const CurrentObject = withManaged
-          ? DurableObject.make(clock, { alarms: current })
-          : DurableObject.make(clock);
+          ? DurableObject.make(clock, { alarms: current, alarm: raw })
+          : DurableObject.make(clock, { alarm: raw });
         const instance = new CurrentObject(state.raw, {});
         const dispatch = Effect.promise(async () => {
           await instance.alarm?.();
@@ -238,7 +244,15 @@ it.effect.each([true, false])(
           deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS,
         );
         yield* dispatch;
-        yield* maintenance.cancel;
+        yield* TestClock.setTime(deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS);
+        const RestoredObject = DurableObject.make(clock, { alarms: previous, alarm: raw });
+        const restored = new RestoredObject(state.raw, {});
+
+        yield* Effect.promise(async () => {
+          await restored.alarm?.();
+        });
+        assert.isUndefined(yield* maintenance.scheduledAt);
+        assert.isNull(yield* state.storage.getAlarm());
       }).pipe(
         Effect.provide(
           Layer.merge(previous.layer, current.layer).pipe(Layer.provideMerge(services)),

@@ -239,6 +239,7 @@ DurableObject.make(Layer.empty, { rpc: { armMaintenance: () => armMaintenance } 
 DurableObject.make(Layer.empty, {
   alarms: registration,
   // @ts-expect-error A managed-alarm registration does not register named wakeups.
+  // @effect-diagnostics-next-line missingEffectContext:off
   rpc: { armMaintenance: () => armMaintenance },
 });
 // @ts-expect-error Installing a wakeup service layer alone cannot install its dispatcher.

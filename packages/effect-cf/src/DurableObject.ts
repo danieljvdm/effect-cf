@@ -368,15 +368,16 @@ export function make<
 
     alarm(alarmInfo?: globalThis.AlarmInvocationInfo): Promise<void> {
       const rawAlarm = options.alarm?.(alarmInfo);
+      // A deployment can remove its last registration while durable checkpoints remain.
+      const managedAlarm = logicalAlarms ?? defineAlarms({}).handlers({}).pipe(Effect.asVoid);
       const alarmEffect =
-        logicalAlarms !== undefined && rawAlarm !== undefined
+        rawAlarm !== undefined
           ? Effect.gen(function* () {
-              yield* logicalAlarms;
+              yield* managedAlarm;
               yield* rawAlarm;
             })
-          : (logicalAlarms ?? rawAlarm ?? defineAlarms({}).handlers({}).pipe(Effect.asVoid));
+          : managedAlarm;
 
-      // A deployment can remove its last registration while durable checkpoints remain.
       return this[RunSymbol](alarmEffect.pipe(Effect.onExit(() => scheduleTelemetryFlush)), {
         event: "alarm",
       });

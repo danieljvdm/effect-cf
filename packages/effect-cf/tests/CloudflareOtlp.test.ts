@@ -302,6 +302,7 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
           resource: { serviceName: "effect-cf-alarm-test" },
           className: "TelemetryAlarm",
         }),
+        alarms: Effect.void,
         alarm: () =>
           Effect.void.pipe(
             Effect.withSpan("test.alarm", { attributes: { transport: "durable-object-alarm" } }),
@@ -668,6 +669,7 @@ mapleSmokeTest("CloudflareOtlp exports Durable Object alarm spans to Maple local
         resource: { serviceName: "effect-cf-maple-alarm-smoke" },
         className: "MapleTelemetryAlarm",
       }),
+      alarms: Effect.void,
       alarm: () => Effect.void.pipe(Effect.withSpan("maple.alarm")),
     });
     const { state, waitUntilPromises } = makeWaitUntilDurableObjectState();

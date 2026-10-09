@@ -329,6 +329,46 @@ it.effect("enrolls wakeups inside the source's SQL transaction and rolls back wi
   );
 });
 
+it.effect.each([false, true])(
+  "preserves raw application dispatch with a retained wakeup: %s",
+  (retainedWakeup) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+        const handled: string[] = [];
+
+        yield* TestClock.setTime(deadline);
+        yield* alarms.scheduleAlarm(alarm("raw", 0));
+        if (retainedWakeup) {
+          yield* alarms.wakeup("removed").scheduleAt(DateTime.makeUnsafe(deadline));
+        }
+        const CurrentObject = DurableObject.make(Layer.succeed(Clock.Clock, yield* Clock.Clock), {
+          alarm: () =>
+            DurableObjectAlarm.processDue((event) =>
+              Effect.sync(() => {
+                handled.push(event.id);
+              }),
+            ).pipe(Effect.asVoid),
+        });
+        const instance = new CurrentObject(state.raw, {});
+        const result = yield* Effect.promise(async () => {
+          await instance.alarm?.();
+        }).pipe(Effect.exit);
+
+        assert.deepStrictEqual(handled, ["raw"]);
+        assert.strictEqual(Exit.isFailure(result), retainedWakeup);
+        assert.isUndefined(yield* alarms.getAlarmStatus({ tag: "job", id: "raw" }));
+        assert.strictEqual(
+          yield* state.storage.getAlarm(),
+          retainedWakeup ? deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS : null,
+        );
+      }).pipe(Effect.provide(services)),
+    );
+  },
+);
+
 it.effect.each([
   { withManaged: true, withRaw: false },
   { withManaged: false, withRaw: false },

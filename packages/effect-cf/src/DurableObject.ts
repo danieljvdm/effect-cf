@@ -11,6 +11,7 @@ import { DurableObjectState, fromDurableObjectState } from "./DurableObjectState
 import {
   DurableObjectAlarm,
   define as defineAlarms,
+  withWakeups,
   type AlarmRegistration,
   type AlarmService,
   type InvalidAlarmRegistrationError,
@@ -369,14 +370,21 @@ export function make<
     alarm(alarmInfo?: globalThis.AlarmInvocationInfo): Promise<void> {
       const rawAlarm = options.alarm?.(alarmInfo);
       // A deployment can remove its last registration while durable checkpoints remain.
-      const managedAlarm = logicalAlarms ?? defineAlarms({}).handlers({}).pipe(Effect.asVoid);
+      // A raw-only hook may dispatch application alarms itself; recover wakeups around it.
+      const fallback =
+        rawAlarm === undefined
+          ? defineAlarms({}).handlers({}).pipe(Effect.asVoid)
+          : withWakeups({
+              layer: Layer.empty,
+              run: rawAlarm.pipe(Effect.as({ failed: [], handled: [], parked: [] })),
+            }).run.pipe(Effect.asVoid);
       const alarmEffect =
-        rawAlarm !== undefined
+        logicalAlarms !== undefined && rawAlarm !== undefined
           ? Effect.gen(function* () {
-              yield* managedAlarm;
+              yield* logicalAlarms;
               yield* rawAlarm;
             })
-          : managedAlarm;
+          : (logicalAlarms ?? fallback);
 
       return this[RunSymbol](alarmEffect.pipe(Effect.onExit(() => scheduleTelemetryFlush)), {
         event: "alarm",

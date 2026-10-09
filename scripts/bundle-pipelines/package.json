@@ -8,7 +8,7 @@
     "alchemy": "2.0.0-beta.72",
     "effect": "4.0.0",
     "esbuild": "0.28.1",
-    "mime": "4.1.0",
+    "mime": "4.0.7",
     "rolldown": "1.1.5",
     "vite": "npm:@voidzero-dev/vite-plus-core@0.3.0",
     "vite-plus": "0.3.0",

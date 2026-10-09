@@ -6,6 +6,6 @@ These Bun package-manager patches update the static import graph reached by Alch
 
 The patches support this repository's external Worker build path. They are not a migration of every Alchemy deployment provider or runtime adapter, and are not shipped with either published library. Bun applies them during `vp run bundle:setup`, including frozen-lockfile installs with scripts disabled.
 
-The isolated tools also pin `mime` because `@alchemy.run/cloudflare-runtime@2.0.0-beta.72` imports it through its Bun source exports but declares it only as a development dependency. A clean install otherwise fails while importing the shared driver, before even the Wrangler pipeline starts. Remove this direct dependency when the pinned runtime declares it correctly or no longer imports it.
+The isolated tools also pin `mime`, which the pinned Cloudflare runtime imports from its Bun source entrypoint but only declares as a development dependency. This keeps clean installs able to load the build driver.
 
 Remove the patches after the pinned upstream dependencies support stable Effect and `vp run bundle:typecheck` plus the Wrangler, Vite, and Alchemy consumer builds pass without them.

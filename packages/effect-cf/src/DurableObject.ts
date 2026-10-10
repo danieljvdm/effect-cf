@@ -376,12 +376,9 @@ export function make<
       return response.finally(() => {
         if (dispatchAfterEvent) {
           this.ctx.waitUntil(
+            // The default scheduler yields to a later task, after the response chain unwinds.
             Effect.runPromise(
-              Effect.scoped(
-                Effect.yieldNow.pipe(Effect.andThen(Effect.promise(() => this.#runAlarm(false)))),
-              ),
-              // Yield to a later task, after the response's Promise chain has unwound.
-              { scheduler: new Scheduler.MixedScheduler("async") },
+              Effect.yieldNow.pipe(Effect.andThen(Effect.promise(() => this.#runAlarm(false)))),
             ),
           );
         }

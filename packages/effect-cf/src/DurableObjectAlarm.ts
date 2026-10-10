@@ -153,18 +153,17 @@ const CurrentAlarmPass = Context.Reference<
   { readonly row: AlarmRow; readonly parked: AlarmParked[]; active: boolean } | undefined
 >("effect-cf/DurableObjectAlarm/CurrentAlarmPass", { defaultValue: () => undefined });
 
-const AlarmSelection = Context.Reference<
-  { readonly tags: readonly string[]; readonly exclude: boolean } | undefined
->("effect-cf/DurableObjectAlarm/AlarmSelection", { defaultValue: () => undefined });
-const ManualPermits = Context.Reference<Semaphore.Semaphore | undefined>(
-  "effect-cf/DurableObjectAlarm/ManualPermits",
-  { defaultValue: () => undefined },
-);
+/** One dispatcher's view of a registration pass: its tags, shared manual permits, raw tracking. */
+const CurrentDispatch = Context.Reference<
+  | {
+      readonly tags: readonly string[];
+      readonly exclude: boolean;
+      readonly permits: Semaphore.Semaphore;
+      readonly raw?: { processed: boolean };
+    }
+  | undefined
+>("effect-cf/DurableObjectAlarm/CurrentDispatch", { defaultValue: () => undefined });
 const ManualTags: unique symbol = Symbol("effect-cf/DurableObjectAlarm/ManualTags");
-const CurrentRawDispatch = Context.Reference<{ processed: boolean } | undefined>(
-  "effect-cf/DurableObjectAlarm/CurrentRawDispatch",
-  { defaultValue: () => undefined },
-);
 
 interface NextAlarmRow extends Record<string, SqlStorageValue> {
   readonly run_at: number;
@@ -737,44 +736,65 @@ const runRegistrations = <R, E>(
     yield* validateRegistration(parts);
     const alarms = yield* DurableObjectAlarm;
     const permits = yield* Semaphore.make(4);
-    const tags = parts.dispatchers.flatMap((dispatcher) => dispatcher.tags);
-    const fallback =
+    const parentRaw = (yield* CurrentDispatch)?.raw;
+    const recoveryScope = {
+      tags: parts.dispatchers.flatMap((dispatcher) => dispatcher.tags),
+      exclude: true,
+      permits,
+      raw: parentRaw,
+    };
+    const recovery =
       rawAlarm === undefined
-        ? makeDefinition({}).handlers({})
+        ? makeDefinition({})
+            .handlers({})
+            .pipe(Effect.provideService(CurrentDispatch, recoveryScope))
         : Effect.suspend(() => {
-            const pass = { processed: false };
+            const raw = { processed: false };
 
             return rawAlarm.pipe(
               Effect.onExit(() =>
-                pass.processed ? Effect.void : makeDefinition({}).handlers({}).pipe(Effect.asVoid),
+                raw.processed ? Effect.void : makeDefinition({}).handlers({}).pipe(Effect.asVoid),
               ),
-              Effect.provideService(CurrentRawDispatch, pass),
+              Effect.provideService(CurrentDispatch, { ...recoveryScope, raw }),
               Effect.as(emptyResult),
             );
           });
 
     return yield* alarms.deferWakes(
       Effect.gen(function* () {
-        const registered = parts.dispatchers.map((dispatcher) =>
-          dispatcher.run.pipe(
-            Effect.provideService(AlarmSelection, { tags: dispatcher.tags, exclude: false }),
-          ),
+        const run = (dispatchers: RegistrationParts<R, E>["dispatchers"]) =>
+          Effect.forEach(
+            dispatchers,
+            (dispatcher) =>
+              dispatcher.run.pipe(
+                Effect.provideService(CurrentDispatch, {
+                  tags: dispatcher.tags,
+                  exclude: false,
+                  permits,
+                  raw: parentRaw,
+                }),
+                Effect.exit,
+              ),
+            { concurrency: "unbounded" },
+          );
+        // Raw hooks wait only for automatic dispatchers; manual-only work stays independent.
+        const automatic = parts.dispatchers.filter(
+          (dispatcher) => rawAlarm !== undefined && dispatcher.automatic,
         );
-        const recovery = fallback.pipe(
-          Effect.provideService(AlarmSelection, { tags, exclude: true }),
+        const independent = parts.dispatchers.filter(
+          (dispatcher) => rawAlarm === undefined || !dispatcher.automatic,
         );
-        // Preserve raw-hook ordering after explicit automatic registrations. Manual-only
-        // registrations leave raw application dispatch independent of queue processing.
-        const orderedRaw =
-          rawAlarm !== undefined && parts.dispatchers.some((dispatcher) => dispatcher.automatic);
-        const exits = yield* Effect.forEach(
-          orderedRaw ? registered : [...registered, recovery],
-          Effect.exit,
-          // Static registrations run independently; manual handlers share four permits.
+        const exits = (yield* Effect.all(
+          [
+            run(independent),
+            run(automatic).pipe(
+              Effect.flatMap((exits) =>
+                Effect.map(Effect.exit(recovery), (exit) => [...exits, exit]),
+              ),
+            ),
+          ],
           { concurrency: "unbounded" },
-        );
-
-        if (orderedRaw) exits.push(yield* Effect.exit(recovery));
+        )).flat();
 
         yield* Exit.asVoidAll(exits);
 
@@ -783,7 +803,7 @@ const runRegistrations = <R, E>(
           handled: exits.flatMap((exit) => (Exit.isSuccess(exit) ? exit.value.handled : [])),
           parked: exits.flatMap((exit) => (Exit.isSuccess(exit) ? exit.value.parked : [])),
         };
-      }).pipe(Effect.provideService(ManualPermits, permits)),
+      }),
     );
   });
 
@@ -1067,6 +1087,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
       let wakesReady: Deferred.Deferred<void> | undefined;
       let pendingAlarm: Deferred.Deferred<void, unknown> | undefined;
       let dispatchActive = false;
+      let dispatchNeedsReconcile = false;
       let deferredRecoveryDelay = PARKED_RETRY_DELAY_MS;
       let deferredRecoveryAt = 0;
 
@@ -1093,6 +1114,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
 
       const reconcileAlarm = Effect.fn("DurableObjectAlarm.reconcileAlarm")(function* () {
         if (wakeDeferrals > 0 || dispatchActive) {
+          if (dispatchActive) dispatchNeedsReconcile = true;
           const current = yield* state.storage.getAlarm();
           const now = yield* Clock.currentTimeMillis;
 
@@ -1351,7 +1373,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
             Effect.gen(function* () {
               wakeDeferrals--;
               if (wakeDeferrals === 0) {
-                yield* transaction(() => Effect.void).pipe(
+                yield* (dispatchActive ? Effect.void : transaction(() => Effect.void)).pipe(
                   Effect.ensuring(
                     Effect.sync(() => {
                       if (wakeDeferrals === 0 && wakesReady !== undefined) {
@@ -1392,6 +1414,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                   let dispatchStarted = false;
 
                   pendingAlarm = completed;
+                  dispatchNeedsReconcile = native;
 
                   return restore(
                     Effect.gen(function* () {
@@ -1413,8 +1436,13 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                         // swallowed by a native delivery that joined after the final checkpoint.
                         // Acquisition failure never reached a dispatcher: keep a future guard
                         // instead of rearming untouched due rows into an immediate retry loop.
+                        const reconcile =
+                          dispatchNeedsReconcile || dispatchStarted || Exit.isFailure(exit);
+
                         dispatchActive = Exit.isFailure(exit) && !dispatchStarted;
-                        const reconciled = yield* transaction(() => Effect.void).pipe(Effect.exit);
+                        const reconciled = yield* (
+                          reconcile ? transaction(() => Effect.void) : Effect.void
+                        ).pipe(Effect.exit);
 
                         dispatchActive = false;
                         pendingAlarm = undefined;
@@ -1503,18 +1531,17 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         const limit = yield* getProcessLimit(options);
         const initialDelay = yield* getFailureRetryDelay(options, configuration);
         const now = yield* Clock.currentTimeMillis;
-        const rawDispatch = yield* CurrentRawDispatch;
+        const dispatch = yield* CurrentDispatch;
 
         // A validated dispatcher owns its remaining batch, including newly enrolled work.
-        if (rawDispatch !== undefined) rawDispatch.processed = true;
+        if (dispatch?.raw !== undefined) dispatch.raw.processed = true;
 
-        const selection = yield* AlarmSelection;
         const tagFilter =
-          selection === undefined
+          dispatch === undefined
             ? ""
-            : ` AND a.tag ${selection.exclude ? "NOT IN" : "IN"} (SELECT value FROM json_each(?))`;
+            : ` AND a.tag ${dispatch.exclude ? "NOT IN" : "IN"} (SELECT value FROM json_each(?))`;
         const tagBindings =
-          selection === undefined ? [] : [S.encodeSync(StoredTags)([...selection.tags])];
+          dispatch === undefined ? [] : [S.encodeSync(StoredTags)([...dispatch.tags])];
         const select = Effect.fnUntraced(function* (lifecycle: AlarmLifecycle, batchLimit: number) {
           const cursor = yield* state.storage.sql.exec<AlarmRow>(
             `${alarmRowsSql} WHERE a.lifecycle = ? AND a.wake_at <= ?${tagFilter}
@@ -1635,7 +1662,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           if (!manual) yield* transaction(() => acknowledgeAlarm(row, configuration));
           handled.push(event);
         });
-        const permits = (yield* ManualPermits) ?? (yield* Semaphore.make(4));
+        const permits = dispatch?.permits ?? (yield* Semaphore.make(4));
         const automatic = Effect.forEach(dueRows, handleRow, { discard: true }).pipe(Effect.exit);
         const exits = yield* manualRows.length === 0
           ? automatic.pipe(Effect.map((exit) => [exit]))

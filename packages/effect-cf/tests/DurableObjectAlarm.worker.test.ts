@@ -43,6 +43,88 @@ class Reminders extends DurableObjectAlarm.Tag<Reminders>()("test/Reminders", {
   reminder: Schema.Null,
 }) {}
 
+it.effect.each([false, true])(
+  "idle post-event checks leave native storage untouched (future alarm: %s)",
+  (future) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+    const EventScope = Context.Service<{ rpc: boolean }>("test/IdleAlarmScope");
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
+        yield* alarms.getAlarmStatus({ tag: "job", id: "future" });
+        if (future) yield* alarms.scheduleAlarm(alarm("future", 5_000));
+        const pending: Promise<unknown>[] = [];
+        const waitUntil = state.raw.waitUntil.bind(state.raw);
+        const capture = vi.spyOn(state.raw, "waitUntil").mockImplementation((promise) => {
+          pending.push(promise);
+          waitUntil(promise);
+        });
+        const transaction = vi.spyOn(state.raw.storage, "transaction");
+        const setAlarm = vi.spyOn(state.raw.storage, "setAlarm");
+        const deleteAlarm = vi.spyOn(state.raw.storage, "deleteAlarm");
+        let enrollOnClose = false;
+
+        yield* Effect.gen(function* () {
+          const CurrentObject = DurableObject.make(
+            Layer.succeed(DurableObjectAlarm.ScheduleConfiguration, { dispatchAfterEvent: true }),
+            {
+              eventLayer: Layer.effect(
+                EventScope,
+                Effect.acquireRelease(
+                  Effect.sync(() => ({ rpc: false })),
+                  (scope) =>
+                    scope.rpc || !enrollOnClose
+                      ? Effect.void
+                      : Effect.flatMap(DurableObjectAlarm.DurableObjectAlarm, (alarms) =>
+                          alarms.scheduleAlarm(alarm("late", 0)),
+                        ).pipe(Effect.orDie),
+                ),
+              ),
+              rpc: {
+                ping: () =>
+                  Effect.map(EventScope, (scope) => {
+                    scope.rpc = true;
+
+                    return "pong";
+                  }),
+              },
+            },
+          );
+          const instance = new CurrentObject(state.raw, {});
+
+          assert.strictEqual(yield* Effect.promise(() => instance.ping()), "pong");
+          assert.isAbove(pending.length, 0);
+          yield* Effect.promise(() => Promise.all(pending));
+          assert.deepStrictEqual(
+            {
+              transactions: transaction.mock.calls.length,
+              alarmWrites: setAlarm.mock.calls.length + deleteAlarm.mock.calls.length,
+            },
+            { transactions: 0, alarmWrites: 0 },
+          );
+          // An otherwise idle alarm scope can still enroll work from its finalizers.
+          enrollOnClose = true;
+          pending.length = 0;
+          yield* Effect.promise(() => instance.ping());
+          yield* Effect.promise(() => Promise.all(pending));
+          assert.strictEqual(yield* state.storage.getAlarm(), deadline);
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              capture.mockRestore();
+              transaction.mockRestore();
+              setAlarm.mockRestore();
+              deleteAlarm.mockRestore();
+            }),
+          ),
+        );
+      }).pipe(Effect.provide(services)),
+    );
+  },
+);
+
 it.effect("keeps post-event checks from taking over raw-only native alarms", () => {
   const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
 
@@ -1073,10 +1155,14 @@ it.effect.each(["success", "failure"] as const)(
   },
 );
 
-it.effect.each(["raw", "manual", "effect", "effect-and-raw"] as const)(
+it.effect.each(["raw", "manual", "effect", "effect-and-raw", "registration"] as const)(
   "preserves the %s dispatcher's batch limit without charging unvisited alarms",
   (kind) => {
     const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+    class Jobs extends DurableObjectAlarm.Tag<Jobs>()("test/RawJobRegistration", {
+      job: Schema.Null,
+    }) {}
 
     return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
       Effect.gen(function* () {
@@ -1093,13 +1179,14 @@ it.effect.each(["raw", "manual", "effect", "effect-and-raw"] as const)(
           });
         }
         const clock = Layer.succeed(Clock.Clock, yield* Clock.Clock);
+        const handle = (event: { readonly id: string }) =>
+          Effect.sync(() => {
+            handled.push(event.id);
+          });
         const raw = () =>
-          DurableObjectAlarm.processDue(
-            (event) =>
-              Effect.sync(() => {
-                handled.push(event.id);
-              }),
-            { limit: 1 },
+          (kind === "registration"
+            ? Jobs.handlers({ job: handle }, { limit: 1 }).run
+            : DurableObjectAlarm.processDue(handle, { limit: 1 })
           ).pipe(Effect.asVoid);
         const CurrentObject =
           kind === "manual"
@@ -1112,7 +1199,7 @@ it.effect.each(["raw", "manual", "effect", "effect-and-raw"] as const)(
                 }),
                 alarm: raw,
               })
-            : kind === "raw"
+            : kind === "raw" || kind === "registration"
               ? DurableObject.make(clock, { alarm: raw })
               : DurableObject.make(clock, {
                   alarms: raw(),

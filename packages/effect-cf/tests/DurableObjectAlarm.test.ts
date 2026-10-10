@@ -1001,6 +1001,7 @@ it.effect("applies per-tag failure policies from typed alarm definitions", () =>
 test("DurableObject.make registers the typed scheduler for application layers, RPC and alarm handlers", async () => {
   const fixture = makeAlarmFixture();
   const calls: Array<string> = [];
+  const rawFinished = Deferred.makeUnsafe<void>();
 
   class JobAlarms extends DurableObjectAlarm.Tag<JobAlarms>()("JobAlarms", { jobs: Schema.Null }) {}
   const applicationLayer = Layer.effect(
@@ -1019,19 +1020,32 @@ test("DurableObject.make registers the typed scheduler for application layers, R
         const alarms = yield* JobAlarms;
 
         yield* alarms.scheduleAlarm({ tag: "jobs", id: "a", runAt: atMillis(0), payload: null });
+        yield* (yield* Maintenance).scheduleAlarm(maintenanceInput(atMillis(0)));
       }),
     },
-    alarms: JobAlarms.handlers({
-      jobs: Effect.fn("jobs")(function* (event) {
-        const alarms = yield* JobAlarms;
+    alarms: DurableObjectAlarm.mergeAll(
+      JobAlarms.handlers({
+        jobs: Effect.fn("jobs")(function* (event) {
+          const alarms = yield* JobAlarms;
 
-        yield* alarms.cancelAlarm(event);
-        calls.push(`logical:${event.id}`);
+          yield* alarms.cancelAlarm(event);
+          calls.push(`logical:${event.id}`);
+        }),
       }),
-    }),
+      Maintenance.handlers({
+        maintenance: () =>
+          Effect.gen(function* () {
+            // A manual-only dispatcher must not delay raw dispatch after automatic work.
+            yield* Deferred.await(rawFinished);
+            yield* (yield* Maintenance).cancelAlarm(maintenanceRef);
+            calls.push("manual");
+          }),
+      }),
+    ),
     alarm: () =>
-      Effect.sync(() => {
+      Effect.gen(function* () {
         calls.push("raw");
+        yield* Deferred.succeed(rawFinished, undefined);
       }),
   });
 
@@ -1045,7 +1059,7 @@ test("DurableObject.make registers the typed scheduler for application layers, R
 
   await makePartialTestDouble<AlarmHandler>(instance).alarm();
 
-  expect(calls).toEqual(["logical:0", "logical:a", "raw"]);
+  expect(calls).toEqual(["logical:0", "logical:a", "raw", "manual"]);
 });
 
 type SqlFixtureRow = Record<string, globalThis.SqlStorageValue>;

@@ -200,7 +200,9 @@ dispatcher and automatic-alarm batch limits. Manual alarms do not consume those
 limits. If a custom hook does not dispatch, retained automatic alarms receive
 the default unknown-tag backoff and parking policy, even when the hook fails.
 Raw-only hooks without scheduler tables retain native alarm ownership, including
-on legacy KV-backed objects. Typed alarms require SQLite storage.
+on legacy KV-backed objects. When combined with registrations, raw hooks wait
+for automatic dispatchers; manual-only registrations run independently. Typed
+alarms require SQLite storage.
 
 ## Dispatch promptly after a response
 

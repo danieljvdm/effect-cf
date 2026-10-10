@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.55.0
+
+### Minor Changes
+
+- [#211](https://github.com/danieljvdm/effect-cf/pull/211) [`2764143`](https://github.com/danieljvdm/effect-cf/commit/276414374c3fe71f619c26ef1c447ab0f52f9ab4) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Keep in-flight Durable Object work recoverable through a configurable short alarm deadline while preserving hourly parked recovery. Coalesce native deliveries with active processing without starting another pass.
+
 ## 0.54.0
 
 ### Minor Changes

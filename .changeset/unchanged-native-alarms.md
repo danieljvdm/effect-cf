@@ -2,4 +2,4 @@
 "effect-cf": patch
 ---
 
-Reduce Durable Object alarm storage operations when the scheduled deadline is unchanged.
+Avoid redundant native alarm writes when the scheduled deadline is unchanged.

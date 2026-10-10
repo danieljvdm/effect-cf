@@ -232,6 +232,66 @@ it.effect.each([false, true])(
   },
 );
 
+it.effect("reconciles manual checkpoints without rewriting an unchanged native alarm", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+  const registration = Maintenance.handlers({ maintenance: () => Effect.void });
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+      const maintenance = yield* Maintenance;
+      const setAlarm = vi.spyOn(state.raw.storage, "setAlarm");
+      const deleteAlarm = vi.spyOn(state.raw.storage, "deleteAlarm");
+
+      yield* Effect.gen(function* () {
+        yield* alarms.transaction(() => Effect.void);
+        assert.isNull(yield* state.storage.getAlarm());
+        assert.strictEqual(deleteAlarm.mock.calls.length, 0);
+
+        yield* maintenance.scheduleAlarm(maintenanceInput(DateTime.makeUnsafe(deadline)));
+        yield* maintenance.scheduleAlarmEarlier(
+          maintenanceInput(DateTime.makeUnsafe(deadline + 1_000)),
+        );
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline);
+        assert.strictEqual(
+          DateTime.toEpochMillis((yield* maintenance.getAlarmStatus(maintenanceRef))!.runAt),
+          deadline,
+        );
+        assert.deepStrictEqual(
+          setAlarm.mock.calls.map(([at]) => at),
+          [deadline],
+        );
+
+        yield* maintenance.scheduleAlarm(maintenanceInput(DateTime.makeUnsafe(deadline + 2_000)));
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline + 2_000);
+        assert.deepStrictEqual(
+          setAlarm.mock.calls.map(([at]) => at),
+          [deadline, deadline + 2_000],
+        );
+
+        yield* maintenance.cancelAlarm(maintenanceRef);
+        yield* maintenance.cancelAlarm(maintenanceRef);
+        assert.isUndefined(yield* maintenance.getAlarmStatus(maintenanceRef));
+        assert.isNull(yield* state.storage.getAlarm());
+        assert.strictEqual(deleteAlarm.mock.calls.length, 1);
+
+        // A retained native deadline with no logical owner must still be removed.
+        yield* Effect.promise(() => state.raw.storage.setAlarm(deadline + 4_000));
+        yield* alarms.transaction(() => Effect.void);
+        assert.isNull(yield* state.storage.getAlarm());
+        assert.strictEqual(deleteAlarm.mock.calls.length, 2);
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            setAlarm.mockRestore();
+            deleteAlarm.mockRestore();
+          }),
+        ),
+      );
+    }).pipe(Effect.provide(registration.layer.pipe(Layer.provideMerge(services)))),
+  );
+});
+
 it.effect("keeps post-event checks from taking over raw-only native alarms", () => {
   const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
 

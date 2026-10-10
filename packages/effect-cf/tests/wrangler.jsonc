@@ -54,6 +54,10 @@
         "class_name": "TestCounterDurableObject",
       },
       {
+        "name": "TEST_LEGACY_ALARM_DO",
+        "class_name": "TestLegacyAlarmDurableObject",
+      },
+      {
         "name": "TEST_COMPUTER_DO",
         "class_name": "TestComputerWorkspaceDurableObject",
       },
@@ -70,6 +74,7 @@
   "migrations": [
     {
       "tag": "v1",
+      "new_classes": ["TestLegacyAlarmDurableObject"],
       "new_sqlite_classes": [
         "TestInitializationDurableObject",
         "TestInitializationControl",

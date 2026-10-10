@@ -2,12 +2,14 @@ import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Predicate from "effect/Predicate";
 import * as S from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 
 import { DurableObjectState } from "./DurableObjectState";
 import { type SqlStorageValue, StorageOperationError } from "./DurableObjectStorage";
@@ -18,6 +20,7 @@ CREATE TABLE IF NOT EXISTS effect_cf_scheduled_alarms (
   storage_id TEXT PRIMARY KEY,
   alarm_id TEXT NOT NULL,
   tag TEXT NOT NULL,
+  lifecycle TEXT NOT NULL DEFAULT 'automatic',
   run_at INTEGER NOT NULL,
   wake_at INTEGER NOT NULL DEFAULT 0,
   repeat_every_ms INTEGER,
@@ -34,6 +37,7 @@ CREATE TABLE IF NOT EXISTS effect_cf_alarm_attempts (
 `;
 
 const WAKE_INDEX = "idx_effect_cf_scheduled_alarms_wake_at_storage_id";
+const LIFECYCLE_INDEX = "idx_effect_cf_scheduled_alarms_lifecycle_wake_at_storage_id";
 
 const DEFAULT_PROCESS_DUE_ALARMS_LIMIT = 100;
 
@@ -49,6 +53,8 @@ export const MIN_REPEAT_INTERVAL_MS = 1_000;
 export const DEFAULT_MIN_REPEAT_INTERVAL_MS = 60_000;
 
 export interface ScheduleConfiguration {
+  /** Check for due alarms after RPC/fetch responses unwind. Native alarms remain recovery authority. */
+  readonly dispatchAfterEvent?: boolean;
   /** Retry floor, at least one second. Defaults to one second. */
   readonly minimumRetryDelay?: Duration.Input;
   /** Positive safe integer. Defaults to eight unchanged attempts. */
@@ -68,7 +74,13 @@ export const ScheduleConfiguration = Context.Reference<ScheduleConfiguration>(
 const safeIntegerAtLeast = (minimum: number) =>
   S.Int.check(S.isGreaterThanOrEqualTo(minimum), S.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER));
 
+/** Automatic alarms acknowledge/retry on handler exit; manual alarms retain consumer control. */
+export type AlarmLifecycle = "automatic" | "manual";
+
+const AlarmLifecycleSchema = S.Literals(["automatic", "manual"]);
+
 const ScheduleConfigurationSchema = S.Struct({
+  dispatchAfterEvent: S.Boolean,
   minimumRetryDelay: safeIntegerAtLeast(MIN_RETRY_DELAY_MS),
   unchangedAttemptBudget: safeIntegerAtLeast(1),
   parkedRetryDelay: safeIntegerAtLeast(PARKED_RETRY_DELAY_MS),
@@ -99,6 +111,7 @@ const getScheduledEventId = (input: { readonly id: string; readonly tag: string 
 export type AlarmPayload = S.Json;
 
 interface AlarmRow extends Record<string, SqlStorageValue> {
+  readonly lifecycle: AlarmLifecycle;
   readonly attempts: number;
   readonly alarm_id: string;
   readonly payload: string;
@@ -139,6 +152,18 @@ export const AlarmReporter = Context.Reference<(event: AlarmParked) => Effect.Ef
 const CurrentAlarmPass = Context.Reference<
   { readonly row: AlarmRow; readonly parked: AlarmParked[]; active: boolean } | undefined
 >("effect-cf/DurableObjectAlarm/CurrentAlarmPass", { defaultValue: () => undefined });
+
+/** One dispatcher's view of a registration pass: its tags, shared manual permits, raw tracking. */
+const CurrentDispatch = Context.Reference<
+  | {
+      readonly tags: readonly string[];
+      readonly exclude: boolean;
+      readonly permits: Semaphore.Semaphore;
+      readonly raw?: { processed: boolean };
+    }
+  | undefined
+>("effect-cf/DurableObjectAlarm/CurrentDispatch", { defaultValue: () => undefined });
+const ManualTags: unique symbol = Symbol("effect-cf/DurableObjectAlarm/ManualTags");
 
 interface NextAlarmRow extends Record<string, SqlStorageValue> {
   readonly run_at: number;
@@ -188,12 +213,23 @@ export class InvalidScheduleConfigurationError extends Data.TaggedError(
   }
 }
 
+export class InvalidAlarmRegistrationError extends Data.TaggedError(
+  "InvalidAlarmRegistrationError",
+)<{
+  readonly cause: unknown;
+}> {
+  override get message(): string {
+    return `Invalid Durable Object alarm registration: ${ErrorMessage.causeMessage(this.cause)}`;
+  }
+}
+
 const getScheduleConfiguration = Effect.fnUntraced(function* (defaults: ScheduleConfiguration) {
   const input = { ...defaults, ...(yield* ScheduleConfiguration) };
 
   return yield* Effect.try({
     try: () =>
       S.decodeUnknownSync(ScheduleConfigurationSchema)({
+        dispatchAfterEvent: input.dispatchAfterEvent ?? false,
         minimumRetryDelay: Math.ceil(
           Duration.toMillis(input.minimumRetryDelay ?? MIN_RETRY_DELAY_MS),
         ),
@@ -219,6 +255,7 @@ export class StoredAlarmDecodeError extends Data.TaggedError("StoredAlarmDecodeE
 }
 
 export type DurableObjectAlarmError =
+  | InvalidAlarmRegistrationError
   | InvalidAlarmPayloadError
   | InvalidAlarmRefError
   | InvalidProcessDueAlarmsOptionsError
@@ -258,6 +295,8 @@ const decodeAlarmRef = (input: AlarmRef) =>
  * Reusing `{tag, id}` replaces an alarm. Product repeats use the configured floor and run after completion.
  */
 export type ScheduleAlarmInput<Tag extends string = string> = AlarmRef<Tag> & {
+  /** Prefer selecting the lifecycle in a typed Tag definition. Defaults to automatic. */
+  readonly lifecycle?: AlarmLifecycle;
   readonly payload: AlarmPayload;
   readonly repeatEvery?: Duration.Input;
   readonly runAt: DateTime.Utc;
@@ -291,6 +330,7 @@ export type ProcessDueAlarmsFailureAction =
     };
 
 export interface ProcessDueAlarmsOptions<OnFailureR = never, OnFailureE = never> {
+  readonly [ManualTags]?: ReadonlySet<string>;
   readonly limit?: number;
   readonly onFailure?: (
     failure: ProcessDueAlarmsFailure,
@@ -318,8 +358,39 @@ export interface AlarmStatus {
   readonly retryAt: DateTime.Utc | undefined;
 }
 
+/** @internal */
+export const RunAlarm: unique symbol = Symbol("effect-cf/DurableObjectAlarm/RunAlarm");
+/** @internal */
+export const DispatchAfterEvent: unique symbol = Symbol(
+  "effect-cf/DurableObjectAlarm/DispatchAfterEvent",
+);
+/** @internal */
+export const HasDueAlarms: unique symbol = Symbol("effect-cf/DurableObjectAlarm/HasDueAlarms");
+
 /** Own `storage.setAlarm()` exclusively: a Durable Object has one platform alarm timestamp. */
 export type AlarmScheduler = {
+  /** @internal DurableObject.make shares this scoped event across native and post-event dispatch. */
+  readonly [RunAlarm]: <R>(
+    event: (
+      beginDispatch: Effect.Effect<void, InvalidScheduleConfigurationError>,
+    ) => Effect.Effect<void, unknown, R>,
+    native: boolean,
+  ) => Effect.Effect<void, unknown, R>;
+  /** @internal Read the current event's opt-in without acquiring another event layer. */
+  readonly [DispatchAfterEvent]: Effect.Effect<boolean>;
+  /** @internal Check inside the alarm event so its clock and configuration apply. */
+  readonly [HasDueAlarms]: Effect.Effect<boolean, StorageOperationError>;
+  /**
+   * Keep a native recovery alarm armed while coalescing checkpoint changes across this
+   * object's concurrent and nested scopes. Source/checkpoint transactions still commit;
+   * the last scope reconciles their current deadlines on success, failure or interruption.
+   * Run outside transactions, around bounded maintenance or inline work. The first scope's
+   * parkedRetryDelay bounds the shared guard; renew it if it expires and is consumed while
+   * scopes remain active. A process loss before exit recovers at that retained alarm.
+   */
+  readonly deferWakes: <A, E, R>(
+    body: Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E | InvalidScheduleConfigurationError | StorageOperationError, R>;
   /**
    * Commits local application storage and logical alarms in one native SQLite
    * Durable Object transaction, reconciling the native alarm before commit.
@@ -374,6 +445,7 @@ export type AlarmScheduler = {
 };
 
 const StoredPayloadString = S.fromJsonString(S.Json);
+const StoredTags = S.fromJsonString(S.Array(S.String));
 
 const decodeStoredPayload = (row: AlarmRow) =>
   S.decodeUnknownEffect(StoredPayloadString)(row.payload).pipe(
@@ -389,7 +461,7 @@ const ensureTable = Effect.fnUntraced(function* (state: DurableObjectState["Serv
   yield* state.storage.sql.exec(INIT_TABLE_SQL);
   const index = yield* state.storage.sql.exec(
     "SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?",
-    WAKE_INDEX,
+    LIFECYCLE_INDEX,
   );
 
   if ((yield* index.toArray()).length > 0) return;
@@ -398,6 +470,11 @@ const ensureTable = Effect.fnUntraced(function* (state: DurableObjectState["Serv
   );
   const names = new Set((yield* columns.toArray()).map((column) => column.name));
 
+  if (!names.has("lifecycle")) {
+    yield* state.storage.sql.exec(
+      "ALTER TABLE effect_cf_scheduled_alarms ADD COLUMN lifecycle TEXT NOT NULL DEFAULT 'automatic'",
+    );
+  }
   if (!names.has("wake_at")) {
     yield* state.storage.sql.exec(
       "ALTER TABLE effect_cf_scheduled_alarms ADD COLUMN wake_at INTEGER NOT NULL DEFAULT 0",
@@ -413,6 +490,8 @@ const ensureTable = Effect.fnUntraced(function* (state: DurableObjectState["Serv
   );
   yield* state.storage.sql.exec(`CREATE INDEX IF NOT EXISTS ${WAKE_INDEX}
     ON effect_cf_scheduled_alarms (wake_at, storage_id)`);
+  yield* state.storage.sql.exec(`CREATE INDEX IF NOT EXISTS ${LIFECYCLE_INDEX}
+    ON effect_cf_scheduled_alarms (lifecycle, wake_at, storage_id)`);
 });
 
 const toRepeatEveryMillis = (input: Duration.Input | undefined, minimum: number) => {
@@ -515,11 +594,20 @@ export interface AlarmRetryPolicy {
   readonly initialDelay?: Duration.Input;
 }
 
-export interface AlarmDefinitionConfig<Payload extends AlarmPayloadSchema = AlarmPayloadSchema> {
-  readonly failure?: AlarmFailurePolicy;
+export type AlarmDefinitionConfig<Payload extends AlarmPayloadSchema = AlarmPayloadSchema> = {
   readonly payload: Payload;
-  readonly retry?: AlarmRetryPolicy;
-}
+} & (
+  | {
+      readonly lifecycle?: "automatic";
+      readonly failure?: AlarmFailurePolicy;
+      readonly retry?: AlarmRetryPolicy;
+    }
+  | {
+      readonly lifecycle: "manual";
+      readonly failure?: never;
+      readonly retry?: never;
+    }
+);
 
 export type AlarmDefinitionEntry = AlarmDefinitionConfig | AlarmPayloadSchema;
 
@@ -547,9 +635,14 @@ export type DefinedAlarmHandlers<Definitions extends AlarmDefinitions, R = never
 
 /** A discriminated union keeps each tag paired with its decoded payload type. */
 export type DefinedScheduleAlarmInput<Definitions extends AlarmDefinitions> = {
-  readonly [Tag in keyof Definitions & string]: Omit<ScheduleAlarmInput<Tag>, "payload"> & {
+  readonly [Tag in keyof Definitions & string]: Omit<
+    ScheduleAlarmInput<Tag>,
+    "payload" | "lifecycle" | "repeatEvery" | "progress"
+  > & {
     readonly payload: AlarmDefinitionPayload<Definitions[Tag]>;
-  };
+  } & (Definitions[Tag] extends { readonly lifecycle: "manual" }
+      ? { readonly repeatEvery?: never; readonly progress?: never }
+      : Pick<ScheduleAlarmInput<Tag>, "repeatEvery" | "progress">);
 }[keyof Definitions & string];
 
 export interface DefinedAlarmTransaction<Definitions extends AlarmDefinitions> {
@@ -577,6 +670,7 @@ export interface DefinedAlarmScheduler<
   Definitions extends AlarmDefinitions,
 > extends DefinedAlarmTransaction<Definitions> {
   readonly [TypedAlarmSchedulerTypeId]: typeof TypedAlarmSchedulerTypeId;
+  readonly deferWakes: AlarmScheduler["deferWakes"];
   readonly getAlarmStatus: (
     input: AlarmRef<keyof Definitions & string>,
   ) => ReturnType<AlarmScheduler["getAlarmStatus"]>;
@@ -587,12 +681,175 @@ export interface DefinedAlarmScheduler<
 
 /** Registers a dispatcher and the service authorized to schedule its alarms. */
 export interface AlarmRegistration<Self, R = never, E = never> {
-  readonly layer: Layer.Layer<Self, never, DurableObjectAlarm>;
+  readonly layer: Layer.Layer<Self, InvalidAlarmRegistrationError, DurableObjectAlarm>;
   readonly run: Effect.Effect<
     ProcessDueAlarmsResult,
     E | DurableObjectAlarmError,
     R | DurableObjectAlarm
   >;
+  readonly [RegistrationParts]?: RegistrationParts<R, E>;
+}
+
+const RegistrationParts: unique symbol = Symbol("effect-cf/DurableObjectAlarm/RegistrationParts");
+
+interface AlarmDispatcher<R, E> {
+  readonly tags: readonly string[];
+  readonly automatic: boolean;
+  readonly run: AlarmRegistration<never, R, E>["run"];
+}
+
+interface RegistrationParts<R, E> {
+  readonly services: readonly string[];
+  readonly dispatchers: readonly AlarmDispatcher<R, E>[];
+  readonly invalid?: string;
+}
+
+const emptyResult: ProcessDueAlarmsResult = { failed: [], handled: [], parked: [] };
+
+const missingAlarm = (tag: string) =>
+  new InvalidAlarmRegistrationError({
+    cause: new Error(`No manual handler registered for alarm tag "${tag}"`),
+  });
+
+const validateRegistration = <R, E>(parts: RegistrationParts<R, E>) =>
+  Effect.try({
+    try: () => {
+      if (parts.invalid !== undefined) throw new Error(parts.invalid);
+      const tags = parts.dispatchers.flatMap((dispatcher) => dispatcher.tags);
+
+      S.decodeUnknownSync(S.Array(S.NonEmptyString))([...parts.services, ...tags]);
+      if (
+        new Set(parts.services).size !== parts.services.length ||
+        new Set(tags).size !== tags.length
+      ) {
+        throw new Error(
+          "Alarm service keys and definition tags must be unique within a Durable Object",
+        );
+      }
+    },
+    catch: (cause) => new InvalidAlarmRegistrationError({ cause }),
+  });
+
+const runRegistrations = <R, E>(
+  parts: RegistrationParts<R, E>,
+  rawAlarm?: Effect.Effect<void, E, R>,
+): AlarmRegistration<never, R, E>["run"] =>
+  Effect.gen(function* () {
+    yield* validateRegistration(parts);
+    const alarms = yield* DurableObjectAlarm;
+    const permits = yield* Semaphore.make(4);
+    const parentRaw = (yield* CurrentDispatch)?.raw;
+    const recoveryScope = {
+      tags: parts.dispatchers.flatMap((dispatcher) => dispatcher.tags),
+      exclude: true,
+      permits,
+      raw: parentRaw,
+    };
+    const recovery =
+      rawAlarm === undefined
+        ? makeDefinition({})
+            .handlers({})
+            .pipe(Effect.provideService(CurrentDispatch, recoveryScope))
+        : Effect.suspend(() => {
+            const raw = { processed: false };
+
+            return rawAlarm.pipe(
+              Effect.onExit(() =>
+                raw.processed ? Effect.void : makeDefinition({}).handlers({}).pipe(Effect.asVoid),
+              ),
+              Effect.provideService(CurrentDispatch, { ...recoveryScope, raw }),
+              Effect.as(emptyResult),
+            );
+          });
+
+    return yield* alarms.deferWakes(
+      Effect.gen(function* () {
+        const run = (dispatchers: RegistrationParts<R, E>["dispatchers"]) =>
+          Effect.forEach(
+            dispatchers,
+            (dispatcher) =>
+              dispatcher.run.pipe(
+                Effect.catchTag("InvalidProcessDueAlarmsOptionsError", (error) =>
+                  Effect.fail(error).pipe(
+                    Effect.onExit(() => makeDefinition({}).handlers({}).pipe(Effect.asVoid)),
+                  ),
+                ),
+                Effect.provideService(CurrentDispatch, {
+                  tags: dispatcher.tags,
+                  exclude: false,
+                  permits,
+                  raw: parentRaw,
+                }),
+                Effect.exit,
+              ),
+            { concurrency: "unbounded" },
+          );
+        // Raw hooks wait only for automatic dispatchers; manual-only work stays independent.
+        const automatic = parts.dispatchers.filter(
+          (dispatcher) => rawAlarm !== undefined && dispatcher.automatic,
+        );
+        const independent = parts.dispatchers.filter(
+          (dispatcher) => rawAlarm === undefined || !dispatcher.automatic,
+        );
+        const exits = (yield* Effect.all(
+          [
+            run(independent),
+            run(automatic).pipe(
+              Effect.flatMap((exits) =>
+                Effect.map(Effect.exit(recovery), (exit) => [...exits, exit]),
+              ),
+            ),
+          ],
+          { concurrency: "unbounded" },
+        )).flat();
+
+        yield* Exit.asVoidAll(exits);
+
+        return {
+          failed: exits.flatMap((exit) => (Exit.isSuccess(exit) ? exit.value.failed : [])),
+          handled: exits.flatMap((exit) => (Exit.isSuccess(exit) ? exit.value.handled : [])),
+          parked: exits.flatMap((exit) => (Exit.isSuccess(exit) ? exit.value.parked : [])),
+        };
+      }),
+    );
+  });
+
+const makeRegistration = <Self, R, E>(
+  layer: AlarmRegistration<Self>["layer"],
+  parts: RegistrationParts<R, E>,
+): AlarmRegistration<Self, R, E> => ({
+  [RegistrationParts]: parts,
+  layer: layer.pipe(Layer.provide(Layer.effectDiscard(validateRegistration(parts)))),
+  run: runRegistrations(parts),
+});
+
+/** Compose independent typed alarm registrations under one native alarm owner. */
+export function mergeAll<
+  const Registrations extends readonly [
+    AlarmRegistration<never, unknown, unknown>,
+    ...AlarmRegistration<never, unknown, unknown>[],
+  ],
+>(
+  ...registrations: Registrations
+): AlarmRegistration<
+  Layer.Success<Registrations[number]["layer"]>,
+  Exclude<Effect.Services<Registrations[number]["run"]>, DurableObjectAlarm>,
+  Exclude<Effect.Error<Registrations[number]["run"]>, DurableObjectAlarmError>
+>;
+export function mergeAll(
+  registration: AlarmRegistration<never, unknown, unknown>,
+  ...others: readonly AlarmRegistration<never, unknown, unknown>[]
+): AlarmRegistration<never, unknown, unknown> {
+  const registrations = [registration, ...others];
+  const parts = registrations.map((item) => item[RegistrationParts]);
+
+  return makeRegistration(Layer.mergeAll(registration.layer, ...others.map((item) => item.layer)), {
+    services: parts.flatMap((part) => part?.services ?? []),
+    dispatchers: parts.flatMap((part) => part?.dispatchers ?? []),
+    invalid: parts.some((part) => part === undefined)
+      ? "mergeAll requires registrations returned by Tag.handlers"
+      : parts.find((part) => part?.invalid !== undefined)?.invalid,
+  });
 }
 
 export interface AlarmTagClass<
@@ -654,7 +911,11 @@ const makeDefinition = <const Definitions extends AlarmDefinitions>(definitions:
           Effect.mapError((cause) => new InvalidAlarmPayloadError({ cause })),
         );
 
-        yield* mutations[method]({ ...input, payload });
+        yield* mutations[method]({
+          ...input,
+          payload,
+          lifecycle: isAlarmDefinitionConfig(definition) ? definition.lifecycle : undefined,
+        });
       });
 
     return {
@@ -680,6 +941,7 @@ const makeDefinition = <const Definitions extends AlarmDefinitions>(definitions:
     make: (alarms: AlarmScheduler): DefinedAlarmScheduler<Definitions> => ({
       [TypedAlarmSchedulerTypeId]: TypedAlarmSchedulerTypeId,
       ...bind(alarms),
+      deferWakes: alarms.deferWakes,
       getAlarmStatus: (input) => alarms.getAlarmStatus(input),
       transaction: (closure) => alarms.transaction((tx) => closure(bind(tx))),
     }),
@@ -724,6 +986,14 @@ const makeDefinition = <const Definitions extends AlarmDefinitions>(definitions:
           }),
         {
           ...options,
+          [ManualTags]: new Set(
+            Object.entries(definitions)
+              .filter(
+                ([, definition]) =>
+                  isAlarmDefinitionConfig(definition) && definition.lifecycle === "manual",
+              )
+              .map(([tag]) => tag),
+          ),
           onFailure: (failure) =>
             Effect.gen(function* () {
               const action = getAlarmDefinitionFailureAction(definitionFor(failure.tag));
@@ -742,6 +1012,46 @@ export const define = <const Definitions extends AlarmDefinitions>(definitions: 
   handlers: makeDefinition(definitions).handlers,
 });
 
+const hasSchedulerTables = Effect.fnUntraced(function* (state: DurableObjectState["Service"]) {
+  return yield* Effect.gen(function* () {
+    if (state.raw.storage.sql === undefined) return false;
+    // Inspect without creating tables: raw-only SQLite and KV objects retain native ownership.
+    const tables = yield* state.storage.sql.exec(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+      "effect_cf_scheduled_alarms",
+    );
+
+    return (yield* tables.toArray()).length > 0;
+  }).pipe(
+    Effect.catchIf(
+      (error) =>
+        error.cause instanceof Error &&
+        (error.cause.message.startsWith("SQL is not enabled for this Durable Object class") ||
+          error.cause.message.startsWith("This Durable Object is not backed by SQLite storage")),
+      () => Effect.succeed(false),
+    ),
+  );
+});
+
+/** @internal Preserve custom dispatch while recovering retained alarms after deployments. */
+export const dispatchRawAlarm = <Self, E, R>(
+  rawAlarm: Effect.Effect<void, E, R>,
+  registration?: AlarmRegistration<Self, R, E>,
+): Effect.Effect<void, E | DurableObjectAlarmError, R | DurableObjectAlarm | DurableObjectState> =>
+  Effect.gen(function* () {
+    const parts = registration?.[RegistrationParts];
+
+    if (parts !== undefined) return yield* runRegistrations(parts, rawAlarm).pipe(Effect.asVoid);
+    const custom =
+      registration === undefined ? rawAlarm : registration.run.pipe(Effect.andThen(rawAlarm));
+    const state = yield* DurableObjectState;
+    const hasScheduler = yield* hasSchedulerTables(state);
+
+    if (!hasScheduler) return yield* custom;
+
+    return yield* runRegistrations({ services: [], dispatchers: [] }, custom).pipe(Effect.asVoid);
+  });
+
 /** The typed scheduler becomes available when its handlers are registered on a Durable Object. */
 export const Tag =
   <Self>() =>
@@ -756,10 +1066,19 @@ export const Tag =
       handlers: <R = never, E = never>(
         handlers: DefinedAlarmHandlers<Definitions, R, E>,
         options?: ProcessDueAlarmsOptions<R, E>,
-      ): AlarmRegistration<Self, R, E> => ({
-        layer: Layer.effect(tag, Effect.map(DurableObjectAlarm, definition.make)),
-        run: definition.handlers(handlers, options),
-      }),
+      ): AlarmRegistration<Self, R, E> =>
+        makeRegistration(Layer.effect(tag, Effect.map(DurableObjectAlarm, definition.make)), {
+          services: [id],
+          dispatchers: [
+            {
+              tags: Object.keys(definitions),
+              automatic: Object.values(definitions).some(
+                (entry) => !isAlarmDefinitionConfig(entry) || entry.lifecycle !== "manual",
+              ),
+              run: definition.handlers(handlers, options),
+            },
+          ],
+        }),
     });
   };
 
@@ -771,6 +1090,13 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
     Effect.gen(function* () {
       const state = yield* DurableObjectState;
       const configurationDefaults = { ...(yield* ScheduleConfiguration) };
+      let wakeDeferrals = 0;
+      let wakesReady: Deferred.Deferred<void> | undefined;
+      let pendingAlarm: Deferred.Deferred<void, unknown> | undefined;
+      let dispatchActive = false;
+      let dispatchNeedsReconcile = false;
+      let deferredRecoveryDelay = PARKED_RETRY_DELAY_MS;
+      let deferredRecoveryAt = 0;
 
       const readRow = Effect.fnUntraced(function* (storageId: string) {
         const cursor = yield* state.storage.sql.exec<AlarmRow>(
@@ -781,25 +1107,43 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         return (yield* cursor.toArray())[0];
       });
 
-      const reconcileAlarm = Effect.fn("DurableObjectAlarm.reconcileAlarm")(function* () {
-        const cursor = yield* state.storage.sql.exec<NextAlarmRow>(
-          `SELECT wake_at AS run_at FROM effect_cf_scheduled_alarms
-            ORDER BY wake_at, storage_id LIMIT 1`,
-        );
-        const next = (yield* cursor.toArray())[0];
-
-        // The scheduler is the sole alarm writer. Raw storage is confined to this boundary.
-        yield* Effect.tryPromise({
+      // The scheduler is the sole alarm writer. Raw storage is confined to this boundary.
+      const writeNativeAlarm = (runAt: number | null) =>
+        Effect.tryPromise({
           try: () =>
-            next === undefined
-              ? state.raw.storage.deleteAlarm()
-              : state.raw.storage.setAlarm(next.run_at),
+            runAt === null ? state.raw.storage.deleteAlarm() : state.raw.storage.setAlarm(runAt),
           catch: (cause) =>
             new StorageOperationError({
-              operation: next === undefined ? "deleteAlarm" : "setAlarm",
+              operation: runAt === null ? "deleteAlarm" : "setAlarm",
               cause,
             }),
         });
+
+      const reconcileAlarm = Effect.fn("DurableObjectAlarm.reconcileAlarm")(function* () {
+        if (wakeDeferrals > 0 || dispatchActive) {
+          if (dispatchActive) dispatchNeedsReconcile = true;
+          const current = yield* state.storage.getAlarm();
+          const now = yield* Clock.currentTimeMillis;
+
+          if (deferredRecoveryAt <= now) {
+            deferredRecoveryAt = now + deferredRecoveryDelay;
+          }
+
+          // Commit the guard before user work. Later transactions keep it even when
+          // logical deadlines move earlier or every checkpoint is cancelled.
+          if (current === null || current <= now || current > deferredRecoveryAt) {
+            yield* writeNativeAlarm(deferredRecoveryAt);
+          }
+
+          return;
+        }
+        const cursor = yield* state.storage.sql.exec<NextAlarmRow>(
+          `SELECT wake_at AS run_at FROM effect_cf_scheduled_alarms
+           ORDER BY wake_at, storage_id LIMIT 1`,
+        );
+        const next = (yield* cursor.toArray())[0];
+
+        yield* writeNativeAlarm(next?.run_at ?? null);
       });
 
       const writeAttempts = Effect.fnUntraced(function* (
@@ -851,6 +1195,20 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
       ) {
         const configuration = yield* getScheduleConfiguration(configurationDefaults);
         const ref = yield* decodeAlarmRef(input);
+        const lifecycle = yield* S.decodeUnknownEffect(AlarmLifecycleSchema)(
+          input.lifecycle ?? "automatic",
+        ).pipe(Effect.mapError((cause) => new InvalidAlarmRefError({ cause })));
+
+        if (
+          lifecycle === "manual" &&
+          (input.repeatEvery !== undefined || input.progress !== undefined)
+        ) {
+          return yield* Effect.fail(
+            new InvalidAlarmRefError({
+              cause: new Error("Manual alarms own their repeats and progress budgets"),
+            }),
+          );
+        }
         const repeatEveryMillis = yield* toRepeatEveryMillis(
           input.repeatEvery,
           configuration.minimumRepeatInterval,
@@ -859,19 +1217,10 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         const storageId = getScheduledEventId(ref);
         const existing = yield* readRow(storageId);
         const pass = yield* CurrentAlarmPass;
-        const source = pass?.row;
+        const source =
+          lifecycle === "automatic" && pass?.row.lifecycle === "automatic" ? pass.row : undefined;
         const progress = existing?.progress ?? source?.progress ?? -1;
 
-        if (pass !== undefined && !pass.active) {
-          return yield* Effect.fail(
-            new StorageOperationError({
-              operation: "alarm.schedule",
-              cause: new Error(
-                "Alarm handlers cannot schedule detached work after their pass ends",
-              ),
-            }),
-          );
-        }
         if (input.progress !== undefined) {
           yield* S.decodeUnknownEffect(S.Natural)(input.progress).pipe(
             Effect.mapError((cause) => new InvalidAlarmRefError({ cause })),
@@ -907,16 +1256,22 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         const keepEarlier = earlier && existing !== undefined && existing.run_at <= runAt;
         const scheduledAt = keepEarlier ? existing.run_at : runAt;
         const scheduledPayload = keepEarlier ? existing.payload : payload;
-        const scheduledRepeat = keepEarlier ? existing.repeat_every_ms : repeatEveryMillis;
-        const nextProgress = Math.max(progress, input.progress ?? -1);
+        const scheduledRepeat =
+          lifecycle === "manual"
+            ? null
+            : keepEarlier
+              ? existing.repeat_every_ms
+              : repeatEveryMillis;
+        const nextProgress = lifecycle === "manual" ? -1 : Math.max(progress, input.progress ?? -1);
 
         yield* state.storage.sql.exec(
           `INSERT OR REPLACE INTO effect_cf_scheduled_alarms
-            (storage_id, alarm_id, tag, run_at, repeat_every_ms, payload)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+            (storage_id, alarm_id, tag, lifecycle, run_at, repeat_every_ms, payload)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
           storageId,
           ref.id,
           ref.tag,
+          lifecycle,
           scheduledAt,
           scheduledRepeat,
           scheduledPayload,
@@ -949,13 +1304,24 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
       });
 
       const transaction: AlarmScheduler["transaction"] = Effect.fnUntraced(function* (closure) {
+        const pass = yield* CurrentAlarmPass;
+
+        if (pass !== undefined && !pass.active) {
+          return yield* Effect.fail(
+            new StorageOperationError({
+              operation: "alarm.transaction",
+              cause: new Error("Alarm handlers cannot mutate detached work after their pass ends"),
+            }),
+          );
+        }
         const reports: string[] = [];
         const result = yield* state.storage.transaction(() =>
           Effect.withFiber((owner) => {
             let active = true;
             const requireActive = <A, E>(effect: Effect.Effect<A, E>) =>
               Effect.withFiber<A, E | StorageOperationError>((fiber) =>
-                active && fiber === owner
+                // A queued or suspended transaction can outlive the handler that admitted it.
+                active && fiber === owner && (pass === undefined || pass.active)
                   ? effect
                   : Effect.fail(
                       new StorageOperationError({
@@ -995,6 +1361,107 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
 
         return result;
       });
+
+      const deferWakes: AlarmScheduler["deferWakes"] = (body) =>
+        Effect.acquireUseRelease(
+          Effect.gen(function* () {
+            const configuration = yield* getScheduleConfiguration(configurationDefaults);
+            const now = yield* Clock.currentTimeMillis;
+
+            if (wakeDeferrals === 0) {
+              deferredRecoveryDelay = configuration.parkedRetryDelay;
+              deferredRecoveryAt = now + deferredRecoveryDelay;
+              wakesReady ??= Deferred.makeUnsafe<void>();
+            }
+            wakeDeferrals++;
+          }),
+          () => transaction(() => Effect.void).pipe(Effect.andThen(body)),
+          () =>
+            Effect.gen(function* () {
+              wakeDeferrals--;
+              if (wakeDeferrals === 0) {
+                yield* (dispatchActive ? Effect.void : transaction(() => Effect.void)).pipe(
+                  Effect.ensuring(
+                    Effect.sync(() => {
+                      if (wakeDeferrals === 0 && wakesReady !== undefined) {
+                        Deferred.doneUnsafe(wakesReady, Effect.void);
+                        wakesReady = undefined;
+                      }
+                    }),
+                  ),
+                );
+              }
+            }),
+        );
+
+      const awaitWakes: Effect.Effect<void> = Effect.suspend(() =>
+        wakesReady === undefined
+          ? Effect.void
+          : Deferred.await(wakesReady).pipe(Effect.andThen(awaitWakes)),
+      );
+      const runAlarm: AlarmScheduler[typeof RunAlarm] = (event, native) =>
+        Effect.flatMap(hasSchedulerTables(state), (managed) =>
+          !managed
+            ? native
+              ? event(Effect.void)
+              : Effect.void
+            : Effect.uninterruptibleMask((restore) =>
+                Effect.suspend(() => {
+                  const pending = pendingAlarm;
+
+                  if (pending !== undefined) {
+                    // A native delivery consumed its timestamp. Restore recovery before joining.
+                    return restore(
+                      (native ? transaction(() => Effect.void) : Effect.void).pipe(
+                        Effect.andThen(Deferred.await(pending)),
+                      ),
+                    );
+                  }
+                  const completed = Deferred.makeUnsafe<void, unknown>();
+                  let dispatchStarted = false;
+
+                  pendingAlarm = completed;
+                  dispatchNeedsReconcile = native;
+
+                  return restore(
+                    Effect.gen(function* () {
+                      // Native-first delivery can consume an inline region's guard before
+                      // any prompt pass exists to join. Restore it while waiting for exit.
+                      if (native && wakesReady !== undefined) yield* transaction(() => Effect.void);
+                      yield* awaitWakes;
+                      dispatchActive = true;
+                      yield* event(
+                        Effect.gen(function* () {
+                          yield* getScheduleConfiguration(configurationDefaults);
+                          dispatchStarted = true;
+                        }),
+                      );
+                    }),
+                  ).pipe(
+                    Effect.onExit((exit) =>
+                      Effect.gen(function* () {
+                        // The event includes its scope finalizers. Late enrollments cannot be
+                        // swallowed by a native delivery that joined after the final checkpoint.
+                        // Acquisition failure never reached a dispatcher: keep a future guard
+                        // instead of rearming untouched due rows into an immediate retry loop.
+                        const reconcile =
+                          dispatchNeedsReconcile || dispatchStarted || Exit.isFailure(exit);
+
+                        dispatchActive = Exit.isFailure(exit) && !dispatchStarted;
+                        const reconciled = yield* (
+                          reconcile ? transaction(() => Effect.void) : Effect.void
+                        ).pipe(Effect.exit);
+
+                        dispatchActive = false;
+                        pendingAlarm = undefined;
+                        yield* Deferred.done(completed, Exit.asVoidAll([exit, reconciled]));
+                        yield* reconciled;
+                      }),
+                    ),
+                  );
+                }),
+              ),
+        );
 
       const rescheduleFailedAlarm = Effect.fnUntraced(function* (
         row: AlarmRow,
@@ -1072,14 +1539,50 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         const limit = yield* getProcessLimit(options);
         const initialDelay = yield* getFailureRetryDelay(options, configuration);
         const now = yield* Clock.currentTimeMillis;
+        const dispatch = yield* CurrentDispatch;
 
-        const cursor = yield* state.storage.sql.exec<AlarmRow>(
-          `${alarmRowsSql}
-            WHERE a.wake_at <= ? ORDER BY a.wake_at ASC, a.storage_id ASC LIMIT ?`,
-          now,
-          limit,
-        );
-        const dueRows = yield* cursor.toArray();
+        // A validated dispatcher owns its remaining batch, including newly enrolled work.
+        if (dispatch?.raw !== undefined) dispatch.raw.processed = true;
+
+        const tagFilter =
+          dispatch === undefined
+            ? ""
+            : ` AND a.tag ${dispatch.exclude ? "NOT IN" : "IN"} (SELECT value FROM json_each(?))`;
+        const tagBindings =
+          dispatch === undefined ? [] : [S.encodeSync(StoredTags)([...dispatch.tags])];
+        const select = Effect.fnUntraced(function* (lifecycle: AlarmLifecycle, batchLimit: number) {
+          const cursor = yield* state.storage.sql.exec<AlarmRow>(
+            `${alarmRowsSql} WHERE a.lifecycle = ? AND a.wake_at <= ?${tagFilter}
+             ORDER BY a.wake_at ASC, a.storage_id ASC LIMIT ?`,
+            lifecycle,
+            now,
+            ...tagBindings,
+            batchLimit,
+          );
+
+          return yield* cursor.toArray();
+        });
+        // Manual recovery never consumes the raw/automatic dispatcher's batch allowance.
+        const dueRows = yield* select("automatic", limit);
+        const manualRows = yield* select("manual", DEFAULT_PROCESS_DUE_ALARMS_LIMIT);
+
+        if (manualRows.length > 0) {
+          yield* transaction(() =>
+            Effect.gen(function* () {
+              for (const row of manualRows) {
+                // Keep the selected revision: a racing replacement must survive this guard.
+                yield* state.storage.sql.exec(
+                  `UPDATE effect_cf_scheduled_alarms SET run_at = ?, wake_at = ? WHERE ${sameRevisionSql}`,
+                  now + configuration.parkedRetryDelay,
+                  now + configuration.parkedRetryDelay,
+                  row.storage_id,
+                  row.storage_id,
+                  row.revision,
+                );
+              }
+            }),
+          );
+        }
         const handled: DurableObjectAlarmEvent[] = [];
         const failed: ProcessDueAlarmsFailure[] = [];
         const parked: AlarmParked[] = [];
@@ -1128,12 +1631,10 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           }
         });
 
-        for (const row of dueRows) {
+        const handleRow = Effect.fnUntraced(function* (row: AlarmRow) {
           const current = yield* readRow(row.storage_id);
 
-          if (current === undefined || current.revision !== row.revision) {
-            continue;
-          }
+          if (current === undefined || current.revision !== row.revision) return;
           const inPass = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
             const pass = { row, parked, active: true };
 
@@ -1146,28 +1647,69 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
               ),
             );
           };
+          const manual = row.lifecycle === "manual";
+
+          if (manual && !options?.[ManualTags]?.has(row.tag)) {
+            return yield* Effect.fail(missingAlarm(row.tag));
+          }
           const eventExit = yield* Effect.exit(toAlarmDue(row));
 
           if (Exit.isFailure(eventExit)) {
-            yield* inPass(handleFailure(row, undefined, eventExit.cause));
-            continue;
+            if (manual) return yield* Effect.failCause(eventExit.cause);
+
+            return yield* inPass(handleFailure(row, undefined, eventExit.cause));
           }
           const event = eventExit.value;
           const handleExit = yield* Effect.exit(inPass(Effect.suspend(() => handle(event))));
 
           if (Exit.isFailure(handleExit)) {
-            yield* inPass(handleFailure(row, event, handleExit.cause));
-            continue;
+            if (manual) return yield* Effect.failCause(handleExit.cause);
+
+            return yield* inPass(handleFailure(row, event, handleExit.cause));
           }
-          yield* transaction(() => acknowledgeAlarm(row, configuration));
+          if (!manual) yield* transaction(() => acknowledgeAlarm(row, configuration));
           handled.push(event);
-        }
+        });
+        const permits = dispatch?.permits ?? (yield* Semaphore.make(4));
+        const automatic = Effect.forEach(dueRows, handleRow, { discard: true }).pipe(Effect.exit);
+        const exits = yield* manualRows.length === 0
+          ? automatic.pipe(Effect.map((exit) => [exit]))
+          : Effect.all(
+              [
+                automatic,
+                Effect.forEach(
+                  manualRows,
+                  (row) => permits.withPermits(1)(handleRow(row)).pipe(Effect.exit),
+                  { concurrency: 4 },
+                ).pipe(Effect.flatMap(Exit.asVoidAll), Effect.exit),
+              ],
+              { concurrency: 2 },
+            );
+
         yield* transaction(() => Effect.void);
+        yield* Exit.asVoidAll(exits);
 
         return { failed, handled, parked };
       });
 
       return DurableObjectAlarm.of({
+        [RunAlarm]: runAlarm,
+        [DispatchAfterEvent]: Effect.map(
+          ScheduleConfiguration,
+          (configuration) =>
+            (configuration.dispatchAfterEvent ?? configurationDefaults.dispatchAfterEvent) === true,
+        ),
+        [HasDueAlarms]: Effect.gen(function* () {
+          yield* ensureTable(state);
+          const now = yield* Clock.currentTimeMillis;
+          const cursor = yield* state.storage.sql.exec(
+            "SELECT 1 FROM effect_cf_scheduled_alarms WHERE wake_at <= ? LIMIT 1",
+            now,
+          );
+
+          return (yield* cursor.toArray()).length > 0;
+        }),
+        deferWakes,
         cancelAlarm: (input) => transaction((alarms) => alarms.cancelAlarm(input)),
         getAlarmStatus: Effect.fnUntraced(function* (input) {
           const ref = yield* decodeAlarmRef(input);

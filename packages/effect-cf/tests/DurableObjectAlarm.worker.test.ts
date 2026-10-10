@@ -1,11 +1,27 @@
 import { env } from "cloudflare:workers";
 import { evictDurableObject } from "cloudflare:test";
-import { assert, it } from "@effect/vitest";
-import { DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema } from "effect";
+import { assert, it, vi } from "@effect/vitest";
+import {
+  Cause,
+  Clock,
+  Context,
+  DateTime,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Schema,
+} from "effect";
 import { TestClock } from "effect/testing";
 import { SqlClient } from "effect/sql";
 
-import { DurableObjectAlarm, DurableObjectSqlite, DurableObjectState } from "../src/index";
+import {
+  DurableObject,
+  DurableObjectAlarm,
+  DurableObjectSqlite,
+  DurableObjectState,
+} from "../src/index";
 import type {
   SqlCursor,
   SqlStorage,
@@ -27,6 +43,1403 @@ const alarm = (id: string, offset: number) =>
     runAt: DateTime.makeUnsafe(deadline + offset),
     payload: null,
   }) satisfies DurableObjectAlarm.ScheduleAlarmInput<"job">;
+
+const maintenanceRef = { tag: "maintenance", id: "maintenance" } as const;
+const maintenanceInput = (runAt: DateTime.Utc) => ({ ...maintenanceRef, payload: null, runAt });
+
+class Maintenance extends DurableObjectAlarm.Tag<Maintenance>()("test/Maintenance", {
+  maintenance: { payload: Schema.Null, lifecycle: "manual" },
+}) {}
+class Reminders extends DurableObjectAlarm.Tag<Reminders>()("test/Reminders", {
+  reminder: Schema.Null,
+}) {}
+
+it.effect.each(["limit", "retry", "manual", "configuration"] as const)(
+  "bounds retained alarms with invalid %s options without blocking healthy dispatchers",
+  (kind) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+    const lifecycle = kind === "manual" ? "manual" : "automatic";
+
+    class Work extends DurableObjectAlarm.Tag<Work>()("test/InvalidAlarmOptions", {
+      job: { payload: Schema.Null, lifecycle },
+    }) {}
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+        const handled: string[] = [];
+        const registration = (invalid: boolean) =>
+          DurableObjectAlarm.mergeAll(
+            Work.handlers(
+              {
+                job: (event) =>
+                  Effect.gen(function* () {
+                    handled.push(event.tag);
+                    yield* (yield* Work).cancelAlarm(event);
+                  }),
+              },
+              invalid && kind !== "configuration"
+                ? kind === "retry"
+                  ? { retryFailedAfter: "0 millis" }
+                  : { limit: 0 }
+                : undefined,
+            ),
+            Reminders.handlers({
+              reminder: () =>
+                Effect.sync(() => {
+                  handled.push("reminder");
+                }),
+            }),
+          );
+        const clock = Layer.succeed(Clock.Clock, yield* Clock.Clock);
+
+        yield* TestClock.setTime(deadline);
+        yield* alarms.scheduleAlarm({ ...alarm("retained", 0), lifecycle });
+        yield* alarms.scheduleAlarm({
+          tag: "reminder",
+          id: "healthy",
+          payload: null,
+          runAt: DateTime.makeUnsafe(deadline + 500),
+        });
+        const CurrentObject = DurableObject.make(
+          clock.pipe(
+            Layer.merge(
+              Layer.succeed(
+                DurableObjectAlarm.ScheduleConfiguration,
+                kind === "configuration" ? { minimumRetryDelay: 0 } : { unchangedAttemptBudget: 2 },
+              ),
+            ),
+          ),
+          { alarms: registration(true) },
+        );
+        const instance = new CurrentObject(state.raw, {});
+
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const now = yield* Clock.currentTimeMillis;
+
+          yield* Effect.promise(() => state.raw.storage.deleteAlarm());
+          const exit = yield* Effect.promise(async () => instance.alarm()).pipe(Effect.exit);
+
+          assert.isTrue(Exit.isFailure(exit));
+          if (Exit.isFailure(exit)) {
+            assert.instanceOf<Error>(
+              Cause.squash(exit.cause),
+              kind === "configuration"
+                ? DurableObjectAlarm.InvalidScheduleConfigurationError
+                : DurableObjectAlarm.InvalidProcessDueAlarmsOptionsError,
+            );
+          }
+          const next = yield* state.storage.getAlarm();
+
+          assert.isNotNull(next);
+          assert.isAbove(next!, now);
+          if (attempt === 0 && kind !== "configuration") assert.strictEqual(next, deadline + 500);
+          yield* TestClock.setTime(next!);
+        }
+        const retained = yield* alarms.getAlarmStatus({ tag: "job", id: "retained" });
+
+        assert.isDefined(retained);
+        assert.strictEqual(retained!.attempts, kind === "limit" || kind === "retry" ? 2 : 0);
+        const RestoredObject = DurableObject.make(clock, { alarms: registration(false) });
+
+        yield* Effect.promise(async () => new RestoredObject(state.raw, {}).alarm());
+        assert.deepStrictEqual(handled.sort(), ["job", "reminder"]);
+        assert.isNull(yield* state.storage.getAlarm());
+      }).pipe(Effect.provide(services)),
+    );
+  },
+);
+
+it.effect.each([false, true])(
+  "idle post-event checks leave native storage untouched (future alarm: %s)",
+  (future) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+    const EventScope = Context.Service<{ rpc: boolean }>("test/IdleAlarmScope");
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
+        yield* alarms.getAlarmStatus({ tag: "job", id: "future" });
+        if (future) yield* alarms.scheduleAlarm(alarm("future", 5_000));
+        const pending: Promise<unknown>[] = [];
+        const waitUntil = state.raw.waitUntil.bind(state.raw);
+        const capture = vi.spyOn(state.raw, "waitUntil").mockImplementation((promise) => {
+          pending.push(promise);
+          waitUntil(promise);
+        });
+        const transaction = vi.spyOn(state.raw.storage, "transaction");
+        const setAlarm = vi.spyOn(state.raw.storage, "setAlarm");
+        const deleteAlarm = vi.spyOn(state.raw.storage, "deleteAlarm");
+        let enrollOnClose = false;
+
+        yield* Effect.gen(function* () {
+          const CurrentObject = DurableObject.make(
+            Layer.succeed(DurableObjectAlarm.ScheduleConfiguration, { dispatchAfterEvent: true }),
+            {
+              eventLayer: Layer.effect(
+                EventScope,
+                Effect.acquireRelease(
+                  Effect.sync(() => ({ rpc: false })),
+                  (scope) =>
+                    scope.rpc || !enrollOnClose
+                      ? Effect.void
+                      : Effect.flatMap(DurableObjectAlarm.DurableObjectAlarm, (alarms) =>
+                          alarms.scheduleAlarm(alarm("late", 0)),
+                        ).pipe(Effect.orDie),
+                ),
+              ),
+              rpc: {
+                ping: () =>
+                  Effect.map(EventScope, (scope) => {
+                    scope.rpc = true;
+
+                    return "pong";
+                  }),
+              },
+            },
+          );
+          const instance = new CurrentObject(state.raw, {});
+
+          assert.strictEqual(yield* Effect.promise(() => instance.ping()), "pong");
+          assert.isAbove(pending.length, 0);
+          yield* Effect.promise(() => Promise.all(pending));
+          assert.deepStrictEqual(
+            {
+              transactions: transaction.mock.calls.length,
+              alarmWrites: setAlarm.mock.calls.length + deleteAlarm.mock.calls.length,
+            },
+            { transactions: 0, alarmWrites: 0 },
+          );
+          // An otherwise idle alarm scope can still enroll work from its finalizers.
+          enrollOnClose = true;
+          pending.length = 0;
+          yield* Effect.promise(() => instance.ping());
+          yield* Effect.promise(() => Promise.all(pending));
+          assert.strictEqual(yield* state.storage.getAlarm(), deadline);
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              capture.mockRestore();
+              transaction.mockRestore();
+              setAlarm.mockRestore();
+              deleteAlarm.mockRestore();
+            }),
+          ),
+        );
+      }).pipe(Effect.provide(services)),
+    );
+  },
+);
+
+it.effect("keeps post-event checks from taking over raw-only native alarms", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const pending: Promise<unknown>[] = [];
+      const waitUntil = state.raw.waitUntil.bind(state.raw);
+      const capture = vi.spyOn(state.raw, "waitUntil").mockImplementation((promise) => {
+        pending.push(promise);
+        waitUntil(promise);
+      });
+
+      yield* Effect.gen(function* () {
+        yield* Effect.promise(() => state.raw.storage.setAlarm(deadline));
+        const CurrentObject = DurableObject.make(
+          Layer.succeed(DurableObjectAlarm.ScheduleConfiguration, { dispatchAfterEvent: true }),
+          {
+            rpc: { ping: () => Effect.succeed("pong") },
+            alarm: () => Effect.promise(() => state.raw.storage.setAlarm(deadline + 1_000)),
+          },
+        );
+        const instance = new CurrentObject(state.raw, {});
+
+        assert.strictEqual(yield* Effect.promise(() => instance.ping()), "pong");
+        assert.isAbove(pending.length, 0);
+        yield* Effect.promise(() => Promise.all(pending));
+        const tables = yield* state.storage.sql.exec(
+          "SELECT name FROM sqlite_master WHERE name = 'effect_cf_scheduled_alarms'",
+        );
+
+        assert.deepStrictEqual(yield* tables.toArray(), []);
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline);
+        yield* Effect.promise(async () => {
+          await instance.alarm();
+        });
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline + 1_000);
+      }).pipe(Effect.ensuring(Effect.sync(() => capture.mockRestore())));
+    }),
+  );
+});
+
+it.effect.each(["automatic", "manual"] as const)(
+  "retains bounded recovery when event-layer acquisition fails before %s dispatch",
+  (lifecycle) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+    const EventDependency = Context.Service<{ readonly available: boolean }>(
+      "test/UnavailableAlarmDependency",
+    );
+
+    class Work extends DurableObjectAlarm.Tag<Work>()("test/EventAcquisitionAlarm", {
+      job: { payload: Schema.Null, lifecycle },
+    }) {}
+    let unavailable = true;
+    let handled = 0;
+    const registration = Work.handlers({
+      job: ({ id }) =>
+        Effect.gen(function* () {
+          handled++;
+          yield* (yield* Work).cancelAlarm({ tag: "job", id });
+        }),
+    });
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const work = yield* Work;
+        const ref = { tag: "job", id: "retained" } as const;
+        const recoveryAt = deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS;
+
+        yield* TestClock.setTime(deadline);
+        yield* work.scheduleAlarm({ ...ref, payload: null, runAt: DateTime.makeUnsafe(deadline) });
+        const CurrentObject = DurableObject.make(Layer.succeed(Clock.Clock, yield* Clock.Clock), {
+          alarms: registration,
+          eventLayer: Layer.effect(
+            EventDependency,
+            Effect.suspend(() =>
+              unavailable
+                ? Effect.fail("dependency unavailable")
+                : Effect.succeed({ available: true }),
+            ),
+          ),
+        });
+        const instance = new CurrentObject(state.raw, {});
+
+        for (let attempt = 0; attempt < 3; attempt++) {
+          // Model a native delivery consuming its timestamp before entering the event.
+          yield* Effect.promise(() => state.raw.storage.deleteAlarm());
+          const result = yield* Effect.promise(async () => {
+            await instance.alarm();
+          }).pipe(Effect.exit);
+
+          assert.isTrue(Exit.isFailure(result));
+          assert.strictEqual(handled, 0);
+          assert.strictEqual(yield* state.storage.getAlarm(), recoveryAt);
+          const retained = yield* work.getAlarmStatus(ref);
+
+          assert.strictEqual(DateTime.toEpochMillis(retained!.runAt), deadline);
+          assert.strictEqual(retained!.attempts, 0);
+        }
+        unavailable = false;
+        yield* TestClock.setTime(recoveryAt);
+        yield* Effect.promise(async () => {
+          await instance.alarm();
+        });
+        assert.strictEqual(handled, 1);
+        assert.isUndefined(yield* work.getAlarmStatus(ref));
+        assert.isNull(yield* state.storage.getAlarm());
+      }).pipe(Effect.provide(registration.layer.pipe(Layer.provideMerge(services)))),
+    );
+  },
+);
+
+it.effect.each(["rpc", "fetch"] as const)(
+  "dispatches after %s settles in a fresh scope and joins an overlapping native alarm",
+  (event) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+    const EventScope = Context.Service<{ closed: boolean }>("test/PromptAlarmScope");
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        const scopes: Array<{ closed: boolean }> = [];
+        const handled: string[] = [];
+        let responseSettled = false;
+        let observedSettled = false;
+        let observedClosed = false;
+        let nativeSettled = false;
+        const enroll = Effect.gen(function* () {
+          const reminders = yield* Reminders;
+
+          for (const [id, offset] of [
+            ["due", 0],
+            ["future", 5_000],
+          ] as const) {
+            yield* reminders.scheduleAlarm({
+              tag: "reminder",
+              id,
+              payload: null,
+              runAt: DateTime.makeUnsafe(deadline + offset),
+            });
+          }
+
+          return "enrolled";
+        });
+
+        yield* TestClock.setTime(deadline);
+        const CurrentObject = DurableObject.make(
+          Layer.merge(
+            Layer.succeed(Clock.Clock, yield* Clock.Clock),
+            Layer.succeed(DurableObjectAlarm.ScheduleConfiguration, { dispatchAfterEvent: true }),
+          ),
+          {
+            eventLayer: Layer.effect(
+              EventScope,
+              Effect.acquireRelease(
+                Effect.sync(() => {
+                  const scope = { closed: false };
+
+                  scopes.push(scope);
+
+                  return scope;
+                }),
+                (scope) =>
+                  Effect.sync(() => {
+                    scope.closed = true;
+                  }),
+              ),
+            ),
+            alarms: Reminders.handlers({
+              reminder: (alarm) =>
+                Effect.gen(function* () {
+                  const scope = yield* EventScope;
+
+                  handled.push(alarm.id);
+                  observedSettled = responseSettled;
+                  observedClosed = scopes[0]!.closed && scope !== scopes[0];
+                  yield* Deferred.succeed(started, undefined);
+                  yield* Deferred.await(release);
+                }),
+            }),
+            rpc: { enroll: () => enroll },
+            fetch: enroll.pipe(Effect.map((body) => new Response(body))),
+          },
+        );
+        const instance = new CurrentObject(state.raw, {});
+
+        yield* Effect.gen(function* () {
+          const response = yield* Effect.promise(async () => {
+            if (event === "rpc") {
+              const body = await instance.enroll();
+
+              responseSettled = true;
+
+              return body;
+            }
+            const response = await instance.fetch!(new Request("https://test/"));
+
+            responseSettled = true;
+
+            return response.text();
+          });
+
+          assert.strictEqual(response, "enrolled");
+          yield* Deferred.await(started);
+          assert.isTrue(observedSettled);
+          assert.isTrue(observedClosed);
+          assert.strictEqual(scopes.length, 2);
+          assert.isFalse(scopes[1]!.closed);
+          assert.strictEqual(
+            yield* state.storage.getAlarm(),
+            deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS,
+          );
+          // A delivered native alarm consumes the armed timestamp before joining.
+          yield* Effect.promise(() => state.raw.storage.deleteAlarm());
+          const native = yield* Effect.promise(async () => {
+            await instance.alarm?.();
+            nativeSettled = true;
+          }).pipe(Effect.forkChild);
+
+          const recovery = yield* Effect.promise(() =>
+            vi.waitFor(async () => {
+              const runAt = await state.raw.storage.getAlarm();
+
+              assert.isNotNull(runAt);
+
+              return runAt;
+            }),
+          );
+
+          assert.isFalse(nativeSettled);
+          assert.deepStrictEqual(handled, ["due"]);
+          assert.strictEqual(recovery, deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS);
+          yield* Deferred.succeed(release, undefined);
+          yield* Fiber.join(native);
+          assert.deepStrictEqual(handled, ["due"]);
+          assert.strictEqual(scopes.length, 2);
+          assert.isTrue(scopes[1]!.closed);
+          assert.strictEqual(yield* state.storage.getAlarm(), deadline + 5_000);
+        }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
+      }),
+    );
+  },
+);
+
+it.effect.each([0, 5_000])(
+  "preserves source re-enrollment at +%sms while an alarm event finalizer and native join are pending",
+  (offset) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+    const EventScope = Context.Service<{ alarm: boolean }>("test/FinalizingAlarmScope");
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const finalizing = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        const generations: number[] = [];
+        const lateDeadline = deadline + offset;
+        let nativeSettled = false;
+
+        yield* TestClock.setTime(deadline);
+        const CurrentObject = DurableObject.make(
+          Layer.merge(
+            Layer.succeed(Clock.Clock, yield* Clock.Clock),
+            Layer.succeed(DurableObjectAlarm.ScheduleConfiguration, { dispatchAfterEvent: true }),
+          ),
+          {
+            eventLayer: Layer.effect(
+              EventScope,
+              Effect.acquireRelease(
+                Effect.sync(() => ({ alarm: false })),
+                (scope) =>
+                  scope.alarm
+                    ? Deferred.succeed(finalizing, undefined).pipe(
+                        Effect.andThen(Deferred.await(release)),
+                      )
+                    : Effect.void,
+              ),
+            ),
+            alarms: Maintenance.handlers({
+              maintenance: () =>
+                Effect.gen(function* () {
+                  const scope = yield* EventScope;
+                  const maintenance = yield* Maintenance;
+
+                  scope.alarm = true;
+                  yield* maintenance.transaction((txn) =>
+                    Effect.gen(function* () {
+                      generations.push((yield* state.storage.get<number>("source-generation"))!);
+                      yield* state.storage.delete("source-generation");
+                      yield* txn.cancelAlarm(maintenanceRef);
+                    }),
+                  );
+                }),
+            }),
+            rpc: {
+              enroll: (generation: number, runAt: number) =>
+                Effect.gen(function* () {
+                  const maintenance = yield* Maintenance;
+
+                  yield* maintenance.transaction((txn) =>
+                    Effect.gen(function* () {
+                      yield* state.storage.put("source-generation", generation);
+                      yield* txn.scheduleAlarm(maintenanceInput(DateTime.makeUnsafe(runAt)));
+                    }),
+                  );
+                }),
+              status: () =>
+                Effect.flatMap(Maintenance, (maintenance) =>
+                  maintenance.getAlarmStatus(maintenanceRef),
+                ),
+            },
+          },
+        );
+        const instance = new CurrentObject(state.raw, {});
+
+        yield* Effect.gen(function* () {
+          yield* Effect.promise(() => instance.enroll(1, deadline));
+          yield* Deferred.await(finalizing);
+          assert.deepStrictEqual(generations, [1]);
+          assert.isUndefined(yield* Effect.promise(() => instance.status()));
+          assert.strictEqual(
+            yield* state.storage.getAlarm(),
+            deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS,
+          );
+          yield* Effect.promise(() => instance.enroll(2, lateDeadline));
+          yield* Effect.promise(() => state.raw.storage.deleteAlarm());
+          const native = yield* Effect.promise(async () => {
+            await instance.alarm?.();
+            nativeSettled = true;
+          }).pipe(Effect.forkChild);
+
+          const recovery = yield* Effect.promise(() =>
+            vi.waitFor(async () => {
+              const runAt = await state.raw.storage.getAlarm();
+
+              assert.isNotNull(runAt);
+
+              return runAt;
+            }),
+          );
+
+          assert.isFalse(nativeSettled);
+          assert.strictEqual(recovery, deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS);
+          assert.deepStrictEqual(generations, [1]);
+          assert.strictEqual(yield* state.storage.get("source-generation"), 2);
+          yield* Deferred.succeed(release, undefined);
+          yield* Fiber.join(native);
+          // A post-event kick may already own the due-now replacement.
+          yield* Effect.promise(() =>
+            vi.waitFor(async () => {
+              const runAt = await state.raw.storage.getAlarm();
+
+              assert.isTrue(generations.length === 2 || runAt === lateDeadline);
+            }),
+          );
+          if (offset > 0) {
+            assert.deepStrictEqual(generations, [1]);
+            assert.strictEqual(
+              DateTime.toEpochMillis((yield* Effect.promise(() => instance.status()))!.runAt),
+              lateDeadline,
+            );
+          }
+          yield* TestClock.setTime(lateDeadline);
+          yield* Effect.promise(async () => {
+            await instance.alarm?.();
+          });
+          assert.deepStrictEqual(generations, [1, 2]);
+          assert.isUndefined(yield* state.storage.get("source-generation"));
+          assert.isNull(yield* state.storage.getAlarm());
+        }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
+      }),
+    );
+  },
+);
+
+it.effect("blocks prompt and native dispatch until an external deferred region exits", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const heldDuringDispatch: boolean[] = [];
+      let held = false;
+      let nativeSettled = false;
+
+      yield* TestClock.setTime(deadline);
+      const CurrentObject = DurableObject.make(
+        Layer.merge(
+          Layer.succeed(Clock.Clock, yield* Clock.Clock),
+          Layer.succeed(DurableObjectAlarm.ScheduleConfiguration, { dispatchAfterEvent: true }),
+        ),
+        {
+          alarms: Maintenance.handlers({
+            maintenance: () =>
+              Effect.gen(function* () {
+                const maintenance = yield* Maintenance;
+
+                heldDuringDispatch.push(held);
+                yield* maintenance.cancelAlarm(maintenanceRef);
+              }),
+          }),
+          rpc: {
+            hold: () =>
+              Effect.flatMap(Maintenance, (maintenance) =>
+                maintenance.deferWakes(
+                  Effect.gen(function* () {
+                    held = true;
+                    yield* Deferred.succeed(entered, undefined);
+                    yield* Deferred.await(release);
+                  }).pipe(
+                    Effect.ensuring(
+                      Effect.sync(() => {
+                        held = false;
+                      }),
+                    ),
+                  ),
+                ),
+              ),
+            enroll: () =>
+              Effect.flatMap(Maintenance, (maintenance) =>
+                maintenance.scheduleAlarm(maintenanceInput(DateTime.makeUnsafe(deadline))),
+              ),
+          },
+        },
+      );
+      const instance = new CurrentObject(state.raw, {});
+
+      yield* Effect.gen(function* () {
+        const holding = yield* Effect.promise(() => instance.hold()).pipe(Effect.forkChild);
+
+        yield* Deferred.await(entered);
+        yield* Effect.promise(() => instance.enroll());
+        yield* Effect.promise(() => state.raw.storage.deleteAlarm());
+        const native = yield* Effect.promise(async () => {
+          await instance.alarm?.();
+          nativeSettled = true;
+        }).pipe(Effect.forkChild);
+
+        const recovery = yield* Effect.promise(() =>
+          vi.waitFor(async () => {
+            const runAt = await state.raw.storage.getAlarm();
+
+            assert.isNotNull(runAt);
+
+            return runAt;
+          }),
+        );
+
+        assert.isFalse(nativeSettled);
+        assert.deepStrictEqual(heldDuringDispatch, []);
+        assert.strictEqual(recovery, deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS);
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(holding);
+        yield* Fiber.join(native);
+        assert.deepStrictEqual(heldDuringDispatch, [false]);
+        assert.isNull(yield* state.storage.getAlarm());
+      }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
+    }),
+  );
+});
+
+it.effect("preserves native rearming on raw-only SQLite objects without managed schedules", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const CurrentObject = DurableObject.make(Layer.empty, {
+        alarm: () => Effect.promise(() => state.raw.storage.setAlarm(deadline + 1_000)),
+      });
+      const instance = new CurrentObject(state.raw, {});
+
+      yield* Effect.promise(() => state.raw.storage.setAlarm(deadline));
+      yield* Effect.promise(async () => {
+        await instance.alarm?.();
+      });
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 1_000);
+    }),
+  );
+});
+
+it.effect("runs and rearms raw hooks on legacy KV-backed Durable Objects", () => {
+  const stub = env.TEST_LEGACY_ALARM_DO!.getByName(crypto.randomUUID());
+
+  return Effect.gen(function* () {
+    yield* PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        assert.throws(
+          () => state.raw.storage.sql.databaseSize,
+          /SQL is not enabled|not backed by SQLite/,
+        );
+        yield* state.storage.put("raw-alarm-next", deadline + 1_000);
+        yield* Effect.promise(() => state.raw.storage.setAlarm(deadline));
+      }),
+    );
+    assert.isTrue(yield* PoolWorkers.runDurableObjectAlarm(stub));
+    yield* PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        assert.strictEqual(yield* state.storage.get("raw-alarm-invocations"), 1);
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline + 1_000);
+      }),
+    );
+  });
+});
+
+it.effect("settles retained legacy KV alarms after their raw hook is removed", () => {
+  const stub = env.TEST_LEGACY_ALARM_DO!.getByName(crypto.randomUUID());
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const CurrentObject = DurableObject.make(Layer.empty);
+      const instance = new CurrentObject(state.raw, {});
+
+      yield* Effect.promise(() => state.raw.storage.setAlarm(deadline));
+      yield* Effect.promise(async () => {
+        await instance.alarm?.();
+      });
+    }),
+  );
+});
+
+it.effect.each(["processDue", "define"] as const)(
+  "composes a manual-only registration with a raw %s application dispatcher",
+  (kind) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+    const registration = Maintenance.handlers({
+      maintenance: () =>
+        Effect.flatMap(Maintenance, (maintenance) => maintenance.cancelAlarm(maintenanceRef)),
+    });
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+        const handled: string[] = [];
+        const handle = (event: { readonly id: string }) =>
+          Effect.sync(() => {
+            handled.push(event.id);
+          });
+
+        yield* TestClock.setTime(deadline);
+        yield* alarms.scheduleAlarm(alarm("raw", 0));
+        yield* alarms.scheduleAlarm({
+          ...maintenanceInput(DateTime.makeUnsafe(deadline)),
+          lifecycle: "manual",
+        });
+        const CurrentObject = DurableObject.make(Layer.succeed(Clock.Clock, yield* Clock.Clock), {
+          alarms: kind === "processDue" ? registration : DurableObjectAlarm.mergeAll(registration),
+          alarm: () =>
+            (kind === "processDue"
+              ? DurableObjectAlarm.processDue(handle)
+              : DurableObjectAlarm.define({ job: Schema.Null }).handlers({ job: handle })
+            ).pipe(Effect.asVoid),
+        });
+        const instance = new CurrentObject(state.raw, {});
+
+        yield* Effect.promise(async () => {
+          await instance.alarm?.();
+        });
+        assert.deepStrictEqual(handled, ["raw"]);
+        assert.isUndefined(yield* alarms.getAlarmStatus(maintenanceRef));
+        assert.isUndefined(yield* alarms.getAlarmStatus({ tag: "job", id: "raw" }));
+        assert.isNull(yield* state.storage.getAlarm());
+      }).pipe(Effect.provide(services)),
+    );
+  },
+);
+
+it.effect("coalesces nested and concurrent wake changes until deferred work exits", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+  const registration = DurableObjectAlarm.mergeAll(
+    Reminders.handlers({ reminder: () => Effect.void }),
+    Maintenance.handlers({ maintenance: () => Effect.void }),
+  );
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const maintenance = yield* Maintenance;
+      const reminders = yield* Reminders;
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+
+      yield* TestClock.setTime(deadline);
+      yield* maintenance.scheduleAlarm(maintenanceInput(DateTime.makeUnsafe(deadline + 10_000)));
+      const running = yield* maintenance
+        .deferWakes(
+          Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))),
+        )
+        .pipe(Effect.forkChild);
+
+      yield* Deferred.await(entered);
+      // This caller does not inherit the running scope's Effect context.
+      yield* maintenance.scheduleAlarmEarlier(maintenanceInput(DateTime.makeUnsafe(deadline)));
+      yield* maintenance.deferWakes(
+        Effect.gen(function* () {
+          yield* reminders.scheduleAlarm({
+            tag: "reminder",
+            id: "a",
+            payload: null,
+            runAt: DateTime.makeUnsafe(deadline + 5_000),
+          });
+          yield* maintenance.scheduleAlarm(maintenanceInput(DateTime.makeUnsafe(deadline + 2_000)));
+        }),
+      );
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 10_000);
+      assert.strictEqual(
+        DateTime.toEpochMillis((yield* maintenance.getAlarmStatus(maintenanceRef))!.runAt),
+        deadline + 2_000,
+      );
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(running);
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 2_000);
+      yield* maintenance.cancelAlarm(maintenanceRef);
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 5_000);
+      yield* reminders.cancelAlarm({ tag: "reminder", id: "a" });
+      assert.isNull(yield* state.storage.getAlarm());
+    }).pipe(Effect.provide(registration.layer.pipe(Layer.provideMerge(services)))),
+  );
+});
+
+it.effect.each(["failure", "interruption"] as const)(
+  "pre-arms deferred source writes and reconciles after %s",
+  (outcome) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+    const registration = Maintenance.handlers({ maintenance: () => Effect.void });
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const maintenance = yield* Maintenance;
+
+        yield* TestClock.setTime(deadline);
+        const running = yield* maintenance
+          .deferWakes(
+            Effect.gen(function* () {
+              const recoveryAt = deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS;
+
+              assert.strictEqual(yield* state.storage.getAlarm(), recoveryAt);
+              yield* maintenance.transaction((tx) =>
+                Effect.gen(function* () {
+                  yield* tx.scheduleAlarmEarlier(maintenanceInput(DateTime.makeUnsafe(deadline)));
+                  yield* state.storage.put("source", "ready");
+                }),
+              );
+              assert.strictEqual(yield* state.storage.getAlarm(), recoveryAt);
+
+              return yield* outcome === "failure" ? Effect.fail("failed") : Effect.interrupt;
+            }),
+          )
+          .pipe(Effect.forkChild);
+        const exit = yield* Fiber.await(running);
+
+        assert.isTrue(Exit.isFailure(exit));
+        assert.strictEqual(yield* state.storage.get("source"), "ready");
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline);
+        yield* maintenance.cancelAlarm(maintenanceRef);
+        assert.isNull(yield* state.storage.getAlarm());
+      }).pipe(Effect.provide(registration.layer.pipe(Layer.provideMerge(services)))),
+    );
+  },
+);
+
+it.effect("manual alarms and application alarms preserve each other's deadlines", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+  const registration = DurableObjectAlarm.mergeAll(
+    Reminders.handlers({ reminder: () => Effect.void }),
+    Maintenance.handlers({
+      maintenance: () =>
+        Effect.flatMap(Maintenance, (maintenance) => maintenance.cancelAlarm(maintenanceRef)),
+    }),
+  );
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const reminders = yield* Reminders;
+      const maintenance = yield* Maintenance;
+      const input = {
+        tag: "reminder",
+        id: "a",
+        payload: null,
+        runAt: DateTime.makeUnsafe(deadline + 1_000),
+      } as const;
+
+      yield* TestClock.setTime(deadline);
+      yield* reminders.scheduleAlarm(input);
+      yield* maintenance.scheduleAlarm(maintenanceInput(DateTime.makeUnsafe(deadline)));
+      yield* maintenance.cancelAlarm(maintenanceRef);
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 1_000);
+
+      yield* maintenance.scheduleAlarm(maintenanceInput(DateTime.makeUnsafe(deadline + 2_000)));
+      yield* reminders.cancelAlarm(input);
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 2_000);
+      yield* maintenance.scheduleAlarmEarlier(
+        maintenanceInput(DateTime.makeUnsafe(deadline + 3_000)),
+      );
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 2_000);
+      yield* maintenance.scheduleAlarmEarlier(maintenanceInput(DateTime.makeUnsafe(deadline)));
+      yield* reminders.scheduleAlarm(input);
+      yield* registration.run;
+      assert.isUndefined(yield* maintenance.getAlarmStatus(maintenanceRef));
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 1_000);
+
+      yield* maintenance.scheduleAlarm(maintenanceInput(DateTime.makeUnsafe(deadline + 2_000)));
+      yield* TestClock.setTime(deadline + 1_000);
+      yield* registration.run;
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 2_000);
+      yield* TestClock.setTime(deadline + 2_000);
+      yield* registration.run;
+      assert.isNull(yield* state.storage.getAlarm());
+    }).pipe(Effect.provide(registration.layer.pipe(Layer.provideMerge(services)))),
+  );
+});
+
+it.effect("dispatches two automatic registrations independently when one handler fails", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+  const calls: string[] = [];
+
+  class Lifecycle extends DurableObjectAlarm.Tag<Lifecycle>()("test/Lifecycle", {
+    lifecycle: Schema.Null,
+  }) {}
+  const registration = DurableObjectAlarm.mergeAll(
+    Reminders.handlers({
+      reminder: () =>
+        Effect.sync(() => {
+          calls.push("reminder");
+        }).pipe(Effect.andThen(Effect.fail("reminder failed"))),
+    }),
+    Lifecycle.handlers({
+      lifecycle: () =>
+        Effect.sync(() => {
+          calls.push("lifecycle");
+        }),
+    }),
+  );
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const reminders = yield* Reminders;
+      const lifecycle = yield* Lifecycle;
+
+      yield* TestClock.setTime(deadline);
+      yield* reminders.scheduleAlarm({
+        tag: "reminder",
+        id: "a",
+        payload: null,
+        runAt: DateTime.makeUnsafe(deadline - 1),
+      });
+      yield* lifecycle.scheduleAlarm({
+        tag: "lifecycle",
+        id: "a",
+        payload: null,
+        runAt: DateTime.makeUnsafe(deadline),
+      });
+      const result = yield* registration.run;
+
+      assert.deepStrictEqual(calls.sort(), ["lifecycle", "reminder"]);
+      assert.deepStrictEqual(
+        result.handled.map((event) => event.tag),
+        ["lifecycle"],
+      );
+      assert.deepStrictEqual(
+        result.failed.map((failure) => failure.tag),
+        ["reminder"],
+      );
+      assert.isUndefined(yield* lifecycle.getAlarmStatus({ tag: "lifecycle", id: "a" }));
+      assert.strictEqual(
+        (yield* reminders.getAlarmStatus({ tag: "reminder", id: "a" }))!.attempts,
+        1,
+      );
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 1_000);
+    }).pipe(Effect.provide(registration.layer.pipe(Layer.provideMerge(services)))),
+  );
+});
+
+it.effect(
+  "checkpoints manual alarms before dispatch and isolates failures without another attempt budget",
+  () => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+    let remindersHandled = 0;
+    let maintenanceHandled = 0;
+    const recoveryAt = deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS;
+    const registration = DurableObjectAlarm.mergeAll(
+      Reminders.handlers({
+        reminder: () =>
+          Effect.sync(() => {
+            remindersHandled++;
+          }),
+      }),
+      Maintenance.handlers({
+        maintenance: () =>
+          Effect.gen(function* () {
+            const maintenance = yield* Maintenance;
+            const scheduled = yield* maintenance.getAlarmStatus(maintenanceRef);
+
+            assert.strictEqual(DateTime.toEpochMillis(scheduled!.runAt), recoveryAt);
+            maintenanceHandled++;
+            if (maintenanceHandled === 1) {
+              // Replacing a checkpoint before failing must preserve the owner's new deadline.
+              yield* maintenance.scheduleAlarm(maintenanceInput(DateTime.makeUnsafe(deadline)));
+            }
+
+            return yield* Effect.fail("maintenance failed");
+          }),
+      }),
+    );
+    const layer = registration.layer.pipe(Layer.provideMerge(services));
+
+    return Effect.gen(function* () {
+      yield* PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+        Effect.gen(function* () {
+          const reminders = yield* Reminders;
+          const maintenance = yield* Maintenance;
+
+          yield* TestClock.setTime(deadline);
+          yield* reminders.scheduleAlarm({
+            tag: "reminder",
+            id: "a",
+            payload: null,
+            runAt: DateTime.makeUnsafe(deadline),
+          });
+          yield* maintenance.scheduleAlarm(maintenanceInput(DateTime.makeUnsafe(deadline)));
+          assert.isTrue(Exit.isFailure(yield* registration.run.pipe(Effect.exit)));
+          assert.strictEqual(remindersHandled, 1);
+          assert.strictEqual(maintenanceHandled, 1);
+          assert.strictEqual(yield* state.storage.getAlarm(), deadline);
+
+          assert.isTrue(Exit.isFailure(yield* registration.run.pipe(Effect.exit)));
+          assert.strictEqual(maintenanceHandled, 2);
+          assert.strictEqual(yield* state.storage.getAlarm(), recoveryAt);
+          yield* registration.run;
+          assert.strictEqual(maintenanceHandled, 2);
+        }).pipe(Effect.provide(layer)),
+      );
+      yield* Effect.promise(() => evictDurableObject(stub));
+      yield* PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+        Effect.gen(function* () {
+          const maintenance = yield* Maintenance;
+
+          assert.strictEqual(
+            DateTime.toEpochMillis((yield* maintenance.getAlarmStatus(maintenanceRef))!.runAt),
+            recoveryAt,
+          );
+          assert.strictEqual(yield* state.storage.getAlarm(), recoveryAt);
+          yield* maintenance.cancelAlarm(maintenanceRef);
+          assert.isNull(yield* state.storage.getAlarm());
+        }).pipe(Effect.provide(layer)),
+      );
+    });
+  },
+);
+
+it.effect(
+  "manual alarms roll back with source writes and reject escaped transaction handles",
+  () => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+    const registration = Maintenance.handlers({ maintenance: () => Effect.void });
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const maintenance = yield* Maintenance;
+        let escaped: Parameters<Parameters<typeof maintenance.transaction>[0]>[0] | undefined;
+
+        yield* maintenance.transaction((tx) =>
+          Effect.gen(function* () {
+            yield* state.storage.put("source", "before");
+            yield* tx.scheduleAlarm(maintenanceInput(DateTime.makeUnsafe(deadline)));
+            escaped = tx;
+          }),
+        );
+        const exit = yield* maintenance
+          .transaction((tx) =>
+            Effect.gen(function* () {
+              yield* state.storage.put("source", "after");
+              yield* tx.cancelAlarm(maintenanceRef);
+
+              return yield* Effect.fail("rollback");
+            }),
+          )
+          .pipe(Effect.exit);
+
+        assert.isTrue(Exit.isFailure(exit));
+        assert.strictEqual(yield* state.storage.get("source"), "before");
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline);
+        assert.strictEqual(
+          (yield* escaped!.cancelAlarm(maintenanceRef).pipe(Effect.flip))._tag,
+          "StorageOperationError",
+        );
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline);
+        yield* maintenance.cancelAlarm(maintenanceRef);
+      }).pipe(Effect.provide(registration.layer.pipe(Layer.provideMerge(services)))),
+    );
+  },
+);
+
+it.effect(
+  "enrolls manual alarms inside the source's SQL transaction and rolls back with it",
+  () => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+    const registration = Maintenance.handlers({ maintenance: () => Effect.void });
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const maintenance = yield* Maintenance;
+        const sql = yield* SqlClient.SqlClient;
+
+        yield* sql`CREATE TABLE source (generation INTEGER NOT NULL)`;
+        yield* sql.withTransaction(
+          Effect.gen(function* () {
+            yield* maintenance.scheduleAlarmEarlier(
+              maintenanceInput(DateTime.makeUnsafe(deadline)),
+            );
+            yield* sql`INSERT INTO source VALUES (1)`;
+          }),
+        );
+        const aborted = yield* sql
+          .withTransaction(
+            Effect.gen(function* () {
+              yield* maintenance.scheduleAlarm(
+                maintenanceInput(DateTime.makeUnsafe(deadline + 1_000)),
+              );
+              yield* sql`UPDATE source SET generation = 2`;
+
+              return yield* Effect.fail("rollback source and checkpoint");
+            }),
+          )
+          .pipe(Effect.exit);
+
+        assert.isTrue(Exit.isFailure(aborted));
+        assert.deepStrictEqual(yield* sql`SELECT generation FROM source`, [{ generation: 1 }]);
+        assert.strictEqual(
+          DateTime.toEpochMillis((yield* maintenance.getAlarmStatus(maintenanceRef))!.runAt),
+          deadline,
+        );
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline);
+        yield* maintenance.cancelAlarm(maintenanceRef);
+      }).pipe(Effect.provide(registration.layer.pipe(Layer.provideMerge(services)))),
+    );
+  },
+);
+
+it.effect.each([false, true])(
+  "preserves raw application dispatch with a retained manual alarm: %s",
+  (retainedManualAlarm) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+        const handled: string[] = [];
+
+        yield* TestClock.setTime(deadline);
+        yield* alarms.scheduleAlarm(alarm("raw", 0));
+        if (retainedManualAlarm) {
+          yield* alarms.scheduleAlarm({
+            ...maintenanceInput(DateTime.makeUnsafe(deadline)),
+            lifecycle: "manual",
+          });
+        }
+        const CurrentObject = DurableObject.make(Layer.succeed(Clock.Clock, yield* Clock.Clock), {
+          alarm: () =>
+            DurableObjectAlarm.processDue((event) =>
+              Effect.sync(() => {
+                handled.push(event.id);
+              }),
+            ).pipe(Effect.asVoid),
+        });
+        const instance = new CurrentObject(state.raw, {});
+        const result = yield* Effect.promise(async () => {
+          await instance.alarm?.();
+        }).pipe(Effect.exit);
+
+        assert.deepStrictEqual(handled, ["raw"]);
+        assert.strictEqual(Exit.isFailure(result), retainedManualAlarm);
+        assert.isUndefined(yield* alarms.getAlarmStatus({ tag: "job", id: "raw" }));
+        assert.strictEqual(
+          yield* state.storage.getAlarm(),
+          retainedManualAlarm ? deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS : null,
+        );
+      }).pipe(Effect.provide(services)),
+    );
+  },
+);
+
+it.effect.each(["success", "failure"] as const)(
+  "bounds retained application alarms when a raw-only hook exits with %s",
+  (outcome) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+        let now = deadline;
+
+        yield* TestClock.setTime(now);
+        yield* alarms.scheduleAlarm(alarm("removed", 0));
+        const CurrentObject = DurableObject.make(
+          Layer.merge(
+            Layer.succeed(Clock.Clock, yield* Clock.Clock),
+            Layer.succeed(DurableObjectAlarm.ScheduleConfiguration, { unchangedAttemptBudget: 2 }),
+          ),
+          { alarm: () => (outcome === "success" ? Effect.void : Effect.fail("raw hook failed")) },
+        );
+        const instance = new CurrentObject(state.raw, {});
+        const dispatch = Effect.promise(async () => {
+          await instance.alarm?.();
+        }).pipe(Effect.exit);
+
+        for (const [index, delay] of [1_000, DurableObjectAlarm.PARKED_RETRY_DELAY_MS].entries()) {
+          assert.strictEqual(Exit.isFailure(yield* dispatch), outcome === "failure");
+          const status = (yield* alarms.getAlarmStatus({ tag: "job", id: "removed" }))!;
+
+          assert.strictEqual(status.attempts, index + 1);
+          assert.strictEqual(status.parked, index === 1);
+          assert.strictEqual(yield* state.storage.getAlarm(), now + delay);
+          yield* dispatch;
+          assert.strictEqual(
+            (yield* alarms.getAlarmStatus({ tag: "job", id: "removed" }))!.attempts,
+            index + 1,
+          );
+          now += delay;
+          yield* TestClock.setTime(now);
+        }
+        yield* dispatch;
+        assert.strictEqual(
+          yield* state.storage.getAlarm(),
+          now + DurableObjectAlarm.PARKED_RETRY_DELAY_MS,
+        );
+        yield* alarms.cancelAlarm({ tag: "job", id: "removed" });
+      }).pipe(Effect.provide(services)),
+    );
+  },
+);
+
+it.effect.each(["raw", "manual", "effect", "effect-and-raw", "registration"] as const)(
+  "preserves the %s dispatcher's batch limit without charging unvisited alarms",
+  (kind) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+    class Jobs extends DurableObjectAlarm.Tag<Jobs>()("test/RawJobRegistration", {
+      job: Schema.Null,
+    }) {}
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+        const handled: string[] = [];
+
+        yield* TestClock.setTime(deadline);
+        yield* alarms.scheduleAlarm(alarm("a", 0));
+        yield* alarms.scheduleAlarm(alarm("b", 0));
+        if (kind === "manual") {
+          yield* alarms.scheduleAlarm({
+            ...maintenanceInput(DateTime.makeUnsafe(deadline)),
+            lifecycle: "manual",
+          });
+        }
+        const clock = Layer.succeed(Clock.Clock, yield* Clock.Clock);
+        const handle = (event: { readonly id: string }) =>
+          Effect.sync(() => {
+            handled.push(event.id);
+          });
+        const raw = () =>
+          (kind === "registration"
+            ? Jobs.handlers({ job: handle }, { limit: 1 }).run
+            : DurableObjectAlarm.processDue(handle, { limit: 1 })
+          ).pipe(Effect.asVoid);
+        const CurrentObject =
+          kind === "manual"
+            ? DurableObject.make(clock, {
+                alarms: Maintenance.handlers({
+                  maintenance: () =>
+                    Effect.flatMap(Maintenance, (maintenance) =>
+                      maintenance.cancelAlarm(maintenanceRef),
+                    ),
+                }),
+                alarm: raw,
+              })
+            : kind === "raw" || kind === "registration"
+              ? DurableObject.make(clock, { alarm: raw })
+              : DurableObject.make(clock, {
+                  alarms: raw(),
+                  alarm: kind === "effect-and-raw" ? () => Effect.void : undefined,
+                });
+        const instance = new CurrentObject(state.raw, {});
+        const dispatch = Effect.promise(async () => {
+          await instance.alarm?.();
+        });
+
+        yield* dispatch;
+        assert.deepStrictEqual(handled, ["a"]);
+        const pending = (yield* alarms.getAlarmStatus({ tag: "job", id: "b" }))!;
+
+        assert.strictEqual(pending.attempts, 0);
+        assert.isUndefined(pending.retryAt);
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline);
+        yield* dispatch;
+        assert.deepStrictEqual(handled, ["a", "b"]);
+        assert.isNull(yield* state.storage.getAlarm());
+      }).pipe(Effect.provide(services)),
+    );
+  },
+);
+
+it.effect.each([
+  { kind: "managed", withRaw: false },
+  { kind: "none", withRaw: false },
+  { kind: "effect", withRaw: false },
+  { kind: "managed", withRaw: true },
+  { kind: "none", withRaw: true },
+  { kind: "effect", withRaw: true },
+])(
+  "recovers a removed manual alarm with $kind alarms and raw hook $withRaw",
+  ({ kind, withRaw }) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+    const previous = Maintenance.handlers({
+      maintenance: () =>
+        Effect.flatMap(Maintenance, (maintenance) => maintenance.cancelAlarm(maintenanceRef)),
+    });
+    const current = Reminders.handlers({ reminder: () => Effect.void });
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const maintenance = yield* Maintenance;
+        const reminders = yield* Reminders;
+
+        yield* TestClock.setTime(deadline);
+        yield* maintenance.scheduleAlarm(maintenanceInput(DateTime.makeUnsafe(deadline)));
+        if (kind === "managed") {
+          yield* reminders.scheduleAlarm({
+            tag: "reminder",
+            id: "a",
+            payload: null,
+            runAt: DateTime.makeUnsafe(deadline),
+          });
+        }
+        const clock = Layer.succeed(Clock.Clock, yield* Clock.Clock);
+        const raw = withRaw ? () => Effect.void : undefined;
+        const CurrentObject =
+          kind === "managed"
+            ? DurableObject.make(clock, { alarms: current, alarm: raw })
+            : kind === "effect"
+              ? DurableObject.make(clock, { alarms: Effect.void, alarm: raw })
+              : DurableObject.make(clock, { alarm: raw });
+        const instance = new CurrentObject(state.raw, {});
+        const dispatch = Effect.promise(async () => {
+          await instance.alarm?.();
+        });
+
+        assert.isTrue(Exit.isFailure(yield* dispatch.pipe(Effect.exit)));
+        assert.isUndefined(yield* reminders.getAlarmStatus({ tag: "reminder", id: "a" }));
+        assert.strictEqual(
+          yield* state.storage.getAlarm(),
+          deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS,
+        );
+        yield* dispatch;
+        yield* TestClock.setTime(deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS);
+        const RestoredObject = DurableObject.make(clock, { alarms: previous, alarm: raw });
+        const restored = new RestoredObject(state.raw, {});
+
+        yield* Effect.promise(async () => {
+          await restored.alarm?.();
+        });
+        assert.isUndefined(yield* maintenance.getAlarmStatus(maintenanceRef));
+        assert.isNull(yield* state.storage.getAlarm());
+      }).pipe(
+        Effect.provide(
+          Layer.merge(previous.layer, current.layer).pipe(Layer.provideMerge(services)),
+        ),
+      ),
+    );
+  },
+);
+
+it.effect.each(["duplicate registration", "service collision", "duplicate tag"] as const)(
+  "rejects %s before building application services",
+  (kind) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+    const maintenance = Maintenance.handlers({ maintenance: () => Effect.void });
+
+    class Conflicting extends DurableObjectAlarm.Tag<Conflicting>()("test/Reminders", {
+      maintenance: { payload: Schema.Null, lifecycle: "manual" },
+    }) {}
+    class DuplicateTag extends DurableObjectAlarm.Tag<DuplicateTag>()("test/DuplicateTag", {
+      reminder: Schema.Null,
+    }) {}
+    const registration: DurableObjectAlarm.AlarmRegistration<never> =
+      kind === "duplicate registration"
+        ? DurableObjectAlarm.mergeAll(maintenance, maintenance)
+        : kind === "service collision"
+          ? DurableObjectAlarm.mergeAll(
+              Reminders.handlers({ reminder: () => Effect.void }),
+              Conflicting.handlers({ maintenance: () => Effect.void }),
+            )
+          : DurableObjectAlarm.mergeAll(
+              Reminders.handlers({ reminder: () => Effect.void }),
+              DuplicateTag.handlers({ reminder: () => Effect.void }),
+            );
+    let built = false;
+
+    return PoolWorkers.runInDurableObject(stub, () =>
+      Effect.gen(function* () {
+        const exit = yield* Effect.sync(() => {
+          built = true;
+        }).pipe(Effect.provide(registration.layer.pipe(Layer.provideMerge(services))), Effect.exit);
+
+        assert.isTrue(Exit.isFailure(exit));
+        assert.isFalse(built);
+      }),
+    );
+  },
+);
 
 const customConfiguration = {
   minimumRetryDelay: "2 seconds",
@@ -439,8 +1852,8 @@ it.effect.each(["deadline", "payload", "repeat", "progress"] as const)(
   },
 );
 
-it.effect.each(["legacy", "parked"] as const)(
-  "migrates %s schedules atomically into the indexed wake queue",
+it.effect.each(["legacy", "parked", "indexed"] as const)(
+  "migrates %s schedules atomically into the indexed queue with lifecycle metadata",
   (kind) => {
     const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
 
@@ -469,7 +1882,7 @@ it.effect.each(["legacy", "parked"] as const)(
           deadline,
           "null",
         );
-        if (kind === "parked") {
+        if (kind !== "legacy") {
           yield* state.storage.sql.exec(`CREATE TABLE effect_cf_alarm_attempts (
             storage_id TEXT PRIMARY KEY, revision TEXT NOT NULL, attempts INTEGER NOT NULL,
             parked INTEGER NOT NULL, retry_at INTEGER, progress INTEGER NOT NULL
@@ -480,6 +1893,18 @@ it.effect.each(["legacy", "parked"] as const)(
             "retained-revision",
             deadline + 3_600_000,
           );
+        }
+        if (kind === "indexed") {
+          // Published managed alarms may already have the wake index but no lifecycle column.
+          yield* state.storage.sql.exec(
+            "ALTER TABLE effect_cf_scheduled_alarms ADD COLUMN wake_at INTEGER NOT NULL DEFAULT 0",
+          );
+          yield* state.storage.sql.exec(`UPDATE effect_cf_scheduled_alarms SET wake_at =
+            MAX(run_at, COALESCE((SELECT retry_at FROM effect_cf_alarm_attempts s
+              WHERE s.storage_id = effect_cf_scheduled_alarms.storage_id), run_at))`);
+          yield* state.storage.sql
+            .exec(`CREATE INDEX idx_effect_cf_scheduled_alarms_wake_at_storage_id
+            ON effect_cf_scheduled_alarms (wake_at, storage_id)`);
         }
         const nativeDeadline = kind === "legacy" ? deadline : deadline + 3_600_000;
 
@@ -495,14 +1920,30 @@ it.effect.each(["legacy", "parked"] as const)(
         assert.isTrue(Exit.isFailure(aborted));
         assert.deepStrictEqual(
           (yield* columns.toArray()).map((column) => column.name),
-          ["storage_id", "alarm_id", "tag", "run_at", "repeat_every_ms", "payload"],
+          [
+            "storage_id",
+            "alarm_id",
+            "tag",
+            "run_at",
+            "repeat_every_ms",
+            "payload",
+            ...(kind === "indexed" ? ["wake_at"] : []),
+          ],
         );
         assert.strictEqual(yield* state.storage.getAlarm(), nativeDeadline);
         yield* alarms.transaction(() => Effect.void);
+        const upgradedColumns = yield* state.storage.sql.exec<{ name: string }>(
+          "SELECT name FROM pragma_table_info('effect_cf_scheduled_alarms')",
+        );
+
+        assert.include(
+          (yield* upgradedColumns.toArray()).map((column) => column.name),
+          "lifecycle",
+        );
         assert.strictEqual(yield* state.storage.getAlarm(), deadline);
         const before = yield* alarms.processDueAlarms(() => Effect.void);
 
-        if (kind === "parked") {
+        if (kind !== "legacy") {
           assert.deepStrictEqual(
             before.handled.map((event) => event.id),
             ["b"],

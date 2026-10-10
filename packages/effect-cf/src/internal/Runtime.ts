@@ -56,11 +56,14 @@ const runPromise = <A, E, R, LayerError>(
  * layer so the resulting runtime satisfies both the user services and the
  * platform services.
  */
-export const makeEntrypointRuntime = <ROut, LayerError, Services>(
+export const makeEntrypointRuntime = <ROut, LayerError, Services, ServicesError = never>(
   layer: Layer.Layer<ROut, LayerError, Services | WorkerEnvironment>,
   env: WorkerEnv,
-  services: Layer.Layer<Services>,
-): ManagedRuntime.ManagedRuntime<ROut | Services | WorkerEnvironment, LayerError> => {
+  services: Layer.Layer<Services, ServicesError>,
+): ManagedRuntime.ManagedRuntime<
+  ROut | Services | WorkerEnvironment,
+  LayerError | ServicesError
+> => {
   const entrypointServices = Layer.mergeAll(
     services,
     ConfigProvider.layer(WorkerConfig.providerFromEnv(env)),
@@ -69,6 +72,10 @@ export const makeEntrypointRuntime = <ROut, LayerError, Services>(
 
   return ManagedRuntime.make(provideEntrypointServices(layer, entrypointServices));
 };
+
+/** Close event resources before an outer lifecycle (such as alarm reconciliation) completes. */
+export const scopeEvent = <A, E, R>(effect: Effect.Effect<A, E, R | Scope.Scope>) =>
+  Effect.scoped(RpcTargets.withScope(effect));
 
 export function runEventPromise<A, E, R, LayerError>(
   runtime: ManagedRuntime.ManagedRuntime<R, LayerError>,
@@ -105,7 +112,7 @@ export function runEventPromise<A, E, R, REvent, EventLayerError, LayerError>(
   const [runtime, effect, eventLayer, parent, onFailure] = args;
 
   if (eventLayer === undefined) {
-    const event = Effect.scoped(RpcTargets.withScope(effect));
+    const event = scopeEvent(effect);
 
     return runPromise(
       runtime,
@@ -114,9 +121,7 @@ export function runEventPromise<A, E, R, REvent, EventLayerError, LayerError>(
     );
   }
 
-  const event = Effect.scoped(
-    RpcTargets.withScope(effect.pipe(Effect.provide(eventLayer, { local: true }))),
-  );
+  const event = scopeEvent(effect.pipe(Effect.provide(eventLayer, { local: true })));
 
   return runPromise(
     runtime,

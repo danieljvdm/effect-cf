@@ -44,12 +44,16 @@ const invokeEntrypointRpcMethod = <Self>(
   );
 };
 
-export const provideEntrypointServices = <ROut, LayerError, RIn>(
+export const provideEntrypointServices = <ROut, LayerError, RIn, ServicesError = never>(
   layer: Layer.Layer<ROut, LayerError, RIn>,
-  services: Layer.Layer<RIn, never, never>,
-): Layer.Layer<ROut | RIn, LayerError, never> =>
+  services: Layer.Layer<RIn, ServicesError, never>,
+): Layer.Layer<ROut | RIn, LayerError | ServicesError, never> =>
   // SAFETY: provideMerge supplies RIn while retaining it in the output context for entrypoint consumers.
-  layer.pipe(Layer.provideMerge(services)) as Layer.Layer<ROut | RIn, LayerError, never>;
+  layer.pipe(Layer.provideMerge(services)) as Layer.Layer<
+    ROut | RIn,
+    LayerError | ServicesError,
+    never
+  >;
 
 export const defineEntrypointRpcMethods = <Self, Prototype extends object = object>(
   target: string,

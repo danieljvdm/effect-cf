@@ -10,8 +10,14 @@ import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 import { DurableObjectState, fromDurableObjectState } from "./DurableObjectState";
 import {
   DurableObjectAlarm,
+  DispatchAfterEvent,
+  HasDueAlarms,
+  RunAlarm,
+  dispatchRawAlarm,
   type AlarmRegistration,
   type AlarmService,
+  type InvalidAlarmRegistrationError,
+  type InvalidScheduleConfigurationError,
 } from "./DurableObjectAlarm";
 import { fromWebSocket, type DurableWebSocket } from "./DurableObjectWebSocket";
 import * as RpcDefinition from "./RpcDefinition";
@@ -229,6 +235,7 @@ export type DurableObjectClass<Rpc extends DurableObjectRpc<ROut>, ROut> = new (
   env: WorkerEnv,
 ) => CloudflareDurableObject<WorkerEnv> &
   DurableObjectRpcApi<Rpc, ROut> & {
+    alarm(alarmInfo?: globalThis.AlarmInvocationInfo): Promise<void> | void;
     [RunSymbol]<A, E>(
       effect: Effect.Effect<A, E, HandlerContext<ROut>>,
       options?: RunOptions,
@@ -274,12 +281,15 @@ export function make<
 ): DurableObjectClass<Rpc, ROut | REvent | RAlarm> {
   const registration =
     options.alarms !== undefined && !Effect.isEffect(options.alarms) ? options.alarms : undefined;
-  const logicalAlarms = (
-    registration?.run ?? (Effect.isEffect(options.alarms) ? options.alarms : undefined)
-  )?.pipe(Effect.asVoid);
+  const legacyAlarms = Effect.isEffect(options.alarms)
+    ? options.alarms.pipe(Effect.asVoid)
+    : undefined;
 
   class EffectDurableObject extends CloudflareDurableObject<WorkerEnv> {
-    readonly runtime: ManagedRuntime.ManagedRuntime<RuntimeContext<ROut | RAlarm>, LayerError>;
+    readonly runtime: ManagedRuntime.ManagedRuntime<
+      RuntimeContext<ROut | RAlarm>,
+      LayerError | InvalidAlarmRegistrationError
+    >;
 
     constructor(state: globalThis.DurableObjectState, env: WorkerEnv) {
       super(state, env);
@@ -290,12 +300,16 @@ export function make<
       // SAFETY: RAlarm is inferred only from the registration's layer; without a registration it is never.
       const services = (registration?.layer ?? Layer.empty).pipe(
         Layer.provideMerge(baseServices),
-      ) as Layer.Layer<DurableObjectState | DurableObjectAlarm | RAlarm>;
+      ) as Layer.Layer<
+        DurableObjectState | DurableObjectAlarm | RAlarm,
+        InvalidAlarmRegistrationError
+      >;
 
       this.runtime = Runtime.makeEntrypointRuntime<
         ROut,
         LayerError,
-        DurableObjectState | DurableObjectAlarm | RAlarm
+        DurableObjectState | DurableObjectAlarm | RAlarm,
+        InvalidAlarmRegistrationError
       >(layer, env, services);
 
       const initialize = options.initialize;
@@ -322,27 +336,54 @@ export function make<
       const eventLayer = runOptions.eventLayer === false ? undefined : options.eventLayer;
       const parent = runOptions.rpc?.parent;
       const parentSpan = parent === undefined ? undefined : Tracer.externalSpan(parent);
+      const afterResponse = runOptions.event === "rpc" || runOptions.event === "fetch";
+      let dispatchAfterEvent = false;
+      const handler = afterResponse
+        ? effect.pipe(
+            Effect.onExit(() =>
+              Effect.flatMap(DurableObjectAlarm, (alarms) =>
+                Effect.map(alarms[DispatchAfterEvent], (enabled) => {
+                  dispatchAfterEvent = enabled;
+                }),
+              ),
+            ),
+          )
+        : effect;
+      let response: Promise<A>;
 
       if (eventLayer === undefined) {
         // SAFETY: initialize cannot require event services; without an event layer, all requirements are already provided.
-        return Runtime.runEventPromise(
+        response = Runtime.runEventPromise(
           this.runtime,
           // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off
-          effect as Effect.Effect<A, E, HandlerContext<ROut | RAlarm>>,
+          handler as Effect.Effect<A, E, HandlerContext<ROut | RAlarm>>,
           undefined,
           parentSpan,
           runOptions.onFailure,
         );
+      } else {
+        response = Runtime.runEventPromise<
+          A,
+          E,
+          RuntimeContext<ROut | RAlarm>,
+          REvent,
+          EventLayerError,
+          LayerError | InvalidAlarmRegistrationError
+        >(this.runtime, handler, eventLayer, parentSpan, runOptions.onFailure);
       }
 
-      return Runtime.runEventPromise<
-        A,
-        E,
-        RuntimeContext<ROut | RAlarm>,
-        REvent,
-        EventLayerError,
-        LayerError
-      >(this.runtime, effect, eventLayer, parentSpan, runOptions.onFailure);
+      if (!afterResponse) return response;
+
+      return response.finally(() => {
+        if (dispatchAfterEvent) {
+          this.ctx.waitUntil(
+            // The default scheduler yields to a later task, after the response chain unwinds.
+            Effect.runPromise(
+              Effect.yieldNow.pipe(Effect.andThen(Effect.promise(() => this.#runAlarm(false)))),
+            ),
+          );
+        }
+      });
     }
 
     fetch(request: Request): Promise<Response> {
@@ -357,21 +398,43 @@ export function make<
       });
     }
 
-    alarm(alarmInfo?: globalThis.AlarmInvocationInfo): Promise<void> | void {
-      const rawAlarm = options.alarm?.(alarmInfo);
-      const alarmEffect =
-        logicalAlarms !== undefined && rawAlarm !== undefined
-          ? Effect.gen(function* () {
-              yield* logicalAlarms;
-              yield* rawAlarm;
-            })
-          : (logicalAlarms ?? rawAlarm);
+    alarm(alarmInfo?: globalThis.AlarmInvocationInfo): Promise<void> {
+      return this.#runAlarm(true, alarmInfo);
+    }
 
-      if (alarmEffect !== undefined) {
-        return this[RunSymbol](alarmEffect.pipe(Effect.onExit(() => scheduleTelemetryFlush)), {
+    #runAlarm(native: boolean, alarmInfo?: globalThis.AlarmInvocationInfo): Promise<void> {
+      const event = (beginDispatch: Effect.Effect<void, InvalidScheduleConfigurationError>) => {
+        const alarmEffect = Effect.gen(function* () {
+          const alarms = yield* DurableObjectAlarm;
+
+          if (!native && !(yield* alarms[HasDueAlarms])) return;
+          const rawAlarm = options.alarm?.(alarmInfo);
+          const customAlarm =
+            legacyAlarms === undefined
+              ? (rawAlarm ?? Effect.void)
+              : legacyAlarms.pipe(Effect.andThen(rawAlarm ?? Effect.void));
+
+          yield* beginDispatch;
+          // Custom dispatchers, including Effect-form alarms, recover retained checkpoints.
+          yield* registration === undefined || rawAlarm !== undefined
+            ? dispatchRawAlarm(customAlarm, registration)
+            : registration.run.pipe(Effect.asVoid);
+        }).pipe(Effect.onExit(() => scheduleTelemetryFlush));
+
+        return Runtime.scopeEvent(
+          options.eventLayer === undefined
+            ? alarmEffect
+            : alarmEffect.pipe(Effect.provide(options.eventLayer, { local: true })),
+        );
+      };
+
+      return this[RunSymbol](
+        Effect.flatMap(DurableObjectAlarm, (alarms) => alarms[RunAlarm](event, native)),
+        {
           event: "alarm",
-        });
-      }
+          eventLayer: false,
+        },
+      );
     }
 
     webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> | void {

@@ -198,3 +198,96 @@ DurableObject.make(applicationLayer, {
 // @ts-expect-error Application layers cannot use an unregistered alarm service.
 // @effect-diagnostics-next-line missingLayerContext:off
 DurableObject.make(applicationLayer);
+
+class Maintenance extends DurableObjectAlarm.Tag<Maintenance>()("test/Maintenance", {
+  maintenance: { payload: Schema.Null, lifecycle: "manual" },
+}) {}
+class Lifecycle extends DurableObjectAlarm.Tag<Lifecycle>()("test/Lifecycle", {
+  lifecycle: Schema.Null,
+}) {}
+const maintenanceRef = { tag: "maintenance", id: "maintenance" } as const;
+const maintenanceInput = (runAt: DateTime.Utc) => ({ ...maintenanceRef, payload: null, runAt });
+
+declare const maintenance: Maintenance["Service"];
+expectTypeOf(maintenance.transaction(() => application)).toEqualTypeOf<
+  Effect.Effect<number, ApplicationError | DurableObjectStorage.StorageOperationError, Application>
+>();
+expectTypeOf(maintenance.deferWakes(application)).toEqualTypeOf<
+  Effect.Effect<
+    number,
+    | ApplicationError
+    | DurableObjectAlarm.InvalidScheduleConfigurationError
+    | DurableObjectStorage.StorageOperationError,
+    Application
+  >
+>();
+expectTypeOf(maintenance.scheduleAlarm(maintenanceInput(runAt))).toEqualTypeOf<
+  ReturnType<DurableObjectAlarm.AlarmScheduler["scheduleAlarm"]>
+>();
+void maintenance.scheduleAlarmEarlier(maintenanceInput(runAt));
+void maintenance.cancelAlarm(maintenanceRef);
+void maintenance.getAlarmStatus(maintenanceRef);
+void alarms.scheduleAlarm({ ...maintenanceInput(runAt), lifecycle: "manual" });
+// @ts-expect-error Manual alarms leave repeat scheduling to their consumer.
+void maintenance.scheduleAlarm({ ...maintenanceInput(runAt), repeatEvery: "1 minute" });
+// @ts-expect-error Manual alarms leave progress budgets to their consumer.
+void maintenance.scheduleAlarmEarlier({ ...maintenanceInput(runAt), progress: 1 });
+const manualFailure = { payload: Schema.Null, lifecycle: "manual", failure: "retry" } as const;
+const manualRetry = {
+  payload: Schema.Null,
+  lifecycle: "manual",
+  retry: { initialDelay: "1 second" },
+} as const;
+
+// @ts-expect-error Manual definitions cannot install automatic failure policies.
+void (manualFailure satisfies DurableObjectAlarm.AlarmDefinitionEntry);
+// @ts-expect-error Manual definitions cannot install automatic retry policies.
+void (manualRetry satisfies DurableObjectAlarm.AlarmDefinitionEntry);
+
+const maintenanceRegistration = Maintenance.handlers({
+  maintenance: () => application.pipe(Effect.asVoid),
+});
+
+expectTypeOf(maintenanceRegistration.run).toEqualTypeOf<
+  Effect.Effect<
+    DurableObjectAlarm.ProcessDueAlarmsResult,
+    ApplicationError | DurableObjectAlarm.DurableObjectAlarmError,
+    Application | DurableObjectAlarm.DurableObjectAlarm
+  >
+>();
+const armMaintenance = Effect.flatMap(Maintenance, (alarms) =>
+  alarms.scheduleAlarm(maintenanceInput(runAt)),
+);
+const together = DurableObjectAlarm.mergeAll(
+  registration,
+  maintenanceRegistration,
+  Lifecycle.handlers({ lifecycle: () => Effect.void }),
+);
+const appService = Layer.succeed(Application, { id: "app" });
+
+DurableObject.make(appService, {
+  alarms: together,
+  rpc: { save: schedule, armMaintenance: () => armMaintenance },
+});
+Documents.make(appService, { alarms: together, rpc: { save: schedule } });
+// @ts-expect-error A manual alarm requires its own handler registration.
+// @effect-diagnostics-next-line missingEffectContext:off
+DurableObject.make(Layer.empty, { rpc: { armMaintenance: () => armMaintenance } });
+DurableObject.make(Layer.empty, {
+  alarms: registration,
+  // @ts-expect-error An unrelated alarm registration does not register maintenance.
+  // @effect-diagnostics-next-line missingEffectContext:off
+  rpc: { armMaintenance: () => armMaintenance },
+});
+// @ts-expect-error Installing a manual alarm service layer alone cannot install its dispatcher.
+DurableObject.make(maintenanceRegistration.layer);
+// Duplicate definition tags are rejected at runtime, not by composition's types.
+DurableObjectAlarm.mergeAll(registration, otherRegistration);
+
+void maintenance.transaction((manualTx) => {
+  void manualTx.scheduleAlarm(maintenanceInput(runAt));
+  // @ts-expect-error An alarm transaction cannot open nested transactions.
+  void manualTx.transaction(() => Effect.void);
+
+  return manualTx.cancelAlarm(maintenanceRef);
+});

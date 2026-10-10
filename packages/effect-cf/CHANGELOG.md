@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.56.0
+
+### Minor Changes
+
+- [#213](https://github.com/danieljvdm/effect-cf/pull/213) [`b0e1201`](https://github.com/danieljvdm/effect-cf/commit/b0e1201663c3769fa2e63daad6f46a8a8b0d9b05) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Allow alarm transactions to share a Durable Object SQL client's connection and commit boundary. Reduce manual alarm checkpoint writes while preserving recovery guards and stale-dispatch fencing.
+
 ## 0.55.0
 
 ### Minor Changes

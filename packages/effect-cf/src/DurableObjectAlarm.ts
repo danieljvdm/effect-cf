@@ -1178,9 +1178,11 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           `SELECT wake_at AS run_at FROM effect_cf_scheduled_alarms
            ORDER BY wake_at, storage_id LIMIT 1`,
         );
-        const next = (yield* cursor.toArray())[0];
+        const next = (yield* cursor.toArray())[0]?.run_at ?? null;
 
-        yield* writeNativeAlarm(next?.run_at ?? null);
+        if ((yield* state.storage.getAlarm()) !== next) {
+          yield* writeNativeAlarm(next);
+        }
       });
 
       const writeAttempts = Effect.fnUntraced(function* (

@@ -1,3 +1,4 @@
+import { SqliteClient } from "@effect/sql-sqlite-do";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
@@ -10,6 +11,8 @@ import * as Layer from "effect/Layer";
 import * as Predicate from "effect/Predicate";
 import * as S from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import type { SqlClient } from "effect/sql/SqlClient";
+import { SqlError } from "effect/sql/SqlError";
 
 import { DurableObjectState } from "./DurableObjectState";
 import { type SqlStorageValue, StorageOperationError } from "./DurableObjectStorage";
@@ -24,20 +27,17 @@ CREATE TABLE IF NOT EXISTS effect_cf_scheduled_alarms (
   run_at INTEGER NOT NULL,
   wake_at INTEGER NOT NULL DEFAULT 0,
   repeat_every_ms INTEGER,
-  payload TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS effect_cf_alarm_attempts (
-  storage_id TEXT PRIMARY KEY,
-  revision TEXT NOT NULL,
-  attempts INTEGER NOT NULL,
-  parked INTEGER NOT NULL,
+  payload TEXT NOT NULL,
+  revision TEXT NOT NULL DEFAULT '',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  parked INTEGER NOT NULL DEFAULT 0,
   retry_at INTEGER,
-  progress INTEGER NOT NULL
+  progress INTEGER NOT NULL DEFAULT -1
 );
 `;
 
 const WAKE_INDEX = "idx_effect_cf_scheduled_alarms_wake_at_storage_id";
-const LIFECYCLE_INDEX = "idx_effect_cf_scheduled_alarms_lifecycle_wake_at_storage_id";
+const LIFECYCLE_INDEX = "idx_effect_cf_scheduled_alarms_lifecycle_wake_at_storage_id_v2";
 
 const DEFAULT_PROCESS_DUE_ALARMS_LIMIT = 100;
 
@@ -130,15 +130,8 @@ interface AlarmRow extends Record<string, SqlStorageValue> {
   readonly progress: number;
 }
 
-const alarmRowsSql = `
-  SELECT a.*, COALESCE(s.revision, '') AS revision,
-         COALESCE(s.attempts, 0) AS attempts, COALESCE(s.parked, 0) AS parked,
-         s.retry_at, COALESCE(s.progress, -1) AS progress
-    FROM effect_cf_scheduled_alarms a
-    LEFT JOIN effect_cf_alarm_attempts s USING (storage_id)`;
-
-const sameRevisionSql = `storage_id = ? AND COALESCE(
-  (SELECT revision FROM effect_cf_alarm_attempts WHERE storage_id = ?), '') = ?`;
+const alarmRowsSql = "SELECT a.* FROM effect_cf_scheduled_alarms a";
+const sameRevisionSql = "storage_id = ? AND revision = ?";
 
 /** Content-free: no alarm identifiers, payload, error text or consumer state. */
 export const AlarmParked = S.TaggedStruct("AlarmParked", {
@@ -358,6 +351,16 @@ export type AlarmTransaction = Pick<
   "scheduleAlarm" | "scheduleAlarmEarlier" | "cancelAlarm"
 >;
 
+/** Share the same native commit and connection permit as the caller's SQL writes. */
+export interface AlarmTransactionOptions {
+  /** Must be a storage-backed @effect/sql-sqlite-do client for this Durable Object. */
+  readonly sqlClient: SqlClient;
+}
+
+const StorageSqlClient = S.declare<SqliteClient.SqliteClient>(
+  (value): value is SqliteClient.SqliteClient => Predicate.hasProperty(value, SqliteClient.TypeId),
+);
+
 export interface AlarmStatus {
   readonly attempts: number;
   readonly parked: boolean;
@@ -401,7 +404,7 @@ export type AlarmScheduler = {
   /**
    * Commits local application storage and logical alarms in one native SQLite
    * Durable Object transaction, reconciling the native alarm before commit.
-   * Use the supplied mutations, not standalone alarm methods or nested transactions.
+   * Use the supplied mutations inside the callback instead of standalone alarm methods.
    * SqlClient queries must use this same Durable Object's storage.
    *
    * Failure, defects and interruption before commit roll back. A lost reply or
@@ -412,6 +415,7 @@ export type AlarmScheduler = {
    */
   readonly transaction: <A, E, R>(
     closure: (alarms: AlarmTransaction) => Effect.Effect<A, E, R>,
+    options?: AlarmTransactionOptions,
   ) => Effect.Effect<A, E | StorageOperationError, R>;
 
   readonly cancelAlarm: (
@@ -465,13 +469,13 @@ const encodeStoredPayload = (payload: AlarmPayload) =>
   );
 
 const ensureTable = Effect.fnUntraced(function* (state: DurableObjectState["Service"]) {
-  yield* state.storage.sql.exec(INIT_TABLE_SQL);
   const index = yield* state.storage.sql.exec(
     "SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?",
     LIFECYCLE_INDEX,
   );
 
   if ((yield* index.toArray()).length > 0) return;
+  yield* state.storage.sql.exec(INIT_TABLE_SQL);
   const columns = yield* state.storage.sql.exec<{ name: string }>(
     "SELECT name FROM pragma_table_info('effect_cf_scheduled_alarms')",
   );
@@ -487,11 +491,36 @@ const ensureTable = Effect.fnUntraced(function* (state: DurableObjectState["Serv
       "ALTER TABLE effect_cf_scheduled_alarms ADD COLUMN wake_at INTEGER NOT NULL DEFAULT 0",
     );
   }
-  // Backfill once, including retained schedules from before attempt tracking existed.
-  // The wake index is the durable migration marker and is created only after the backfill.
+  for (const [column, definition] of Object.entries({
+    revision: "TEXT NOT NULL DEFAULT ''",
+    attempts: "INTEGER NOT NULL DEFAULT 0",
+    parked: "INTEGER NOT NULL DEFAULT 0",
+    retry_at: "INTEGER",
+    progress: "INTEGER NOT NULL DEFAULT -1",
+  })) {
+    if (!names.has(column))
+      yield* state.storage.sql.exec(
+        `ALTER TABLE effect_cf_scheduled_alarms ADD COLUMN ${column} ${definition}`,
+      );
+  }
+  const attempts = yield* state.storage.sql.exec(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'effect_cf_alarm_attempts'",
+  );
+
+  if ((yield* attempts.toArray()).length > 0) {
+    yield* state.storage.sql.exec(`UPDATE effect_cf_scheduled_alarms SET
+      (revision, attempts, parked, retry_at, progress) =
+      (SELECT revision, attempts, parked, retry_at, progress FROM effect_cf_alarm_attempts s
+       WHERE s.storage_id = effect_cf_scheduled_alarms.storage_id)
+      WHERE storage_id IN (SELECT storage_id FROM effect_cf_alarm_attempts)`);
+    yield* state.storage.sql.exec("DROP TABLE effect_cf_alarm_attempts");
+  }
+  // The replacement lifecycle index marks the committed single-row migration.
   yield* state.storage.sql.exec(`UPDATE effect_cf_scheduled_alarms SET
-    wake_at = MAX(run_at, COALESCE((SELECT retry_at FROM effect_cf_alarm_attempts s
-      WHERE s.storage_id = effect_cf_scheduled_alarms.storage_id), run_at))`);
+    wake_at = MAX(run_at, COALESCE(retry_at, run_at))`);
+  yield* state.storage.sql.exec(
+    "DROP INDEX IF EXISTS idx_effect_cf_scheduled_alarms_lifecycle_wake_at_storage_id",
+  );
   yield* state.storage.sql.exec(
     "DROP INDEX IF EXISTS idx_effect_cf_scheduled_alarms_run_at_storage_id",
   );
@@ -683,6 +712,7 @@ export interface DefinedAlarmScheduler<
   ) => ReturnType<AlarmScheduler["getAlarmStatus"]>;
   readonly transaction: <A, E, R>(
     closure: (alarms: DefinedAlarmTransaction<Definitions>) => Effect.Effect<A, E, R>,
+    options?: AlarmTransactionOptions,
   ) => Effect.Effect<A, E | StorageOperationError, R>;
 }
 
@@ -950,7 +980,7 @@ const makeDefinition = <const Definitions extends AlarmDefinitions>(definitions:
       ...bind(alarms),
       deferWakes: alarms.deferWakes,
       getAlarmStatus: (input) => alarms.getAlarmStatus(input),
-      transaction: (closure) => alarms.transaction((tx) => closure(bind(tx))),
+      transaction: (closure, options) => alarms.transaction((tx) => closure(bind(tx)), options),
     }),
     handlers: <R = never, E = never>(
       handlers: DefinedAlarmHandlers<Definitions, R, E>,
@@ -1161,21 +1191,14 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         progress: number,
       ) {
         yield* state.storage.sql.exec(
-          `INSERT OR REPLACE INTO effect_cf_alarm_attempts
-            (storage_id, revision, attempts, parked, retry_at, progress)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          storageId,
+          `UPDATE effect_cf_scheduled_alarms SET revision = ?, attempts = ?, parked = ?,
+             retry_at = ?, progress = ?, wake_at = MAX(run_at, COALESCE(?, run_at))
+           WHERE storage_id = ?`,
           crypto.randomUUID(),
           attempts,
           parked,
           retryAt,
           progress,
-        );
-        // Materialize the effective wake in the same transaction for indexed dispatch/reconciliation.
-        yield* state.storage.sql.exec(
-          `UPDATE effect_cf_scheduled_alarms
-            SET wake_at = MAX(run_at, COALESCE(?, run_at))
-            WHERE storage_id = ?`,
           retryAt,
           storageId,
         );
@@ -1187,10 +1210,6 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
 
         yield* state.storage.sql.exec(
           `DELETE FROM effect_cf_scheduled_alarms WHERE storage_id = ?`,
-          storageId,
-        );
-        yield* state.storage.sql.exec(
-          `DELETE FROM effect_cf_alarm_attempts WHERE storage_id = ?`,
           storageId,
         );
       });
@@ -1222,6 +1241,34 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         );
         const payload = yield* encodeStoredPayload(input.payload);
         const storageId = getScheduledEventId(ref);
+        const runAt = DateTime.toEpochMillis(input.runAt);
+
+        if (lifecycle === "manual") {
+          // The queue owns attempts. One row carries the aggregate deadline and dispatch fence.
+          const deadline = earlier ? "MIN(run_at, excluded.run_at)" : "excluded.run_at";
+          const nextPayload = earlier
+            ? "CASE WHEN run_at <= excluded.run_at THEN payload ELSE excluded.payload END"
+            : "excluded.payload";
+
+          yield* state.storage.sql.exec(
+            `INSERT INTO effect_cf_scheduled_alarms
+              (storage_id, alarm_id, tag, lifecycle, run_at, wake_at, payload, revision)
+             VALUES (?, ?, ?, 'manual', ?, ?, ?, ?)
+             ON CONFLICT(storage_id) DO UPDATE SET
+               lifecycle = 'manual', run_at = ${deadline}, wake_at = ${deadline},
+               payload = ${nextPayload}, revision = excluded.revision,
+               repeat_every_ms = NULL, attempts = 0, parked = 0, retry_at = NULL, progress = -1`,
+            storageId,
+            ref.id,
+            ref.tag,
+            runAt,
+            runAt,
+            payload,
+            crypto.randomUUID(),
+          );
+
+          return;
+        }
         const existing = yield* readRow(storageId);
         const pass = yield* CurrentAlarmPass;
         const source =
@@ -1259,22 +1306,17 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         const now = yield* Clock.currentTimeMillis;
         const retryAt =
           attempts === 0 ? null : now + retryDelay(attempts, configuration, parked === 1);
-        const runAt = DateTime.toEpochMillis(input.runAt);
         const keepEarlier = earlier && existing !== undefined && existing.run_at <= runAt;
         const scheduledAt = keepEarlier ? existing.run_at : runAt;
         const scheduledPayload = keepEarlier ? existing.payload : payload;
-        const scheduledRepeat =
-          lifecycle === "manual"
-            ? null
-            : keepEarlier
-              ? existing.repeat_every_ms
-              : repeatEveryMillis;
-        const nextProgress = lifecycle === "manual" ? -1 : Math.max(progress, input.progress ?? -1);
+        const scheduledRepeat = keepEarlier ? existing.repeat_every_ms : repeatEveryMillis;
+        const nextProgress = Math.max(progress, input.progress ?? -1);
 
         yield* state.storage.sql.exec(
           `INSERT OR REPLACE INTO effect_cf_scheduled_alarms
-            (storage_id, alarm_id, tag, lifecycle, run_at, repeat_every_ms, payload)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            (storage_id, alarm_id, tag, lifecycle, run_at, repeat_every_ms, payload,
+             wake_at, revision, attempts, parked, retry_at, progress)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           storageId,
           ref.id,
           ref.tag,
@@ -1282,8 +1324,13 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           scheduledAt,
           scheduledRepeat,
           scheduledPayload,
+          Math.max(scheduledAt, retryAt ?? scheduledAt),
+          crypto.randomUUID(),
+          attempts,
+          parked,
+          retryAt,
+          nextProgress,
         );
-        yield* writeAttempts(storageId, attempts, parked, retryAt, nextProgress);
         if (parked === 1 && retryAt !== null && (existing?.parked ?? source?.parked ?? 0) === 0) {
           reports.push(storageId);
         }
@@ -1310,20 +1357,22 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         }
       });
 
-      const transaction: AlarmScheduler["transaction"] = Effect.fnUntraced(function* (closure) {
-        const pass = yield* CurrentAlarmPass;
+      const transaction: AlarmScheduler["transaction"] = Effect.fnUntraced(
+        function* (closure, options) {
+          const pass = yield* CurrentAlarmPass;
 
-        if (pass !== undefined && !pass.active) {
-          return yield* Effect.fail(
-            new StorageOperationError({
-              operation: "alarm.transaction",
-              cause: new Error("Alarm handlers cannot mutate detached work after their pass ends"),
-            }),
-          );
-        }
-        const reports: string[] = [];
-        const result = yield* state.storage.transaction(() =>
-          Effect.withFiber((owner) => {
+          if (pass !== undefined && !pass.active) {
+            return yield* Effect.fail(
+              new StorageOperationError({
+                operation: "alarm.transaction",
+                cause: new Error(
+                  "Alarm handlers cannot mutate detached work after their pass ends",
+                ),
+              }),
+            );
+          }
+          const reports: string[] = [];
+          const body = Effect.withFiber((owner) => {
             let active = true;
             const requireActive = <A, E>(effect: Effect.Effect<A, E>) =>
               Effect.withFiber<A, E | StorageOperationError>((fiber) =>
@@ -1361,13 +1410,44 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
 
               return result;
             });
-          }),
-        );
+          });
+          const result = yield* options === undefined
+            ? state.storage.transaction(() => body)
+            : Effect.gen(function* () {
+                const client = yield* S.decodeUnknownEffect(StorageSqlClient)(
+                  options.sqlClient,
+                ).pipe(
+                  Effect.mapError(
+                    (cause) => new StorageOperationError({ operation: "alarm.transaction", cause }),
+                  ),
+                );
 
-        yield* reportParked(reports);
+                if (client.config.storage !== state.raw.storage)
+                  return yield* Effect.fail(
+                    new StorageOperationError({
+                      operation: "alarm.transaction",
+                      cause: new Error(
+                        "Alarm transactions require this Durable Object's storage-backed SQL client",
+                      ),
+                    }),
+                  );
 
-        return result;
-      });
+                return yield* client
+                  .withTransaction(body)
+                  .pipe(
+                    Effect.mapError((cause) =>
+                      cause instanceof SqlError
+                        ? new StorageOperationError({ operation: "alarm.transaction", cause })
+                        : cause,
+                    ),
+                  );
+              });
+
+          yield* reportParked(reports);
+
+          return result;
+        },
+      );
 
       const deferWakes: AlarmScheduler["deferWakes"] = (body) =>
         Effect.acquireUseRelease(
@@ -1516,19 +1596,11 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         configuration: ResolvedScheduleConfiguration,
       ) {
         if (row.repeat_every_ms === null) {
-          const cursor = yield* state.storage.sql.exec(
+          yield* state.storage.sql.exec(
             `DELETE FROM effect_cf_scheduled_alarms WHERE ${sameRevisionSql}`,
-            row.storage_id,
             row.storage_id,
             row.revision,
           );
-
-          if ((yield* cursor.rowsWritten) > 0) {
-            yield* state.storage.sql.exec(
-              `DELETE FROM effect_cf_alarm_attempts WHERE storage_id = ?`,
-              row.storage_id,
-            );
-          }
 
           return;
         }
@@ -1536,7 +1608,6 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         const cursor = yield* state.storage.sql.exec(
           `UPDATE effect_cf_scheduled_alarms SET run_at = ? WHERE ${sameRevisionSql}`,
           now + Math.max(configuration.minimumRepeatInterval, row.repeat_every_ms),
-          row.storage_id,
           row.storage_id,
           row.revision,
         );
@@ -1604,7 +1675,6 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                   `UPDATE effect_cf_scheduled_alarms SET run_at = ?, wake_at = ? WHERE ${sameRevisionSql}`,
                   recoveryAt,
                   recoveryAt,
-                  row.storage_id,
                   row.storage_id,
                   row.revision,
                 );
@@ -1725,7 +1795,6 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                 `UPDATE effect_cf_scheduled_alarms SET run_at = ?, wake_at = ? WHERE ${sameRevisionSql}`,
                 recoveryAt,
                 recoveryAt,
-                row.storage_id,
                 row.storage_id,
                 row.revision,
               );

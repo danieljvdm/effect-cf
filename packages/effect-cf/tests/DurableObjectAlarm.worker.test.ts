@@ -343,6 +343,106 @@ it.effect.each(["automatic", "manual"] as const)(
   },
 );
 
+it.effect("preserves an active deferred guard when concurrent event acquisition fails", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+  const EventDependency = Context.Service<void>("test/ConcurrentAlarmAcquisition");
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const acquiring = yield* Deferred.make<void>();
+      const failAcquisition = yield* Deferred.make<void>();
+      const holding = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      let suspendAcquisition = false;
+      let handled = 0;
+      let nativeSettled = false;
+
+      yield* TestClock.setTime(deadline);
+      const CurrentObject = DurableObject.make(Layer.succeed(Clock.Clock, yield* Clock.Clock), {
+        eventLayer: Layer.effect(
+          EventDependency,
+          Effect.gen(function* () {
+            if (!suspendAcquisition) return;
+            suspendAcquisition = false;
+            yield* Deferred.succeed(acquiring, undefined);
+            yield* Deferred.await(failAcquisition);
+
+            return yield* Effect.fail("dependency unavailable");
+          }),
+        ),
+        alarms: Maintenance.handlers({
+          maintenance: () =>
+            Effect.gen(function* () {
+              handled++;
+              yield* (yield* Maintenance).cancelAlarm(maintenanceRef);
+            }),
+        }),
+        rpc: {
+          enroll: () =>
+            Effect.flatMap(Maintenance, (maintenance) =>
+              maintenance.scheduleAlarm(maintenanceInput(DateTime.makeUnsafe(deadline))),
+            ),
+          hold: () =>
+            Effect.flatMap(Maintenance, (maintenance) =>
+              maintenance.deferWakes(
+                Deferred.succeed(holding, undefined).pipe(Effect.andThen(Deferred.await(release))),
+              ),
+            ),
+        },
+      });
+      const instance = new CurrentObject(state.raw, {});
+
+      yield* Effect.gen(function* () {
+        yield* Effect.promise(() => instance.enroll());
+        suspendAcquisition = true;
+        yield* Effect.promise(() => state.raw.storage.deleteAlarm());
+        const failed = yield* Effect.promise(() => instance.alarm()).pipe(
+          Effect.exit,
+          Effect.forkChild,
+        );
+
+        yield* Deferred.await(acquiring);
+        const scope = yield* Effect.promise(() => instance.hold()).pipe(Effect.forkChild);
+
+        yield* Deferred.await(holding);
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline + 1_000);
+        yield* Deferred.succeed(failAcquisition, undefined);
+        assert.isTrue(Exit.isFailure(yield* Fiber.join(failed)));
+        yield* TestClock.setTime(deadline + 1_000);
+        yield* Effect.promise(() => state.raw.storage.deleteAlarm());
+        const native = yield* Effect.promise(async () => {
+          await instance.alarm();
+          nativeSettled = true;
+        }).pipe(Effect.forkChild);
+        const recovery = yield* Effect.promise(() =>
+          vi.waitFor(async () => {
+            const runAt = await state.raw.storage.getAlarm();
+
+            assert.isNotNull(runAt);
+
+            return runAt;
+          }),
+        );
+
+        assert.strictEqual(recovery, deadline + 2_000);
+        assert.strictEqual(handled, 0);
+        assert.isFalse(nativeSettled);
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(scope);
+        yield* Fiber.join(native);
+        assert.strictEqual(handled, 1);
+        assert.isNull(yield* state.storage.getAlarm());
+      }).pipe(
+        Effect.ensuring(
+          Deferred.succeed(failAcquisition, undefined).pipe(
+            Effect.andThen(Deferred.succeed(release, undefined)),
+          ),
+        ),
+      );
+    }),
+  );
+});
+
 it.effect.each(["rpc", "fetch"] as const)(
   "dispatches after %s settles in a fresh scope and joins an overlapping native alarm",
   (event) => {
@@ -440,10 +540,7 @@ it.effect.each(["rpc", "fetch"] as const)(
           assert.isTrue(observedClosed);
           assert.strictEqual(scopes.length, 2);
           assert.isFalse(scopes[1]!.closed);
-          assert.strictEqual(
-            yield* state.storage.getAlarm(),
-            deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS,
-          );
+          assert.strictEqual(yield* state.storage.getAlarm(), deadline + 1_000);
           // A delivered native alarm consumes the armed timestamp before joining.
           yield* Effect.promise(() => state.raw.storage.deleteAlarm());
           const native = yield* Effect.promise(async () => {
@@ -463,7 +560,7 @@ it.effect.each(["rpc", "fetch"] as const)(
 
           assert.isFalse(nativeSettled);
           assert.deepStrictEqual(handled, ["due"]);
-          assert.strictEqual(recovery, deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS);
+          assert.strictEqual(recovery, deadline + 1_000);
           yield* Deferred.succeed(release, undefined);
           yield* Fiber.join(native);
           assert.deepStrictEqual(handled, ["due"]);
@@ -551,10 +648,7 @@ it.effect.each([0, 5_000])(
           yield* Deferred.await(finalizing);
           assert.deepStrictEqual(generations, [1]);
           assert.isUndefined(yield* Effect.promise(() => instance.status()));
-          assert.strictEqual(
-            yield* state.storage.getAlarm(),
-            deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS,
-          );
+          assert.strictEqual(yield* state.storage.getAlarm(), deadline + 1_000);
           yield* Effect.promise(() => instance.enroll(2, lateDeadline));
           yield* Effect.promise(() => state.raw.storage.deleteAlarm());
           const native = yield* Effect.promise(async () => {
@@ -573,7 +667,7 @@ it.effect.each([0, 5_000])(
           );
 
           assert.isFalse(nativeSettled);
-          assert.strictEqual(recovery, deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS);
+          assert.strictEqual(recovery, deadline + 1_000);
           assert.deepStrictEqual(generations, [1]);
           assert.strictEqual(yield* state.storage.get("source-generation"), 2);
           yield* Deferred.succeed(release, undefined);
@@ -664,6 +758,7 @@ it.effect("blocks prompt and native dispatch until an external deferred region e
 
         yield* Deferred.await(entered);
         yield* Effect.promise(() => instance.enroll());
+        yield* TestClock.setTime(deadline + 1_000);
         yield* Effect.promise(() => state.raw.storage.deleteAlarm());
         const native = yield* Effect.promise(async () => {
           await instance.alarm?.();
@@ -682,7 +777,7 @@ it.effect("blocks prompt and native dispatch until an external deferred region e
 
         assert.isFalse(nativeSettled);
         assert.deepStrictEqual(heldDuringDispatch, []);
-        assert.strictEqual(recovery, deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS);
+        assert.strictEqual(recovery, deadline + 2_000);
         yield* Deferred.succeed(release, undefined);
         yield* Fiber.join(holding);
         yield* Fiber.join(native);
@@ -834,7 +929,7 @@ it.effect("coalesces nested and concurrent wake changes until deferred work exit
           yield* maintenance.scheduleAlarm(maintenanceInput(DateTime.makeUnsafe(deadline + 2_000)));
         }),
       );
-      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 10_000);
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 250);
       assert.strictEqual(
         DateTime.toEpochMillis((yield* maintenance.getAlarmStatus(maintenanceRef))!.runAt),
         deadline + 2_000,
@@ -846,7 +941,12 @@ it.effect("coalesces nested and concurrent wake changes until deferred work exit
       assert.strictEqual(yield* state.storage.getAlarm(), deadline + 5_000);
       yield* reminders.cancelAlarm({ tag: "reminder", id: "a" });
       assert.isNull(yield* state.storage.getAlarm());
-    }).pipe(Effect.provide(registration.layer.pipe(Layer.provideMerge(services)))),
+    }).pipe(
+      Effect.provideService(DurableObjectAlarm.ScheduleConfiguration, {
+        inFlightRecovery: "250 millis",
+      }),
+      Effect.provide(registration.layer.pipe(Layer.provideMerge(services))),
+    ),
   );
 });
 
@@ -864,7 +964,7 @@ it.effect.each(["failure", "interruption"] as const)(
         const running = yield* maintenance
           .deferWakes(
             Effect.gen(function* () {
-              const recoveryAt = deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS;
+              const recoveryAt = deadline + 1_000;
 
               assert.strictEqual(yield* state.storage.getAlarm(), recoveryAt);
               yield* maintenance.transaction((tx) =>
@@ -1023,7 +1123,7 @@ it.effect(
             const maintenance = yield* Maintenance;
             const scheduled = yield* maintenance.getAlarmStatus(maintenanceRef);
 
-            assert.strictEqual(DateTime.toEpochMillis(scheduled!.runAt), recoveryAt);
+            assert.strictEqual(DateTime.toEpochMillis(scheduled!.runAt), deadline + 1_000);
             maintenanceHandled++;
             if (maintenanceHandled === 1) {
               // Replacing a checkpoint before failing must preserve the owner's new deadline.
@@ -1542,6 +1642,8 @@ it.effect.each([
   { minimumRetryDelay: Infinity },
   { parkedRetryDelay: "30 minutes" },
   { parkedRetryDelay: Infinity },
+  { inFlightRecovery: 0 },
+  { inFlightRecovery: Infinity },
   { minimumRepeatInterval: 0 },
   { minimumRepeatInterval: Infinity },
   { minimumRetryDelay: "2 hours", parkedRetryDelay: "1 hour" },

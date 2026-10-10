@@ -167,10 +167,13 @@ alarm's attempt budget. The lifecycle is persisted with the alarm, so it remains
 known after eviction or a deployment that removes its registration.
 
 Before dispatch, the scheduler commits a native recovery alarm and moves due
-manual alarms to `now + parkedRetryDelay` (at least one hour). Automatic alarms
-and a pool of up to four manual handlers run independently. A manual handler's
-failure does not cancel other handlers; parent interruption still interrupts the
-pass. The recovery deadline survives handler success, failure and process loss.
+manual alarms to `now + inFlightRecovery` (one second by default). Eviction during
+work leaves both the native guard and logical work eligible within that deadline.
+Automatic alarms and a pool of up to four manual handlers run independently.
+A manual handler's failure does not cancel other handlers; parent interruption
+still interrupts the pass. When handlers return without replacing or cancelling
+their alarm, unchanged revisions move to `now + parkedRetryDelay` (at least one
+hour). A newer checkpoint always wins.
 
 Registrations defer native alarm changes during dispatch. For inline processing,
 use `maintenance.deferWakes(inlinePass)` outside any storage transaction.
@@ -179,8 +182,11 @@ while source and alarm transactions commit. Nested and concurrent scopes share
 the deferral across the object, including changes made by other requests. The
 last scope reconciles the earliest remaining deadline on success, failure or
 interruption. A cancelled alarm is not revived by a buffered hint. Keep work
-bounded: eviction before final reconciliation can delay it until the retained
-recovery alarm.
+bounded: the first scope's `inFlightRecovery` sets the shared guard. A native
+delivery while a scope or pass is active renews that guard and joins the existing
+work without starting another pass. Checkpoint transactions retain the guard
+instead of rewriting it on each mutation; the last scope restores the earliest
+logical deadline.
 
 After external work, **re-read the authoritative queue and replace or cancel its
 alarm in the same transaction as source changes**. Include outstanding lease and
@@ -242,6 +248,7 @@ Provide the optional `DurableObjectAlarm.ScheduleConfiguration` reference with
 
 ```ts
 const schedulingPolicy = Layer.succeed(DurableObjectAlarm.ScheduleConfiguration, {
+  inFlightRecovery: "1 second",
   minimumRetryDelay: "2 seconds",
   unchangedAttemptBudget: 4,
   parkedRetryDelay: "2 hours",
@@ -256,13 +263,14 @@ during service initialization and retained for events. Custom runtimes can provi
 `DurableObjectAlarm.layer` with `Layer.provide`. A runtime or
 `Effect.provideService` override takes precedence for its supplied fields.
 
-| Setting                  | Default  | Constraint                                            |
-| ------------------------ | -------- | ----------------------------------------------------- |
-| `dispatchAfterEvent`     | `false`  | Opt in to scoped due dispatch after RPC/fetch         |
-| `minimumRetryDelay`      | 1 second | Finite, at least 1 second                             |
-| `unchangedAttemptBudget` | 8        | Positive safe integer; cannot disable parking         |
-| `parkedRetryDelay`       | 1 hour   | Finite, at least 1 hour and the retry floor           |
-| `minimumRepeatInterval`  | 1 minute | Finite, at least 1 second; only for product schedules |
+| Setting                  | Default  | Constraint                                              |
+| ------------------------ | -------- | ------------------------------------------------------- |
+| `dispatchAfterEvent`     | `false`  | Opt in to scoped due dispatch after RPC/fetch           |
+| `inFlightRecovery`       | 1 second | Finite, positive; guard while a scope or pass is active |
+| `minimumRetryDelay`      | 1 second | Finite, at least 1 second                               |
+| `unchangedAttemptBudget` | 8        | Positive safe integer; cannot disable parking           |
+| `parkedRetryDelay`       | 1 hour   | Finite, at least 1 hour and the retry floor             |
+| `minimumRepeatInterval`  | 1 minute | Finite, at least 1 second; only for product schedules   |
 
 Durations accept Effect `Duration.Input`. Invalid policy raises
 `InvalidScheduleConfigurationError` before scheduling commits. The configured
@@ -271,6 +279,13 @@ at the parked recovery interval. Raising the budget does not resume already
 parked work or report it again. Existing deadlines remain enrolled; later
 re-arms and repeat completions use the active configuration. Real progress,
 completion or explicit external enrollment still resets the work's budget.
+
+`inFlightRecovery` is independent of retry backoff and parked recovery. Shorter
+guards reduce the eviction recovery deadline but can cause more native deliveries
+during long-running work. Cloudflare delivery may occur after the enrolled deadline;
+measure recovery and alarm activity for the application's workload. Event-layer
+acquisition precedes registered dispatch; failure before dispatch retains parked
+recovery unless an explicit deferred scope already owns a short guard.
 
 These settings tune timing and retry limits. They do not make state polling a
 product schedule. A productive workflow that schedules its next step should

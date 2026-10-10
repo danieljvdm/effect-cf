@@ -71,7 +71,12 @@ jobs:
           vp run effect-webtransport#build
 
       - name: Compare bundles
+        id: compare
         run: vp run bundle:compare -- --base-dir .bundle-base
+
+      - name: Show failed build logs
+        if: ${{ failure() && steps.compare.outcome == 'failure' }}
+        run: find .bundle-report -type f -name '*.log' -print -exec cat {} \;
 
       - name: Show comparison
         env:
@@ -95,6 +100,7 @@ jobs:
           retention-days: 30
 
       - name: Upload emitted chunks and module analysis
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: bundle-analysis

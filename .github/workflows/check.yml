@@ -67,7 +67,14 @@ jobs:
           docker info --format '{{json .RegistryConfig.Mirrors}}'
 
       - name: Test native containers with Docker
-        run: vp run test:containers
+        run: |
+          # Keep the digest aligned with Wrangler/Miniflare's default egress image.
+          container_proxy_image=mirror.gcr.io/cloudflare/proxy-everything:3cb1195@sha256:0ef6716c52430096900b150d84a3302057d6cd2319dae7987128c85d0733e3c8
+          # A cache miss keeps Wrangler's Docker Hub default and daemon mirror fallback.
+          if docker pull "$container_proxy_image"; then
+            export MINIFLARE_CONTAINER_EGRESS_IMAGE="$container_proxy_image"
+          fi
+          vp run test:containers
 
       - name: Run tests
         run: vp test

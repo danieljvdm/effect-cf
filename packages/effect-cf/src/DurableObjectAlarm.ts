@@ -46,6 +46,7 @@ export const MIN_RETRY_DELAY_MS = 1_000;
 export const UNCHANGED_ATTEMPT_BUDGET = 8;
 /** Minimum and default parked recovery interval. */
 export const PARKED_RETRY_DELAY_MS = 3_600_000;
+const DEFAULT_IN_FLIGHT_RECOVERY_MS = 1_000;
 
 /** Absolute product repeat floor. */
 export const MIN_REPEAT_INTERVAL_MS = 1_000;
@@ -55,6 +56,8 @@ export const DEFAULT_MIN_REPEAT_INTERVAL_MS = 60_000;
 export interface ScheduleConfiguration {
   /** Check for due alarms after RPC/fetch responses unwind. Native alarms remain recovery authority. */
   readonly dispatchAfterEvent?: boolean;
+  /** Positive recovery deadline while dispatch or deferWakes is active. Defaults to one second. */
+  readonly inFlightRecovery?: Duration.Input;
   /** Retry floor, at least one second. Defaults to one second. */
   readonly minimumRetryDelay?: Duration.Input;
   /** Positive safe integer. Defaults to eight unchanged attempts. */
@@ -81,6 +84,7 @@ const AlarmLifecycleSchema = S.Literals(["automatic", "manual"]);
 
 const ScheduleConfigurationSchema = S.Struct({
   dispatchAfterEvent: S.Boolean,
+  inFlightRecovery: safeIntegerAtLeast(1),
   minimumRetryDelay: safeIntegerAtLeast(MIN_RETRY_DELAY_MS),
   unchangedAttemptBudget: safeIntegerAtLeast(1),
   parkedRetryDelay: safeIntegerAtLeast(PARKED_RETRY_DELAY_MS),
@@ -230,6 +234,9 @@ const getScheduleConfiguration = Effect.fnUntraced(function* (defaults: Schedule
     try: () =>
       S.decodeUnknownSync(ScheduleConfigurationSchema)({
         dispatchAfterEvent: input.dispatchAfterEvent ?? false,
+        inFlightRecovery: Math.ceil(
+          Duration.toMillis(input.inFlightRecovery ?? DEFAULT_IN_FLIGHT_RECOVERY_MS),
+        ),
         minimumRetryDelay: Math.ceil(
           Duration.toMillis(input.minimumRetryDelay ?? MIN_RETRY_DELAY_MS),
         ),
@@ -385,7 +392,7 @@ export type AlarmScheduler = {
    * object's concurrent and nested scopes. Source/checkpoint transactions still commit;
    * the last scope reconciles their current deadlines on success, failure or interruption.
    * Run outside transactions, around bounded maintenance or inline work. The first scope's
-   * parkedRetryDelay bounds the shared guard; renew it if it expires and is consumed while
+   * inFlightRecovery bounds the shared guard; renew it if it expires and is consumed while
    * scopes remain active. A process loss before exit recovers at that retained alarm.
    */
   readonly deferWakes: <A, E, R>(
@@ -1369,7 +1376,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
             const now = yield* Clock.currentTimeMillis;
 
             if (wakeDeferrals === 0) {
-              deferredRecoveryDelay = configuration.parkedRetryDelay;
+              deferredRecoveryDelay = configuration.inFlightRecovery;
               deferredRecoveryAt = now + deferredRecoveryDelay;
               wakesReady ??= Deferred.makeUnsafe<void>();
             }
@@ -1448,6 +1455,22 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                           dispatchNeedsReconcile || dispatchStarted || Exit.isFailure(exit);
 
                         dispatchActive = Exit.isFailure(exit) && !dispatchStarted;
+                        if (dispatchActive) {
+                          const recoveryDelay = yield* getScheduleConfiguration(
+                            configurationDefaults,
+                          ).pipe(
+                            Effect.match({
+                              onFailure: () => PARKED_RETRY_DELAY_MS,
+                              onSuccess: (configuration) => configuration.parkedRetryDelay,
+                            }),
+                          );
+
+                          // A concurrent deferred scope retains ownership of its short guard.
+                          if (wakeDeferrals === 0) {
+                            deferredRecoveryDelay = recoveryDelay;
+                            deferredRecoveryAt = 0;
+                          }
+                        }
                         const reconciled = yield* (
                           reconcile ? transaction(() => Effect.void) : Effect.void
                         ).pipe(Effect.exit);
@@ -1570,11 +1593,17 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           yield* transaction(() =>
             Effect.gen(function* () {
               for (const row of manualRows) {
-                // Keep the selected revision: a racing replacement must survive this guard.
+                // Keep work eligible after eviction; unknown registrations stay parked.
+                const recoveryAt =
+                  now +
+                  (options?.[ManualTags]?.has(row.tag)
+                    ? configuration.inFlightRecovery
+                    : configuration.parkedRetryDelay);
+
                 yield* state.storage.sql.exec(
                   `UPDATE effect_cf_scheduled_alarms SET run_at = ?, wake_at = ? WHERE ${sameRevisionSql}`,
-                  now + configuration.parkedRetryDelay,
-                  now + configuration.parkedRetryDelay,
+                  recoveryAt,
+                  recoveryAt,
                   row.storage_id,
                   row.storage_id,
                   row.revision,
@@ -1686,7 +1715,23 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
               { concurrency: 2 },
             );
 
-        yield* transaction(() => Effect.void);
+        yield* transaction(() =>
+          Effect.gen(function* () {
+            const recoveryAt = (yield* Clock.currentTimeMillis) + configuration.parkedRetryDelay;
+
+            for (const row of manualRows) {
+              // Only a returned handler with no newer checkpoint falls back to parked recovery.
+              yield* state.storage.sql.exec(
+                `UPDATE effect_cf_scheduled_alarms SET run_at = ?, wake_at = ? WHERE ${sameRevisionSql}`,
+                recoveryAt,
+                recoveryAt,
+                row.storage_id,
+                row.storage_id,
+                row.revision,
+              );
+            }
+          }),
+        );
         yield* Exit.asVoidAll(exits);
 
         return { failed, handled, parked };

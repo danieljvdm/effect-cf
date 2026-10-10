@@ -212,9 +212,7 @@ it.effect(
                 );
                 yield* maintenance.scheduleAlarmEarlier(maintenanceInput(atMillis(500)));
                 yield* maintenance.scheduleAlarmEarlier(maintenanceInput(atMillis(250)));
-                assert.deepStrictEqual(fixture.tracker.setAlarms, [
-                  DurableObjectAlarm.PARKED_RETRY_DELAY_MS,
-                ]);
+                assert.deepStrictEqual(fixture.tracker.setAlarms, [1_000]);
                 fixture.failNextSetAlarm();
               }),
             )
@@ -226,13 +224,10 @@ it.effect(
             DateTime.toEpochMillis((yield* maintenance.getAlarmStatus(maintenanceRef))!.runAt),
             250,
           );
-          assert.strictEqual(fixture.currentAlarm(), DurableObjectAlarm.PARKED_RETRY_DELAY_MS);
+          assert.strictEqual(fixture.currentAlarm(), 1_000);
           yield* maintenance.deferWakes(Effect.void);
           assert.strictEqual(fixture.currentAlarm(), 250);
-          assert.deepStrictEqual(fixture.tracker.setAlarms, [
-            DurableObjectAlarm.PARKED_RETRY_DELAY_MS,
-            250,
-          ]);
+          assert.deepStrictEqual(fixture.tracker.setAlarms, [1_000, 250]);
         }).pipe(Effect.provide(Maintenance.handlers({ maintenance: () => Effect.void }).layer)),
       );
     }),

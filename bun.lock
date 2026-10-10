@@ -54,7 +54,7 @@
     },
     "packages/effect-cf": {
       "name": "effect-cf",
-      "version": "0.52.0",
+      "version": "0.54.0",
       "devDependencies": {
         "@cloudflare/computer": "0.2.0",
         "@cloudflare/containers": "catalog:",
@@ -98,7 +98,7 @@
     },
     "packages/effect-webtransport": {
       "name": "effect-webtransport",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "devDependencies": {
         "@effect/vitest": "catalog:",
         "effect": "catalog:",

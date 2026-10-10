@@ -357,8 +357,8 @@ export interface AlarmTransactionOptions {
   readonly sqlClient: SqlClient;
 }
 
-const StorageSqlClient = S.declare<SqliteClient.SqliteClient>((value) =>
-  Predicate.hasProperty(value, SqliteClient.TypeId),
+const StorageSqlClient = S.declare<SqliteClient.SqliteClient>(
+  (value): value is SqliteClient.SqliteClient => Predicate.hasProperty(value, SqliteClient.TypeId),
 );
 
 export interface AlarmStatus {

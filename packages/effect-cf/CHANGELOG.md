@@ -1,5 +1,15 @@
 # effect-cf
 
+## 0.54.0
+
+### Minor Changes
+
+- [#208](https://github.com/danieljvdm/effect-cf/pull/208) [`be9befa`](https://github.com/danieljvdm/effect-cf/commit/be9befaf7e07cdfff2a5c92e886065725edf90e6) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Add an Effect-native RateLimit binding client with service layers, native admission outcomes, and typed operation errors preserving the original cause.
+
+- [#210](https://github.com/danieljvdm/effect-cf/pull/210) [`abcdb42`](https://github.com/danieljvdm/effect-cf/commit/abcdb4204b3b32d7e979f449e36d9727693e5d73) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Compose typed alarm services with `DurableObjectAlarm.mergeAll` under one native Durable Object alarm owner. Use `lifecycle: "manual"` for queues that own completion and retry policy, and `deferWakes` to coalesce native alarm changes during processing while retaining durable recovery.
+
+  Enable `ScheduleConfiguration.dispatchAfterEvent` to dispatch due alarms after RPC/fetch responses unwind, using the same scoped pass as native delivery. Overlapping native alarms join the pass, deferred regions delay dispatch, and durable native scheduling retains recovery authority. Cold Objects can deliver responses later because post-response processing shares the same CPU.
+
 ## 0.53.0
 
 ### Minor Changes

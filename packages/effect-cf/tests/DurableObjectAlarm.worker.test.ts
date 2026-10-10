@@ -1222,6 +1222,61 @@ it.effect(
   },
 );
 
+it.effect("shares the source SQL transaction and preserves its caught child rollback", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+  const registration = Maintenance.handlers({ maintenance: () => Effect.void });
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const maintenance = yield* Maintenance;
+      const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`CREATE TABLE source (generation INTEGER NOT NULL)`;
+      yield* alarms.scheduleAlarm(alarm("unrelated", 1_000));
+      const native = vi.spyOn(state.raw.storage, "transaction");
+
+      yield* maintenance.transaction(
+        (parent) =>
+          Effect.gen(function* () {
+            assert.strictEqual((yield* Effect.serviceOption(sql.transactionService))._tag, "Some");
+            yield* sql`INSERT INTO source VALUES (1)`;
+            yield* state.storage.put("generation", 1);
+            yield* parent.scheduleAlarm(maintenanceInput(DateTime.makeUnsafe(deadline + 2_000)));
+            const child = yield* maintenance
+              .transaction(
+                (tx) =>
+                  Effect.gen(function* () {
+                    yield* sql`UPDATE source SET generation = 2`;
+                    yield* state.storage.put("generation", 2);
+                    yield* tx.scheduleAlarm(maintenanceInput(DateTime.makeUnsafe(deadline)));
+
+                    return yield* Effect.fail("abort child after checkpoint");
+                  }),
+                { sqlClient: sql },
+              )
+              .pipe(Effect.exit);
+
+            assert.isTrue(Exit.isFailure(child));
+          }),
+        { sqlClient: sql },
+      );
+      assert.strictEqual(native.mock.calls.length, 2);
+      native.mockRestore();
+      assert.deepStrictEqual(yield* sql`SELECT generation FROM source`, [{ generation: 1 }]);
+      assert.strictEqual(yield* state.storage.get("generation"), 1);
+      assert.strictEqual(
+        DateTime.toEpochMillis((yield* maintenance.getAlarmStatus(maintenanceRef))!.runAt),
+        deadline + 2_000,
+      );
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 1_000);
+      yield* maintenance.cancelAlarm(maintenanceRef);
+      yield* alarms.cancelAlarm({ tag: "job", id: "unrelated" });
+      assert.isNull(yield* state.storage.getAlarm());
+    }).pipe(Effect.provide(registration.layer.pipe(Layer.provideMerge(services)))),
+  );
+});
+
 it.effect(
   "enrolls manual alarms inside the source's SQL transaction and rolls back with it",
   () => {

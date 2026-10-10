@@ -68,6 +68,13 @@ repeat when its deadline is already earlier. Other logical alarms always retain
 their own deadlines; the scheduler reconciles the earliest effective wake deadline.
 `cancelAlarm` removes that logical work and its attempt state.
 
+When source writes use Effect SQL, pass `{ sqlClient: sql }` as the second argument
+to `alarms.transaction`. The client must be a storage-backed `@effect/sql-sqlite-do`
+client for this same Object. The callback owns its connection permit and SQL
+transaction context, so source writes and alarm checkpoints share one native
+transaction. Use that client directly inside the callback; nested transactions
+remain separate rollback scopes. Do not reserve its connection outside this call.
+
 External enrollment without a source cursor starts a fresh budget and removes
 parking immediately, honoring the requested deadline. A successful one-shot
 completion or cancellation drains that work to idle. A successfully completed

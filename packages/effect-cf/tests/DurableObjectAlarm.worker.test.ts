@@ -396,10 +396,9 @@ it.effect("preserves an active deferred guard when concurrent event acquisition 
         yield* Effect.promise(() => instance.enroll());
         suspendAcquisition = true;
         yield* Effect.promise(() => state.raw.storage.deleteAlarm());
-        const failed = yield* Effect.promise(() => instance.alarm()).pipe(
-          Effect.exit,
-          Effect.forkChild,
-        );
+        const failed = yield* Effect.promise(async () => {
+          await instance.alarm();
+        }).pipe(Effect.exit, Effect.forkChild);
 
         yield* Deferred.await(acquiring);
         const scope = yield* Effect.promise(() => instance.hold()).pipe(Effect.forkChild);

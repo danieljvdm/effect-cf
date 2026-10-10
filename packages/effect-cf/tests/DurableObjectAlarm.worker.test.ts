@@ -1,7 +1,18 @@
 import { env } from "cloudflare:workers";
 import { evictDurableObject } from "cloudflare:test";
 import { assert, it, vi } from "@effect/vitest";
-import { Clock, Context, DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema } from "effect";
+import {
+  Cause,
+  Clock,
+  Context,
+  DateTime,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Schema,
+} from "effect";
 import { TestClock } from "effect/testing";
 import { SqlClient } from "effect/sql";
 
@@ -42,6 +53,102 @@ class Maintenance extends DurableObjectAlarm.Tag<Maintenance>()("test/Maintenanc
 class Reminders extends DurableObjectAlarm.Tag<Reminders>()("test/Reminders", {
   reminder: Schema.Null,
 }) {}
+
+it.effect.each(["limit", "retry", "manual", "configuration"] as const)(
+  "bounds retained alarms with invalid %s options without blocking healthy dispatchers",
+  (kind) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+    const lifecycle = kind === "manual" ? "manual" : "automatic";
+
+    class Work extends DurableObjectAlarm.Tag<Work>()("test/InvalidAlarmOptions", {
+      job: { payload: Schema.Null, lifecycle },
+    }) {}
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+        const handled: string[] = [];
+        const registration = (invalid: boolean) =>
+          DurableObjectAlarm.mergeAll(
+            Work.handlers(
+              {
+                job: (event) =>
+                  Effect.gen(function* () {
+                    handled.push(event.tag);
+                    yield* (yield* Work).cancelAlarm(event);
+                  }),
+              },
+              invalid && kind !== "configuration"
+                ? kind === "retry"
+                  ? { retryFailedAfter: "0 millis" }
+                  : { limit: 0 }
+                : undefined,
+            ),
+            Reminders.handlers({
+              reminder: () =>
+                Effect.sync(() => {
+                  handled.push("reminder");
+                }),
+            }),
+          );
+        const clock = Layer.succeed(Clock.Clock, yield* Clock.Clock);
+
+        yield* TestClock.setTime(deadline);
+        yield* alarms.scheduleAlarm({ ...alarm("retained", 0), lifecycle });
+        yield* alarms.scheduleAlarm({
+          tag: "reminder",
+          id: "healthy",
+          payload: null,
+          runAt: DateTime.makeUnsafe(deadline + 500),
+        });
+        const CurrentObject = DurableObject.make(
+          clock.pipe(
+            Layer.merge(
+              Layer.succeed(
+                DurableObjectAlarm.ScheduleConfiguration,
+                kind === "configuration" ? { minimumRetryDelay: 0 } : { unchangedAttemptBudget: 2 },
+              ),
+            ),
+          ),
+          { alarms: registration(true) },
+        );
+        const instance = new CurrentObject(state.raw, {});
+
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const now = yield* Clock.currentTimeMillis;
+
+          yield* Effect.promise(() => state.raw.storage.deleteAlarm());
+          const exit = yield* Effect.promise(async () => instance.alarm()).pipe(Effect.exit);
+
+          assert.isTrue(Exit.isFailure(exit));
+          if (Exit.isFailure(exit)) {
+            assert.instanceOf<Error>(
+              Cause.squash(exit.cause),
+              kind === "configuration"
+                ? DurableObjectAlarm.InvalidScheduleConfigurationError
+                : DurableObjectAlarm.InvalidProcessDueAlarmsOptionsError,
+            );
+          }
+          const next = yield* state.storage.getAlarm();
+
+          assert.isNotNull(next);
+          assert.isAbove(next!, now);
+          if (attempt === 0 && kind !== "configuration") assert.strictEqual(next, deadline + 500);
+          yield* TestClock.setTime(next!);
+        }
+        const retained = yield* alarms.getAlarmStatus({ tag: "job", id: "retained" });
+
+        assert.isDefined(retained);
+        assert.strictEqual(retained!.attempts, kind === "limit" || kind === "retry" ? 2 : 0);
+        const RestoredObject = DurableObject.make(clock, { alarms: registration(false) });
+
+        yield* Effect.promise(async () => new RestoredObject(state.raw, {}).alarm());
+        assert.deepStrictEqual(handled.sort(), ["job", "reminder"]);
+        assert.isNull(yield* state.storage.getAlarm());
+      }).pipe(Effect.provide(services)),
+    );
+  },
+);
 
 it.effect.each([false, true])(
   "idle post-event checks leave native storage untouched (future alarm: %s)",

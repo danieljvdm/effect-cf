@@ -371,7 +371,9 @@ export const HasDueAlarms: unique symbol = Symbol("effect-cf/DurableObjectAlarm/
 export type AlarmScheduler = {
   /** @internal DurableObject.make shares this scoped event across native and post-event dispatch. */
   readonly [RunAlarm]: <R>(
-    event: (beginDispatch: Effect.Effect<void>) => Effect.Effect<void, unknown, R>,
+    event: (
+      beginDispatch: Effect.Effect<void, InvalidScheduleConfigurationError>,
+    ) => Effect.Effect<void, unknown, R>,
     native: boolean,
   ) => Effect.Effect<void, unknown, R>;
   /** @internal Read the current event's opt-in without acquiring another event layer. */
@@ -767,6 +769,11 @@ const runRegistrations = <R, E>(
             dispatchers,
             (dispatcher) =>
               dispatcher.run.pipe(
+                Effect.catchTag("InvalidProcessDueAlarmsOptionsError", (error) =>
+                  Effect.fail(error).pipe(
+                    Effect.onExit(() => makeDefinition({}).handlers({}).pipe(Effect.asVoid)),
+                  ),
+                ),
                 Effect.provideService(CurrentDispatch, {
                   tags: dispatcher.tags,
                   exclude: false,
@@ -1424,7 +1431,8 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                       yield* awaitWakes;
                       dispatchActive = true;
                       yield* event(
-                        Effect.sync(() => {
+                        Effect.gen(function* () {
+                          yield* getScheduleConfiguration(configurationDefaults);
                           dispatchStarted = true;
                         }),
                       );

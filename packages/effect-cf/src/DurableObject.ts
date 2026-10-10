@@ -17,6 +17,7 @@ import {
   type AlarmRegistration,
   type AlarmService,
   type InvalidAlarmRegistrationError,
+  type InvalidScheduleConfigurationError,
 } from "./DurableObjectAlarm";
 import { fromWebSocket, type DurableWebSocket } from "./DurableObjectWebSocket";
 import * as RpcDefinition from "./RpcDefinition";
@@ -402,7 +403,7 @@ export function make<
     }
 
     #runAlarm(native: boolean, alarmInfo?: globalThis.AlarmInvocationInfo): Promise<void> {
-      const event = (beginDispatch: Effect.Effect<void>) => {
+      const event = (beginDispatch: Effect.Effect<void, InvalidScheduleConfigurationError>) => {
         const alarmEffect = Effect.gen(function* () {
           const alarms = yield* DurableObjectAlarm;
 

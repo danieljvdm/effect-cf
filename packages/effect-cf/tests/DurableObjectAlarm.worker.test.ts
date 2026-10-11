@@ -1769,7 +1769,7 @@ it.effect("honors an earlier checkpoint after an unwrapped SQL commit", () => {
         deadline + 5_000,
       );
       yield* alarms.cancelAlarm(input);
-    }).pipe(Effect.provide(services), Effect.provide(Reactivity.layer)),
+    }).pipe(Effect.provide(Layer.merge(services, Reactivity.layer))),
   );
 });
 
@@ -1817,7 +1817,7 @@ it.effect.each(["sql", "native", "no SQL service", "reused native callback"] as 
         );
 
         yield* boundary === "no SQL service"
-          ? transaction.pipe(Effect.updateContext(Context.omit(SqlClient.SqlClient)))
+          ? transaction.pipe(Effect.updateContext<never, never>(Context.omit(SqlClient.SqlClient)))
           : transaction;
         assert.deepStrictEqual(yield* sql`SELECT value FROM rollback_source ORDER BY value`, [
           { value: 1 },
@@ -1829,7 +1829,7 @@ it.effect.each(["sql", "native", "no SQL service", "reused native callback"] as 
         );
         assert.strictEqual(yield* state.storage.getAlarm(), deadline + 5_000);
         yield* alarms.cancelAlarm(input);
-      }).pipe(Effect.provide(services), Effect.provide(Reactivity.layer)),
+      }).pipe(Effect.provide(Layer.merge(services, Reactivity.layer))),
     );
   },
 );

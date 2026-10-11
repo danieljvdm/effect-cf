@@ -144,6 +144,8 @@ interface AlarmCache {
   readonly rows: Map<string, AlarmRow>;
   native: { readonly at: number | null; readonly delivery: number } | undefined;
 }
+const MAX_CACHED_ALARMS = 128;
+const MAX_CACHED_ROW_TEXT_UNITS = 2_048;
 const emptyCache = (schema = false): AlarmCache => ({
   schema,
   complete: false,
@@ -1278,8 +1280,22 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
       });
       const rememberRow = (cache: AlarmCache | undefined, row: AlarmRow) => {
         if (cache === undefined) return;
+        // Bound retained text to 512 KiB per view, plus fixed row/map overhead.
+        const textUnits =
+          row.storage_id.length +
+          row.alarm_id.length +
+          row.tag.length +
+          row.payload.length +
+          row.revision.length;
+
+        if (textUnits > MAX_CACHED_ROW_TEXT_UNITS) {
+          cache.rows.delete(row.storage_id);
+          cache.complete = false;
+
+          return;
+        }
         cache.rows.set(row.storage_id, row);
-        if (cache.rows.size > 128) {
+        if (cache.rows.size > MAX_CACHED_ALARMS) {
           const oldest = cache.rows.keys().next().value;
 
           if (oldest !== undefined) cache.rows.delete(oldest);

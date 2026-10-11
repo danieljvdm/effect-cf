@@ -77,6 +77,7 @@ remain separate rollback scopes. Do not reserve its connection outside this call
 
 The scheduler retains a bounded view of confirmed alarm metadata per Object
 incarnation, avoiding repeated schema probes and unchanged manual checkpoints.
+Large rows are read from durable storage on demand instead of being retained.
 Commit publishes the view; rollback discards it, and eviction reloads durable rows.
 `DurableObjectSqlite.layer` tracks SQL transaction boundaries. A missing SQL client,
 an unobserved external transaction, or overlapping native transactions disable

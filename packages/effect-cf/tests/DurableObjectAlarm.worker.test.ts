@@ -952,6 +952,125 @@ it.effect.each(["processDue", "define"] as const)(
   },
 );
 
+it.effect("retains an overdue deferred guard and rearms a consumed guard", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+  const registration = Maintenance.handlers({ maintenance: () => Effect.void });
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const maintenance = yield* Maintenance;
+      const guardAt = deadline + 1_000;
+      const nextGuardAt = deadline + 2_001;
+
+      yield* TestClock.setTime(deadline);
+      yield* maintenance.scheduleAlarm(maintenanceInput(DateTime.makeUnsafe(deadline + 10_000)));
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 10_000);
+      const native = vi.spyOn(state.raw.storage, "setAlarm");
+      const observed = yield* maintenance
+        .deferWakes(
+          Effect.gen(function* () {
+            assert.strictEqual(yield* state.storage.getAlarm(), guardAt);
+            assert.strictEqual(native.mock.calls.length, 1);
+            native.mockClear();
+            yield* TestClock.setTime(guardAt + 1);
+            yield* maintenance.scheduleAlarmEarlier(
+              maintenanceInput(DateTime.makeUnsafe(deadline + 5_000)),
+            );
+            const retainedAt = yield* state.storage.getAlarm();
+            const retainedSets = native.mock.calls.length;
+
+            // Model a native delivery consuming the still-present recovery timestamp.
+            yield* Effect.promise(() => state.raw.storage.deleteAlarm());
+            native.mockClear();
+            yield* maintenance.scheduleAlarmEarlier(
+              maintenanceInput(DateTime.makeUnsafe(deadline + 5_000)),
+            );
+            const consumedAt = yield* state.storage.getAlarm();
+            const consumedSets = native.mock.calls.length;
+
+            return { retainedAt, retainedSets, consumedAt, consumedSets };
+          }),
+        )
+        .pipe(Effect.ensuring(Effect.sync(() => native.mockRestore())));
+
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 5_000);
+      yield* maintenance.cancelAlarm(maintenanceRef);
+      assert.isNull(yield* state.storage.getAlarm());
+      assert.deepStrictEqual(observed, {
+        retainedAt: guardAt,
+        retainedSets: 0,
+        consumedAt: nextGuardAt,
+        consumedSets: 1,
+      });
+    }).pipe(Effect.provide(registration.layer.pipe(Layer.provideMerge(services)))),
+  );
+});
+
+it.effect("backs off failed event acquisition after its deferred guard becomes overdue", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+  const EventDependency = Context.Service<void>("test/OverdueAcquisitionGuard");
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      let failAcquisition = false;
+      let handled = 0;
+
+      yield* TestClock.setTime(deadline);
+      const CurrentObject = DurableObject.make(Layer.succeed(Clock.Clock, yield* Clock.Clock), {
+        eventLayer: Layer.effect(
+          EventDependency,
+          Effect.gen(function* () {
+            if (!failAcquisition) return;
+            const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+
+            return yield* alarms.deferWakes(
+              Deferred.succeed(entered, undefined).pipe(
+                Effect.andThen(Deferred.await(release)),
+                Effect.andThen(Effect.fail("dependency unavailable")),
+              ),
+            );
+          }),
+        ),
+        alarms: Maintenance.handlers({
+          maintenance: () =>
+            Effect.sync(() => {
+              handled++;
+            }),
+        }),
+        rpc: {
+          enroll: () =>
+            Effect.flatMap(Maintenance, (maintenance) =>
+              maintenance.scheduleAlarm(maintenanceInput(DateTime.makeUnsafe(deadline))),
+            ),
+        },
+      });
+      const instance = new CurrentObject(state.raw, {});
+
+      yield* Effect.gen(function* () {
+        yield* Effect.promise(() => instance.enroll());
+        failAcquisition = true;
+        yield* Effect.promise(() => state.raw.storage.deleteAlarm());
+        const failed = yield* Effect.promise(async () => {
+          await instance.alarm();
+        }).pipe(Effect.exit, Effect.forkChild);
+
+        yield* Deferred.await(entered);
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline + 1_000);
+        yield* TestClock.setTime(deadline + 1_001);
+        yield* Deferred.succeed(release, undefined);
+        assert.isTrue(Exit.isFailure(yield* Fiber.join(failed)));
+        assert.strictEqual(handled, 0);
+        assert.strictEqual(
+          yield* state.storage.getAlarm(),
+          deadline + 1_001 + DurableObjectAlarm.PARKED_RETRY_DELAY_MS,
+        );
+      }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
+    }),
+  );
+});
+
 it.effect("coalesces nested and concurrent wake changes until deferred work exits", () => {
   const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
   const registration = DurableObjectAlarm.mergeAll(
@@ -1162,6 +1281,243 @@ it.effect("dispatches two automatic registrations independently when one handler
   );
 });
 
+it.effect("coalesces unchanged manual checkpoints while fencing an active dispatch", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+  class Jobs extends DurableObjectAlarm.Tag<Jobs>()("test/ManualCheckpoint", {
+    job: { payload: Schema.String, lifecycle: "manual" },
+  }) {}
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const handled: { readonly payload: string; readonly scheduledAt: number }[] = [];
+      let rowsWritten = 0;
+      const measuredSql: SqlStorage = {
+        ...state.storage.sql,
+        exec: <T extends Record<string, SqlStorageValue>>(
+          query: string,
+          ...bindings: SqlStorageValue[]
+        ) =>
+          state.storage.sql.exec<T>(query, ...bindings).pipe(
+            Effect.tap((cursor) =>
+              Effect.gen(function* () {
+                rowsWritten += yield* cursor.rowsWritten;
+              }),
+            ),
+          ),
+      };
+      const measuredState = Layer.succeed(DurableObjectState.DurableObjectState, {
+        ...state,
+        storage: { ...state.storage, sql: measuredSql },
+      });
+      const registration = Jobs.handlers({
+        job: (event) =>
+          Effect.gen(function* () {
+            handled.push({
+              payload: event.payload,
+              scheduledAt: DateTime.toEpochMillis(event.scheduledAt),
+            });
+            if (handled.length === 1) {
+              yield* Deferred.succeed(entered, undefined);
+              yield* Deferred.await(release);
+            }
+          }),
+      });
+
+      yield* Effect.gen(function* () {
+        const jobs = yield* Jobs;
+        const input = {
+          tag: "job",
+          id: "work",
+          payload: "original",
+          runAt: DateTime.makeUnsafe(deadline),
+        } as const;
+        const recoveryAt = deadline + 1_000;
+
+        yield* TestClock.setTime(deadline);
+        yield* jobs.scheduleAlarm(input);
+        const running = yield* registration.run.pipe(Effect.forkChild);
+
+        yield* Deferred.await(entered);
+        assert.deepStrictEqual(handled, [{ payload: "original", scheduledAt: deadline }]);
+        assert.strictEqual(
+          DateTime.toEpochMillis((yield* jobs.getAlarmStatus(input))!.runAt),
+          recoveryAt,
+        );
+        // The first checkpoint must fence this dispatch even at its recovery deadline.
+        rowsWritten = 0;
+        yield* jobs.scheduleAlarmEarlier({ ...input, runAt: DateTime.makeUnsafe(recoveryAt) });
+        const firstFenceWrites = rowsWritten;
+
+        assert.isAbove(firstFenceWrites, 0);
+        // A redundant row checkpoint must still restore a consumed native guard.
+        yield* Effect.promise(() => state.raw.storage.deleteAlarm());
+        rowsWritten = 0;
+        yield* jobs.scheduleAlarmEarlier({
+          ...input,
+          payload: "ignored later payload",
+          runAt: DateTime.makeUnsafe(recoveryAt + 1_000),
+        });
+        const repeatedWrites = rowsWritten;
+
+        assert.strictEqual(yield* state.storage.getAlarm(), recoveryAt);
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(running);
+        assert.strictEqual(
+          DateTime.toEpochMillis((yield* jobs.getAlarmStatus(input))!.runAt),
+          recoveryAt,
+        );
+        assert.strictEqual(yield* state.storage.getAlarm(), recoveryAt);
+
+        yield* TestClock.setTime(recoveryAt);
+        yield* registration.run;
+        const parkedAt = recoveryAt + DurableObjectAlarm.PARKED_RETRY_DELAY_MS;
+
+        assert.deepStrictEqual(handled, [
+          { payload: "original", scheduledAt: deadline },
+          { payload: "original", scheduledAt: recoveryAt },
+        ]);
+        assert.strictEqual(
+          DateTime.toEpochMillis((yield* jobs.getAlarmStatus(input))!.runAt),
+          parkedAt,
+        );
+        rowsWritten = 0;
+        yield* jobs.scheduleAlarmEarlier({ ...input, runAt: DateTime.makeUnsafe(parkedAt) });
+        const parkedWrites = rowsWritten;
+
+        rowsWritten = 0;
+        yield* jobs.scheduleAlarm({ ...input, runAt: DateTime.makeUnsafe(parkedAt) });
+        const replacementWrites = rowsWritten;
+
+        assert.isAbove(replacementWrites, 0);
+        yield* jobs.cancelAlarm(input);
+        assert.isNull(yield* state.storage.getAlarm());
+        console.info("Manual checkpoint native rowsWritten", {
+          firstFenceWrites,
+          repeatedWrites,
+          parkedWrites,
+          replacementWrites,
+        });
+        assert.deepStrictEqual(
+          { repeatedWrites, parkedWrites },
+          { repeatedWrites: 0, parkedWrites: 0 },
+        );
+      }).pipe(
+        Effect.ensuring(Deferred.succeed(release, undefined)),
+        Effect.provide(
+          registration.layer.pipe(Layer.provideMerge(services), Layer.provide(measuredState)),
+        ),
+      );
+    }),
+  );
+});
+
+it.effect.each(["claim", "park"] as const)(
+  "rejects a stale manual selection after another pass reaches %s",
+  (boundary) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+    class Jobs extends DurableObjectAlarm.Tag<Jobs>()("test/ManualClaim", {
+      job: { payload: Schema.String, lifecycle: "manual" },
+    }) {}
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const selected = yield* Deferred.make<void>();
+        const resume = yield* Deferred.make<void>();
+        const entered = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        let holdSnapshot = true;
+        const observedSql: SqlStorage = {
+          ...state.storage.sql,
+          exec: <T extends Record<string, SqlStorageValue>>(
+            query: string,
+            ...bindings: SqlStorageValue[]
+          ) =>
+            state.storage.sql.exec<T>(query, ...bindings).pipe(
+              Effect.map((cursor) => ({
+                ...cursor,
+                toArray: Effect.fnUntraced(function* () {
+                  const rows = yield* cursor.toArray();
+
+                  if (holdSnapshot && rows.some((row) => row.lifecycle === "manual")) {
+                    holdSnapshot = false;
+                    yield* Deferred.succeed(selected, undefined);
+                    yield* Deferred.await(resume);
+                  }
+
+                  return rows;
+                }),
+              })),
+            ),
+        };
+        const observedState = Layer.succeed(DurableObjectState.DurableObjectState, {
+          ...state,
+          storage: { ...state.storage, sql: observedSql },
+        });
+        const handled: { readonly payload: string; readonly scheduledAt: number }[] = [];
+        const registration = Jobs.handlers({
+          job: (event) =>
+            Effect.gen(function* () {
+              handled.push({
+                payload: event.payload,
+                scheduledAt: DateTime.toEpochMillis(event.scheduledAt),
+              });
+              if (handled.length === 1) {
+                yield* Deferred.succeed(entered, undefined);
+                if (boundary === "claim") yield* Deferred.await(release);
+              }
+            }),
+        });
+
+        yield* Effect.gen(function* () {
+          const jobs = yield* Jobs;
+          const input = {
+            tag: "job",
+            id: "work",
+            payload: "original",
+            runAt: DateTime.makeUnsafe(deadline),
+          } as const;
+          const parkedAt = deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS;
+
+          yield* TestClock.setTime(deadline);
+          yield* jobs.scheduleAlarm(input);
+          const stale = yield* registration.run.pipe(Effect.forkChild);
+
+          yield* Deferred.await(selected);
+          const current = yield* registration.run.pipe(Effect.forkChild);
+
+          yield* Deferred.await(entered);
+          if (boundary === "park") yield* Fiber.join(current);
+          assert.strictEqual(
+            DateTime.toEpochMillis((yield* jobs.getAlarmStatus(input))!.runAt),
+            boundary === "park" ? parkedAt : deadline + 1_000,
+          );
+          yield* Deferred.succeed(resume, undefined);
+          yield* Fiber.join(stale);
+          yield* Deferred.succeed(release, undefined);
+          yield* Fiber.join(current);
+          assert.strictEqual(
+            DateTime.toEpochMillis((yield* jobs.getAlarmStatus(input))!.runAt),
+            parkedAt,
+          );
+          assert.strictEqual(yield* state.storage.getAlarm(), parkedAt);
+          yield* jobs.cancelAlarm(input);
+          assert.deepStrictEqual(handled, [{ payload: "original", scheduledAt: deadline }]);
+        }).pipe(
+          Effect.ensuring(Deferred.succeed(resume, undefined)),
+          Effect.ensuring(Deferred.succeed(release, undefined)),
+          Effect.provide(
+            registration.layer.pipe(Layer.provideMerge(services), Layer.provide(observedState)),
+          ),
+        );
+      }),
+    );
+  },
+);
+
 it.effect(
   "checkpoints manual alarms before dispatch and isolates failures without another attempt budget",
   () => {
@@ -1281,6 +1637,139 @@ it.effect(
     );
   },
 );
+
+// The shared transaction path introduced by b0e1201 checks schema even without alarm writes.
+it.effect(
+  "avoids scheduler SQL for unused deferred source transactions without losing recovery",
+  () => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+    const registration = Maintenance.handlers({ maintenance: () => Effect.void });
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const maintenance = yield* Maintenance;
+        const sql = yield* SqlClient.SqlClient;
+
+        yield* TestClock.setTime(deadline);
+        yield* sql`CREATE TABLE source (generation INTEGER NOT NULL)`;
+        yield* maintenance.scheduleAlarm(maintenanceInput(DateTime.makeUnsafe(deadline + 10_000)));
+        const observed = yield* maintenance.deferWakes(
+          Effect.gen(function* () {
+            yield* Effect.promise(() => state.raw.storage.deleteAlarm());
+            const native = vi.spyOn(state.raw.storage.sql, "exec");
+
+            return yield* Effect.gen(function* () {
+              yield* maintenance.transaction(() => sql`INSERT INTO source VALUES (1)`, {
+                sqlClient: sql,
+              });
+              const unusedCalls = native.mock.calls.length;
+              const guardAt = yield* state.storage.getAlarm();
+
+              native.mockClear();
+              yield* maintenance.transaction(
+                (tx) =>
+                  Effect.gen(function* () {
+                    yield* sql`INSERT INTO source VALUES (2)`;
+                    yield* tx.scheduleAlarm(
+                      maintenanceInput(DateTime.makeUnsafe(deadline + 5_000)),
+                    );
+                    yield* tx.scheduleAlarmEarlier(
+                      maintenanceInput(DateTime.makeUnsafe(deadline + 4_000)),
+                    );
+                  }),
+                { sqlClient: sql },
+              );
+
+              return { unusedCalls, guardAt, batchCalls: native.mock.calls.length };
+            }).pipe(Effect.ensuring(Effect.sync(() => native.mockRestore())));
+          }),
+        );
+
+        assert.deepStrictEqual(yield* sql`SELECT generation FROM source ORDER BY generation`, [
+          { generation: 1 },
+          { generation: 2 },
+        ]);
+        assert.strictEqual(observed.guardAt, deadline + 1_000);
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline + 4_000);
+        yield* maintenance.cancelAlarm(maintenanceRef);
+        assert.strictEqual(observed.batchCalls, 4);
+        assert.strictEqual(observed.unusedCalls, 1);
+      }).pipe(Effect.provide(registration.layer.pipe(Layer.provideMerge(services)))),
+    );
+  },
+);
+
+it.effect("does not retain a caught child's first schema initialization in its parent", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+  const registration = Maintenance.handlers({ maintenance: () => Effect.void });
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const maintenance = yield* Maintenance;
+      const sql = yield* SqlClient.SqlClient;
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+
+      yield* TestClock.setTime(deadline);
+      yield* sql`CREATE TABLE source (generation INTEGER NOT NULL)`;
+      const transaction = state.raw.storage.transaction.bind(state.raw.storage);
+      let holdAcquisition = true;
+      const native = vi
+        .spyOn(state.raw.storage, "transaction")
+        .mockImplementation(
+          async <A>(callback: (tx: globalThis.DurableObjectTransaction) => Promise<A>) => {
+            if (holdAcquisition) {
+              holdAcquisition = false;
+              await Effect.runPromise(Deferred.succeed(entered, undefined));
+              await Effect.runPromise(Deferred.await(release));
+            }
+
+            return transaction(callback);
+          },
+        );
+
+      yield* Effect.gen(function* () {
+        const deferred = yield* maintenance.deferWakes(Effect.void).pipe(Effect.forkChild);
+
+        yield* Deferred.await(entered);
+        yield* maintenance.transaction(
+          (parent) =>
+            Effect.gen(function* () {
+              yield* sql`INSERT INTO source VALUES (1)`;
+              const child = yield* sql
+                .withTransaction(
+                  Effect.gen(function* () {
+                    yield* sql`INSERT INTO source VALUES (2)`;
+                    yield* parent.scheduleAlarm(
+                      maintenanceInput(DateTime.makeUnsafe(deadline + 5_000)),
+                    );
+
+                    return yield* Effect.fail("abort first schema initialization");
+                  }),
+                )
+                .pipe(Effect.exit);
+
+              assert.isTrue(Exit.isFailure(child));
+              yield* parent.scheduleAlarm(maintenanceInput(DateTime.makeUnsafe(deadline + 8_000)));
+            }),
+          { sqlClient: sql },
+        );
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(deferred);
+        assert.deepStrictEqual(yield* sql`SELECT generation FROM source`, [{ generation: 1 }]);
+        assert.strictEqual(
+          DateTime.toEpochMillis((yield* maintenance.getAlarmStatus(maintenanceRef))!.runAt),
+          deadline + 8_000,
+        );
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline + 8_000);
+        yield* maintenance.cancelAlarm(maintenanceRef);
+      }).pipe(
+        Effect.ensuring(Deferred.succeed(release, undefined)),
+        Effect.ensuring(Effect.sync(() => native.mockRestore())),
+      );
+    }).pipe(Effect.provide(registration.layer.pipe(Layer.provideMerge(services)))),
+  );
+});
 
 it.effect("shares the source SQL transaction and preserves its caught child rollback", () => {
   const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());

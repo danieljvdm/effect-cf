@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { evictDurableObject } from "cloudflare:test";
+import { SqliteClient } from "@effect/sql-sqlite-do";
 import { assert, it, vi } from "@effect/vitest";
 import {
   Cause,
@@ -13,6 +14,7 @@ import {
   Layer,
   Schema,
 } from "effect";
+import * as Reactivity from "effect/reactivity/Reactivity";
 import { TestClock } from "effect/testing";
 import { SqlClient } from "effect/sql";
 
@@ -1294,6 +1296,7 @@ it.effect("coalesces unchanged manual checkpoints while fencing an active dispat
       const release = yield* Deferred.make<void>();
       const handled: { readonly payload: string; readonly scheduledAt: number }[] = [];
       let rowsWritten = 0;
+      let sqlCalls = 0;
       const measuredSql: SqlStorage = {
         ...state.storage.sql,
         exec: <T extends Record<string, SqlStorageValue>>(
@@ -1303,6 +1306,7 @@ it.effect("coalesces unchanged manual checkpoints while fencing an active dispat
           state.storage.sql.exec<T>(query, ...bindings).pipe(
             Effect.tap((cursor) =>
               Effect.gen(function* () {
+                sqlCalls++;
                 rowsWritten += yield* cursor.rowsWritten;
               }),
             ),
@@ -1355,12 +1359,14 @@ it.effect("coalesces unchanged manual checkpoints while fencing an active dispat
         // A redundant row checkpoint must still restore a consumed native guard.
         yield* Effect.promise(() => state.raw.storage.deleteAlarm());
         rowsWritten = 0;
+        sqlCalls = 0;
         yield* jobs.scheduleAlarmEarlier({
           ...input,
           payload: "ignored later payload",
           runAt: DateTime.makeUnsafe(recoveryAt + 1_000),
         });
         const repeatedWrites = rowsWritten;
+        const repeatedSql = sqlCalls;
 
         assert.strictEqual(yield* state.storage.getAlarm(), recoveryAt);
         yield* Deferred.succeed(release, undefined);
@@ -1401,8 +1407,8 @@ it.effect("coalesces unchanged manual checkpoints while fencing an active dispat
           replacementWrites,
         });
         assert.deepStrictEqual(
-          { repeatedWrites, parkedWrites },
-          { repeatedWrites: 0, parkedWrites: 0 },
+          { repeatedWrites, parkedWrites, repeatedSql },
+          { repeatedWrites: 0, parkedWrites: 0, repeatedSql: 0 },
         );
       }).pipe(
         Effect.ensuring(Deferred.succeed(release, undefined)),
@@ -1442,7 +1448,11 @@ it.effect.each(["claim", "park"] as const)(
                 toArray: Effect.fnUntraced(function* () {
                   const rows = yield* cursor.toArray();
 
-                  if (holdSnapshot && rows.some((row) => row.lifecycle === "manual")) {
+                  if (
+                    holdSnapshot &&
+                    query.startsWith("SELECT") &&
+                    rows.some((row) => row.lifecycle === "manual")
+                  ) {
                     holdSnapshot = false;
                     yield* Deferred.succeed(selected, undefined);
                     yield* Deferred.await(resume);
@@ -1692,12 +1702,173 @@ it.effect(
         assert.strictEqual(observed.guardAt, deadline + 1_000);
         assert.strictEqual(yield* state.storage.getAlarm(), deadline + 4_000);
         yield* maintenance.cancelAlarm(maintenanceRef);
-        assert.strictEqual(observed.batchCalls, 4);
+        assert.strictEqual(observed.batchCalls, 3);
         assert.strictEqual(observed.unusedCalls, 1);
       }).pipe(Effect.provide(registration.layer.pipe(Layer.provideMerge(services)))),
     );
   },
 );
+
+it.effect("reinitializes alarms after public storage deleteAll", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+      const sql = yield* SqlClient.SqlClient;
+      const ref = { tag: "job", id: "cleared" };
+
+      yield* alarms.scheduleAlarm(alarm(ref.id, 2_000));
+      yield* state.storage.deleteAll();
+      assert.deepStrictEqual(
+        yield* sql`SELECT name FROM sqlite_master WHERE name = 'effect_cf_scheduled_alarms'`,
+        [],
+      );
+      assert.isNull(yield* state.storage.getAlarm());
+      assert.isUndefined(yield* alarms.getAlarmStatus(ref));
+      yield* alarms.scheduleAlarm(alarm(ref.id, 5_000));
+      assert.deepStrictEqual(yield* sql`SELECT alarm_id, run_at FROM effect_cf_scheduled_alarms`, [
+        { alarm_id: ref.id, run_at: deadline + 5_000 },
+      ]);
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 5_000);
+      yield* alarms.cancelAlarm(ref);
+    }).pipe(Effect.provide(services)),
+  );
+});
+
+it.effect("honors an earlier checkpoint after an unwrapped SQL commit", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+      const sql = yield* SqliteClient.make({ storage: state.raw.storage });
+      const input = { ...alarm("foreign-commit", 2_000), lifecycle: "manual" as const };
+
+      yield* alarms.scheduleAlarm(input);
+      yield* sql.withTransaction(
+        alarms.transaction(
+          (tx) => tx.scheduleAlarm({ ...input, runAt: DateTime.makeUnsafe(deadline + 8_000) }),
+          { sqlClient: sql },
+        ),
+      );
+      assert.deepStrictEqual(yield* sql`SELECT alarm_id, run_at FROM effect_cf_scheduled_alarms`, [
+        { alarm_id: input.id, run_at: deadline + 8_000 },
+      ]);
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 8_000);
+      yield* alarms.scheduleAlarmEarlier({
+        ...input,
+        runAt: DateTime.makeUnsafe(deadline + 5_000),
+      });
+      assert.deepStrictEqual(yield* sql`SELECT alarm_id, run_at FROM effect_cf_scheduled_alarms`, [
+        { alarm_id: input.id, run_at: deadline + 5_000 },
+      ]);
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 5_000);
+      assert.strictEqual(
+        DateTime.toEpochMillis((yield* alarms.getAlarmStatus(input))!.runAt),
+        deadline + 5_000,
+      );
+      yield* alarms.cancelAlarm(input);
+    }).pipe(Effect.provide(Layer.merge(services, Reactivity.layer))),
+  );
+});
+
+// Regression in a08f781: an inner checkpoint escaped an unobserved SQL rollback.
+it.effect.each(["sql", "native", "no SQL service", "reused native callback"] as const)(
+  "does not retain an inner checkpoint across an unwrapped SQL rollback: %s",
+  (boundary) => {
+    const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+    return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+        const sql = yield* SqliteClient.make({ storage: state.raw.storage });
+        const options = boundary === "sql" ? { sqlClient: sql } : undefined;
+        const input = { ...alarm("nested-rollback", 2_000), lifecycle: "manual" as const };
+
+        yield* sql`CREATE TABLE rollback_source (value INTEGER NOT NULL)`;
+        yield* alarms.scheduleAlarm(alarm("prime", 1_000));
+        yield* alarms.cancelAlarm({ tag: "job", id: "prime" });
+        const transaction = alarms.transaction(
+          (outer) =>
+            Effect.gen(function* () {
+              yield* sql`INSERT INTO rollback_source VALUES (1)`;
+              const rolledBack = yield* sql
+                .withTransaction(
+                  Effect.gen(function* () {
+                    yield* sql`INSERT INTO rollback_source VALUES (2)`;
+                    yield* boundary === "reused native callback"
+                      ? outer.scheduleAlarm(input)
+                      : alarms.transaction((inner) => inner.scheduleAlarm(input), options);
+
+                    return yield* Effect.fail("roll back the unwrapped middle scope");
+                  }),
+                )
+                .pipe(Effect.exit);
+
+              assert.isTrue(Exit.isFailure(rolledBack));
+              yield* outer.scheduleAlarmEarlier({
+                ...input,
+                runAt: DateTime.makeUnsafe(deadline + 5_000),
+              });
+              yield* sql`INSERT INTO rollback_source VALUES (3)`;
+            }),
+          options,
+        );
+
+        yield* boundary === "no SQL service"
+          ? transaction.pipe(Effect.updateContext<never, never>(Context.omit(SqlClient.SqlClient)))
+          : transaction;
+        assert.deepStrictEqual(yield* sql`SELECT value FROM rollback_source ORDER BY value`, [
+          { value: 1 },
+          { value: 3 },
+        ]);
+        assert.deepStrictEqual(
+          yield* sql`SELECT alarm_id, run_at FROM effect_cf_scheduled_alarms`,
+          [{ alarm_id: input.id, run_at: deadline + 5_000 }],
+        );
+        assert.strictEqual(yield* state.storage.getAlarm(), deadline + 5_000);
+        yield* alarms.cancelAlarm(input);
+      }).pipe(Effect.provide(Layer.merge(services, Reactivity.layer))),
+    );
+  },
+);
+
+it.effect("discards alarms after an explicit successful storage rollback", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+      const sql = yield* SqlClient.SqlClient;
+      const ref = { tag: "job", id: "rolled-back" };
+      const result = yield* state.storage.transaction((tx) =>
+        Effect.gen(function* () {
+          yield* state.storage.put("uncommitted", true);
+          yield* alarms.scheduleAlarm(alarm(ref.id, 2_000));
+          yield* tx.rollback();
+
+          return "returned after rollback";
+        }),
+      );
+
+      assert.strictEqual(result, "returned after rollback");
+      assert.isUndefined(yield* state.storage.get("uncommitted"));
+      assert.deepStrictEqual(
+        yield* sql`SELECT name FROM sqlite_master WHERE name = 'effect_cf_scheduled_alarms'`,
+        [],
+      );
+      assert.isNull(yield* state.storage.getAlarm());
+      assert.isUndefined(yield* alarms.getAlarmStatus(ref));
+      yield* alarms.scheduleAlarm(alarm(ref.id, 5_000));
+      assert.deepStrictEqual(yield* sql`SELECT alarm_id, run_at FROM effect_cf_scheduled_alarms`, [
+        { alarm_id: ref.id, run_at: deadline + 5_000 },
+      ]);
+      assert.strictEqual(yield* state.storage.getAlarm(), deadline + 5_000);
+      yield* alarms.cancelAlarm(ref);
+    }).pipe(Effect.provide(services)),
+  );
+});
 
 it.effect("does not retain a caught child's first schema initialization in its parent", () => {
   const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());

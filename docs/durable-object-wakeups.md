@@ -75,6 +75,17 @@ transaction context, so source writes and alarm checkpoints share one native
 transaction. Use that client directly inside the callback; nested transactions
 remain separate rollback scopes. Do not reserve its connection outside this call.
 
+The scheduler retains a bounded view of confirmed alarm metadata per Object
+incarnation, avoiding repeated schema probes and unchanged manual checkpoints.
+Large rows are read from durable storage on demand instead of being retained.
+Commit publishes the view; rollback discards it, and eviction reloads durable rows.
+`DurableObjectSqlite.layer` tracks SQL transaction boundaries. A missing SQL client,
+an unobserved external transaction, or overlapping native transactions disable
+memoization for that incarnation. `state.storage.deleteAll()` invalidates the
+retained metadata.
+Direct writes to scheduler tables or the native alarm remain outside scheduler
+ownership.
+
 External enrollment without a source cursor starts a fresh budget and removes
 parking immediately, honoring the requested deadline. A successful one-shot
 completion or cancellation drains that work to idle. A successfully completed

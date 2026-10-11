@@ -11,12 +11,20 @@ import * as Layer from "effect/Layer";
 import * as Predicate from "effect/Predicate";
 import * as S from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
-import type { SqlClient, TransactionConnection } from "effect/sql/SqlClient";
+import { SqlClient } from "effect/sql/SqlClient";
 import { SqlError } from "effect/sql/SqlError";
 
 import { DurableObjectState } from "./DurableObjectState";
 import { type SqlStorageValue, StorageOperationError } from "./DurableObjectStorage";
 import * as ErrorMessage from "./internal/ErrorMessage";
+import {
+  CurrentStorageTransaction,
+  invalidateStorageCache,
+  observedSqlTransactions,
+  storageCacheState,
+  withStorageTransaction,
+  type StorageTransaction,
+} from "./internal/StorageTransaction";
 
 const INIT_TABLE_SQL = `
 CREATE TABLE IF NOT EXISTS effect_cf_scheduled_alarms (
@@ -129,6 +137,30 @@ interface AlarmRow extends Record<string, SqlStorageValue> {
   readonly retry_at: number | null;
   readonly progress: number;
 }
+
+interface AlarmCache {
+  schema: boolean;
+  complete: boolean;
+  readonly rows: Map<string, AlarmRow>;
+  native: { readonly at: number | null; readonly delivery: number } | undefined;
+}
+const MAX_CACHED_ALARMS = 128;
+const MAX_CACHED_ROW_TEXT_UNITS = 2_048;
+const emptyCache = (schema = false): AlarmCache => ({
+  schema,
+  complete: false,
+  rows: new Map(),
+  native: undefined,
+});
+
+interface AlarmCacheState {
+  committed: AlarmCache;
+  activeRoots: number;
+  nativeDelivery: number;
+  transactions: WeakMap<StorageTransaction, AlarmCache>;
+  version: number;
+}
+const alarmCaches = new WeakMap<globalThis.DurableObjectStorage, AlarmCacheState>();
 
 const alarmRowsSql = "SELECT a.* FROM effect_cf_scheduled_alarms a";
 const sameRevisionSql = "storage_id = ? AND revision = ?";
@@ -1129,24 +1161,194 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
       const configurationDefaults = { ...(yield* ScheduleConfiguration) };
       let wakeDeferrals = 0;
       let wakesReady: Deferred.Deferred<void> | undefined;
+      let guardReady: Deferred.Deferred<void, StorageOperationError> | undefined;
       let pendingAlarm: Deferred.Deferred<void, unknown> | undefined;
       let dispatchActive = false;
       let dispatchNeedsReconcile = false;
       let deferredRecoveryDelay = PARKED_RETRY_DELAY_MS;
       let deferredRecoveryAt = 0;
 
+      // Only scheduler metadata is retained. A bounded view follows native commits;
+      // evictions and overlapping root transactions fall back to durable storage.
+      const cacheControl = storageCacheState(state.raw.storage);
+      let cacheState = alarmCaches.get(state.raw.storage);
+
+      if (cacheState === undefined) {
+        cacheState = {
+          committed: emptyCache(),
+          activeRoots: 0,
+          nativeDelivery: 0,
+          version: cacheControl.version,
+          transactions: new WeakMap(),
+        };
+        alarmCaches.set(state.raw.storage, cacheState);
+      }
+      const cacheStateForObject = cacheState;
+      const transactionCache = (scope: StorageTransaction): AlarmCache | undefined => {
+        if (scope.storage !== state.raw.storage) return undefined;
+        if (!scope.cacheable) {
+          invalidateStorageCache(state.raw.storage, true);
+
+          return undefined;
+        }
+        const existing = cacheStateForObject.transactions.get(scope);
+
+        if (existing !== undefined) return existing;
+        const parent = scope.parent;
+
+        if (parent === undefined && cacheStateForObject.activeRoots > 0) {
+          invalidateStorageCache(state.raw.storage, true);
+
+          return undefined;
+        }
+        const previous =
+          parent === undefined ? cacheStateForObject.committed : transactionCache(parent);
+
+        if (previous === undefined) return undefined;
+        const view = { ...previous, rows: new Map(previous.rows) };
+        const version = cacheControl.version;
+
+        if (parent === undefined) {
+          cacheStateForObject.activeRoots++;
+          cacheStateForObject.committed = emptyCache(previous.schema);
+        }
+        cacheStateForObject.transactions.set(scope, view);
+        scope.onExit.push((committed) => {
+          if (parent !== undefined) {
+            if (committed && scope.cacheable && version === cacheControl.version) {
+              previous.schema = view.schema;
+              previous.complete = view.complete;
+              previous.native = view.native;
+              previous.rows.clear();
+              for (const [id, row] of view.rows) previous.rows.set(id, row);
+            } else {
+              // Reload after a caught rollback instead of trusting a retained parent view.
+              previous.schema = false;
+              previous.complete = false;
+              previous.native = undefined;
+              previous.rows.clear();
+              if (!scope.cacheable) parent.cacheable = false;
+            }
+          } else {
+            cacheStateForObject.activeRoots--;
+            if (cacheStateForObject.activeRoots === 0) {
+              cacheStateForObject.committed =
+                committed && version === cacheControl.version && scope.cacheable
+                  ? view
+                  : emptyCache();
+            }
+          }
+        });
+
+        return view;
+      };
+      const currentCache = Effect.withFiber((fiber) => {
+        if (cacheStateForObject.version !== cacheControl.version) {
+          cacheStateForObject.version = cacheControl.version;
+          cacheStateForObject.committed = emptyCache();
+          cacheStateForObject.transactions = new WeakMap();
+        }
+        if (!cacheControl.enabled) return Effect.succeed(undefined);
+        const sql = Context.getOption(fiber.context, SqlClient);
+
+        // Without its transaction key, an unwrapped SQL scope cannot be observed.
+        if (sql._tag === "None") {
+          invalidateStorageCache(state.raw.storage, true);
+
+          return Effect.succeed(undefined);
+        }
+        const transaction = Context.get(fiber.context, CurrentStorageTransaction);
+        const connection = Context.getOption(fiber.context, sql.value.transactionService);
+        const depth = connection._tag === "Some" ? connection.value[1] : undefined;
+
+        if (transaction !== undefined) {
+          // A retained callback may enter an unwrapped SQL child without opening a new scope.
+          if (transaction.storage === state.raw.storage && transaction.sqlDepth !== depth)
+            transaction.cacheable = false;
+
+          return Effect.succeed(transactionCache(transaction));
+        }
+
+        // Interoperating with an unwrapped SQL transaction cannot certify its commit.
+        if (connection._tag === "Some") {
+          invalidateStorageCache(state.raw.storage, true);
+
+          return Effect.succeed(undefined);
+        }
+
+        return Effect.succeed(cacheStateForObject.committed);
+      });
+      const rememberRow = (cache: AlarmCache | undefined, row: AlarmRow) => {
+        if (cache === undefined) return;
+        // Bound retained text to 512 KiB per view, plus fixed row/map overhead.
+        const textUnits =
+          row.storage_id.length +
+          row.alarm_id.length +
+          row.tag.length +
+          row.payload.length +
+          row.revision.length;
+
+        if (textUnits > MAX_CACHED_ROW_TEXT_UNITS) {
+          cache.rows.delete(row.storage_id);
+          cache.complete = false;
+
+          return;
+        }
+        cache.rows.set(row.storage_id, row);
+        if (cache.rows.size > MAX_CACHED_ALARMS) {
+          const oldest = cache.rows.keys().next().value;
+
+          if (oldest !== undefined) cache.rows.delete(oldest);
+          cache.complete = false;
+        }
+      };
+      const ensureSchema = Effect.gen(function* () {
+        const cache = yield* currentCache;
+
+        if (cache?.schema) return;
+        yield* ensureTable(state);
+        if (cache !== undefined) cache.schema = true;
+      });
+      const hasTables = Effect.gen(function* () {
+        const cache = yield* currentCache;
+
+        return cache?.schema === true || (yield* hasSchedulerTables(state));
+      });
+      const readNativeAlarm = Effect.gen(function* () {
+        const cache = yield* currentCache;
+
+        // The managed native entry invalidates a consumed timestamp before joining.
+        // Raw/manual callers retain the native observation at their interop boundary.
+        if (dispatchActive && cache?.native?.delivery === cacheStateForObject.nativeDelivery)
+          return cache.native.at;
+        const at = yield* state.storage.getAlarm();
+
+        if (cache !== undefined)
+          cache.native = { at, delivery: cacheStateForObject.nativeDelivery };
+
+        return at;
+      });
+
       const readRow = Effect.fnUntraced(function* (storageId: string) {
+        const cache = yield* currentCache;
+
+        if (cache !== undefined && (cache.complete || cache.rows.has(storageId)))
+          return cache.rows.get(storageId);
         const cursor = yield* state.storage.sql.exec<AlarmRow>(
           `${alarmRowsSql} WHERE a.storage_id = ?`,
           storageId,
         );
 
-        return (yield* cursor.toArray())[0];
+        const row = (yield* cursor.toArray())[0];
+
+        if (row !== undefined) rememberRow(cache, row);
+
+        return row;
       });
 
       // The scheduler is the sole alarm writer. Raw storage is confined to this boundary.
-      const writeNativeAlarm = (runAt: number | null) =>
-        Effect.tryPromise({
+      const writeNativeAlarm = Effect.fnUntraced(function* (runAt: number | null) {
+        yield* Effect.tryPromise({
           try: () =>
             runAt === null ? state.raw.storage.deleteAlarm() : state.raw.storage.setAlarm(runAt),
           catch: (cause) =>
@@ -1155,11 +1357,16 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
               cause,
             }),
         });
+        const cache = yield* currentCache;
+
+        if (cache !== undefined)
+          cache.native = { at: runAt, delivery: cacheStateForObject.nativeDelivery };
+      });
 
       const reconcileAlarm = Effect.fnUntraced(function* (renewOverdue = false) {
         if (wakeDeferrals > 0 || dispatchActive) {
           if (dispatchActive) dispatchNeedsReconcile = true;
-          const current = yield* state.storage.getAlarm();
+          const current = yield* readNativeAlarm;
           const now = yield* Clock.currentTimeMillis;
           const resetRecovery = deferredRecoveryAt === 0;
 
@@ -1179,13 +1386,25 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
 
           return;
         }
-        const cursor = yield* state.storage.sql.exec<NextAlarmRow>(
-          `SELECT wake_at AS run_at FROM effect_cf_scheduled_alarms
-           ORDER BY wake_at, storage_id LIMIT 1`,
-        );
-        const next = (yield* cursor.toArray())[0]?.run_at ?? null;
+        const cache = yield* currentCache;
+        let next: number | null = null;
 
-        if ((yield* state.storage.getAlarm()) !== next) {
+        if (cache?.complete) {
+          for (const row of cache.rows.values()) next = Math.min(next ?? row.wake_at, row.wake_at);
+        } else {
+          const cursor = yield* state.storage.sql.exec<NextAlarmRow>(
+            `SELECT wake_at AS run_at FROM effect_cf_scheduled_alarms
+             ORDER BY wake_at, storage_id LIMIT 1`,
+          );
+
+          next = (yield* cursor.toArray())[0]?.run_at ?? null;
+          if (cache !== undefined && next === null) {
+            cache.complete = true;
+            cache.rows.clear();
+          }
+        }
+
+        if ((yield* readNativeAlarm) !== next) {
           yield* writeNativeAlarm(next);
         }
       });
@@ -1197,10 +1416,10 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         retryAt: number | null,
         progress: number,
       ) {
-        yield* state.storage.sql.exec(
+        const cursor = yield* state.storage.sql.exec<AlarmRow>(
           `UPDATE effect_cf_scheduled_alarms SET revision = ?, attempts = ?, parked = ?,
              retry_at = ?, progress = ?, wake_at = MAX(run_at, COALESCE(?, run_at))
-           WHERE storage_id = ?`,
+           WHERE storage_id = ? RETURNING *`,
           crypto.randomUUID(),
           attempts,
           parked,
@@ -1209,16 +1428,22 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           retryAt,
           storageId,
         );
+        const row = (yield* cursor.toArray())[0];
+
+        if (row !== undefined) rememberRow(yield* currentCache, row);
       });
 
       const cancelAlarm = Effect.fn("DurableObjectAlarm.cancelAlarm")(function* (input: AlarmRef) {
         const ref = yield* decodeAlarmRef(input);
         const storageId = getScheduledEventId(ref);
+        const cache = yield* currentCache;
 
+        if (cache?.complete && !cache.rows.has(storageId)) return;
         yield* state.storage.sql.exec(
           `DELETE FROM effect_cf_scheduled_alarms WHERE storage_id = ?`,
           storageId,
         );
+        cache?.rows.delete(storageId);
       });
 
       const scheduleAlarm = Effect.fn("DurableObjectAlarm.scheduleAlarm")(function* (
@@ -1251,6 +1476,22 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         const runAt = DateTime.toEpochMillis(input.runAt);
 
         if (lifecycle === "manual") {
+          const cache = yield* currentCache;
+          const known = cache?.rows.get(storageId);
+
+          if (
+            earlier &&
+            known?.lifecycle === "manual" &&
+            known.run_at <= runAt &&
+            known.wake_at === known.run_at &&
+            known.repeat_every_ms === null &&
+            known.attempts === 0 &&
+            known.parked === 0 &&
+            known.retry_at === null &&
+            known.progress === -1 &&
+            !known.revision.startsWith("manual:")
+          )
+            return;
           // The queue owns attempts. One row carries the aggregate deadline and dispatch fence.
           const deadline = earlier ? "MIN(run_at, excluded.run_at)" : "excluded.run_at";
           const nextPayload = earlier
@@ -1264,7 +1505,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                  OR revision GLOB 'manual:*'`
             : "";
 
-          yield* state.storage.sql.exec(
+          const cursor = yield* state.storage.sql.exec<AlarmRow>(
             `INSERT INTO effect_cf_scheduled_alarms
               (storage_id, alarm_id, tag, lifecycle, run_at, wake_at, payload, revision)
              VALUES (?, ?, ?, 'manual', ?, ?, ?, ?)
@@ -1272,7 +1513,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                lifecycle = 'manual', run_at = ${deadline}, wake_at = ${deadline},
                payload = ${nextPayload}, revision = excluded.revision,
                repeat_every_ms = NULL, attempts = 0, parked = 0, retry_at = NULL, progress = -1
-             ${changed}`,
+             ${changed} RETURNING *`,
             storageId,
             ref.id,
             ref.tag,
@@ -1281,6 +1522,10 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
             payload,
             crypto.randomUUID(),
           );
+
+          const row = (yield* cursor.toArray())[0];
+
+          if (row !== undefined) rememberRow(cache, row);
 
           return;
         }
@@ -1327,11 +1572,11 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         const scheduledRepeat = keepEarlier ? existing.repeat_every_ms : repeatEveryMillis;
         const nextProgress = Math.max(progress, input.progress ?? -1);
 
-        yield* state.storage.sql.exec(
+        const cursor = yield* state.storage.sql.exec<AlarmRow>(
           `INSERT OR REPLACE INTO effect_cf_scheduled_alarms
             (storage_id, alarm_id, tag, lifecycle, run_at, repeat_every_ms, payload,
              wake_at, revision, attempts, parked, retry_at, progress)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
           storageId,
           ref.id,
           ref.tag,
@@ -1346,6 +1591,9 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           retryAt,
           nextProgress,
         );
+        const row = (yield* cursor.toArray())[0];
+
+        if (row !== undefined) rememberRow(yield* currentCache, row);
         if (parked === 1 && retryAt !== null && (existing?.parked ?? source?.parked ?? 0) === 0) {
           reports.push(storageId);
         }
@@ -1390,10 +1638,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         const reports: string[] = [];
         const body = Effect.withFiber((owner) => {
           let active = true;
-          const schemaTransactions =
-            options !== undefined && (wakeDeferrals > 0 || dispatchActive)
-              ? new WeakSet<TransactionConnection.Service>()
-              : undefined;
+          const lazySchema = options !== undefined && (wakeDeferrals > 0 || dispatchActive);
           const requireActive = <A, E>(effect: Effect.Effect<A, E>) =>
             Effect.withFiber<A, E | StorageOperationError>((fiber) => {
               // A queued or suspended transaction can outlive the handler that admitted it.
@@ -1404,26 +1649,12 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                     cause: new Error("Alarm mutations require their active transaction callback"),
                   }),
                 );
-              if (schemaTransactions === undefined || options === undefined) return effect;
-              const transaction = Context.getOption(
-                fiber.context,
-                options.sqlClient.transactionService,
-              );
 
-              if (transaction._tag === "Some" && schemaTransactions.has(transaction.value))
-                return effect;
-
-              return Effect.gen(function* () {
-                yield* ensureTable(state);
-                // Child rollback cannot certify schema for its parent's transaction.
-                if (transaction._tag === "Some") schemaTransactions.add(transaction.value);
-
-                return yield* effect;
-              });
+              return lazySchema ? Effect.andThen(ensureSchema, effect) : effect;
             });
 
           return Effect.gen(function* () {
-            if (schemaTransactions === undefined) yield* ensureTable(state);
+            if (!lazySchema) yield* ensureSchema;
             const result = yield* Effect.suspend(() =>
               closure({
                 cancelAlarm: (input) => requireActive(cancelAlarm(input)),
@@ -1438,8 +1669,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
               ),
             );
 
-            if (schemaTransactions !== undefined && wakeDeferrals === 0 && !dispatchActive)
-              yield* ensureTable(state);
+            if (lazySchema && wakeDeferrals === 0 && !dispatchActive) yield* ensureSchema;
             yield* reconcileAlarm(renewOverdue);
 
             return result;
@@ -1464,15 +1694,19 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                   }),
                 );
 
-              return yield* client
-                .withTransaction(body)
-                .pipe(
-                  Effect.mapError((cause) =>
-                    cause instanceof SqlError
-                      ? new StorageOperationError({ operation: "alarm.transaction", cause })
-                      : cause,
-                  ),
-                );
+              const operation = client.withTransaction(body);
+
+              return yield* (
+                observedSqlTransactions.has(client.withTransaction)
+                  ? operation
+                  : withStorageTransaction(state.raw.storage, operation, client)
+              ).pipe(
+                Effect.mapError((cause) =>
+                  cause instanceof SqlError
+                    ? new StorageOperationError({ operation: "alarm.transaction", cause })
+                    : cause,
+                ),
+              );
             });
 
         yield* reportParked(reports);
@@ -1490,10 +1724,19 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
               deferredRecoveryDelay = configuration.inFlightRecovery;
               deferredRecoveryAt = now + deferredRecoveryDelay;
               wakesReady ??= Deferred.makeUnsafe<void>();
+              guardReady = Deferred.makeUnsafe<void, StorageOperationError>();
             }
             wakeDeferrals++;
+
+            return { first: wakeDeferrals === 1, ready: guardReady! };
           }),
-          () => transaction(() => Effect.void, undefined, true).pipe(Effect.andThen(body)),
+          ({ first, ready }) =>
+            (first
+              ? transaction(() => Effect.void, undefined, true).pipe(
+                  Effect.onExit((exit) => Deferred.done(ready, exit)),
+                )
+              : Deferred.await(ready)
+            ).pipe(Effect.andThen(body)),
           () =>
             Effect.gen(function* () {
               wakeDeferrals--;
@@ -1504,6 +1747,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                       if (wakeDeferrals === 0 && wakesReady !== undefined) {
                         Deferred.doneUnsafe(wakesReady, Effect.void);
                         wakesReady = undefined;
+                        guardReady = undefined;
                       }
                     }),
                   ),
@@ -1518,84 +1762,89 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           : Deferred.await(wakesReady).pipe(Effect.andThen(awaitWakes)),
       );
       const runAlarm: AlarmScheduler[typeof RunAlarm] = (event, native) =>
-        Effect.flatMap(hasSchedulerTables(state), (managed) =>
-          !managed
-            ? native
-              ? event(Effect.void)
-              : Effect.void
-            : Effect.uninterruptibleMask((restore) =>
-                Effect.suspend(() => {
-                  const pending = pendingAlarm;
+        Effect.suspend(() => {
+          if (native) cacheStateForObject.nativeDelivery++;
 
-                  if (pending !== undefined) {
-                    // A native delivery consumed its timestamp. Restore recovery before joining.
+          return Effect.flatMap(hasTables, (managed) =>
+            !managed
+              ? native
+                ? event(Effect.void)
+                : Effect.void
+              : Effect.uninterruptibleMask((restore) =>
+                  Effect.suspend(() => {
+                    const pending = pendingAlarm;
+
+                    if (pending !== undefined) {
+                      // A native delivery consumed its timestamp. Restore recovery before joining.
+                      return restore(
+                        (native ? transaction(() => Effect.void) : Effect.void).pipe(
+                          Effect.andThen(Deferred.await(pending)),
+                        ),
+                      );
+                    }
+                    const completed = Deferred.makeUnsafe<void, unknown>();
+                    let dispatchStarted = false;
+
+                    pendingAlarm = completed;
+                    dispatchNeedsReconcile = native;
+
                     return restore(
-                      (native ? transaction(() => Effect.void) : Effect.void).pipe(
-                        Effect.andThen(Deferred.await(pending)),
+                      Effect.gen(function* () {
+                        // Native-first delivery can consume an inline region's guard before
+                        // any prompt pass exists to join. Restore it while waiting for exit.
+                        if (native && wakesReady !== undefined)
+                          yield* transaction(() => Effect.void);
+                        yield* awaitWakes;
+                        dispatchActive = true;
+                        yield* event(
+                          Effect.gen(function* () {
+                            yield* getScheduleConfiguration(configurationDefaults);
+                            dispatchStarted = true;
+                          }),
+                        );
+                      }),
+                    ).pipe(
+                      Effect.onExit((exit) =>
+                        Effect.gen(function* () {
+                          // The event includes its scope finalizers. Late enrollments cannot be
+                          // swallowed by a native delivery that joined after the final checkpoint.
+                          // Acquisition failure never reached a dispatcher: keep a future guard
+                          // instead of rearming untouched due rows into an immediate retry loop.
+                          const reconcile =
+                            dispatchNeedsReconcile || dispatchStarted || Exit.isFailure(exit);
+
+                          dispatchActive = Exit.isFailure(exit) && !dispatchStarted;
+                          if (dispatchActive) {
+                            const recoveryDelay = yield* getScheduleConfiguration(
+                              configurationDefaults,
+                            ).pipe(
+                              Effect.match({
+                                onFailure: () => PARKED_RETRY_DELAY_MS,
+                                onSuccess: (configuration) => configuration.parkedRetryDelay,
+                              }),
+                            );
+
+                            // A concurrent deferred scope retains ownership of its short guard.
+                            if (wakeDeferrals === 0) {
+                              deferredRecoveryDelay = recoveryDelay;
+                              deferredRecoveryAt = 0;
+                            }
+                          }
+                          const reconciled = yield* (
+                            reconcile ? transaction(() => Effect.void) : Effect.void
+                          ).pipe(Effect.exit);
+
+                          dispatchActive = false;
+                          pendingAlarm = undefined;
+                          yield* Deferred.done(completed, Exit.asVoidAll([exit, reconciled]));
+                          yield* reconciled;
+                        }),
                       ),
                     );
-                  }
-                  const completed = Deferred.makeUnsafe<void, unknown>();
-                  let dispatchStarted = false;
-
-                  pendingAlarm = completed;
-                  dispatchNeedsReconcile = native;
-
-                  return restore(
-                    Effect.gen(function* () {
-                      // Native-first delivery can consume an inline region's guard before
-                      // any prompt pass exists to join. Restore it while waiting for exit.
-                      if (native && wakesReady !== undefined) yield* transaction(() => Effect.void);
-                      yield* awaitWakes;
-                      dispatchActive = true;
-                      yield* event(
-                        Effect.gen(function* () {
-                          yield* getScheduleConfiguration(configurationDefaults);
-                          dispatchStarted = true;
-                        }),
-                      );
-                    }),
-                  ).pipe(
-                    Effect.onExit((exit) =>
-                      Effect.gen(function* () {
-                        // The event includes its scope finalizers. Late enrollments cannot be
-                        // swallowed by a native delivery that joined after the final checkpoint.
-                        // Acquisition failure never reached a dispatcher: keep a future guard
-                        // instead of rearming untouched due rows into an immediate retry loop.
-                        const reconcile =
-                          dispatchNeedsReconcile || dispatchStarted || Exit.isFailure(exit);
-
-                        dispatchActive = Exit.isFailure(exit) && !dispatchStarted;
-                        if (dispatchActive) {
-                          const recoveryDelay = yield* getScheduleConfiguration(
-                            configurationDefaults,
-                          ).pipe(
-                            Effect.match({
-                              onFailure: () => PARKED_RETRY_DELAY_MS,
-                              onSuccess: (configuration) => configuration.parkedRetryDelay,
-                            }),
-                          );
-
-                          // A concurrent deferred scope retains ownership of its short guard.
-                          if (wakeDeferrals === 0) {
-                            deferredRecoveryDelay = recoveryDelay;
-                            deferredRecoveryAt = 0;
-                          }
-                        }
-                        const reconciled = yield* (
-                          reconcile ? transaction(() => Effect.void) : Effect.void
-                        ).pipe(Effect.exit);
-
-                        dispatchActive = false;
-                        pendingAlarm = undefined;
-                        yield* Deferred.done(completed, Exit.asVoidAll([exit, reconciled]));
-                        yield* reconciled;
-                      }),
-                    ),
-                  );
-                }),
-              ),
-        );
+                  }),
+                ),
+          );
+        });
 
       const rescheduleFailedAlarm = Effect.fnUntraced(function* (
         row: AlarmRow,
@@ -1627,11 +1876,13 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         configuration: ResolvedScheduleConfiguration,
       ) {
         if (row.repeat_every_ms === null) {
-          yield* state.storage.sql.exec(
+          const cursor = yield* state.storage.sql.exec(
             `DELETE FROM effect_cf_scheduled_alarms WHERE ${sameRevisionSql}`,
             row.storage_id,
             row.revision,
           );
+
+          if ((yield* cursor.rowsWritten) > 0) (yield* currentCache)?.rows.delete(row.storage_id);
 
           return;
         }
@@ -1660,7 +1911,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
       ) {
         const configuration = yield* getScheduleConfiguration(configurationDefaults);
 
-        yield* ensureTable(state);
+        yield* ensureSchema;
         const limit = yield* getProcessLimit(options);
         const initialDelay = yield* getFailureRetryDelay(options, configuration);
         const now = yield* Clock.currentTimeMillis;
@@ -1676,6 +1927,22 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         const tagBindings =
           dispatch === undefined ? [] : [S.encodeSync(StoredTags)([...dispatch.tags])];
         const select = Effect.fnUntraced(function* (lifecycle: AlarmLifecycle, batchLimit: number) {
+          const cache = yield* currentCache;
+
+          if (cache?.complete)
+            return [...cache.rows.values()]
+              .filter(
+                (row) =>
+                  row.lifecycle === lifecycle &&
+                  row.wake_at <= now &&
+                  (dispatch === undefined || dispatch.tags.includes(row.tag) !== dispatch.exclude),
+              )
+              .sort(
+                (a, b) =>
+                  a.wake_at - b.wake_at ||
+                  (a.storage_id < b.storage_id ? -1 : a.storage_id > b.storage_id ? 1 : 0),
+              )
+              .slice(0, batchLimit);
           const cursor = yield* state.storage.sql.exec<AlarmRow>(
             `${alarmRowsSql} WHERE a.lifecycle = ? AND a.wake_at <= ?${tagFilter}
              ORDER BY a.wake_at ASC, a.storage_id ASC LIMIT ?`,
@@ -1685,7 +1952,11 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
             batchLimit,
           );
 
-          return yield* cursor.toArray();
+          const rows = yield* cursor.toArray();
+
+          for (const row of rows) rememberRow(cache, row);
+
+          return rows;
         });
         // Manual recovery never consumes the raw/automatic dispatcher's batch allowance.
         const dueRows = yield* select("automatic", limit);
@@ -1704,9 +1975,9 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                     ? configuration.inFlightRecovery
                     : configuration.parkedRetryDelay);
                 const revision = `manual:${crypto.randomUUID()}`;
-                const cursor = yield* state.storage.sql.exec(
+                const cursor = yield* state.storage.sql.exec<AlarmRow>(
                   `UPDATE effect_cf_scheduled_alarms SET run_at = ?, wake_at = ?, revision = ?
-                   WHERE ${sameRevisionSql}`,
+                   WHERE ${sameRevisionSql} RETURNING *`,
                   recoveryAt,
                   recoveryAt,
                   revision,
@@ -1715,7 +1986,12 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                 );
 
                 // Keep the selected deadline/payload; dispatch only a successfully fenced claim.
-                if ((yield* cursor.rowsWritten) > 0) claimed.push({ ...row, revision });
+                const updated = (yield* cursor.toArray())[0];
+
+                if (updated !== undefined) {
+                  rememberRow(yield* currentCache, updated);
+                  claimed.push({ ...row, revision });
+                }
               }
 
               return claimed;
@@ -1825,24 +2101,37 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
               { concurrency: 2 },
             );
 
-        yield* transaction(() =>
-          Effect.gen(function* () {
-            const recoveryAt = (yield* Clock.currentTimeMillis) + configuration.parkedRetryDelay;
+        const cache = yield* currentCache;
+        const unchanged = manualRows.filter((row) => {
+          const current = cache?.rows.get(row.storage_id);
 
-            for (const row of manualRows) {
-              // Retire the claim with a fresh fence; never revive a pre-claim revision.
-              yield* state.storage.sql.exec(
-                `UPDATE effect_cf_scheduled_alarms SET run_at = ?, wake_at = ?, revision = ?
-                 WHERE ${sameRevisionSql}`,
-                recoveryAt,
-                recoveryAt,
-                crypto.randomUUID(),
-                row.storage_id,
-                row.revision,
-              );
-            }
-          }),
-        );
+          return current === undefined
+            ? cache?.complete !== true
+            : current.revision === row.revision;
+        });
+
+        if (unchanged.length > 0 || (wakeDeferrals === 0 && !dispatchActive))
+          yield* transaction(() =>
+            Effect.gen(function* () {
+              const recoveryAt = (yield* Clock.currentTimeMillis) + configuration.parkedRetryDelay;
+
+              for (const row of unchanged) {
+                // Retire the claim with a fresh fence; never revive a pre-claim revision.
+                const cursor = yield* state.storage.sql.exec<AlarmRow>(
+                  `UPDATE effect_cf_scheduled_alarms SET run_at = ?, wake_at = ?, revision = ?
+                 WHERE ${sameRevisionSql} RETURNING *`,
+                  recoveryAt,
+                  recoveryAt,
+                  crypto.randomUUID(),
+                  row.storage_id,
+                  row.revision,
+                );
+                const updated = (yield* cursor.toArray())[0];
+
+                if (updated !== undefined) rememberRow(yield* currentCache, updated);
+              }
+            }),
+          );
         yield* Exit.asVoidAll(exits);
 
         return { failed, handled, parked };
@@ -1856,7 +2145,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
             (configuration.dispatchAfterEvent ?? configurationDefaults.dispatchAfterEvent) === true,
         ),
         [HasDueAlarms]: Effect.gen(function* () {
-          yield* ensureTable(state);
+          yield* ensureSchema;
           const now = yield* Clock.currentTimeMillis;
           const cursor = yield* state.storage.sql.exec(
             "SELECT 1 FROM effect_cf_scheduled_alarms WHERE wake_at <= ? LIMIT 1",
@@ -1870,7 +2159,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         getAlarmStatus: Effect.fnUntraced(function* (input) {
           const ref = yield* decodeAlarmRef(input);
 
-          yield* ensureTable(state);
+          yield* ensureSchema;
           const row = yield* readRow(getScheduledEventId(ref));
 
           return row === undefined

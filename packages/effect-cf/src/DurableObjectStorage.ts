@@ -10,6 +10,12 @@ import * as S from "effect/Schema";
 
 import * as ErrorMessage from "./internal/ErrorMessage";
 import { runNativeCallback } from "./internal/NativeCallback";
+import {
+  CurrentStorageTransaction,
+  invalidateStorageCache,
+  withStorageTransaction,
+  type StorageTransaction,
+} from "./internal/StorageTransaction";
 
 export type SqlStorageValue = globalThis.SqlStorageValue;
 
@@ -234,6 +240,7 @@ const fromSyncKvStorage = (kv: globalThis.SyncKvStorage): SyncKvStorage => ({
 // SAFETY: every overload is dispatched by the native key form and wrapped with the same Effect error contract.
 const fromDurableObjectTransaction = (
   txn: globalThis.DurableObjectTransaction,
+  owner: StorageTransaction | undefined,
 ): DurableObjectTransaction =>
   ({
     get: <T = unknown>(
@@ -259,7 +266,11 @@ const fromDurableObjectTransaction = (
       Array.isArray(keyOrKeys)
         ? tryStoragePromise("transaction.delete", () => txn.delete(keyOrKeys, options))
         : tryStoragePromise("transaction.delete", () => txn.delete(keyOrKeys, options)),
-    rollback: () => tryStorageSync("transaction.rollback", () => txn.rollback()),
+    rollback: () =>
+      tryStorageSync("transaction.rollback", () => {
+        txn.rollback();
+        if (owner !== undefined) owner.rolledBack = true;
+      }),
     getAlarm: (options?: globalThis.DurableObjectGetAlarmOptions) =>
       tryStoragePromise("transaction.getAlarm", () => txn.getAlarm(options)),
   }) as DurableObjectTransaction;
@@ -274,79 +285,95 @@ export const fromDurableObjectStorage = (
   delete: (key: string, options?: globalThis.DurableObjectPutOptions) =>
     tryStoragePromise("delete", () => storage.delete(key, options)),
   deleteAll: (options?: globalThis.DurableObjectPutOptions) =>
-    tryStoragePromise("deleteAll", () => storage.deleteAll(options)),
+    Effect.suspend(() => {
+      invalidateStorageCache(storage);
+
+      return tryStoragePromise("deleteAll", () => storage.deleteAll(options)).pipe(
+        Effect.ensuring(Effect.sync(() => invalidateStorageCache(storage))),
+      );
+    }),
   getAlarm: (options?: globalThis.DurableObjectGetAlarmOptions) =>
     tryStoragePromise("getAlarm", () => storage.getAlarm(options)),
   transactionSync: <A, E, R>(closure: () => Effect.Effect<A, E, R>) =>
-    Effect.context<R>().pipe(
-      Effect.flatMap((context) =>
-        Effect.suspend((): Effect.Effect<A, E | StorageOperationError> => {
-          // Cloudflare rolls the transaction back when the callback throws, so a
-          // failed Exit is thrown to abort it. Keep a typed reference to that
-          // Exit rather than recovering its type from the untyped catch binding.
-          let aborted: Exit.Exit<A, E> | undefined;
-          let escapedFiber: Fiber.Fiber<unknown, unknown> | undefined;
+    withStorageTransaction(
+      storage,
+      Effect.context<R>().pipe(
+        Effect.flatMap((context) =>
+          Effect.suspend((): Effect.Effect<A, E | StorageOperationError> => {
+            // Cloudflare rolls the transaction back when the callback throws, so a
+            // failed Exit is thrown to abort it. Keep a typed reference to that
+            // Exit rather than recovering its type from the untyped catch binding.
+            let aborted: Exit.Exit<A, E> | undefined;
+            let escapedFiber: Fiber.Fiber<unknown, unknown> | undefined;
 
-          try {
-            return Effect.succeed(
-              storage.transactionSync(() => {
-                const exit = Effect.runSyncExitWith(context)(closure());
+            try {
+              return Effect.succeed(
+                storage.transactionSync(() => {
+                  const exit = Effect.runSyncExitWith(context)(closure());
 
-                if (Exit.isSuccess(exit)) {
-                  return exit.value;
-                }
-                const defect = Cause.findDefect(exit.cause);
+                  if (Exit.isSuccess(exit)) {
+                    return exit.value;
+                  }
+                  const defect = Cause.findDefect(exit.cause);
 
-                if (Result.isSuccess(defect) && Cause.isAsyncFiberError(defect.success)) {
-                  escapedFiber = defect.success.fiber;
-                  escapedFiber.interruptUnsafe();
-                }
-                aborted = exit;
+                  if (Result.isSuccess(defect) && Cause.isAsyncFiberError(defect.success)) {
+                    escapedFiber = defect.success.fiber;
+                    escapedFiber.interruptUnsafe();
+                  }
+                  aborted = exit;
 
-                throw exit;
-              }),
-            );
-          } catch (cause) {
-            const failure: Effect.Effect<never, E | StorageOperationError> =
-              aborted !== undefined && cause === aborted && Exit.isFailure(aborted)
-                ? Effect.failCause(aborted.cause)
-                : Effect.fail(storageError("transactionSync", cause));
-            const fiber = escapedFiber;
+                  throw exit;
+                }),
+              );
+            } catch (cause) {
+              const failure: Effect.Effect<never, E | StorageOperationError> =
+                aborted !== undefined && cause === aborted && Exit.isFailure(aborted)
+                  ? Effect.failCause(aborted.cause)
+                  : Effect.fail(storageError("transactionSync", cause));
+              const fiber = escapedFiber;
 
-            if (fiber !== undefined) {
-              return Fiber.interrupt(fiber).pipe(Effect.andThen(failure));
+              if (fiber !== undefined) {
+                return Fiber.interrupt(fiber).pipe(Effect.andThen(failure));
+              }
+
+              return failure;
             }
-
-            return failure;
-          }
-        }),
+          }),
+        ),
       ),
     ),
   transaction: <A, E, R>(closure: (txn: DurableObjectTransaction) => Effect.Effect<A, E, R>) =>
-    Effect.suspend(() => {
-      // See `transactionSync`: the thrown Exit aborts Cloudflare's
-      // transaction, and holding it here keeps its error type.
-      let aborted: Exit.Exit<A, E> | undefined;
+    withStorageTransaction(
+      storage,
+      Effect.suspend(() => {
+        // See `transactionSync`: the thrown Exit aborts Cloudflare's
+        // transaction, and holding it here keeps its error type.
+        let aborted: Exit.Exit<A, E> | undefined;
 
-      return runNativeCallback<A, E, R, A>((run) =>
-        storage.transaction(async (txn) => {
-          const exit = await run(Effect.suspend(() => closure(fromDurableObjectTransaction(txn))));
+        return runNativeCallback<A, E, R, A>((run) =>
+          storage.transaction(async (txn) => {
+            const exit = await run(
+              Effect.flatMap(CurrentStorageTransaction, (owner) =>
+                closure(fromDurableObjectTransaction(txn, owner)),
+              ),
+            );
 
-          if (Exit.isSuccess(exit)) {
-            return exit.value;
-          }
-          aborted = exit;
+            if (Exit.isSuccess(exit)) {
+              return exit.value;
+            }
+            aborted = exit;
 
-          throw exit;
-        }),
-      ).pipe(
-        Effect.catch((cause): Effect.Effect<never, E | StorageOperationError> =>
-          aborted !== undefined && cause === aborted && Exit.isFailure(aborted)
-            ? Effect.failCause(aborted.cause)
-            : Effect.fail(storageError("transaction", cause)),
-        ),
-      );
-    }),
+            throw exit;
+          }),
+        ).pipe(
+          Effect.catch((cause): Effect.Effect<never, E | StorageOperationError> =>
+            aborted !== undefined && cause === aborted && Exit.isFailure(aborted)
+              ? Effect.failCause(aborted.cause)
+              : Effect.fail(storageError("transaction", cause)),
+          ),
+        );
+      }),
+    ),
   sync: () => tryStoragePromise("sync", () => storage.sync()),
   getCurrentBookmark: () =>
     tryStoragePromise("getCurrentBookmark", () => storage.getCurrentBookmark()),

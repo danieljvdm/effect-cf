@@ -7,6 +7,7 @@ import * as Reactivity from "effect/reactivity/Reactivity";
 import { SqlClient } from "effect/sql";
 
 import { DurableObjectState } from "./DurableObjectState";
+import { observedSqlTransactions, withStorageTransaction } from "./internal/StorageTransaction";
 
 export type SqliteLayerOptions = Omit<SqliteClient.SqliteClientConfig, "db" | "storage">;
 
@@ -20,12 +21,15 @@ export const layer = (
       const original = client.withTransaction;
       const scheduler = new Scheduler.MixedScheduler("sync");
       const withTransaction: SqliteClient.SqliteClient["withTransaction"] = (body) =>
-        original(body).pipe(Effect.provideService(Scheduler.Scheduler, scheduler));
+        withStorageTransaction(state.raw.storage, original(body), client).pipe(
+          Effect.provideService(Scheduler.Scheduler, scheduler),
+        );
 
       // Native timers retain their input gate. A blocked parent timer can prevent
       // a transaction's later timer from running, so yield through microtasks until
       // the native transaction settles. Keep the original client and SQL permit.
       Object.assign(client, { withTransaction });
+      observedSqlTransactions.add(withTransaction);
 
       return Context.make(SqliteClient.SqliteClient, client).pipe(
         Context.add(SqlClient.SqlClient, client),

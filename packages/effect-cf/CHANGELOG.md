@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.56.1
+
+### Patch Changes
+
+- [#215](https://github.com/danieljvdm/effect-cf/pull/215) [`2497a42`](https://github.com/danieljvdm/effect-cf/commit/2497a4221bf4af96011c1bf47ec5b85a5d266a65) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Coalesce unchanged manual alarm checkpoints and native alarm writes during deferred work. Preserve short recovery guards, source transaction rollback, and fencing across concurrent manual dispatch.
+
 ## 0.56.0
 
 ### Minor Changes

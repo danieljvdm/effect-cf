@@ -173,6 +173,10 @@ the queue owns those policies. Their scheduling does not consume an automatic
 alarm's attempt budget. The lifecycle is persisted with the alarm, so it remains
 known after eviction or a deployment that removes its registration.
 
+Repeated manual `scheduleAlarmEarlier` checkpoints can leave the logical row
+unchanged while still reconciling native recovery. The first enrollment during
+a dispatch always supersedes that dispatch's fallback recovery for the same alarm.
+
 Before dispatch, the scheduler commits a native recovery alarm and moves due
 manual alarms to `now + inFlightRecovery` (one second by default). Eviction during
 work leaves both the native guard and logical work eligible within that deadline.
@@ -191,8 +195,10 @@ last scope reconciles the earliest remaining deadline on success, failure or
 interruption. A cancelled alarm is not revived by a buffered hint. Keep work
 bounded: the first scope's `inFlightRecovery` sets the shared guard. A native
 delivery while a scope or pass is active renews that guard and joins the existing
-work without starting another pass. Checkpoint transactions retain the guard
-instead of rewriting it on each mutation; the last scope restores the earliest
+work without starting another pass. Checkpoint transactions retain a still-pending
+guard even after its deadline, and rearm it when consumed or later than the required
+recovery bound. Scope entry still establishes a future guard, and failed event
+acquisition preserves its retry backoff. The last scope restores the earliest
 logical deadline.
 
 After external work, **re-read the authoritative queue and replace or cancel its

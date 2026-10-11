@@ -11,7 +11,7 @@ import * as Layer from "effect/Layer";
 import * as Predicate from "effect/Predicate";
 import * as S from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
-import type { SqlClient } from "effect/sql/SqlClient";
+import type { SqlClient, TransactionConnection } from "effect/sql/SqlClient";
 import { SqlError } from "effect/sql/SqlError";
 
 import { DurableObjectState } from "./DurableObjectState";
@@ -1156,19 +1156,24 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
             }),
         });
 
-      const reconcileAlarm = Effect.fn("DurableObjectAlarm.reconcileAlarm")(function* () {
+      const reconcileAlarm = Effect.fnUntraced(function* (renewOverdue = false) {
         if (wakeDeferrals > 0 || dispatchActive) {
           if (dispatchActive) dispatchNeedsReconcile = true;
           const current = yield* state.storage.getAlarm();
           const now = yield* Clock.currentTimeMillis;
+          const resetRecovery = deferredRecoveryAt === 0;
 
           if (deferredRecoveryAt <= now) {
             deferredRecoveryAt = now + deferredRecoveryDelay;
           }
 
-          // Commit the guard before user work. Later transactions keep it even when
-          // logical deadlines move earlier or every checkpoint is cancelled.
-          if (current === null || current <= now || current > deferredRecoveryAt) {
+          // Checkpoints retain an overdue guard that is still pending. Scope entry
+          // and failed acquisition still establish a future recovery deadline.
+          if (
+            current === null ||
+            current > deferredRecoveryAt ||
+            ((renewOverdue || resetRecovery) && current <= now)
+          ) {
             yield* writeNativeAlarm(deferredRecoveryAt);
           }
 
@@ -1178,9 +1183,11 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           `SELECT wake_at AS run_at FROM effect_cf_scheduled_alarms
            ORDER BY wake_at, storage_id LIMIT 1`,
         );
-        const next = (yield* cursor.toArray())[0];
+        const next = (yield* cursor.toArray())[0]?.run_at ?? null;
 
-        yield* writeNativeAlarm(next?.run_at ?? null);
+        if ((yield* state.storage.getAlarm()) !== next) {
+          yield* writeNativeAlarm(next);
+        }
       });
 
       const writeAttempts = Effect.fnUntraced(function* (
@@ -1249,6 +1256,13 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           const nextPayload = earlier
             ? "CASE WHEN run_at <= excluded.run_at THEN payload ELSE excluded.payload END"
             : "excluded.payload";
+          // The first checkpoint fences an in-flight manual claim, even when nothing else changes.
+          const changed = earlier
+            ? `WHERE (lifecycle, run_at, wake_at, payload, repeat_every_ms,
+                       attempts, parked, retry_at, progress)
+                 IS NOT ('manual', ${deadline}, ${deadline}, ${nextPayload}, NULL, 0, 0, NULL, -1)
+                 OR revision GLOB 'manual:*'`
+            : "";
 
           yield* state.storage.sql.exec(
             `INSERT INTO effect_cf_scheduled_alarms
@@ -1257,7 +1271,8 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
              ON CONFLICT(storage_id) DO UPDATE SET
                lifecycle = 'manual', run_at = ${deadline}, wake_at = ${deadline},
                payload = ${nextPayload}, revision = excluded.revision,
-               repeat_every_ms = NULL, attempts = 0, parked = 0, retry_at = NULL, progress = -1`,
+               repeat_every_ms = NULL, attempts = 0, parked = 0, retry_at = NULL, progress = -1
+             ${changed}`,
             storageId,
             ref.id,
             ref.tag,
@@ -1357,97 +1372,113 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         }
       });
 
-      const transaction: AlarmScheduler["transaction"] = Effect.fnUntraced(
-        function* (closure, options) {
-          const pass = yield* CurrentAlarmPass;
+      const transaction = Effect.fnUntraced(function* <A, E, R>(
+        closure: (alarms: AlarmTransaction) => Effect.Effect<A, E, R>,
+        options?: AlarmTransactionOptions,
+        renewOverdue = false,
+      ) {
+        const pass = yield* CurrentAlarmPass;
 
-          if (pass !== undefined && !pass.active) {
-            return yield* Effect.fail(
-              new StorageOperationError({
-                operation: "alarm.transaction",
-                cause: new Error(
-                  "Alarm handlers cannot mutate detached work after their pass ends",
-                ),
-              }),
-            );
-          }
-          const reports: string[] = [];
-          const body = Effect.withFiber((owner) => {
-            let active = true;
-            const requireActive = <A, E>(effect: Effect.Effect<A, E>) =>
-              Effect.withFiber<A, E | StorageOperationError>((fiber) =>
-                // A queued or suspended transaction can outlive the handler that admitted it.
-                active && fiber === owner && (pass === undefined || pass.active)
-                  ? effect
-                  : Effect.fail(
-                      new StorageOperationError({
-                        operation: "alarm.transaction",
-                        cause: new Error(
-                          "Alarm mutations require their active transaction callback",
-                        ),
-                      }),
-                    ),
-              );
-
-            return Effect.gen(function* () {
-              yield* ensureTable(state);
-              const result = yield* Effect.suspend(() =>
-                closure({
-                  cancelAlarm: (input) => requireActive(cancelAlarm(input)),
-                  scheduleAlarm: (input) => requireActive(scheduleAlarm(input, false, reports)),
-                  scheduleAlarmEarlier: (input) =>
-                    requireActive(scheduleAlarm(input, true, reports)),
-                }),
-              ).pipe(
-                Effect.ensuring(
-                  Effect.sync(() => {
-                    active = false;
+        if (pass !== undefined && !pass.active) {
+          return yield* Effect.fail(
+            new StorageOperationError({
+              operation: "alarm.transaction",
+              cause: new Error("Alarm handlers cannot mutate detached work after their pass ends"),
+            }),
+          );
+        }
+        const reports: string[] = [];
+        const body = Effect.withFiber((owner) => {
+          let active = true;
+          const schemaTransactions =
+            options !== undefined && (wakeDeferrals > 0 || dispatchActive)
+              ? new WeakSet<TransactionConnection.Service>()
+              : undefined;
+          const requireActive = <A, E>(effect: Effect.Effect<A, E>) =>
+            Effect.withFiber<A, E | StorageOperationError>((fiber) => {
+              // A queued or suspended transaction can outlive the handler that admitted it.
+              if (!active || fiber !== owner || (pass !== undefined && !pass.active))
+                return Effect.fail(
+                  new StorageOperationError({
+                    operation: "alarm.transaction",
+                    cause: new Error("Alarm mutations require their active transaction callback"),
                   }),
+                );
+              if (schemaTransactions === undefined || options === undefined) return effect;
+              const transaction = Context.getOption(
+                fiber.context,
+                options.sqlClient.transactionService,
+              );
+
+              if (transaction._tag === "Some" && schemaTransactions.has(transaction.value))
+                return effect;
+
+              return Effect.gen(function* () {
+                yield* ensureTable(state);
+                // Child rollback cannot certify schema for its parent's transaction.
+                if (transaction._tag === "Some") schemaTransactions.add(transaction.value);
+
+                return yield* effect;
+              });
+            });
+
+          return Effect.gen(function* () {
+            if (schemaTransactions === undefined) yield* ensureTable(state);
+            const result = yield* Effect.suspend(() =>
+              closure({
+                cancelAlarm: (input) => requireActive(cancelAlarm(input)),
+                scheduleAlarm: (input) => requireActive(scheduleAlarm(input, false, reports)),
+                scheduleAlarmEarlier: (input) => requireActive(scheduleAlarm(input, true, reports)),
+              }),
+            ).pipe(
+              Effect.ensuring(
+                Effect.sync(() => {
+                  active = false;
+                }),
+              ),
+            );
+
+            if (schemaTransactions !== undefined && wakeDeferrals === 0 && !dispatchActive)
+              yield* ensureTable(state);
+            yield* reconcileAlarm(renewOverdue);
+
+            return result;
+          });
+        });
+        const result = yield* options === undefined
+          ? state.storage.transaction(() => body)
+          : Effect.gen(function* () {
+              const client = yield* S.decodeUnknownEffect(StorageSqlClient)(options.sqlClient).pipe(
+                Effect.mapError(
+                  (cause) => new StorageOperationError({ operation: "alarm.transaction", cause }),
                 ),
               );
 
-              yield* reconcileAlarm();
-
-              return result;
-            });
-          });
-          const result = yield* options === undefined
-            ? state.storage.transaction(() => body)
-            : Effect.gen(function* () {
-                const client = yield* S.decodeUnknownEffect(StorageSqlClient)(
-                  options.sqlClient,
-                ).pipe(
-                  Effect.mapError(
-                    (cause) => new StorageOperationError({ operation: "alarm.transaction", cause }),
-                  ),
+              if (client.config.storage !== state.raw.storage)
+                return yield* Effect.fail(
+                  new StorageOperationError({
+                    operation: "alarm.transaction",
+                    cause: new Error(
+                      "Alarm transactions require this Durable Object's storage-backed SQL client",
+                    ),
+                  }),
                 );
 
-                if (client.config.storage !== state.raw.storage)
-                  return yield* Effect.fail(
-                    new StorageOperationError({
-                      operation: "alarm.transaction",
-                      cause: new Error(
-                        "Alarm transactions require this Durable Object's storage-backed SQL client",
-                      ),
-                    }),
-                  );
+              return yield* client
+                .withTransaction(body)
+                .pipe(
+                  Effect.mapError((cause) =>
+                    cause instanceof SqlError
+                      ? new StorageOperationError({ operation: "alarm.transaction", cause })
+                      : cause,
+                  ),
+                );
+            });
 
-                return yield* client
-                  .withTransaction(body)
-                  .pipe(
-                    Effect.mapError((cause) =>
-                      cause instanceof SqlError
-                        ? new StorageOperationError({ operation: "alarm.transaction", cause })
-                        : cause,
-                    ),
-                  );
-              });
+        yield* reportParked(reports);
 
-          yield* reportParked(reports);
-
-          return result;
-        },
-      );
+        return result;
+      });
 
       const deferWakes: AlarmScheduler["deferWakes"] = (body) =>
         Effect.acquireUseRelease(
@@ -1462,7 +1493,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
             }
             wakeDeferrals++;
           }),
-          () => transaction(() => Effect.void).pipe(Effect.andThen(body)),
+          () => transaction(() => Effect.void, undefined, true).pipe(Effect.andThen(body)),
           () =>
             Effect.gen(function* () {
               wakeDeferrals--;
@@ -1658,11 +1689,13 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         });
         // Manual recovery never consumes the raw/automatic dispatcher's batch allowance.
         const dueRows = yield* select("automatic", limit);
-        const manualRows = yield* select("manual", DEFAULT_PROCESS_DUE_ALARMS_LIMIT);
+        let manualRows = yield* select("manual", DEFAULT_PROCESS_DUE_ALARMS_LIMIT);
 
         if (manualRows.length > 0) {
-          yield* transaction(() =>
+          manualRows = yield* transaction(() =>
             Effect.gen(function* () {
+              const claimed: AlarmRow[] = [];
+
               for (const row of manualRows) {
                 // Keep work eligible after eviction; unknown registrations stay parked.
                 const recoveryAt =
@@ -1670,15 +1703,22 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                   (options?.[ManualTags]?.has(row.tag)
                     ? configuration.inFlightRecovery
                     : configuration.parkedRetryDelay);
-
-                yield* state.storage.sql.exec(
-                  `UPDATE effect_cf_scheduled_alarms SET run_at = ?, wake_at = ? WHERE ${sameRevisionSql}`,
+                const revision = `manual:${crypto.randomUUID()}`;
+                const cursor = yield* state.storage.sql.exec(
+                  `UPDATE effect_cf_scheduled_alarms SET run_at = ?, wake_at = ?, revision = ?
+                   WHERE ${sameRevisionSql}`,
                   recoveryAt,
                   recoveryAt,
+                  revision,
                   row.storage_id,
                   row.revision,
                 );
+
+                // Keep the selected deadline/payload; dispatch only a successfully fenced claim.
+                if ((yield* cursor.rowsWritten) > 0) claimed.push({ ...row, revision });
               }
+
+              return claimed;
             }),
           );
         }
@@ -1790,11 +1830,13 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
             const recoveryAt = (yield* Clock.currentTimeMillis) + configuration.parkedRetryDelay;
 
             for (const row of manualRows) {
-              // Only a returned handler with no newer checkpoint falls back to parked recovery.
+              // Retire the claim with a fresh fence; never revive a pre-claim revision.
               yield* state.storage.sql.exec(
-                `UPDATE effect_cf_scheduled_alarms SET run_at = ?, wake_at = ? WHERE ${sameRevisionSql}`,
+                `UPDATE effect_cf_scheduled_alarms SET run_at = ?, wake_at = ?, revision = ?
+                 WHERE ${sameRevisionSql}`,
                 recoveryAt,
                 recoveryAt,
+                crypto.randomUUID(),
                 row.storage_id,
                 row.revision,
               );

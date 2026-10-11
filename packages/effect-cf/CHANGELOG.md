@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.56.2
+
+### Patch Changes
+
+- [#217](https://github.com/danieljvdm/effect-cf/pull/217) [`a0600bb`](https://github.com/danieljvdm/effect-cf/commit/a0600bb88dfda4f1a56c05dbeb4ecb74e4014042) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Avoid repeated alarm scheduler reads and unchanged manual checkpoints within a Durable Object incarnation while preserving atomic source writes, rollback, and recovery guards.
+
 ## 0.56.1
 
 ### Patch Changes

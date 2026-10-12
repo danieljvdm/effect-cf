@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.56.3
+
+### Patch Changes
+
+- [#219](https://github.com/danieljvdm/effect-cf/pull/219) [`0f83498`](https://github.com/danieljvdm/effect-cf/commit/0f8349898db39caa6dd7b946f90b5d230e83b7aa) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Avoid eagerly instrumenting ignored object bindings when building Worker configuration. Continue reading scalar properties and accessors normally, with configuration scoped to the current environment.
+
 ## 0.56.2
 
 ### Patch Changes

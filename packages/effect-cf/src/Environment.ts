@@ -69,7 +69,19 @@ export namespace WorkerConfig {
   export const providerFromEnv = (env: WorkerEnv, options?: ProviderOptions) => {
     const record: Record<string, string> = {};
 
-    for (const [key, value] of Object.entries(env)) {
+    for (const key of Object.getOwnPropertyNames(env)) {
+      const descriptor = Object.getOwnPropertyDescriptor(env, key);
+
+      // Ignore data-property bindings without triggering instrumentation on env.get.
+      if (
+        !descriptor?.enumerable ||
+        ("value" in descriptor && Predicate.isObjectKeyword(descriptor.value))
+      )
+        continue;
+
+      // SAFETY: The key belongs to the current env's own enumerable properties.
+      const value = env[key as keyof WorkerEnv];
+
       if (Predicate.isString(value) || Predicate.isNumber(value) || Predicate.isBoolean(value)) {
         record[key] = String(value);
       }

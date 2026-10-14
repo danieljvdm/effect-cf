@@ -48,39 +48,40 @@ export const CurrentStorageTransaction = Context.Reference<StorageTransaction | 
   { defaultValue: () => undefined },
 );
 
-export const withStorageTransaction = Effect.fnUntraced(function* <A, E, R>(
+export const withStorageTransaction = <A, E, R>(
   storage: globalThis.DurableObjectStorage,
   effect: Effect.Effect<A, E, R>,
   client?: SqlClient,
-) {
-  const current = yield* CurrentStorageTransaction;
-  const parent = current?.storage === storage ? current : undefined;
-  const supplied = yield* Effect.serviceOption(SqlClient);
-  const sql = client ?? (supplied._tag === "Some" ? supplied.value : undefined);
-  const inherited =
-    sql === undefined ? undefined : yield* Effect.serviceOption(sql.transactionService);
-  const depth = inherited?._tag === "Some" ? inherited.value[1] : undefined;
-  const transaction: StorageTransaction = {
-    storage,
-    parent,
-    // SQL clients enter one level inside the supplied operation; native scopes retain it.
-    sqlDepth: client === undefined ? depth : (depth ?? -1) + 1,
-    // Neither an untracked outer transaction nor a hidden middle scope can publish a view.
-    cacheable:
-      parent === undefined ? depth === undefined : parent.cacheable && parent.sqlDepth === depth,
-    rolledBack: false,
-    onExit: [],
-  };
+): Effect.Effect<A, E, R> =>
+  Effect.withFiber((fiber) => {
+    const current = Context.get(fiber.context, CurrentStorageTransaction);
+    const parent = current?.storage === storage ? current : undefined;
+    const supplied = client === undefined ? Context.getOption(fiber.context, SqlClient) : undefined;
+    const sql = client ?? (supplied?._tag === "Some" ? supplied.value : undefined);
+    const inherited =
+      sql === undefined ? undefined : Context.getOption(fiber.context, sql.transactionService);
+    const depth = inherited?._tag === "Some" ? inherited.value[1] : undefined;
+    const transaction: StorageTransaction = {
+      storage,
+      parent,
+      // SQL clients enter one level inside the supplied operation; native scopes retain it.
+      sqlDepth: client === undefined ? depth : (depth ?? -1) + 1,
+      // Neither an untracked outer transaction nor a hidden middle scope can publish a view.
+      cacheable:
+        parent === undefined ? depth === undefined : parent.cacheable && parent.sqlDepth === depth,
+      rolledBack: false,
+      onExit: [],
+    };
 
-  if (!transaction.cacheable) invalidateStorageCache(storage, true);
+    if (!transaction.cacheable) invalidateStorageCache(storage, true);
 
-  return yield* effect.pipe(
-    Effect.provideService(CurrentStorageTransaction, transaction),
-    Effect.onExit((exit) =>
-      Effect.sync(() => {
-        for (const finish of transaction.onExit)
-          finish(Exit.isSuccess(exit) && !transaction.rolledBack);
-      }),
-    ),
-  );
-});
+    return effect.pipe(
+      Effect.provideService(CurrentStorageTransaction, transaction),
+      Effect.onExit((exit) =>
+        Effect.sync(() => {
+          for (const finish of transaction.onExit)
+            finish(Exit.isSuccess(exit) && !transaction.rolledBack);
+        }),
+      ),
+    );
+  });

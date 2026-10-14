@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.56.4
+
+### Patch Changes
+
+- [#222](https://github.com/danieljvdm/effect-cf/pull/222) [`c90afe4`](https://github.com/danieljvdm/effect-cf/commit/c90afe4e6be82732ae3f72738f7eb0b0b879a223) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Reduce overhead in Durable Object alarm transactions, alarm dispatch and storage transactions without changing their behavior.
+
 ## 0.56.3
 
 ### Patch Changes

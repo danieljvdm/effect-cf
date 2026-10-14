@@ -851,7 +851,7 @@ const runRegistrations = <R, E>(
                 }),
                 Effect.exit,
               ),
-            { concurrency: "unbounded" },
+            { concurrency: dispatchers.length <= 1 ? 1 : "unbounded" },
           );
         // Raw hooks wait only for automatic dispatchers; manual-only work stays independent.
         const automatic = parts.dispatchers.filter(
@@ -959,52 +959,50 @@ const makeDefinition = <const Definitions extends AlarmDefinitions>(definitions:
   const definitionFor = (tag: string) =>
     Object.hasOwn(definitions, tag) ? definitions[tag] : undefined;
 
-  const bind = (mutations: AlarmTransaction): DefinedAlarmTransaction<Definitions> => {
-    const schedule = (method: "scheduleAlarm" | "scheduleAlarmEarlier") =>
-      Effect.fn("DefinedAlarms.scheduleAlarm")(function* (
-        input: DefinedScheduleAlarmInput<Definitions>,
-      ) {
-        const definition = definitionFor(input.tag);
+  const schedule = Effect.fn("DefinedAlarms.scheduleAlarm")(function* (
+    mutations: AlarmTransaction,
+    method: "scheduleAlarm" | "scheduleAlarmEarlier",
+    input: DefinedScheduleAlarmInput<Definitions>,
+  ) {
+    const definition = definitionFor(input.tag);
 
-        if (definition === undefined) {
-          return yield* Effect.fail(
-            new InvalidAlarmRefError({
-              cause: new Error(`Unknown alarm tag "${input.tag}"`),
-            }),
-          );
-        }
-        const payload = yield* S.encodeEffect(getAlarmDefinitionSchema(definition))(
-          input.payload,
-        ).pipe(
-          Effect.flatMap(S.decodeUnknownEffect(S.Json)),
-          Effect.mapError((cause) => new InvalidAlarmPayloadError({ cause })),
-        );
+    if (definition === undefined) {
+      return yield* Effect.fail(
+        new InvalidAlarmRefError({
+          cause: new Error(`Unknown alarm tag "${input.tag}"`),
+        }),
+      );
+    }
+    const payload = yield* S.encodeEffect(getAlarmDefinitionSchema(definition))(input.payload).pipe(
+      Effect.flatMap(S.decodeUnknownEffect(S.Json)),
+      Effect.mapError((cause) => new InvalidAlarmPayloadError({ cause })),
+    );
 
-        yield* mutations[method]({
-          ...input,
-          payload,
-          lifecycle: isAlarmDefinitionConfig(definition) ? definition.lifecycle : undefined,
-        });
-      });
+    yield* mutations[method]({
+      ...input,
+      payload,
+      lifecycle: isAlarmDefinitionConfig(definition) ? definition.lifecycle : undefined,
+    });
+  });
+  const cancel = Effect.fn("DefinedAlarms.cancelAlarm")(function* (
+    mutations: AlarmTransaction,
+    input: AlarmRef<keyof Definitions & string>,
+  ) {
+    if (definitionFor(input.tag) === undefined) {
+      return yield* Effect.fail(
+        new InvalidAlarmRefError({
+          cause: new Error(`Unknown alarm tag "${input.tag}"`),
+        }),
+      );
+    }
 
-    return {
-      scheduleAlarm: schedule("scheduleAlarm"),
-      scheduleAlarmEarlier: schedule("scheduleAlarmEarlier"),
-      cancelAlarm: Effect.fn("DefinedAlarms.cancelAlarm")(function* (
-        input: AlarmRef<keyof Definitions & string>,
-      ) {
-        if (definitionFor(input.tag) === undefined) {
-          return yield* Effect.fail(
-            new InvalidAlarmRefError({
-              cause: new Error(`Unknown alarm tag "${input.tag}"`),
-            }),
-          );
-        }
-
-        yield* mutations.cancelAlarm(input);
-      }),
-    };
-  };
+    yield* mutations.cancelAlarm(input);
+  });
+  const bind = (mutations: AlarmTransaction): DefinedAlarmTransaction<Definitions> => ({
+    scheduleAlarm: (input) => schedule(mutations, "scheduleAlarm", input),
+    scheduleAlarmEarlier: (input) => schedule(mutations, "scheduleAlarmEarlier", input),
+    cancelAlarm: (input) => cancel(mutations, input),
+  });
 
   return {
     make: (alarms: AlarmScheduler): DefinedAlarmScheduler<Definitions> => ({
@@ -1600,7 +1598,6 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
       });
 
       const reportParked = Effect.fnUntraced(function* (storageIds: readonly string[]) {
-        if (storageIds.length === 0) return;
         const pass = yield* CurrentAlarmPass;
         const report = yield* AlarmReporter;
 
@@ -1620,99 +1617,108 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         }
       });
 
-      const transaction = Effect.fnUntraced(function* <A, E, R>(
+      const transaction = <A, E, R>(
         closure: (alarms: AlarmTransaction) => Effect.Effect<A, E, R>,
         options?: AlarmTransactionOptions,
         renewOverdue = false,
-      ) {
-        const pass = yield* CurrentAlarmPass;
+      ): Effect.Effect<A, E | StorageOperationError, R> =>
+        Effect.withFiber((fiber) => {
+          const pass = Context.get(fiber.context, CurrentAlarmPass);
 
-        if (pass !== undefined && !pass.active) {
-          return yield* Effect.fail(
-            new StorageOperationError({
-              operation: "alarm.transaction",
-              cause: new Error("Alarm handlers cannot mutate detached work after their pass ends"),
-            }),
-          );
-        }
-        const reports: string[] = [];
-        const body = Effect.withFiber((owner) => {
-          let active = true;
-          const lazySchema = options !== undefined && (wakeDeferrals > 0 || dispatchActive);
-          const requireActive = <A, E>(effect: Effect.Effect<A, E>) =>
-            Effect.withFiber<A, E | StorageOperationError>((fiber) => {
-              // A queued or suspended transaction can outlive the handler that admitted it.
-              if (!active || fiber !== owner || (pass !== undefined && !pass.active))
-                return Effect.fail(
-                  new StorageOperationError({
-                    operation: "alarm.transaction",
-                    cause: new Error("Alarm mutations require their active transaction callback"),
-                  }),
-                );
-
-              return lazySchema ? Effect.andThen(ensureSchema, effect) : effect;
-            });
-
-          return Effect.gen(function* () {
-            if (!lazySchema) yield* ensureSchema;
-            const result = yield* Effect.suspend(() =>
-              closure({
-                cancelAlarm: (input) => requireActive(cancelAlarm(input)),
-                scheduleAlarm: (input) => requireActive(scheduleAlarm(input, false, reports)),
-                scheduleAlarmEarlier: (input) => requireActive(scheduleAlarm(input, true, reports)),
+          if (pass !== undefined && !pass.active) {
+            return Effect.fail(
+              new StorageOperationError({
+                operation: "alarm.transaction",
+                cause: new Error(
+                  "Alarm handlers cannot mutate detached work after their pass ends",
+                ),
               }),
-            ).pipe(
-              Effect.ensuring(
-                Effect.sync(() => {
-                  active = false;
-                }),
-              ),
             );
+          }
+          const reports: string[] = [];
+          const body = Effect.withFiber((owner) => {
+            let active = true;
+            const lazySchema = options !== undefined && (wakeDeferrals > 0 || dispatchActive);
+            const requireActive = <A, E>(effect: Effect.Effect<A, E>) =>
+              Effect.withFiber<A, E | StorageOperationError>((fiber) => {
+                // A queued or suspended transaction can outlive the handler that admitted it.
+                if (!active || fiber !== owner || (pass !== undefined && !pass.active))
+                  return Effect.fail(
+                    new StorageOperationError({
+                      operation: "alarm.transaction",
+                      cause: new Error("Alarm mutations require their active transaction callback"),
+                    }),
+                  );
 
-            if (lazySchema && wakeDeferrals === 0 && !dispatchActive) yield* ensureSchema;
-            yield* reconcileAlarm(renewOverdue);
+                return lazySchema ? Effect.andThen(ensureSchema, effect) : effect;
+              });
 
-            return result;
-          });
-        });
-        const result = yield* options === undefined
-          ? state.storage.transaction(() => body)
-          : Effect.gen(function* () {
-              const client = yield* S.decodeUnknownEffect(StorageSqlClient)(options.sqlClient).pipe(
-                Effect.mapError(
-                  (cause) => new StorageOperationError({ operation: "alarm.transaction", cause }),
+            return Effect.gen(function* () {
+              if (!lazySchema) yield* ensureSchema;
+              const result = yield* Effect.suspend(() =>
+                closure({
+                  cancelAlarm: (input) => requireActive(cancelAlarm(input)),
+                  scheduleAlarm: (input) => requireActive(scheduleAlarm(input, false, reports)),
+                  scheduleAlarmEarlier: (input) =>
+                    requireActive(scheduleAlarm(input, true, reports)),
+                }),
+              ).pipe(
+                Effect.ensuring(
+                  Effect.sync(() => {
+                    active = false;
+                  }),
                 ),
               );
 
-              if (client.config.storage !== state.raw.storage)
-                return yield* Effect.fail(
-                  new StorageOperationError({
-                    operation: "alarm.transaction",
-                    cause: new Error(
-                      "Alarm transactions require this Durable Object's storage-backed SQL client",
+              if (lazySchema && wakeDeferrals === 0 && !dispatchActive) yield* ensureSchema;
+              yield* reconcileAlarm(renewOverdue);
+
+              return result;
+            });
+          });
+          const operation =
+            options === undefined
+              ? state.storage.transaction(() => body)
+              : Effect.flatMapEager(
+                  S.decodeUnknownEffect(StorageSqlClient)(options.sqlClient).pipe(
+                    Effect.mapErrorEager(
+                      (cause) =>
+                        new StorageOperationError({ operation: "alarm.transaction", cause }),
                     ),
-                  }),
+                  ),
+                  (client) => {
+                    if (client.config.storage !== state.raw.storage)
+                      return Effect.fail(
+                        new StorageOperationError({
+                          operation: "alarm.transaction",
+                          cause: new Error(
+                            "Alarm transactions require this Durable Object's storage-backed SQL client",
+                          ),
+                        }),
+                      );
+
+                    const operation = client.withTransaction(body);
+
+                    return (
+                      observedSqlTransactions.has(client.withTransaction)
+                        ? operation
+                        : withStorageTransaction(state.raw.storage, operation, client)
+                    ).pipe(
+                      Effect.mapError((cause) =>
+                        cause instanceof SqlError
+                          ? new StorageOperationError({ operation: "alarm.transaction", cause })
+                          : cause,
+                      ),
+                    );
+                  },
                 );
 
-              const operation = client.withTransaction(body);
-
-              return yield* (
-                observedSqlTransactions.has(client.withTransaction)
-                  ? operation
-                  : withStorageTransaction(state.raw.storage, operation, client)
-              ).pipe(
-                Effect.mapError((cause) =>
-                  cause instanceof SqlError
-                    ? new StorageOperationError({ operation: "alarm.transaction", cause })
-                    : cause,
-                ),
-              );
-            });
-
-        yield* reportParked(reports);
-
-        return result;
-      });
+          return Effect.flatMap(operation, (result) =>
+            reports.length === 0
+              ? Effect.succeed(result)
+              : Effect.as(reportParked(reports), result),
+          );
+        });
 
       const deferWakes: AlarmScheduler["deferWakes"] = (body) =>
         Effect.acquireUseRelease(
@@ -1920,12 +1926,6 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         // A validated dispatcher owns its remaining batch, including newly enrolled work.
         if (dispatch?.raw !== undefined) dispatch.raw.processed = true;
 
-        const tagFilter =
-          dispatch === undefined
-            ? ""
-            : ` AND a.tag ${dispatch.exclude ? "NOT IN" : "IN"} (SELECT value FROM json_each(?))`;
-        const tagBindings =
-          dispatch === undefined ? [] : [S.encodeSync(StoredTags)([...dispatch.tags])];
         const select = Effect.fnUntraced(function* (lifecycle: AlarmLifecycle, batchLimit: number) {
           const cache = yield* currentCache;
 
@@ -1943,6 +1943,12 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                   (a.storage_id < b.storage_id ? -1 : a.storage_id > b.storage_id ? 1 : 0),
               )
               .slice(0, batchLimit);
+          const tagFilter =
+            dispatch === undefined
+              ? ""
+              : ` AND a.tag ${dispatch.exclude ? "NOT IN" : "IN"} (SELECT value FROM json_each(?))`;
+          const tagBindings =
+            dispatch === undefined ? [] : [S.encodeSync(StoredTags)([...dispatch.tags])];
           const cursor = yield* state.storage.sql.exec<AlarmRow>(
             `${alarmRowsSql} WHERE a.lifecycle = ? AND a.wake_at <= ?${tagFilter}
              ORDER BY a.wake_at ASC, a.storage_id ASC LIMIT ?`,
@@ -2087,19 +2093,17 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         });
         const permits = dispatch?.permits ?? (yield* Semaphore.make(4));
         const automatic = Effect.forEach(dueRows, handleRow, { discard: true }).pipe(Effect.exit);
+        const manual = Effect.forEach(
+          manualRows,
+          (row) => permits.withPermits(1)(handleRow(row)).pipe(Effect.exit),
+          { concurrency: manualRows.length <= 1 ? 1 : 4 },
+        ).pipe(Effect.flatMap(Exit.asVoidAll), Effect.exit);
+        // Empty lanes need no child fiber; a single row has no parallel sibling.
         const exits = yield* manualRows.length === 0
           ? automatic.pipe(Effect.map((exit) => [exit]))
-          : Effect.all(
-              [
-                automatic,
-                Effect.forEach(
-                  manualRows,
-                  (row) => permits.withPermits(1)(handleRow(row)).pipe(Effect.exit),
-                  { concurrency: 4 },
-                ).pipe(Effect.flatMap(Exit.asVoidAll), Effect.exit),
-              ],
-              { concurrency: 2 },
-            );
+          : dueRows.length === 0
+            ? manual.pipe(Effect.map((exit) => [exit]))
+            : Effect.all([automatic, manual], { concurrency: 2 });
 
         const cache = yield* currentCache;
         const unchanged = manualRows.filter((row) => {

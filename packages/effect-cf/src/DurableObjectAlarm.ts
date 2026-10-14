@@ -1918,12 +1918,6 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         // A validated dispatcher owns its remaining batch, including newly enrolled work.
         if (dispatch?.raw !== undefined) dispatch.raw.processed = true;
 
-        const tagFilter =
-          dispatch === undefined
-            ? ""
-            : ` AND a.tag ${dispatch.exclude ? "NOT IN" : "IN"} (SELECT value FROM json_each(?))`;
-        const tagBindings =
-          dispatch === undefined ? [] : [S.encodeSync(StoredTags)([...dispatch.tags])];
         const select = Effect.fnUntraced(function* (lifecycle: AlarmLifecycle, batchLimit: number) {
           const cache = yield* currentCache;
 
@@ -1941,6 +1935,12 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                   (a.storage_id < b.storage_id ? -1 : a.storage_id > b.storage_id ? 1 : 0),
               )
               .slice(0, batchLimit);
+          const tagFilter =
+            dispatch === undefined
+              ? ""
+              : ` AND a.tag ${dispatch.exclude ? "NOT IN" : "IN"} (SELECT value FROM json_each(?))`;
+          const tagBindings =
+            dispatch === undefined ? [] : [S.encodeSync(StoredTags)([...dispatch.tags])];
           const cursor = yield* state.storage.sql.exec<AlarmRow>(
             `${alarmRowsSql} WHERE a.lifecycle = ? AND a.wake_at <= ?${tagFilter}
              ORDER BY a.wake_at ASC, a.storage_id ASC LIMIT ?`,

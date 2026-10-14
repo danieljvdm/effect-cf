@@ -959,52 +959,50 @@ const makeDefinition = <const Definitions extends AlarmDefinitions>(definitions:
   const definitionFor = (tag: string) =>
     Object.hasOwn(definitions, tag) ? definitions[tag] : undefined;
 
-  const bind = (mutations: AlarmTransaction): DefinedAlarmTransaction<Definitions> => {
-    const schedule = (method: "scheduleAlarm" | "scheduleAlarmEarlier") =>
-      Effect.fn("DefinedAlarms.scheduleAlarm")(function* (
-        input: DefinedScheduleAlarmInput<Definitions>,
-      ) {
-        const definition = definitionFor(input.tag);
+  const schedule = Effect.fn("DefinedAlarms.scheduleAlarm")(function* (
+    mutations: AlarmTransaction,
+    method: "scheduleAlarm" | "scheduleAlarmEarlier",
+    input: DefinedScheduleAlarmInput<Definitions>,
+  ) {
+    const definition = definitionFor(input.tag);
 
-        if (definition === undefined) {
-          return yield* Effect.fail(
-            new InvalidAlarmRefError({
-              cause: new Error(`Unknown alarm tag "${input.tag}"`),
-            }),
-          );
-        }
-        const payload = yield* S.encodeEffect(getAlarmDefinitionSchema(definition))(
-          input.payload,
-        ).pipe(
-          Effect.flatMap(S.decodeUnknownEffect(S.Json)),
-          Effect.mapError((cause) => new InvalidAlarmPayloadError({ cause })),
-        );
+    if (definition === undefined) {
+      return yield* Effect.fail(
+        new InvalidAlarmRefError({
+          cause: new Error(`Unknown alarm tag "${input.tag}"`),
+        }),
+      );
+    }
+    const payload = yield* S.encodeEffect(getAlarmDefinitionSchema(definition))(input.payload).pipe(
+      Effect.flatMap(S.decodeUnknownEffect(S.Json)),
+      Effect.mapError((cause) => new InvalidAlarmPayloadError({ cause })),
+    );
 
-        yield* mutations[method]({
-          ...input,
-          payload,
-          lifecycle: isAlarmDefinitionConfig(definition) ? definition.lifecycle : undefined,
-        });
-      });
+    yield* mutations[method]({
+      ...input,
+      payload,
+      lifecycle: isAlarmDefinitionConfig(definition) ? definition.lifecycle : undefined,
+    });
+  });
+  const cancel = Effect.fn("DefinedAlarms.cancelAlarm")(function* (
+    mutations: AlarmTransaction,
+    input: AlarmRef<keyof Definitions & string>,
+  ) {
+    if (definitionFor(input.tag) === undefined) {
+      return yield* Effect.fail(
+        new InvalidAlarmRefError({
+          cause: new Error(`Unknown alarm tag "${input.tag}"`),
+        }),
+      );
+    }
 
-    return {
-      scheduleAlarm: schedule("scheduleAlarm"),
-      scheduleAlarmEarlier: schedule("scheduleAlarmEarlier"),
-      cancelAlarm: Effect.fn("DefinedAlarms.cancelAlarm")(function* (
-        input: AlarmRef<keyof Definitions & string>,
-      ) {
-        if (definitionFor(input.tag) === undefined) {
-          return yield* Effect.fail(
-            new InvalidAlarmRefError({
-              cause: new Error(`Unknown alarm tag "${input.tag}"`),
-            }),
-          );
-        }
-
-        yield* mutations.cancelAlarm(input);
-      }),
-    };
-  };
+    yield* mutations.cancelAlarm(input);
+  });
+  const bind = (mutations: AlarmTransaction): DefinedAlarmTransaction<Definitions> => ({
+    scheduleAlarm: (input) => schedule(mutations, "scheduleAlarm", input),
+    scheduleAlarmEarlier: (input) => schedule(mutations, "scheduleAlarmEarlier", input),
+    cancelAlarm: (input) => cancel(mutations, input),
+  });
 
   return {
     make: (alarms: AlarmScheduler): DefinedAlarmScheduler<Definitions> => ({

@@ -851,7 +851,7 @@ const runRegistrations = <R, E>(
                 }),
                 Effect.exit,
               ),
-            { concurrency: "unbounded" },
+            { concurrency: dispatchers.length <= 1 ? 1 : "unbounded" },
           );
         // Raw hooks wait only for automatic dispatchers; manual-only work stays independent.
         const automatic = parts.dispatchers.filter(
@@ -2087,19 +2087,17 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         });
         const permits = dispatch?.permits ?? (yield* Semaphore.make(4));
         const automatic = Effect.forEach(dueRows, handleRow, { discard: true }).pipe(Effect.exit);
+        const manual = Effect.forEach(
+          manualRows,
+          (row) => permits.withPermits(1)(handleRow(row)).pipe(Effect.exit),
+          { concurrency: manualRows.length <= 1 ? 1 : 4 },
+        ).pipe(Effect.flatMap(Exit.asVoidAll), Effect.exit);
+        // Empty lanes need no child fiber; a single row has no parallel sibling.
         const exits = yield* manualRows.length === 0
           ? automatic.pipe(Effect.map((exit) => [exit]))
-          : Effect.all(
-              [
-                automatic,
-                Effect.forEach(
-                  manualRows,
-                  (row) => permits.withPermits(1)(handleRow(row)).pipe(Effect.exit),
-                  { concurrency: 4 },
-                ).pipe(Effect.flatMap(Exit.asVoidAll), Effect.exit),
-              ],
-              { concurrency: 2 },
-            );
+          : dueRows.length === 0
+            ? manual.pipe(Effect.map((exit) => [exit]))
+            : Effect.all([automatic, manual], { concurrency: 2 });
 
         const cache = yield* currentCache;
         const unchanged = manualRows.filter((row) => {

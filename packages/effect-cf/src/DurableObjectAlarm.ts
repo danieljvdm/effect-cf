@@ -1620,7 +1620,6 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
       const transaction = <A, E, R>(
         closure: (alarms: AlarmTransaction) => Effect.Effect<A, E, R>,
         options?: AlarmTransactionOptions,
-        renewOverdue = false,
       ): Effect.Effect<A, E | StorageOperationError, R> =>
         Effect.withFiber((fiber) => {
           const pass = Context.get(fiber.context, CurrentAlarmPass);
@@ -1671,7 +1670,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
               );
 
               if (lazySchema && wakeDeferrals === 0 && !dispatchActive) yield* ensureSchema;
-              yield* reconcileAlarm(renewOverdue);
+              yield* reconcileAlarm();
 
               return result;
             });
@@ -1723,6 +1722,15 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
       const deferWakes: AlarmScheduler["deferWakes"] = (body) =>
         Effect.acquireUseRelease(
           Effect.gen(function* () {
+            const pass = yield* CurrentAlarmPass;
+
+            if (pass !== undefined && !pass.active)
+              return yield* new StorageOperationError({
+                operation: "alarm.deferWakes",
+                cause: new Error(
+                  "Alarm handlers cannot mutate detached work after their pass ends",
+                ),
+              });
             const configuration = yield* getScheduleConfiguration(configurationDefaults);
             const now = yield* Clock.currentTimeMillis;
 
@@ -1738,9 +1746,9 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           }),
           ({ first, ready }) =>
             (first
-              ? transaction(() => Effect.void, undefined, true).pipe(
-                  Effect.onExit((exit) => Deferred.done(ready, exit)),
-                )
+              ? // Entry changes only the native guard, not the scheduled rows. While this
+                // scope owns a deferral, concurrent checkpoints reconcile to the same guard.
+                reconcileAlarm(true).pipe(Effect.onExit((exit) => Deferred.done(ready, exit)))
               : Deferred.await(ready)
             ).pipe(Effect.andThen(body)),
           () =>
@@ -1771,8 +1779,9 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         Effect.suspend(() => {
           if (native) cacheStateForObject.nativeDelivery++;
 
+          // A deferred region owns recovery before its first enrollment creates tables.
           return Effect.flatMap(hasTables, (managed) =>
-            !managed
+            !managed && wakesReady === undefined
               ? native
                 ? event(Effect.void)
                 : Effect.void

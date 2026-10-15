@@ -56,36 +56,44 @@ test("DurableObject.make supplies application-layer configuration to its shared 
   expect(status).toMatchObject({ attempts: 1, parked: true });
 });
 
-it.effect("rejects self-rearms from a detached handler fiber after the pass completes", () =>
-  Effect.gen(function* () {
-    const fixture = makeAlarmFixture();
+it.effect.each(["schedule", "defer"] as const)(
+  "rejects %s from a detached handler fiber after the pass completes",
+  (operation) =>
+    Effect.gen(function* () {
+      const fixture = makeAlarmFixture();
 
-    yield* fixture.run(
-      Effect.gen(function* () {
-        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
-        const release = yield* Deferred.make<void>();
-        const input = { tag: "job", id: "a", payload: null, runAt: atMillis(0) };
-        const fibers: Fiber.Fiber<void, DurableObjectAlarm.DurableObjectAlarmError>[] = [];
+      yield* fixture.run(
+        Effect.gen(function* () {
+          const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+          const release = yield* Deferred.make<void>();
+          const input = { tag: "job", id: "a", payload: null, runAt: atMillis(0) };
+          const fibers: Fiber.Fiber<void, DurableObjectAlarm.DurableObjectAlarmError>[] = [];
 
-        yield* alarms.scheduleAlarm(input);
-        yield* alarms.processDueAlarms(() =>
-          Effect.gen(function* () {
-            fibers.push(
-              yield* Effect.forkChild(
-                Deferred.await(release).pipe(Effect.andThen(alarms.scheduleAlarm(input))),
-              ),
-            );
-          }),
-        );
-        yield* Deferred.succeed(release, undefined);
-        const error = yield* Fiber.join(fibers[0]!).pipe(Effect.flip);
+          yield* alarms.scheduleAlarm(input);
+          yield* alarms.processDueAlarms(() =>
+            Effect.gen(function* () {
+              fibers.push(
+                yield* Effect.forkChild(
+                  Deferred.await(release).pipe(
+                    Effect.andThen(
+                      operation === "schedule"
+                        ? alarms.scheduleAlarm(input)
+                        : alarms.deferWakes(Effect.void),
+                    ),
+                  ),
+                ),
+              );
+            }),
+          );
+          yield* Deferred.succeed(release, undefined);
+          const error = yield* Fiber.join(fibers[0]!).pipe(Effect.flip);
 
-        assert.strictEqual(error._tag, "StorageOperationError");
-        assert.isUndefined(yield* alarms.getAlarmStatus(input));
-        assert.isNull(fixture.currentAlarm());
-      }),
-    );
-  }),
+          assert.strictEqual(error._tag, "StorageOperationError");
+          assert.isUndefined(yield* alarms.getAlarmStatus(input));
+          assert.isNull(fixture.currentAlarm());
+        }),
+      );
+    }),
 );
 
 it.effect.each(["scheduleAlarm", "scheduleAlarmEarlier", "cancelAlarm"] as const)(

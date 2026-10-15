@@ -186,7 +186,8 @@ known after eviction or a deployment that removes its registration.
 
 For a queue with its own durable retry debit, register `{ prepare: (event, claim) => ... }`
 instead of a function handler. Preparation runs local work only: enter `alarms.transaction`,
-run `claim`, and write the debit only when it returns `true`. Return an Effect containing
+pass `{ sqlClient }`, run `claim`, and write the debit only when it returns `true`.
+Use that client for all preparation SQL. Return an Effect containing
 the actual work. The scheduler runs that Effect only after the outer transaction commits;
 a stale claim skips it. Preparation and work share a handler Scope, so a scoped permit
 can cover both. Keep model calls, RPC and other external I/O in the returned Effect.

@@ -1605,6 +1605,112 @@ it.effect(
   },
 );
 
+// Regression in 9ea63a8: a hidden SQL rollback must not authorize prepared work.
+it.effect("rejects prepared claims with an unobservable SQL transaction", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const sql = yield* SqliteClient.make({ storage: state.raw.storage });
+      let dispatched = false;
+      const registration = Maintenance.handlers({
+        maintenance: {
+          prepare: (_event, claim) =>
+            Effect.gen(function* () {
+              const maintenance = yield* Maintenance;
+
+              return yield* maintenance.transaction(() =>
+                sql
+                  .withTransaction(
+                    Effect.gen(function* () {
+                      yield* claim;
+                      yield* sql`INSERT INTO preparation_debits VALUES (1)`;
+
+                      return yield* Effect.fail("roll back the hidden SQL transaction");
+                    }),
+                  )
+                  .pipe(
+                    Effect.exit,
+                    Effect.as(
+                      Effect.sync(() => {
+                        dispatched = true;
+                      }),
+                    ),
+                  ),
+              );
+            }),
+        },
+      });
+
+      yield* TestClock.setTime(deadline);
+      yield* sql`CREATE TABLE preparation_debits (attempt INTEGER NOT NULL)`;
+      yield* Effect.gen(function* () {
+        const maintenance = yield* Maintenance;
+
+        yield* maintenance.scheduleAlarm(maintenanceInput(DateTime.makeUnsafe(deadline)));
+        const exit = yield* registration.run.pipe(
+          Effect.updateContext<never, never>(Context.omit(SqlClient.SqlClient)),
+          Effect.exit,
+        );
+
+        assert.isFalse(dispatched);
+        assert.isTrue(Exit.isFailure(exit));
+        assert.deepStrictEqual(yield* sql`SELECT attempt FROM preparation_debits`, []);
+        yield* maintenance.cancelAlarm(maintenanceRef);
+      }).pipe(Effect.provide(registration.layer));
+    }).pipe(Effect.provide(Layer.merge(services, Reactivity.layer))),
+  );
+});
+
+// Regression in 9ea63a8: recovery must fence the durable revision after rollback.
+it.effect("parks a prepared alarm after its queue debit rolls back", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const registration = Maintenance.handlers({
+        maintenance: {
+          prepare: (_event, claim) =>
+            Effect.gen(function* () {
+              const maintenance = yield* Maintenance;
+
+              return yield* maintenance.transaction(
+                () =>
+                  Effect.gen(function* () {
+                    yield* claim;
+                    yield* sql`INSERT INTO preparation_debits VALUES (1)`;
+
+                    return yield* Effect.fail("debit failed");
+                  }),
+                { sqlClient: sql },
+              );
+            }),
+        },
+      });
+
+      yield* TestClock.setTime(deadline);
+      yield* sql`CREATE TABLE preparation_debits (attempt INTEGER NOT NULL)`;
+      yield* Effect.gen(function* () {
+        const maintenance = yield* Maintenance;
+
+        yield* maintenance.scheduleAlarm(maintenanceInput(DateTime.makeUnsafe(deadline)));
+        assert.isTrue(Exit.isFailure(yield* registration.run.pipe(Effect.exit)));
+        assert.deepStrictEqual(yield* sql`SELECT attempt FROM preparation_debits`, []);
+        assert.strictEqual(
+          DateTime.toEpochMillis((yield* maintenance.getAlarmStatus(maintenanceRef))!.runAt),
+          deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS,
+        );
+        assert.strictEqual(
+          yield* state.storage.getAlarm(),
+          deadline + DurableObjectAlarm.PARKED_RETRY_DELAY_MS,
+        );
+        yield* maintenance.cancelAlarm(maintenanceRef);
+      }).pipe(Effect.provide(registration.layer));
+    }).pipe(Effect.provide(services)),
+  );
+});
+
 it.effect(
   "manual alarms roll back with source writes and reject escaped transaction handles",
   () => {

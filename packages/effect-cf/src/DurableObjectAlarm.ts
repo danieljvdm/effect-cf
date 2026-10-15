@@ -723,8 +723,9 @@ export type DefinedAlarmEvent<Tag extends string, Payload> = Omit<
 
 /**
  * Prepare local queue state before dispatch. Run `claim` once inside this scheduler's
- * outermost `transaction`, before writing the queue debit. A false claim is stale;
- * skip the debit. Return the work to run after commit; preparation must do no external I/O.
+ * outermost `transaction` with `{ sqlClient }`, before writing the queue debit.
+ * Use that client for all preparation SQL. A false claim is stale; skip the debit.
+ * Return the work to run after commit; preparation must do no external I/O.
  * Rollback, an escaped claim, or returning without a committed claim cannot dispatch work.
  */
 export interface PreparedAlarmHandler<Event, R = never, E = never> {
@@ -1721,14 +1722,11 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
             Effect.withFiber((owner) => {
               let active = true;
               const transactionScope = owner.getRef(CurrentStorageTransaction);
-              const ambientSql = Context.getOption(owner.context, SqlClient);
-              const sql = client ?? (ambientSql._tag === "Some" ? ambientSql.value : undefined);
               const activeCallback = (fiber: Fiber.Fiber<unknown, unknown>) => {
-                const connection =
-                  sql === undefined
-                    ? undefined
-                    : Context.getOption(fiber.context, sql.transactionService);
-                const depth = connection?._tag === "Some" ? connection.value[1] : undefined;
+                // A selected client makes nested SQL rollback boundaries observable.
+                if (client === undefined) return false;
+                const connection = Context.getOption(fiber.context, client.transactionService);
+                const depth = connection._tag === "Some" ? connection.value[1] : undefined;
 
                 return (
                   active &&
@@ -2219,18 +2217,25 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
               )
                 return new StorageOperationError({
                   operation: "alarm.prepare",
-                  cause: new Error("Claim once in the active outermost alarm transaction callback"),
+                  cause: new Error(
+                    "Claim once in the outermost alarm transaction with its SQL client",
+                  ),
                 });
               attempted = true;
+              const durableRow = row;
+              const rowIndex = manualRows.indexOf(row);
+
               scope.onExit.push((success) => {
                 committed = success;
+                // Recovery must CAS the revision that actually survived the transaction.
+                if (success) manualRows[rowIndex] = row;
+                else row = pass.row = durableRow;
               });
 
               return Effect.gen(function* () {
                 const selected = yield* claimManual(row);
 
                 if (selected === undefined) return false;
-                manualRows[manualRows.indexOf(row)] = selected;
                 row = selected;
                 pass.row = selected;
                 claimed = true;

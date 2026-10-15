@@ -579,6 +579,21 @@ it.effect.each(["rpc", "fetch"] as const)(
         );
         const instance = new CurrentObject(state.raw, {});
 
+        yield* Effect.promise(() =>
+          instance[DurableObject.RunSymbol](
+            Effect.flatMap(Reminders, (reminders) =>
+              reminders.scheduleAlarm({
+                tag: "reminder",
+                id: "future",
+                payload: null,
+                runAt: DateTime.makeUnsafe(deadline + 1_000),
+              }),
+            ),
+            { eventLayer: false },
+          ),
+        );
+        const writes = vi.spyOn(state.raw.storage, "setAlarm");
+
         yield* Effect.gen(function* () {
           const response = yield* Effect.promise(async () => {
             if (event === "rpc") {
@@ -602,6 +617,7 @@ it.effect.each(["rpc", "fetch"] as const)(
           assert.strictEqual(scopes.length, 2);
           assert.isFalse(scopes[1]!.closed);
           assert.strictEqual(yield* state.storage.getAlarm(), deadline + 1_000);
+          assert.strictEqual(writes.mock.calls.length, 0);
           // A delivered native alarm consumes the armed timestamp before joining.
           yield* Effect.promise(() => state.raw.storage.deleteAlarm());
           const native = yield* Effect.promise(async () => {
@@ -628,7 +644,10 @@ it.effect.each(["rpc", "fetch"] as const)(
           assert.strictEqual(scopes.length, 2);
           assert.isTrue(scopes[1]!.closed);
           assert.strictEqual(yield* state.storage.getAlarm(), deadline + 5_000);
-        }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
+        }).pipe(
+          Effect.ensuring(Deferred.succeed(release, undefined)),
+          Effect.ensuring(Effect.sync(() => writes.mockRestore())),
+        );
       }),
     );
   },

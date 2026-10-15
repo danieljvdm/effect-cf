@@ -252,6 +252,12 @@ export class InvalidAlarmRegistrationError extends Data.TaggedError(
   }
 }
 
+/** @internal RPC/fetch events check due work after releasing the response. */
+export const ResponseEvent = Context.Reference<boolean>(
+  "effect-cf/DurableObjectAlarm/ResponseEvent",
+  { defaultValue: () => false },
+);
+
 const getScheduleConfiguration = Effect.fnUntraced(function* (defaults: ScheduleConfiguration) {
   const input = { ...defaults, ...(yield* ScheduleConfiguration) };
 
@@ -1361,7 +1367,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           cache.native = { at: runAt, delivery: cacheStateForObject.nativeDelivery };
       });
 
-      const reconcileAlarm = Effect.fnUntraced(function* (renewOverdue = false) {
+      const reconcileAlarm = Effect.fnUntraced(function* () {
         if (wakeDeferrals > 0 || dispatchActive) {
           if (dispatchActive) dispatchNeedsReconcile = true;
           const current = yield* readNativeAlarm;
@@ -1372,12 +1378,12 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
             deferredRecoveryAt = now + deferredRecoveryDelay;
           }
 
-          // Checkpoints retain an overdue guard that is still pending. Scope entry
-          // and failed acquisition still establish a future recovery deadline.
+          // A pending guard remains coverage even when overdue. Consumed guards and
+          // failed event acquisition still establish a future recovery deadline.
           if (
             current === null ||
             current > deferredRecoveryAt ||
-            ((renewOverdue || resetRecovery) && current <= now)
+            (resetRecovery && current <= now)
           ) {
             yield* writeNativeAlarm(deferredRecoveryAt);
           }
@@ -1402,9 +1408,24 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           }
         }
 
-        if ((yield* readNativeAlarm) !== next) {
-          yield* writeNativeAlarm(next);
+        const current = yield* readNativeAlarm;
+
+        if (next !== null && (yield* ResponseEvent)) {
+          const now = yield* Clock.currentTimeMillis;
+
+          if (next <= now) {
+            const configuration = yield* getScheduleConfiguration(configurationDefaults).pipe(
+              Effect.mapError(
+                (cause) => new StorageOperationError({ operation: "alarm.reconcile", cause }),
+              ),
+            );
+
+            // Prompt dispatch uses the logical deadline; a pending native wake covers recovery.
+            if (configuration.dispatchAfterEvent)
+              next = Math.min(current ?? Infinity, now + configuration.inFlightRecovery);
+          }
         }
+        if (current !== next) yield* writeNativeAlarm(next);
       });
 
       const writeAttempts = Effect.fnUntraced(function* (
@@ -1748,7 +1769,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
             (first
               ? // Entry changes only the native guard, not the scheduled rows. While this
                 // scope owns a deferral, concurrent checkpoints reconcile to the same guard.
-                reconcileAlarm(true).pipe(Effect.onExit((exit) => Deferred.done(ready, exit)))
+                reconcileAlarm().pipe(Effect.onExit((exit) => Deferred.done(ready, exit)))
               : Deferred.await(ready)
             ).pipe(Effect.andThen(body)),
           () =>

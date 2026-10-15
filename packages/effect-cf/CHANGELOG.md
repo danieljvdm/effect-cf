@@ -1,5 +1,19 @@
 # effect-cf
 
+## 0.56.6
+
+### Patch Changes
+
+- [#228](https://github.com/danieljvdm/effect-cf/pull/228) [`8500014`](https://github.com/danieljvdm/effect-cf/commit/85000143fd25d3b22d85e51406b1c5fb7ce2f766) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Advance acknowledged recurring alarms with one guarded SQL update while preserving retry reset and rollback behavior.
+
+- [#231](https://github.com/danieljvdm/effect-cf/pull/231) [`dd201c4`](https://github.com/danieljvdm/effect-cf/commit/dd201c49eec8622671f8b5f2a0d4ce0d046a1af7) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Defer unused workspace Git wrapper construction while preserving native property access timing and stable wrapper identity.
+
+- [#229](https://github.com/danieljvdm/effect-cf/pull/229) [`8bc7df5`](https://github.com/danieljvdm/effect-cf/commit/8bc7df523cdc94be0132e18479374c8421eb2b57) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Include the current HTTP server span in base-runtime event-end telemetry flushing, reduce trace serialization allocations, and clarify exporter lifetimes.
+
+- [#230](https://github.com/danieljvdm/effect-cf/pull/230) [`d610b3e`](https://github.com/danieljvdm/effect-cf/commit/d610b3ead19d6b38e21c6e7fb6ee69bec50f3a8a) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Reuse container wrappers for resolved RPC targets and reduce process-output stream overhead while waiting for reader cleanup on failure and interruption.
+
+- [#227](https://github.com/danieljvdm/effect-cf/pull/227) [`8a3b1dc`](https://github.com/danieljvdm/effect-cf/commit/8a3b1dc2ada72e841e794f8b1d2e676600c02858) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Reduce Worker and Workflow invocation setup, typed queue message wrapping, and Durable Object RPC token deduplication overhead.
+
 ## 0.56.5
 
 ### Patch Changes

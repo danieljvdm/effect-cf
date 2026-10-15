@@ -1902,17 +1902,22 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           return;
         }
         const now = yield* Clock.currentTimeMillis;
-        const cursor = yield* state.storage.sql.exec(
-          `UPDATE effect_cf_scheduled_alarms SET run_at = ? WHERE ${sameRevisionSql}`,
-          now + Math.max(configuration.minimumRepeatInterval, row.repeat_every_ms),
+        const next = now + Math.max(configuration.minimumRepeatInterval, row.repeat_every_ms);
+        // A completed product occurrence is progress. Missed occurrences are never replayed.
+        const cursor = yield* state.storage.sql.exec<AlarmRow>(
+          `UPDATE effect_cf_scheduled_alarms SET
+             run_at = ?, wake_at = ?, revision = ?, attempts = 0, parked = 0,
+             retry_at = NULL, progress = ? WHERE ${sameRevisionSql} RETURNING *`,
+          next,
+          next,
+          crypto.randomUUID(),
+          row.progress,
           row.storage_id,
           row.revision,
         );
+        const updated = (yield* cursor.toArray())[0];
 
-        if ((yield* cursor.rowsWritten) > 0) {
-          // A completed product occurrence is progress. Missed occurrences are never replayed.
-          yield* writeAttempts(row.storage_id, 0, 0, null, row.progress);
-        }
+        if (updated !== undefined) rememberRow(yield* currentCache, updated);
       });
 
       const processDueAlarms = Effect.fn("DurableObjectAlarm.processDueAlarms")(function* <

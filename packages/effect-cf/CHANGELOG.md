@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.56.7
+
+### Patch Changes
+
+- [#233](https://github.com/danieljvdm/effect-cf/pull/233) [`8bac82b`](https://github.com/danieljvdm/effect-cf/commit/8bac82beaf99154028386334cc065f65fcd1dcd4) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Reuse a covering native alarm when RPC or fetch events enroll due work for post-event dispatch. Renew consumed guards while retaining pending overdue wakes.
+
 ## 0.56.6
 
 ### Patch Changes

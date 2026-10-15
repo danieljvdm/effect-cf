@@ -1,5 +1,11 @@
 # effect-cf
 
+## 0.56.5
+
+### Patch Changes
+
+- [#224](https://github.com/danieljvdm/effect-cf/pull/224) [`d19baed`](https://github.com/danieljvdm/effect-cf/commit/d19baed87bd46ec9b365cea01370243fa6a5cd1e) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Establish deferred Durable Object wake guards without opening an empty storage transaction.
+
 ## 0.56.4
 
 ### Patch Changes

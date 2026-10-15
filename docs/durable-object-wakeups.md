@@ -184,6 +184,13 @@ the queue owns those policies. Their scheduling does not consume an automatic
 alarm's attempt budget. The lifecycle is persisted with the alarm, so it remains
 known after eviction or a deployment that removes its registration.
 
+For a queue with its own durable retry debit, register `{ prepare: (event, claim) => ... }`
+instead of a function handler. Preparation runs local work only: enter `alarms.transaction`,
+run `claim`, and write the debit only when it returns `true`. Return an Effect containing
+the actual work. The scheduler runs that Effect only after the outer transaction commits;
+a stale claim skips it. Preparation and work share a handler Scope, so a scoped permit
+can cover both. Keep model calls, RPC and other external I/O in the returned Effect.
+
 Repeated manual `scheduleAlarmEarlier` checkpoints can leave the logical row
 unchanged while still reconciling native recovery. The first enrollment during
 a dispatch always supersedes that dispatch's fallback recovery for the same alarm.
@@ -249,6 +256,11 @@ later task and checks for due alarms in a fresh alarm event scope. Both native
 and in-process delivery use the same scheduler pass, registered handlers and
 event layer. Consumers only schedule logical deadlines; they do not override
 entrypoints, call `alarm()`, start daemon fibers or manage background Promises.
+
+When an RPC or fetch makes a logical alarm due, its existing future native pre-arm is
+retained up to `inFlightRecovery`, rather than moved to now and then restored for dispatch.
+The logical deadline stays due. A missing or expired guard is renewed before commit.
+Receipt delivery remains independent of dispatch completion.
 
 A native alarm arriving during that pass joins it, including event-scope
 finalizers. The library restores its recovery timestamp before joining and

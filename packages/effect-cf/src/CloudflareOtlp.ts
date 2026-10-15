@@ -208,10 +208,15 @@ export const layerProtobuf = (
 /**
  * OTLP layer with Cloudflare Worker resource attributes.
  *
- * Provide this layer at runtime scope for long-lived metrics aggregation, or at
- * handler scope when traces/logs should flush as the Cloudflare event finishes.
- * A handler-scoped exporter can delay scope closure while its own finalizer
- * flushes; the two-second background flush limit does not bound layer shutdown.
+ * With `Worker.makeFetchHandler`, runtime scope can retain metric aggregation
+ * across requests sharing the same `env` identity. Export interval timers belong
+ * to the invocation that builds the exporter and can stop when it ends; later
+ * requests still schedule the adapter's event-end flush.
+ *
+ * Use `eventLayer` to build and finalize an exporter within each event. Its
+ * finalizer can delay scope closure; the two-second background flush limit does
+ * not bound layer shutdown. `Worker.make` does not share its base runtime across
+ * native invocations.
  */
 export const layerWorker = (options: WorkerLayerOptions = {}): Layer.Layer<OtlpExporter.Flusher> =>
   makeLayer(options, {

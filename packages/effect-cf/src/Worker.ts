@@ -292,7 +292,7 @@ const renderFetchSuccess = <E, R, REvent, EventLayerError, EventLayerRequirement
     const telemetryMiddleware = HttpMiddleware.make((self) =>
       RpcTargets.withScope(
         Effect.gen(function* () {
-          yield* Effect.addFinalizer(() => scheduleTelemetryFlush);
+          yield* Effect.addFinalizer(() => scheduleFetchTelemetryFlush);
 
           return yield* self;
         }),
@@ -354,6 +354,15 @@ const isWorkerOptions = <ROut, REvent, EventLayerError, Rpc extends WorkerRpc<RO
 const scheduleTelemetryFlush: Effect.Effect<void, never, WorkerContext> =
   Telemetry.scheduleTelemetryFlush((flush) =>
     Effect.flatMap(WorkerContext, (workerContext) => workerContext.waitUntil(flush)),
+  );
+
+const scheduleFetchTelemetryFlush: Effect.Effect<void, never, WorkerContext> =
+  Telemetry.scheduleTelemetryFlush((flush) =>
+    // The outer HTTP tracer queues span completion before the request scope closes.
+    Effect.andThen(
+      Effect.yieldNow,
+      Effect.flatMap(WorkerContext, (workerContext) => workerContext.waitUntil(flush)),
+    ),
   );
 
 /**

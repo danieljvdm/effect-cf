@@ -61,7 +61,9 @@ Provide the layer at the appropriate Worker runtime or event scope. Selected sig
 
 The measured handler-scoped configuration sent two metrics POSTs per event even with an empty registry. Omitting unused metrics reduced Wrangler CPU from 20.5 to 15.5 ms median and completed-response time from 222.5 to 195.6 ms median while retaining the expected logs and spans. Vite and Alchemy also showed lower CPU, but missing collector records prevent verified delivery-equivalence conclusions for those cohorts.
 
-Increasing the periodic export interval does not suppress event-end or finalizer exports. Preserve flushing before an isolate can freeze. For long-lived metric aggregation, use a runtime-scoped exporter; an event-scoped exporter also flushes when its scope closes. Worker CPU can include exports after the response, so report it separately from the client's completed-response time.
+Increasing the periodic export interval does not suppress event-end or finalizer exports. Preserve flushing before an isolate can freeze. Worker CPU can include exports after the response, so report it separately from the client's completed-response time.
+
+`Worker.makeFetchHandler` can retain a runtime-scoped exporter and its metric aggregation across requests sharing the same `env` identity. Its export interval timers belong to the invocation that builds it and can stop when that invocation ends; later requests still schedule event-end flushing. Use `eventLayer` to build and finalize an exporter within each event. `Worker.make` creates a fresh base runtime for each native invocation, so its base layer does not provide aggregation across invocations.
 
 Automatic suppression of empty metric exports remains a follow-up investigation. The installed Effect exporter has no public skip hook covering periodic, explicit, and finalizer exports. The benchmark does not implement or claim such an optimization.
 

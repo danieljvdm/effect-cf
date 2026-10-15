@@ -179,8 +179,8 @@ interface HostArgumentsInstance {
  * to acquire through its Effect layer.
  *
  * The class must use a `new_sqlite_classes` migration. If `shell` is present,
- * its Worker must also configure a `worker_loaders` binding, enable the
- * `experimental` compatibility flag, and export `WorkspaceServiceProxy`.
+ * its Worker must also configure a `worker_loaders` binding and export
+ * `WorkspaceServiceProxy`.
  */
 export const withComputerWorkspace = <TBase extends DurableObjectConstructor>(
   Base: TBase,

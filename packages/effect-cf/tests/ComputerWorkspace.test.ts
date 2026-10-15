@@ -190,6 +190,66 @@ it.effect("wraps text, binary streams, runtime metadata, and scoped run disposal
   }),
 );
 
+it.effect("keeps the captured Git client and stable wrapper identity", () =>
+  Effect.gen(function* () {
+    const calls: Array<string> = [];
+    let gitReads = 0;
+    let nativeGit = {
+      status: () => {
+        calls.push("original");
+
+        return Promise.resolve([]);
+      },
+    };
+    const client = makePartialTestDouble<WorkspaceClient>({
+      fs: {},
+      get git() {
+        gitReads++;
+
+        return nativeGit;
+      },
+      artifacts: emptyArtifacts,
+      assets: undefined,
+      runtime: {},
+      [Symbol.dispose]: () => {},
+    });
+    const workspace = ComputerWorkspace.fromWorkspaceClient(client);
+
+    assert.strictEqual(gitReads, 1);
+
+    nativeGit = {
+      status: () => {
+        calls.push("replacement");
+
+        return Promise.resolve([]);
+      },
+    };
+    const git = workspace.git;
+
+    yield* git.status();
+
+    assert.deepStrictEqual(calls, ["original"]);
+    assert.strictEqual(workspace.git, git);
+    assert.strictEqual(gitReads, 1);
+  }),
+);
+
+it("propagates native Git acquisition failures while wrapping the workspace", () => {
+  const cause = new Error("Git factory unavailable");
+  const client = makePartialTestDouble<WorkspaceClient>({
+    fs: {},
+    get git() {
+      throw cause;
+    },
+    artifacts: emptyArtifacts,
+    assets: undefined,
+    runtime: {},
+    [Symbol.dispose]: () => {},
+  });
+
+  assert.throws(() => ComputerWorkspace.fromWorkspaceClient(client), cause);
+});
+
 it.effect("preserves the workspace receiver for Think compatibility methods", () =>
   Effect.gen(function* () {
     const thinkClient: ReceiverSensitiveThinkClient = {

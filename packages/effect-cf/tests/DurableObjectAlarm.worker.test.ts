@@ -1649,7 +1649,10 @@ it.effect("rejects prepared claims with an unobservable SQL transaction", () => 
 
         yield* maintenance.scheduleAlarm(maintenanceInput(DateTime.makeUnsafe(deadline)));
         const exit = yield* registration.run.pipe(
-          Effect.updateContext<never, never>(Context.omit(SqlClient.SqlClient)),
+          Effect.updateContext(
+            (context: Context.Context<Effect.Services<typeof registration.run>>) =>
+              Context.omit(SqlClient.SqlClient)(context),
+          ),
           Effect.exit,
         );
 

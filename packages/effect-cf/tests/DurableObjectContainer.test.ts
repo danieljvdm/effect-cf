@@ -234,6 +234,71 @@ it.effect("process streams handle the runtime's absent stderr for combined outpu
   }),
 );
 
+it.effect.each(["failure", "interruption"] as const)(
+  "process logs join delayed reader cleanup before completing after %s",
+  (termination) =>
+    Effect.gen(function* () {
+      const cleanupStarted = yield* Deferred.make<void>();
+      const releaseCleanup = Promise.withResolvers<void>();
+      const rejectedRead = new Error("stderr read failed");
+      let cancellations = 0;
+      let cleanupSettled = false;
+      const stdout = new ReadableStream<Uint8Array>({
+        cancel() {
+          cancellations += 1;
+          Deferred.doneUnsafe(cleanupStarted, Effect.void);
+
+          return releaseCleanup.promise.then(() => {
+            cleanupSettled = true;
+          });
+        },
+      });
+      const stderr = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.error(rejectedRead);
+        },
+      });
+      const container = DurableObjectContainer.fromContainer(
+        makePartialTestDouble<Container>({
+          exec: async () =>
+            makePartialTestDouble<ExecProcess>({
+              stdout,
+              stderr,
+              exitCode: Promise.resolve(0),
+            }),
+        }),
+      );
+      const fiber = yield* Effect.forkChild(
+        Effect.gen(function* () {
+          const child = yield* container.exec(["example"]);
+
+          return yield* Stream.runCollect(child.logs);
+        }),
+      );
+
+      yield* Deferred.await(cleanupStarted);
+      if (termination === "interruption") fiber.interruptUnsafe();
+      yield* Effect.yieldNow;
+      yield* Effect.sync(() => assert.isUndefined(fiber.pollUnsafe())).pipe(
+        Effect.ensuring(Effect.sync(() => releaseCleanup.resolve())),
+      );
+      const exit = yield* Fiber.await(fiber);
+
+      assert.isTrue(Exit.isFailure(exit));
+      assert.strictEqual(cancellations, 1);
+      assert.isTrue(cleanupSettled);
+      assert.isFalse(stdout.locked);
+      assert.isFalse(stderr.locked);
+      if (termination === "failure" && Exit.isFailure(exit)) {
+        const error = Cause.squash(exit.cause);
+
+        assert.instanceOf(error, DurableObjectContainer.ContainerError);
+        assert.strictEqual(error.operation, "exec.stderr");
+        assert.strictEqual(error.cause, rejectedRead);
+      }
+    }),
+);
+
 it.effect("immediate scope closure does not signal a process whose exit is already queued", () =>
   Effect.gen(function* () {
     const process = makePartialTestDouble<ExecProcess>({

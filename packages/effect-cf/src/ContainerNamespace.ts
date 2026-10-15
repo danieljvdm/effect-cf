@@ -344,6 +344,10 @@ export const makeClient =
   <Namespace extends ContainerNamespaceResource>(
     namespace: Namespace,
   ): ContainerNamespaceClient<Namespace> => {
+    const clients = new WeakMap<
+      ContainerStubOf<Namespace>,
+      Map<string, ContainerInstanceClient<ContainerStubOf<Namespace>>>
+    >();
     const getByName = (
       name: string,
       options?: globalThis.DurableObjectNamespaceGetDurableObjectOptions,
@@ -355,7 +359,22 @@ export const makeClient =
           // SAFETY: getByName returns the namespace's declared native stub type.
           namespace.getByName(name, options) as ContainerStubOf<Namespace>,
       ).pipe(
-        Effect.map((stub) => makeInstanceClient(definition, name, stub)),
+        Effect.map((stub) => {
+          let names = clients.get(stub);
+
+          if (names === undefined) {
+            names = new Map();
+            clients.set(stub, names);
+          }
+          let client = names.get(name);
+
+          if (client === undefined) {
+            client = makeInstanceClient(definition, name, stub);
+            names.set(name, client);
+          }
+
+          return client;
+        }),
         Effect.mapError(
           (error) =>
             new ContainerOperationError({

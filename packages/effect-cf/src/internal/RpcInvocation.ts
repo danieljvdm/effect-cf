@@ -54,25 +54,12 @@ type RpcMethodOwner<Method extends PropertyKey> = {
   readonly [Key in Method]?: RpcTargetValue;
 };
 
-const invokeWithReceiver = <Method extends PropertyKey, Args extends AnyArgs, Return>(
-  value: (...args: Args) => Return,
-  receiver: RpcMethodOwner<Method>,
-  args: Args,
-): Return => {
-  const result: RpcTargetValue = Function.prototype.apply.call(value, receiver, args);
-
-  // SAFETY: the native apply intrinsic returns value's declared Return while avoiding proxy property reads.
-  return result as Return;
-};
-
-export const lookupRpcMethod = <Api, Method extends AsyncMethodKey<Api>, Error>(
+export const invokeRpcMethod = <Api, Method extends AsyncMethodKey<Api>, Error>(
   target: RpcTargetValue,
   method: Method,
+  args: AsyncMethodArgs<Api, Method>,
   makeError: (cause: unknown) => Error,
-): Effect.Effect<
-  (...args: AsyncMethodArgs<Api, Method>) => AsyncMethodCloudflareReturn<Api, Method>,
-  Error
-> =>
+): Effect.Effect<AsyncMethodCloudflareReturn<Api, Method>, Error> =>
   Effect.try({
     try: () => {
       if (!Predicate.isObjectKeyword(target)) {
@@ -87,35 +74,11 @@ export const lookupRpcMethod = <Api, Method extends AsyncMethodKey<Api>, Error>(
         throw new TypeError(`RPC method "${String(method)}" is not callable`);
       }
 
-      // SAFETY: the runtime check proves callability; Api and Method supply this binding's call contract.
-      const callable = value as (
-        ...args: AsyncMethodArgs<Api, Method>
-      ) => AsyncMethodCloudflareReturn<Api, Method>;
+      const result: RpcTargetValue = Function.prototype.apply.call(value, receiver, args);
 
-      return (...args: AsyncMethodArgs<Api, Method>): AsyncMethodCloudflareReturn<Api, Method> =>
-        invokeWithReceiver<
-          Method,
-          AsyncMethodArgs<Api, Method>,
-          AsyncMethodCloudflareReturn<Api, Method>
-        >(callable, receiver, args);
+      // SAFETY: callability is checked above; the native apply intrinsic preserves the receiver
+      // and returns this binding's declared raw result without reading properties on the method.
+      return result as AsyncMethodCloudflareReturn<Api, Method>;
     },
     catch: makeError,
   });
-
-export const invokeRpcMethod = Effect.fnUntraced(function* <
-  Api,
-  Method extends AsyncMethodKey<Api>,
-  Error,
->(
-  target: RpcTargetValue,
-  method: Method,
-  args: AsyncMethodArgs<Api, Method>,
-  makeError: (cause: unknown) => Error,
-): Effect.fn.Return<AsyncMethodCloudflareReturn<Api, Method>, Error> {
-  const fn = yield* lookupRpcMethod<Api, Method, Error>(target, method, makeError);
-
-  return yield* Effect.try({
-    try: () => fn(...args),
-    catch: makeError,
-  });
-});

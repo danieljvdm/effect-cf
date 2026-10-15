@@ -268,9 +268,10 @@ export const make = <ROut, LayerError, Payload = unknown, Result = unknown>(
       >(
         layer,
         env,
-        Layer.mergeAll(
-          Layer.succeed(ExecutionContext, ctx),
-          Layer.succeed(WorkerContext, fromExecutionContext(ctx)),
+        Layer.succeedContext(
+          Context.make(ExecutionContext, ctx).pipe(
+            Context.add(WorkerContext, fromExecutionContext(ctx)),
+          ),
         ),
       );
     }
@@ -279,13 +280,12 @@ export const make = <ROut, LayerError, Payload = unknown, Result = unknown>(
       event: Readonly<CloudflareWorkflowEvent<Payload>>,
       step: CloudflareWorkflowStep,
     ): Promise<Result> {
-      const workflowServices = Layer.mergeAll(
-        Layer.succeed(WorkflowEvent, fromWorkflowEvent(event)),
-        Layer.succeed(WorkflowStep, fromWorkflowStep(step)),
+      const workflowServices = Context.make(WorkflowEvent, fromWorkflowEvent(event)).pipe(
+        Context.add(WorkflowStep, fromWorkflowStep(step)),
       );
 
       return this[RunSymbol](
-        options.run(event.payload).pipe(Effect.provide(workflowServices, { local: true })),
+        options.run(event.payload).pipe(Effect.provideContext(workflowServices)),
       );
     }
 

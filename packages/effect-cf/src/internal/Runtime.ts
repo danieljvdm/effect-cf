@@ -1,5 +1,6 @@
 import * as Cause from "effect/Cause";
 import * as ConfigProvider from "effect/ConfigProvider";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
@@ -66,8 +67,11 @@ export const makeEntrypointRuntime = <ROut, LayerError, Services, ServicesError 
 > => {
   const entrypointServices = Layer.mergeAll(
     services,
-    ConfigProvider.layer(WorkerConfig.providerFromEnv(env)),
-    Layer.succeed(WorkerEnvironment, env),
+    Layer.succeedContext(
+      Context.make(ConfigProvider.ConfigProvider, WorkerConfig.providerFromEnv(env)).pipe(
+        Context.add(WorkerEnvironment, env),
+      ),
+    ),
   );
 
   return ManagedRuntime.make(provideEntrypointServices(layer, entrypointServices));

@@ -71,6 +71,8 @@ Automatic suppression of empty metric exports remains a follow-up investigation.
 
 Likewise, an isolated RPC argument-parser cache saved microseconds locally without establishing a reliable hosted gain. It is not shipped in the library or example. Keep ordinary RPC validation and lifecycle behavior intact, and use the benchmark workloads to evaluate a specific candidate before adopting it.
 
+For network-disconnect cancellation, Cloudflare's [`enable_request_signal` flag](https://developers.cloudflare.com/workers/runtime-apis/request/) exposes incoming disconnects through `Request.signal`. Worker does not automatically connect that signal to handler or response-body interruption. Applications requiring that policy must explicitly handle the native request's signal, available through `Worker.NativeRequest`. Canceling a body reader and disconnecting an HTTP client are distinct events; do not assume the latter invokes the server stream's `cancel` callback.
+
 ## Interpret the measurements
 
 - Time the complete response body at the client, separately from Worker CPU and invocation wall time. Nested invocation wall times are not additive.

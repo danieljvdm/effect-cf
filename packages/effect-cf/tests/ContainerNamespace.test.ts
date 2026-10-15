@@ -3,7 +3,13 @@ import type { Container as CloudflareContainer } from "@cloudflare/containers";
 import { Effect, Layer, Schema } from "effect";
 import { expectTypeOf } from "vitest";
 
-import { Binding, ContainerNamespace, WorkerEnvironment, type WorkerEnv } from "../src/index";
+import {
+  Binding,
+  ContainerNamespace,
+  RpcTargets,
+  WorkerEnvironment,
+  type WorkerEnv,
+} from "../src/index";
 import { makePartialTestDouble } from "./TestDoubles";
 
 class TestContainers extends ContainerNamespace.Tag<TestContainers>()("TestContainers") {}
@@ -184,6 +190,56 @@ it.effect("supports static byName helpers", () => {
 
     assert.strictEqual(namespace, fake.namespace);
   }).pipe(Effect.provide(fake.live));
+});
+
+it.effect("resolves retained named clients after target failure and across RPC scopes", () => {
+  const fake = makeFake();
+  const cause = new Error("channel failed");
+  let gets = 0;
+  let failNext = false;
+  const namespace: ContainerNamespace.ContainerNamespaceResource = {
+    getByName: () => {
+      const identity = ++gets;
+      let broken = false;
+
+      return {
+        ...fake.stub,
+        getState: async () => {
+          broken ||= failNext;
+          if (broken) throw cause;
+
+          return { lastChange: identity, status: "healthy" };
+        },
+      };
+    },
+  };
+  const retained = ContainerNamespace.makeClient({ binding: "CONTAINERS" })(namespace).byName(
+    "render-scoped",
+  );
+  const identities: Array<number> = [];
+  const useScope = Effect.gen(function* () {
+    const first = yield* retained.state;
+
+    identities.push(first.lastChange);
+    assert.strictEqual((yield* retained.state).lastChange, first.lastChange);
+    failNext = true;
+    const error = yield* Effect.flip(retained.state);
+
+    assert.strictEqual(error.cause, cause);
+    failNext = false;
+    const replacement = yield* retained.state;
+
+    identities.push(replacement.lastChange);
+    assert.notStrictEqual(replacement.lastChange, first.lastChange);
+  }).pipe(RpcTargets.withScope, Effect.scoped);
+
+  return Effect.gen(function* () {
+    yield* useScope;
+    yield* useScope;
+
+    assert.deepStrictEqual(identities, [1, 2, 3, 4]);
+    assert.strictEqual(gets, 4);
+  });
 });
 
 it.effect("waits for ports and manages host policy on named instances", () => {

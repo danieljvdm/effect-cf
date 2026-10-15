@@ -191,6 +191,122 @@ const processStream = (
         onError: (cause) => new ContainerError({ operation, cause }),
       });
 
+const mergeProcessLogs = (
+  stdout: ReadableStream<Uint8Array> | null | undefined,
+  stderr: ReadableStream<Uint8Array> | null | undefined,
+): Stream.Stream<ContainerProcessLog, ContainerError> =>
+  Stream.fromReadableStream({
+    evaluate: () => {
+      const readers: Array<{
+        stream: "stdout" | "stderr";
+        reader: ReadableStreamDefaultReader<Uint8Array>;
+      }> = [];
+      const ready: Array<{
+        index: number;
+        result?: ReadableStreamReadResult<Uint8Array>;
+        error?: ContainerError;
+      }> = [];
+      let remaining = 0;
+      let wake: (() => void) | undefined;
+      let stopped = false;
+      let cleanup: Promise<void> | undefined;
+      const cancel = () => {
+        if (cleanup !== undefined) return cleanup;
+        stopped = true;
+        wake?.();
+        wake = undefined;
+
+        // Install the shared promise before native cancellation callbacks can reenter.
+        return (cleanup = Promise.resolve().then(async () => {
+          await Promise.all(
+            readers.map(async ({ reader }) => {
+              try {
+                await reader.cancel();
+              } catch {
+              } finally {
+                try {
+                  reader.releaseLock();
+                } catch {}
+              }
+            }),
+          );
+          ready.length = 0;
+        }));
+      };
+      const read = (index: number) => {
+        const notify = (value: (typeof ready)[number]) => {
+          if (stopped) return;
+          ready.push(value);
+          wake?.();
+          wake = undefined;
+        };
+
+        readers[index].reader.read().then(
+          (result) => notify({ index, result }),
+          (cause) =>
+            notify({
+              index,
+              error: new ContainerError({ operation: `exec.${readers[index].stream}`, cause }),
+            }),
+        );
+      };
+
+      return new ReadableStream<ContainerProcessLog>(
+        {
+          async start() {
+            try {
+              if (stdout !== null && stdout !== undefined)
+                readers.push({ stream: "stdout", reader: stdout.getReader() });
+              if (stderr !== null && stderr !== undefined)
+                readers.push({ stream: "stderr", reader: stderr.getReader() });
+              remaining = readers.length;
+              for (let index = 0; index < readers.length; index++) read(index);
+            } catch (cause) {
+              await cancel();
+              throw new ContainerError({ operation: "exec.logs", cause });
+            }
+          },
+          async pull(controller) {
+            try {
+              while (!stopped && remaining > 0) {
+                if (ready.length === 0)
+                  await new Promise<void>((resolve) => {
+                    wake = resolve;
+                  });
+                if (stopped) return;
+                const next = ready.shift()!;
+
+                if (next.error !== undefined) throw next.error;
+                if (next.result!.done) {
+                  remaining--;
+                  readers[next.index].reader.releaseLock();
+                } else {
+                  read(next.index);
+                  controller.enqueue({
+                    stream: readers[next.index].stream,
+                    data: next.result!.value,
+                  });
+
+                  return;
+                }
+              }
+              if (!stopped) controller.close();
+            } catch (cause) {
+              await cancel();
+              controller.error(cause);
+            }
+          },
+          cancel,
+        },
+        { highWaterMark: 0 },
+      );
+    },
+    onError: (cause) =>
+      cause instanceof ContainerError
+        ? cause
+        : new ContainerError({ operation: "exec.logs", cause }),
+  });
+
 const fromProcess = (process: globalThis.ExecProcess): ContainerProcess => {
   let exited = false;
   const onExit = () => {
@@ -201,8 +317,10 @@ const fromProcess = (process: globalThis.ExecProcess): ContainerProcess => {
   // Observe completion immediately, even if the caller never awaits exitCode.
   process.exitCode.then(onExit, onExit);
 
-  const stdout = processStream(process.stdout, "exec.stdout");
-  const stderr = processStream(process.stderr, "exec.stderr");
+  const nativeStdout = process.stdout;
+  const nativeStderr = process.stderr;
+  const stdout = processStream(nativeStdout, "exec.stdout");
+  const stderr = processStream(nativeStderr, "exec.stderr");
   const output = attemptPromise("exec.output", () => process.output());
 
   return {
@@ -212,10 +330,7 @@ const fromProcess = (process: globalThis.ExecProcess): ContainerProcess => {
     stdin: process.stdin ?? null,
     stdout,
     stderr,
-    logs: Stream.merge(
-      Stream.map(stdout, (data): ContainerProcessLog => ({ stream: "stdout", data })),
-      Stream.map(stderr, (data): ContainerProcessLog => ({ stream: "stderr", data })),
-    ),
+    logs: mergeProcessLogs(nativeStdout, nativeStderr),
     exitCode: attemptPromise("exec.exitCode", () => process.exitCode),
     output,
     outputText: Effect.map(output, (result) => ({

@@ -1,6 +1,6 @@
 import { NodeHttpServer } from "@effect/platform-node";
 import { expect, it, layer } from "@effect/vitest";
-import { ConfigProvider, Context, Effect, Layer, Queue, Schema as S } from "effect";
+import { ConfigProvider, Context, Effect, Layer, Queue, Schema as S, Scope } from "effect";
 import {
   Headers,
   HttpMiddleware,
@@ -247,6 +247,57 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
           ),
         ).toBe(true);
       }),
+  );
+
+  it.effect.each([200, 500])(
+    "exports the current HTTP server span from the base layer before the next request (%s)",
+    (status) =>
+      Effect.gen(function* () {
+        const collector = yield* OtlpCollector;
+        const scope = yield* Scope.Scope;
+        const telemetry = CloudflareOtlp.layerWorker({
+          signals: ["traces"],
+          serialization: "json",
+          resource: { serviceName: "base-layer-test" },
+        });
+        // The test owns exporter shutdown; the request still uses the base-layer path.
+        const handler = Worker.makeFetchHandler(
+          Layer.effectContext(Layer.buildWithScope(telemetry, scope)),
+          {
+            fetch: (status === 200
+              ? Effect.succeed(new Response("ok"))
+              : Effect.fail("expected handler failure")
+            ).pipe(Effect.withSpan("current.request")),
+          },
+        );
+        const { executionContext, waitUntilPromises } = makeWaitUntilExecutionContext();
+        const response = yield* Effect.promise(() =>
+          handler.fetch(
+            new Request("https://worker.test/current-request"),
+            makeEnv({
+              OTEL_TRACES_EXPORTER: "otlp",
+              OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${collector.endpoint}/v1/traces`,
+              OTEL_BSP_SCHEDULE_DELAY: "600000",
+            }),
+            executionContext,
+          ),
+        );
+
+        expect(response.status).toBe(status);
+        expect(waitUntilPromises).toHaveLength(1);
+        yield* Effect.promise(() => Promise.all(waitUntilPromises));
+
+        const request = yield* collector.nextRequest;
+        const spans = decodeOtlpPayload(request.body).resourceSpans[0].scopeSpans[0].spans;
+
+        expect(spans.map((span) => span.name).toSorted()).toEqual([
+          "current.request",
+          "http.server GET",
+        ]);
+        const server = spans.find((span) => span.name === "http.server GET");
+
+        expect(getStringAttribute(server!.attributes, "url.path")).toBe("/current-request");
+      }).pipe(Effect.scoped),
   );
 
   it.effect("exports WorkerDefinition RPC spans through waitUntil", () =>

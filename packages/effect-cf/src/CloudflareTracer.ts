@@ -38,6 +38,7 @@ const maxBytes = 4096;
 const maxLinks = 8;
 const maxEvents = 16;
 const textEncoder = new TextEncoder();
+const byteScratch = new Uint8Array(maxBytes);
 
 const bestEffort = (f: () => void): void => {
   try {
@@ -57,7 +58,10 @@ const encodeJson = (value: unknown): string | undefined => {
   const parts: Array<string> = [];
   const ancestors = new Set<object>();
   const append = (part: string): boolean => {
-    bytes += textEncoder.encode(part).byteLength;
+    const encoded = textEncoder.encodeInto(part, byteScratch);
+
+    if (encoded.read !== part.length) return false;
+    bytes += encoded.written;
     if (bytes > maxBytes) return false;
     parts.push(part);
 

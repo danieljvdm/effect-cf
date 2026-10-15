@@ -218,7 +218,11 @@ type EffectGitClient = {
   readonly [Name in keyof CloudflareGitClient]: EffectGitMethod<CloudflareGitClient[Name]>;
 };
 
-/** Complete Effect wrapper of the `@cloudflare/computer/git` client. */
+/**
+ * Effect wrapper of the `@cloudflare/computer/git` client. High-level methods
+ * such as `log` require a local workspace; remote stubs expose only `cli`.
+ * Remote Git commands can also run through {@link ComputerWorkspaceService.exec}.
+ */
 export type ComputerWorkspaceGit = Omit<EffectGitClient, "log" | "revParse"> & {
   readonly log: (
     options?: WorkspaceGitLogOptions,
@@ -1142,9 +1146,10 @@ export const fromWorkspaceClient = (
   client: CloudflareWorkspaceClient,
 ): ComputerWorkspaceService => {
   const fs = makeFilesystem(client.fs);
-  // SAFETY: @cloudflare/computer currently publishes these WorkspaceClient properties as `any`,
-  // while its runtime exposes the concrete clients imported above.
-  const git = makeGit(client.git as CloudflareGitClient);
+  // SAFETY: the SDK erases this property to `any`. Local workspaces expose the full Git client;
+  // remote stubs expose only `cli`, as documented by ComputerWorkspaceGit.
+  const gitClient = client.git as CloudflareGitClient;
+  let git: ComputerWorkspaceGit | undefined;
   const runtime = makeRuntime(client);
   const artifacts = ComputerArtifacts.fromClient(
     // SAFETY: the upstream WorkspaceClient declaration erases this concrete artifact client to
@@ -1159,7 +1164,9 @@ export const fromWorkspaceClient = (
 
   return {
     fs,
-    git,
+    get git() {
+      return (git ??= makeGit(gitClient));
+    },
     runtime,
     artifacts,
     assets,

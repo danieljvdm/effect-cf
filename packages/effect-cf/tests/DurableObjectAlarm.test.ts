@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { assert, expect, it, test } from "@effect/vitest";
 import { Cause, Context, DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema } from "effect";
+import { TestClock } from "effect/testing";
 
 import {
   DurableObject,
@@ -185,6 +186,67 @@ it.effect("rolls back a failure's retry budget when native reconciliation fails"
         assert.strictEqual((yield* alarms.getAlarmStatus(input))!.attempts, 0);
         assert.isUndefined((yield* alarms.getAlarmStatus(input))!.retryAt);
         assert.strictEqual(fixture.currentAlarm(), 0);
+      }),
+    );
+  }),
+);
+
+it.effect("resets a successful repeat atomically after parked recovery", () =>
+  Effect.gen(function* () {
+    const fixture = makeAlarmFixture();
+
+    yield* fixture.run(
+      Effect.gen(function* () {
+        const alarms = yield* DurableObjectAlarm.DurableObjectAlarm;
+        const input = {
+          tag: "heartbeat",
+          id: "room",
+          payload: { room: "example" },
+          runAt: atMillis(0),
+          repeatEvery: "1 minute" as const,
+          progress: 7,
+        };
+
+        yield* alarms.scheduleAlarm(input);
+        yield* alarms
+          .processDueAlarms(() => Effect.fail("unavailable"))
+          .pipe(
+            Effect.provideService(DurableObjectAlarm.ScheduleConfiguration, {
+              unchangedAttemptBudget: 1,
+            }),
+          );
+        const parked = fixture.row(input.tag, input.id)!;
+
+        assert.strictEqual(parked.attempts, 1);
+        assert.strictEqual(parked.parked, 1);
+        assert.strictEqual(parked.retry_at, 3_600_000);
+        yield* TestClock.setTime(3_600_000);
+        fixture.failNextSetAlarm();
+        const rejected = yield* alarms.processDueAlarms(() => Effect.void).pipe(Effect.exit);
+
+        assert.isTrue(Exit.isFailure(rejected));
+        assert.deepStrictEqual(fixture.row(input.tag, input.id), parked);
+        assert.strictEqual(fixture.currentAlarm(), 3_600_000);
+        assert.strictEqual(fixture.tracker.transactionRollbacks, 1);
+        const result = yield* alarms.processDueAlarms(() => Effect.void);
+        const next = fixture.row(input.tag, input.id)!;
+
+        assert.strictEqual(result.handled.length, 1);
+        assert.deepStrictEqual(result.failed, []);
+        assert.notStrictEqual(next.revision, parked.revision);
+        assert.deepStrictEqual(
+          { ...next },
+          {
+            ...parked,
+            run_at: 3_660_000,
+            wake_at: 3_660_000,
+            revision: next.revision,
+            attempts: 0,
+            parked: 0,
+            retry_at: null,
+          },
+        );
+        assert.strictEqual(fixture.currentAlarm(), 3_660_000);
       }),
     );
   }),

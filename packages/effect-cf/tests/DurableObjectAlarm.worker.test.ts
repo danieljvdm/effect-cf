@@ -761,7 +761,7 @@ it.effect.each([0, 5_000])(
   },
 );
 
-it.effect("blocks prompt and native dispatch until an external deferred region exits", () => {
+it.effect("blocks prompt and native dispatch before deferred work first enrolls", () => {
   const stub = env.TEST_COUNTER_DO!.getByName(crypto.randomUUID());
 
   return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
@@ -818,7 +818,6 @@ it.effect("blocks prompt and native dispatch until an external deferred region e
         const holding = yield* Effect.promise(() => instance.hold()).pipe(Effect.forkChild);
 
         yield* Deferred.await(entered);
-        yield* Effect.promise(() => instance.enroll());
         yield* TestClock.setTime(deadline + 1_000);
         yield* Effect.promise(() => state.raw.storage.deleteAlarm());
         const native = yield* Effect.promise(async () => {
@@ -839,6 +838,7 @@ it.effect("blocks prompt and native dispatch until an external deferred region e
         assert.isFalse(nativeSettled);
         assert.deepStrictEqual(heldDuringDispatch, []);
         assert.strictEqual(recovery, deadline + 2_000);
+        yield* Effect.promise(() => instance.enroll());
         yield* Deferred.succeed(release, undefined);
         yield* Fiber.join(holding);
         yield* Fiber.join(native);
@@ -1883,21 +1883,17 @@ it.effect("does not retain a caught child's first schema initialization in its p
 
       yield* TestClock.setTime(deadline);
       yield* sql`CREATE TABLE source (generation INTEGER NOT NULL)`;
-      const transaction = state.raw.storage.transaction.bind(state.raw.storage);
+      const setAlarm = state.raw.storage.setAlarm.bind(state.raw.storage);
       let holdAcquisition = true;
-      const native = vi
-        .spyOn(state.raw.storage, "transaction")
-        .mockImplementation(
-          async <A>(callback: (tx: globalThis.DurableObjectTransaction) => Promise<A>) => {
-            if (holdAcquisition) {
-              holdAcquisition = false;
-              await Effect.runPromise(Deferred.succeed(entered, undefined));
-              await Effect.runPromise(Deferred.await(release));
-            }
+      const native = vi.spyOn(state.raw.storage, "setAlarm").mockImplementation(async (...args) => {
+        if (holdAcquisition) {
+          holdAcquisition = false;
+          await Effect.runPromise(Deferred.succeed(entered, undefined));
+          await Effect.runPromise(Deferred.await(release));
+        }
 
-            return transaction(callback);
-          },
-        );
+        return setAlarm(...args);
+      });
 
       yield* Effect.gen(function* () {
         const deferred = yield* maintenance.deferWakes(Effect.void).pipe(Effect.forkChild);

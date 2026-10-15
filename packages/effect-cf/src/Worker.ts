@@ -413,9 +413,10 @@ export function make<
       >(
         layer,
         env,
-        Layer.mergeAll(
-          Layer.succeed(ExecutionContext, ctx),
-          Layer.succeed(WorkerContext, fromExecutionContext(ctx)),
+        Layer.succeedContext(
+          Context.make(ExecutionContext, ctx).pipe(
+            Context.add(WorkerContext, fromExecutionContext(ctx)),
+          ),
         ),
       );
     }
@@ -467,18 +468,19 @@ export function make<
       }
 
       const ctx = requestContext ?? this.ctx;
-      const requestServices = Layer.mergeAll(
-        Layer.succeed(NativeRequest, request),
-        Layer.succeed(HttpServerRequest.HttpServerRequest, HttpServerRequest.fromWeb(request)),
-        Layer.succeed(ExecutionContext, ctx),
-        Layer.succeed(WorkerContext, fromExecutionContext(ctx)),
+      const requestServices = Context.make(NativeRequest, request).pipe(
+        Context.add(HttpServerRequest.HttpServerRequest, HttpServerRequest.fromWeb(request)),
+        Context.add(ExecutionContext, ctx),
+        Context.add(WorkerContext, fromExecutionContext(ctx)),
       );
 
       // The request services wrap eventLayer construction so cached object handlers
       // never build an event layer against a previous request's ExecutionContext.
       // HttpEffect owns the inner scope and transfers it to streaming response bodies.
       return this[RunSymbol](
-        renderFetchSuccess(fetchHandler, options.eventLayer).pipe(Effect.provide(requestServices)),
+        renderFetchSuccess(fetchHandler, options.eventLayer).pipe(
+          Effect.provideContext(requestServices),
+        ),
         { event: "fetch" },
       );
     }

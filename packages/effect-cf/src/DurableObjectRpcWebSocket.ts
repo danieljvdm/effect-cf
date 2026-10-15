@@ -737,6 +737,7 @@ export const layer = (
             if (subscription !== undefined) {
               const checkpointTokens = yield* Effect.sync(() => {
                 const tokens: Array<string> = [];
+                const seen = new Set<string>();
 
                 for (const value of response.values) {
                   const checkpoint = subscription.declaration.checkpointFromValue(value);
@@ -749,12 +750,13 @@ export const layer = (
 
                   const token = subscription.declaration.checkpointToken(checkpoint.value);
 
-                  if (token.length === 0 || tokens.includes(token)) {
+                  if (token.length === 0 || seen.has(token)) {
                     throw new Error(
                       `Resumable RPC stream ${subscription.definitionId} produced invalid checkpoint tokens`,
                     );
                   }
 
+                  seen.add(token);
                   tokens.push(token);
                 }
 

@@ -180,9 +180,26 @@ const wrapHandler = <ROut, const Self extends Definition.Any>(
   const decodeBody = S.decodeUnknownEffect(definition.message);
 
   return Effect.fnUntraced(function* (batch: QueueEntrypoint.QueueBatch<unknown>) {
-    const decoded = yield* QueueEntrypoint.decodeBatch(batch.raw, decodeBody);
+    const messages = [];
 
-    yield* handler(decoded);
+    for (let index = 0; index < batch.messages.length; index++) {
+      const message = batch.messages[index];
+      const body = yield* decodeBody(message.body).pipe(
+        Effect.mapError(
+          (cause) =>
+            new QueueEntrypoint.QueueMessageDecodeError({
+              queue: batch.queue,
+              messageId: message.id,
+              index,
+              cause,
+            }),
+        ),
+      );
+
+      messages.push({ ...message, body });
+    }
+
+    yield* handler({ ...batch, messages });
   });
 };
 

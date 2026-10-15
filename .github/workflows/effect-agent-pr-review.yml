@@ -54,7 +54,7 @@ jobs:
           permission-pull-requests: write
 
       - name: Review the pull request
-        uses: yielded-dev/agent/action@362887d74fb30682db475d75cfd62740e570ed9f # action-v1
+        uses: yielded-dev/agent/action@26694296673517e97835af7b03543e0da1503a21 # action-v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           github-token: ${{ steps.app-token.outputs.token }}

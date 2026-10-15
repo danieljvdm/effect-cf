@@ -250,6 +250,10 @@ and in-process delivery use the same scheduler pass, registered handlers and
 event layer. Consumers only schedule logical deadlines; they do not override
 entrypoints, call `alarm()`, start daemon fibers or manage background Promises.
 
+Due work enrolled by an RPC or fetch reuses a pending native wake within
+`inFlightRecovery`. The logical deadline stays due for post-response dispatch;
+a missing wake is committed before returning. Native delivery renews the guard.
+
 A native alarm arriving during that pass joins it, including event-scope
 finalizers. The library restores its recovery timestamp before joining and
 reconciles committed deadlines after the whole scope closes. Work enrolled after

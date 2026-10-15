@@ -13,6 +13,7 @@ import {
   DispatchAfterEvent,
   HasDueAlarms,
   RunAlarm,
+  ResponseEvent,
   dispatchRawAlarm,
   type AlarmRegistration,
   type AlarmService,
@@ -340,6 +341,7 @@ export function make<
       let dispatchAfterEvent = false;
       const handler = afterResponse
         ? effect.pipe(
+            Effect.provideService(ResponseEvent, true),
             Effect.onExit(() =>
               Effect.flatMap(DurableObjectAlarm, (alarms) =>
                 Effect.map(alarms[DispatchAfterEvent], (enabled) => {

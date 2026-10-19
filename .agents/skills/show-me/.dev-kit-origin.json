@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "selector": "show-me",
+  "name": "show-me",
+  "baseDigest": "sha256:e195e0f0c0dcff5edf07c3863036cd91eae7006e22d8c66d149934e710b4ee63",
+  "source": {
+    "type": "git",
+    "source": "dan-skills",
+    "repository": "https://github.com/danieljvdm/skills.git",
+    "resolved": "29601d4fe4abd55334521959698e916ca1ed4214"
+  }
+}

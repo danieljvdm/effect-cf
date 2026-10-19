@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "selector": "alchemy",
+  "name": "alchemy",
+  "baseDigest": "sha256:29966a3f6e2532aec4b514a9a5e455e1561a4cf8b3e804ffc1a11b2650c68464",
+  "source": {
+    "type": "git",
+    "source": "dan-skills",
+    "repository": "https://github.com/danieljvdm/skills.git",
+    "resolved": "29601d4fe4abd55334521959698e916ca1ed4214"
+  }
+}

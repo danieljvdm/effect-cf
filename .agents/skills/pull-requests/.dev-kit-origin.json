@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "selector": "pull-requests",
+  "name": "pull-requests",
+  "baseDigest": "sha256:ef2e5fb8a8fb13694154c1fb608be2678dc2bce0b0200ea7f60af77b8d643695",
+  "source": {
+    "type": "git",
+    "source": "dan-skills",
+    "repository": "https://github.com/danieljvdm/skills.git",
+    "resolved": "29601d4fe4abd55334521959698e916ca1ed4214"
+  }
+}

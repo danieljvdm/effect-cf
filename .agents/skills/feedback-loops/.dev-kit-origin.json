@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "selector": "feedback-loops",
+  "name": "feedback-loops",
+  "baseDigest": "sha256:4be554dd34bcca8a1f8d1a286a40fbe2d2c4dfc7d24a47f47f6b25053f8f48d1",
+  "source": {
+    "type": "git",
+    "source": "dan-skills",
+    "repository": "https://github.com/danieljvdm/skills.git",
+    "resolved": "29601d4fe4abd55334521959698e916ca1ed4214"
+  }
+}

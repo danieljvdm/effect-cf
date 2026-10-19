@@ -41,7 +41,7 @@ Merge a `Version Packages` PR alone, last, and freshly refreshed: after any othe
 
 ## PR body
 
-Follow the `open-pull-request` skill for concise descriptions and relevant review
+Follow [pull-requests](../pull-requests/SKILL.md) for concise descriptions and relevant review
 evidence. Include calculated release versions when the PR has a changeset.
 Keep validation commands and routine test results in the agent handoff rather
 than the PR body; disclose material risks or limitations when they affect review.

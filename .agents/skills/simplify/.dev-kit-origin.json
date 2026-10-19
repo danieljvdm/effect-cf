@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "selector": "simplify",
+  "name": "simplify",
+  "baseDigest": "sha256:720da2762d048ab99554965df5955d1b1f0a745a836858939113d9fdb4e8d304",
+  "source": {
+    "type": "git",
+    "source": "dan-skills",
+    "repository": "https://github.com/danieljvdm/skills.git",
+    "resolved": "5aeaeb56df4ebd20573a6a6778a81938cf5a4884"
+  }
+}

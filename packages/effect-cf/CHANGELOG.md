@@ -1,5 +1,13 @@
 # effect-cf
 
+## 0.57.0
+
+### Minor Changes
+
+- [#238](https://github.com/danieljvdm/effect-cf/pull/238) [`6f18e94`](https://github.com/danieljvdm/effect-cf/commit/6f18e942c3e42f9cb7dc245afed103fd9abb5db7) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Read Artifacts blobs with `repo.readBlob(hash)` and release repository handles with `repo.dispose`, preserving typed failures and reporting missing blobs as `NOT_FOUND`.
+
+  Add `ServiceBinding.httpClient(service)` to use an Effect service binding with HTTP API clients while preserving request tracing, streaming bodies, cancellation and typed transport failures.
+
 ## 0.56.7
 
 ### Patch Changes

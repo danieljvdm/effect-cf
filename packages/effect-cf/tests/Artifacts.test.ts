@@ -1,4 +1,4 @@
-import { assert, expect, layer, test } from "@effect/vitest";
+import { assert, expect, it, layer, test } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 
 import { Artifacts, Binding, WorkerEnvironment } from "../src/index";
@@ -50,6 +50,7 @@ interface Calls {
   readonly log: Array<Artifacts.ArtifactsLogOptions | undefined>;
   readonly readCommit: Array<string>;
   readonly readTree: Array<string>;
+  readonly readBlob: Array<string>;
 }
 
 const makeCalls = (): Calls => ({
@@ -66,6 +67,7 @@ const makeCalls = (): Calls => ({
   log: [],
   readCommit: [],
   readTree: [],
+  readBlob: [],
 });
 
 const commitInfo = (hash: string): Artifacts.ArtifactsCommit => ({
@@ -132,6 +134,11 @@ const makeRepo = (calls: Calls): Artifacts.ArtifactsRepoBinding => ({
 
     return { hash, entries: [{ name: "README.md", type: "blob" }] };
   },
+  readBlob: (hash) => {
+    calls.readBlob.push(hash);
+
+    return Promise.resolve(new Blob(["# Repository\n"]));
+  },
 });
 
 const makeRemoteRepo = (calls: Calls): Artifacts.ArtifactsRepoBinding => {
@@ -150,6 +157,7 @@ const makeRemoteRepo = (calls: Calls): Artifacts.ArtifactsRepoBinding => {
     log: local.log,
     readCommit: local.readCommit,
     readTree: local.readTree,
+    readBlob: local.readBlob,
   };
 };
 
@@ -289,6 +297,7 @@ const artifactsLayer = (artifacts: Artifacts.ArtifactsBinding) =>
         const history = yield* repo.log({ ref: "main", limit: 10, offset: 2 });
         const commit = yield* repo.readCommit("commit-1");
         const tree = yield* repo.readTree("tree-1");
+        const blob = yield* repo.readBlob("blob-1");
 
         assert.strictEqual(repo.raw.name, "starter-repo");
         assert.deepStrictEqual(info, repoInfo);
@@ -333,6 +342,9 @@ const artifactsLayer = (artifacts: Artifacts.ArtifactsBinding) =>
         assert.deepStrictEqual(calls.log, [{ ref: "main", limit: 10, offset: 2 }]);
         assert.deepStrictEqual(calls.readCommit, ["commit-1"]);
         assert.deepStrictEqual(calls.readTree, ["tree-1"]);
+        assert.deepStrictEqual(calls.readBlob, ["blob-1"]);
+        assert.strictEqual(blob.size, 13);
+        assert.strictEqual(blob.type, "");
       }),
     );
   });
@@ -361,6 +373,73 @@ test("Artifacts supports method-only remote repository handles", async () => {
   assert.deepStrictEqual(calls.info, [true, true]);
   assert.notProperty(repo.raw, "name");
 });
+
+it.effect("Artifacts readBlob reports absent or non-blob objects as NOT_FOUND", () =>
+  Effect.gen(function* () {
+    const calls = makeCalls();
+    const artifacts = {
+      ...makeArtifacts(calls),
+      get: () => Promise.resolve({ ...makeRepo(calls), readBlob: () => Promise.resolve(null) }),
+    } satisfies Artifacts.ArtifactsBinding;
+    const client = Artifacts.makeClient({ binding: "ARTIFACTS" })(artifacts);
+    const repo = yield* client.get("starter-repo");
+    const error = yield* Effect.flip(repo.readBlob("missing"));
+
+    assert.strictEqual(error._tag, "ArtifactsOperationError");
+    assert.strictEqual(error.binding, "ARTIFACTS");
+    assert.strictEqual(error.operation, "readBlob");
+    assert.strictEqual(error.code, "NOT_FOUND");
+    assert.strictEqual(error.numericCode, 10200);
+  }),
+);
+
+it.effect("Artifacts readBlob preserves upstream failure details", () =>
+  Effect.gen(function* () {
+    const calls = makeCalls();
+    const cause = { code: "UPSTREAM_UNAVAILABLE", numericCode: 10401 };
+    const artifacts = {
+      ...makeArtifacts(calls),
+      get: () => Promise.resolve({ ...makeRepo(calls), readBlob: () => Promise.reject(cause) }),
+    } satisfies Artifacts.ArtifactsBinding;
+    const client = Artifacts.makeClient({ binding: "ARTIFACTS" })(artifacts);
+    const repo = yield* client.get("starter-repo");
+    const error = yield* Effect.flip(repo.readBlob("blob-1"));
+
+    assert.strictEqual(error._tag, "ArtifactsOperationError");
+    assert.strictEqual(error.binding, "ARTIFACTS");
+    assert.strictEqual(error.operation, "readBlob");
+    assert.strictEqual(error.code, "UPSTREAM_UNAVAILABLE");
+    assert.strictEqual(error.numericCode, 10401);
+    assert.strictEqual(error.cause, cause);
+  }),
+);
+
+it.effect("Artifacts repository disposal releases its native handle at scope exit", () =>
+  Effect.gen(function* () {
+    let disposed = false;
+    const calls = makeCalls();
+    const native = {
+      ...makeRepo(calls),
+      [Symbol.dispose]() {
+        assert.strictEqual(this, native);
+        disposed = true;
+      },
+    } satisfies Artifacts.ArtifactsRepoBinding;
+    const artifacts = {
+      ...makeArtifacts(calls),
+      get: () => Promise.resolve(native),
+    } satisfies Artifacts.ArtifactsBinding;
+    const client = Artifacts.makeClient({ binding: "ARTIFACTS" })(artifacts);
+
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        yield* Effect.acquireRelease(client.get("starter-repo"), (repo) => repo.dispose);
+        assert.strictEqual(disposed, false);
+      }),
+    );
+    assert.strictEqual(disposed, true);
+  }),
+);
 
 test("Artifacts layer validates the namespace binding shape", async () => {
   await expect(

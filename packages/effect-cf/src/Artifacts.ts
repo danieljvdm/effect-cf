@@ -15,7 +15,7 @@ const expectedArtifactsBinding =
   "Artifacts binding with create(), get(), import(), list(), and delete()";
 
 const expectedArtifactsRepo =
-  "Artifacts repo handle with createToken(), listTokens(), revokeToken(), fork(), log(), readCommit(), and readTree()";
+  "Artifacts repo handle with createToken(), listTokens(), revokeToken(), fork(), log(), readCommit(), readTree(), and readBlob()";
 
 export type ArtifactsOperation =
   | "createClient"
@@ -33,6 +33,7 @@ export type ArtifactsOperation =
   | "log"
   | "readCommit"
   | "readTree"
+  | "readBlob"
   | "cli";
 
 export const artifactsErrorCodes = [
@@ -197,6 +198,7 @@ export interface ArtifactsLogOptions {
 }
 
 export interface ArtifactsRepoBinding extends Partial<ArtifactsRepoInfo> {
+  readonly [Symbol.dispose]?: () => void;
   /**
    * Read repository metadata.
    *
@@ -224,6 +226,7 @@ export interface ArtifactsRepoBinding extends Partial<ArtifactsRepoInfo> {
   readonly log: (options?: ArtifactsLogOptions) => Promise<ArtifactsLogResult>;
   readonly readCommit: (hash: string) => Promise<ArtifactsCommit | null>;
   readonly readTree: (hash: string) => Promise<ArtifactsTree>;
+  readonly readBlob: (hash: string) => Promise<Blob | null>;
 }
 
 export interface ArtifactsBinding {
@@ -238,6 +241,8 @@ export interface ArtifactsBinding {
 }
 
 export interface ArtifactsRepoClient extends ArtifactsRepoInfo {
+  /** Release the native repository handle when its owning scope closes. */
+  readonly dispose: Effect.Effect<void>;
   readonly info: () => Effect.Effect<ArtifactsRepoInfo, ArtifactsOperationError>;
   /**
    * Create a Git token for the repository.
@@ -260,6 +265,11 @@ export interface ArtifactsRepoClient extends ArtifactsRepoInfo {
   ) => Effect.Effect<ArtifactsLogResult, ArtifactsOperationError>;
   readonly readCommit: (hash: string) => Effect.Effect<ArtifactsCommit, ArtifactsOperationError>;
   readonly readTree: (hash: string) => Effect.Effect<ArtifactsTree, ArtifactsOperationError>;
+  /**
+   * Read an untyped Git blob by its lowercase, 40-character SHA-1 object ID.
+   * Fails with `NOT_FOUND` when the object is missing or is not a blob.
+   */
+  readonly readBlob: (hash: string) => Effect.Effect<Blob, ArtifactsOperationError>;
   readonly raw: ArtifactsRepoBinding;
 }
 
@@ -403,7 +413,8 @@ export const isArtifactsRepoBinding = <Candidate>(
   hasFunction(value, "fork") &&
   hasFunction(value, "log") &&
   hasFunction(value, "readCommit") &&
-  hasFunction(value, "readTree");
+  hasFunction(value, "readTree") &&
+  hasFunction(value, "readBlob");
 
 export const isArtifactsBinding = <Candidate>(
   value: Candidate,
@@ -420,6 +431,7 @@ const wrapRepo = (
   info: ArtifactsRepoInfo,
 ): ArtifactsRepoClient => ({
   ...info,
+  dispose: Effect.sync(() => repo[Symbol.dispose]?.()),
   info: () => readRepoInfo(binding, repo),
   createToken: Effect.fn(
     "Artifacts.createToken",
@@ -469,6 +481,23 @@ const wrapRepo = (
     "Artifacts.readTree",
     spanOptions(binding, "readTree"),
   )((hash: string) => tryArtifactsPromise(binding, "readTree", () => repo.readTree(hash))),
+  readBlob: Effect.fn(
+    "Artifacts.readBlob",
+    spanOptions(binding, "readBlob"),
+  )(function* (hash: string) {
+    const blob = yield* tryArtifactsPromise(binding, "readBlob", () => repo.readBlob(hash));
+
+    if (blob === null)
+      return yield* new ArtifactsOperationError({
+        binding,
+        operation: "readBlob",
+        code: "NOT_FOUND",
+        numericCode: artifactsErrorNumericCodes.NOT_FOUND,
+        cause: "Blob not found",
+      });
+
+    return blob;
+  }),
   raw: repo,
 });
 

@@ -1,10 +1,87 @@
 import { expect, test } from "vite-plus/test";
-import { Effect, Fiber } from "effect";
+import { it } from "@effect/vitest";
+import { Effect, Fiber, Stream } from "effect";
+import { HttpClientRequest } from "effect/http";
 
 import { ServiceBinding } from "../src/index";
 
 const makeClient = (fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) =>
   ServiceBinding.makeClient<{}>({ binding: "SERVICE" })({ fetch });
+
+it.effect("ServiceBinding HTTP client preserves request details and streamed bodies", () =>
+  Effect.gen(function* () {
+    const service = makeClient((input) => {
+      expect(input).toBeInstanceOf(Request);
+
+      if (!(input instanceof Request)) return Promise.reject("Expected Request");
+
+      expect(input.url).toBe("https://service.test/messages?cursor=next");
+      expect(input.method).toBe("POST");
+      expect(input.headers.get("content-type")).toBe("text/plain");
+      expect(input.headers.get("traceparent")).toBeTruthy();
+
+      return Promise.resolve(new Response(input.body, { status: 201 }));
+    });
+    const client = ServiceBinding.httpClient(service);
+    const request = HttpClientRequest.post("https://service.test/messages").pipe(
+      HttpClientRequest.setUrlParam("cursor", "next"),
+      HttpClientRequest.bodyStream(Stream.make(new TextEncoder().encode("streamed request")), {
+        contentType: "text/plain",
+      }),
+    );
+    const response = yield* client.execute(request);
+    const body = yield* response.text;
+
+    expect(response.status).toBe(201);
+    expect(body).toBe("streamed request");
+  }),
+);
+
+it.effect("ServiceBinding HTTP client retains binding failures as transport causes", () =>
+  Effect.gen(function* () {
+    const cause = { reason: "service unavailable" };
+    const service = makeClient(() => Promise.reject(cause));
+    const error = yield* Effect.flip(
+      ServiceBinding.httpClient(service).get("https://service.test/messages"),
+    );
+
+    expect(error).toMatchObject({
+      _tag: "HttpClientError",
+      reason: {
+        _tag: "TransportError",
+        cause: { _tag: "ServiceBindingFetchError", binding: "SERVICE", cause },
+      },
+    });
+  }),
+);
+
+it.effect("ServiceBinding HTTP client aborts its native request on interruption", () =>
+  Effect.gen(function* () {
+    let capturedSignal: AbortSignal | null | undefined;
+    let started = () => {};
+    const requestStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const service = makeClient((_input, init) => {
+      capturedSignal = init?.signal;
+      started();
+
+      return new Promise<Response>((_resolve, reject) => {
+        capturedSignal?.addEventListener("abort", () => reject(capturedSignal?.reason), {
+          once: true,
+        });
+      });
+    });
+    const fiber = yield* Effect.forkChild(
+      ServiceBinding.httpClient(service).get("https://service.test/messages"),
+    );
+
+    yield* Effect.promise(() => requestStarted);
+    yield* Fiber.interrupt(fiber);
+    expect(capturedSignal).toBeDefined();
+    expect(capturedSignal?.aborted).toBe(true);
+  }),
+);
 
 test("ServiceBinding scopedCall maps resolved RPC rejections to ServiceBindingRpcError", async () => {
   const cause = new Error("remote unavailable");

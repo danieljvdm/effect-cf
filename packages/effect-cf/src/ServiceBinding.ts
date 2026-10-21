@@ -4,6 +4,7 @@ import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import type { Context, Scope } from "effect";
+import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/http";
 
 import * as Binding from "./Binding";
 import * as CloudflareRpc from "./Rpc";
@@ -175,6 +176,26 @@ export type ServiceBindingStaticClient<
   readonly call: ServiceCall<R, Api>;
   readonly scopedCall: ServiceScopedCall<R, Api>;
 };
+
+/**
+ * Use an Effect service binding as an HTTP client while retaining request
+ * tracing, streaming bodies, interruption and typed transport failures.
+ */
+export const httpClient = (
+  service: Pick<ServiceBindingEffectClient<object>, "fetch">,
+): HttpClient.HttpClient =>
+  HttpClient.make((request, _url, signal) =>
+    HttpClientRequest.toWeb(request, { signal }).pipe(
+      Effect.flatMap((webRequest) => service.fetch(webRequest)),
+      Effect.map((response) => HttpClientResponse.fromWeb(request, response)),
+      Effect.mapError(
+        (cause) =>
+          new HttpClientError.HttpClientError({
+            reason: new HttpClientError.TransportError({ request, cause }),
+          }),
+      ),
+    ),
+  );
 
 export type ServiceClass<
   Self,

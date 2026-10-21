@@ -68,6 +68,7 @@ it.effect("delegates session naming and filtering to the upstream Artifacts faca
       log: () => Promise.reject(new Error("unused log")),
       readCommit: () => Promise.reject(new Error("unused readCommit")),
       readTree: () => Promise.reject(new Error("unused readTree")),
+      readBlob: () => Promise.reject(new Error("unused readBlob")),
     });
     const binding = makePartialTestDouble<Artifacts.ArtifactsBinding>({
       create: (name: string) => {

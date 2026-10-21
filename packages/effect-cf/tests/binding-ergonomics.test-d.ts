@@ -125,6 +125,7 @@ const artifactsProgram = Effect.gen(function* () {
   const repo = yield* artifacts.get("agent-workspace");
 
   expectTypeOf(repo).toEqualTypeOf<Artifacts.ArtifactsRepoClient>();
+  expectTypeOf(repo.dispose).toEqualTypeOf<Effect.Effect<void>>();
   expectTypeOf(repo.info()).toEqualTypeOf<
     Effect.Effect<Artifacts.ArtifactsRepoInfo, Artifacts.ArtifactsOperationError>
   >();
@@ -154,6 +155,9 @@ const artifactsProgram = Effect.gen(function* () {
   >();
   expectTypeOf(repo.readTree("tree-sha")).toEqualTypeOf<
     Effect.Effect<Artifacts.ArtifactsTree, Artifacts.ArtifactsOperationError>
+  >();
+  expectTypeOf(repo.readBlob("blob-sha")).toEqualTypeOf<
+    Effect.Effect<Blob, Artifacts.ArtifactsOperationError>
   >();
   expectTypeOf(artifacts.rawUnsafe).toEqualTypeOf<Effect.Effect<Artifacts.ArtifactsBinding>>();
 
@@ -646,6 +650,8 @@ expectTypeOf(FetchOnlyWorker.fetch(new Request("https://example.com"))).toEqualT
 
 const workerProgram = Effect.gen(function* () {
   const worker = yield* ApiWorker;
+
+  expectTypeOf(ServiceBinding.httpClient(worker)).toEqualTypeOf<HttpClient.HttpClient>();
 
   expectTypeOf(worker.ping("hello")).toEqualTypeOf<
     Effect.Effect<string, ServiceBinding.ServiceBindingRpcError>

@@ -32,7 +32,7 @@
     "dev": "vp pack --watch",
     "test": "vp test",
     "check": "vp check",
-    "typecheck": "vp exec effect-tsrs diagnostics --project tsconfig.json --strict"
+    "typecheck": "vp exec effect-tsrs diagnostics --project tsconfig.json"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",

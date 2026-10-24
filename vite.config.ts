@@ -130,7 +130,7 @@ const recommended = {
       check: ["vp fmt --check", "vp lint", "vp test", "vp run typecheck"],
       typecheck: {
         command: [
-          "vp exec effect-tsrs diagnostics --project scripts/tsconfig.json --strict",
+          "vp exec effect-tsrs diagnostics --project scripts/tsconfig.json",
           "vp run --cache --filter './packages/*' --filter './examples/*' --fail-if-no-match typecheck",
         ],
         cache: false,

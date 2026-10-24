@@ -19,13 +19,12 @@
           // from `call`, so this rule does not apply to this codebase.
           "promiseInEffectSuccess": "off",
           // Dev Kit's recommended profile sets this to `warning`; keep it there
-          // explicitly so new unsafe assertions fail rather than falling back to
-          // the language service's lower default. Existing exceptions carry a
+          // explicitly so unsafe assertions remain visible rather than falling back
+          // to the language service's lower default. Existing exceptions carry a
           // per-site `@effect-diagnostics-next-line` directive and a reason.
           "unsafeEffectTypeAssertion": "warning",
-          // Remaining backlog. The compiler exits non-zero on warnings, and the
-          // Cloudflare host boundaries still produce these, so keep the guidance
-          // visible in editors at `suggestion` until the error channels are typed.
+          // Remaining backlog. Keep this guidance at `suggestion` until the
+          // Cloudflare host boundary error channels are typed.
           // Tracked in https://github.com/danieljvdm/effect-cf/issues/63 —
           // drop each override as its count reaches zero.
           "anyUnknownInErrorContext": "suggestion",

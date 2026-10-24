@@ -15,6 +15,6 @@ The stricter Effect policy makes zero-argument operations reusable Effect values
 
 `QueueDefinition` tag helpers also expose `metrics` as an Effect value. Each execution still performs the native operation; retaining a cursor Effect does not snapshot or consume its rows. Each execution of `repo.info` reads current metadata, including property-backed legacy handles updated after a push.
 
-Numeric schemas now reject `NaN`, `Infinity`, and `-Infinity` in RPC argument counts, Analytics Engine query row counts, AI embeddings, AI Gateway metadata, and WebTransport close information.
+Numeric schemas now reject `NaN`, `Infinity`, and `-Infinity` in RPC argument counts, Analytics Engine query row counts, Workers AI embedding values and dimensions, AI Gateway log metrics and metadata, WebTransport close information, and Cloudflare inbound transport round-trip times.
 
 `WebCrypto.randomUUID` uses a supplied Effect `Crypto.Crypto` service when present and otherwise uses Workers Web Crypto. Alarm revision identifiers use this same injectable source. Production services must use a secure source of randomness.

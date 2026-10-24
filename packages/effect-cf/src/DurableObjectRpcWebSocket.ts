@@ -402,7 +402,12 @@ export const layer = (
             }
 
             const subscriptions = Array.from(connection.subscriptionsByRequestId.values()).map(
-              ({ declaration: _, ...subscription }): PersistedSubscription => subscription,
+              ({ declaration, ...subscription }): PersistedSubscription => {
+                // Handlers and schemas cannot be serialized into hibernation attachments.
+                void declaration;
+
+                return subscription;
+              },
             );
 
             writeAttachment(connection.socket.raw, attachmentKey, {

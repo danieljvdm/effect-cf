@@ -243,7 +243,7 @@ export interface ArtifactsBinding {
 export interface ArtifactsRepoClient extends ArtifactsRepoInfo {
   /** Release the native repository handle when its owning scope closes. */
   readonly dispose: Effect.Effect<void>;
-  readonly info: () => Effect.Effect<ArtifactsRepoInfo, ArtifactsOperationError>;
+  readonly info: Effect.Effect<ArtifactsRepoInfo, ArtifactsOperationError>;
   /**
    * Create a Git token for the repository.
    *
@@ -432,7 +432,7 @@ const wrapRepo = (
 ): ArtifactsRepoClient => ({
   ...info,
   dispose: Effect.sync(() => repo[Symbol.dispose]?.()),
-  info: () => readRepoInfo(binding, repo),
+  info: readRepoInfo(binding, repo),
   createToken: Effect.fn(
     "Artifacts.createToken",
     spanOptions(binding, "createToken"),

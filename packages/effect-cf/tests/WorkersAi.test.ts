@@ -138,3 +138,21 @@ test("Workers AI rejects malformed embedding responses", async () => {
     operation: "runEmbedding",
   });
 });
+
+test.each([Number.NaN, Infinity, -Infinity])(
+  "Workers AI rejects non-finite embedding values: %s",
+  async (value) => {
+    const ai = WorkersAi.makeClient({ binding: "AI" })(
+      makeFakeAi({
+        run: async () => ({ data: [[value]], [embeddingDimensionsKey]: [1, 1] }),
+      }),
+    );
+
+    await expect(
+      Effect.runPromise(ai.runEmbedding("@cf/qwen/qwen3-embedding-0.6b", { text: "test" })),
+    ).rejects.toMatchObject({
+      _tag: "WorkersAiOperationError",
+      operation: "runEmbedding",
+    });
+  },
+);

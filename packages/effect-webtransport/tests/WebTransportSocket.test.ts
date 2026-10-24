@@ -108,12 +108,13 @@ describe("WebTransportSocket", () => {
   it.effect("closing the reader scope wakes a suspended pull", () =>
     Effect.gen(function* () {
       const readStarted = yield* Deferred.make<void>();
+      const context = yield* Effect.context<never>();
       const socket = yield* WebTransportSocket.fromBidirectionalStream(
         Effect.succeed({
           readable: new ReadableStream<Uint8Array>(
             {
               pull() {
-                Effect.runSync(Deferred.succeed(readStarted, undefined));
+                Effect.runSyncWith(context)(Deferred.succeed(readStarted, undefined));
               },
             },
             { highWaterMark: 0 },
@@ -138,12 +139,13 @@ describe("WebTransportSocket", () => {
     (pendingFin) =>
       Effect.gen(function* () {
         const writeStarted = yield* Deferred.make<void>();
+        const context = yield* Effect.context<never>();
         let releaseWrite = () => {};
         let writeController!: WritableStreamDefaultController;
         const writable = new WritableStream<Uint8Array>({
           write(_chunk, controller) {
             writeController = controller;
-            Effect.runSync(Deferred.succeed(writeStarted, undefined));
+            Effect.runSyncWith(context)(Deferred.succeed(writeStarted, undefined));
 
             return new Promise<void>((resolve, reject) => {
               releaseWrite = resolve;

@@ -174,32 +174,35 @@ test("AnalyticsEngine validates blob and index byte limits", async () => {
   assert.deepStrictEqual(dataset.points, []);
 });
 
-test("AnalyticsEngine surfaces schema validation errors for writes", async () => {
-  const dataset = makeFakeAnalyticsEngineDataset();
+test.each([Number.NaN, Infinity, -Infinity])(
+  "AnalyticsEngine rejects non-finite write values: %s",
+  async (value) => {
+    const dataset = makeFakeAnalyticsEngineDataset();
 
-  await expect(
-    Effect.runPromise(
-      Effect.gen(function* () {
-        const analytics = yield* RequestAnalytics;
+    await expect(
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const analytics = yield* RequestAnalytics;
 
-        yield* analytics.writeDataPoint({
-          doubles: [Number.NaN],
-        });
-      }).pipe(Effect.provide(analyticsLayer(dataset))),
-    ),
-  ).rejects.toMatchObject({
-    _tag: "AnalyticsEngineWriteValidationError",
-    binding: "REQUEST_ANALYTICS",
-    operation: "writeDataPoint",
-    violations: [
-      {
-        path: "$",
-      },
-    ],
-  });
+          yield* analytics.writeDataPoint({
+            doubles: [value],
+          });
+        }).pipe(Effect.provide(analyticsLayer(dataset))),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "AnalyticsEngineWriteValidationError",
+      binding: "REQUEST_ANALYTICS",
+      operation: "writeDataPoint",
+      violations: [
+        {
+          path: "$",
+        },
+      ],
+    });
 
-  assert.deepStrictEqual(dataset.points, []);
-});
+    assert.deepStrictEqual(dataset.points, []);
+  },
+);
 
 test("AnalyticsEngine can drop invalid writes by layer policy", async () => {
   const dataset = makeFakeAnalyticsEngineDataset();
@@ -422,7 +425,7 @@ test("AnalyticsEngine query client posts SQL with redacted authorization and dec
   );
   const rowSchema = S.Struct({
     path: S.String,
-    views: S.Number,
+    views: S.Finite,
   });
 
   const result = await Effect.runPromise(
@@ -573,7 +576,7 @@ test("AnalyticsEngine query client surfaces schema failures", async () => {
   );
 
   await expect(
-    Effect.runPromise(client.queryRows(S.Struct({ views: S.Number }), "SELECT views")),
+    Effect.runPromise(client.queryRows(S.Struct({ views: S.Finite }), "SELECT views")),
   ).rejects.toMatchObject({
     _tag: "SchemaError",
   });

@@ -87,10 +87,10 @@ const fetcher = {
 };
 
 class Counter extends DurableObject.Tag<Counter>()("Counter", {
-  get: DurableObject.method({ success: S.Number }),
+  get: DurableObject.method({ success: S.Finite }),
   add: DurableObject.method({
-    args: [S.Number, S.String] as const,
-    success: S.Number,
+    args: [S.Finite, S.String] as const,
+    success: S.Finite,
   }),
   resource: DurableObject.method({ success: S.Unknown }),
 }) {}
@@ -518,9 +518,7 @@ test("DurableObject preserves server, client, handler, and namespace types", () 
     );
 
     DurableObject.make(Layer.empty, {
-      initialize: Effect.gen(function* () {
-        yield* DurableObjectState.DurableObjectState;
-      }),
+      initialize: Effect.asVoid(DurableObjectState.DurableObjectState),
       webSocketMessage: (socket, message) => {
         expectType<DurableObjectWebSocket.DurableWebSocket>(socket);
         expectType<string | ArrayBuffer>(message);
@@ -725,14 +723,7 @@ test("Durable Object namespace binding retrieves stubs from the Worker environme
 
 test("Service binding rpc uses the shared dynamic method validation", async () => {
   await expect(
-    Effect.runPromise(
-      provideEchoService(
-        Effect.gen(function* () {
-          return yield* EchoService;
-        }),
-        makeEchoEnv({ fetch: "bad" }),
-      ),
-    ),
+    Effect.runPromise(provideEchoService(EchoService, makeEchoEnv({ fetch: "bad" }))),
   ).rejects.toBeInstanceOf(Binding.BindingValidationError);
 
   await expect(

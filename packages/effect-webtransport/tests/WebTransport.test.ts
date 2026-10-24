@@ -260,13 +260,14 @@ describe("streams", () => {
   it.effect("writer aborts an in-flight write when interrupted", () =>
     Effect.gen(function* () {
       const writeStarted = yield* Deferred.make<void>();
+      const context = yield* Effect.context<never>();
       const writeInterrupted = yield* Deferred.make<void>();
       let releaseWrite = () => {};
       let writeController!: WritableStreamDefaultController;
       const writable = new WritableStream<Uint8Array>({
         write(_chunk, controller) {
           writeController = controller;
-          Effect.runSync(Deferred.succeed(writeStarted, undefined));
+          Effect.runSyncWith(context)(Deferred.succeed(writeStarted, undefined));
 
           return new Promise<void>((resolve, reject) => {
             releaseWrite = resolve;

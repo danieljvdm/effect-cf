@@ -341,7 +341,7 @@ export interface WorkflowInstanceModifier {
   readonly forceEventTimeout: (step: WorkflowStepTarget) => Effect.Effect<void>;
 }
 
-type WorkflowMockResult = Schema.Schema.Type<typeof Schema.Unknown>;
+type WorkflowMockResult = typeof Schema.Unknown.Type;
 
 export interface WorkflowInstanceIntrospector {
   readonly raw: NativeWorkflowInstanceIntrospector;

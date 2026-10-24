@@ -18,7 +18,7 @@ const decodeAttributes = Schema.decodeUnknownSync(
   Schema.Array(
     Schema.Struct({
       name: Schema.String,
-      value: Schema.Union([Schema.String, Schema.Number, Schema.Boolean]),
+      value: Schema.Union([Schema.String, Schema.Finite, Schema.Boolean]),
     }),
   ),
 );
@@ -29,7 +29,7 @@ const decodeResult = Schema.decodeUnknownSync(
       sampled: Schema.Boolean,
       traceId: Schema.String,
       spanId: Schema.String,
-      unsafeCalls: Schema.Number,
+      unsafeCalls: Schema.Finite,
     }),
   ),
 );

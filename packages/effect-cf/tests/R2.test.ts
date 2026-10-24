@@ -21,7 +21,7 @@ const makeR2Object = (key: string, size = 0) =>
 
 const R2JsonFixtureSchema = Schema.Struct({ value: Schema.String });
 
-type R2JsonFixture = Schema.Schema.Type<typeof R2JsonFixtureSchema>;
+type R2JsonFixture = typeof R2JsonFixtureSchema.Type;
 
 const makeR2ObjectBody = (key: string, jsonValue: R2JsonFixture): R2ObjectBody => {
   const text = JSON.stringify(jsonValue);
@@ -115,7 +115,7 @@ const bucketLayer = (bucket: R2Bucket) =>
         const put = yield* r2.put("avatars/u1.png", "data");
         const object = yield* r2.get("avatars/u1.png");
         const jsonObject = yield* r2.get("avatars/u1.png");
-        const decoded = Schema.decodeUnknownSync(R2JsonFixtureSchema)(
+        const decoded = yield* Schema.decodeUnknownEffect(R2JsonFixtureSchema)(
           yield* Option.getOrThrow(jsonObject).json(),
         );
 

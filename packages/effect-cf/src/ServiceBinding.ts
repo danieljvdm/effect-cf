@@ -212,7 +212,7 @@ export type ServiceClass<
     readonly definition: ServiceBindingDefinition<Definition>;
   };
 
-type ServiceBindingValue = Schema.Schema.Type<typeof Schema.Unknown>;
+type ServiceBindingValue = typeof Schema.Unknown.Type;
 
 const ServiceBindingSchema = Schema.declare(
   (value: ServiceBindingValue): value is ServiceFetcher =>

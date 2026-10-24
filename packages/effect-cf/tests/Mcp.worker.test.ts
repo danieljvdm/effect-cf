@@ -44,7 +44,7 @@ const ToolkitLive = TestToolkit.toLayer(
 
     return TestToolkit.of({
       Add: ({ a, b }) => Effect.succeed({ sum: (a + b) * multiplier.factor }),
-      Fail: () => Effect.fail(new TeapotError({ message: "I'm a teapot" })),
+      Fail: () => Effect.fail(TeapotError.make({ message: "I'm a teapot" })),
     });
   }),
 );

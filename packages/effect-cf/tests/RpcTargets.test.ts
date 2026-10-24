@@ -119,7 +119,7 @@ it.effect("reuses RPC targets per invocation and replaces failed channels", () =
 
             assert.strictEqual(yield* ping, target);
             retried.push(target);
-            if (step.attempt === 1) return yield* Effect.fail(new RetryFailure());
+            if (step.attempt === 1) return yield* new RetryFailure();
 
             return target;
           }),

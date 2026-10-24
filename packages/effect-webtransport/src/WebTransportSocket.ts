@@ -24,12 +24,12 @@ export interface MakeSocketOptions {
 }
 
 const toSocketOpenError = (cause: unknown): Socket.SocketError =>
-  new Socket.SocketError({
-    reason: new Socket.SocketOpenError({ kind: "Unknown", cause }),
+  Socket.SocketError.make({
+    reason: Socket.SocketOpenError.make({ kind: "Unknown", cause }),
   });
 
 const closeError = (code = 1000, closeReason?: string) =>
-  new Socket.SocketError({ reason: new Socket.SocketCloseError({ code, closeReason }) });
+  Socket.SocketError.make({ reason: Socket.SocketCloseError.make({ code, closeReason }) });
 
 const encoder = new TextEncoder();
 
@@ -114,11 +114,11 @@ export const fromBidirectionalStream = <R>(
       current = connection;
       latch.openUnsafe();
       const pull = Effect.gen(function* () {
-        if (error !== undefined) return yield* Effect.fail(error);
+        if (error !== undefined) return yield* error;
         const result = yield* Effect.tryPromise({
           try: () => readerHandle.read(),
           catch: (cause) =>
-            error ?? new Socket.SocketError({ reason: new Socket.SocketReadError({ cause }) }),
+            error ?? Socket.SocketError.make({ reason: Socket.SocketReadError.make({ cause }) }),
         });
 
         if (error !== undefined) return yield* Effect.fail(error);
@@ -151,7 +151,7 @@ export const fromBidirectionalStream = <R>(
               );
             },
             catch: (cause) =>
-              new Socket.SocketError({ reason: new Socket.SocketWriteError({ cause }) }),
+              Socket.SocketError.make({ reason: Socket.SocketWriteError.make({ cause }) }),
           });
         }),
       );
@@ -168,7 +168,7 @@ export const fromBidirectionalStream = <R>(
             }
           },
           catch: (cause) =>
-            new Socket.SocketError({ reason: new Socket.SocketWriteError({ cause }) }),
+            Socket.SocketError.make({ reason: Socket.SocketWriteError.make({ cause }) }),
         }),
       );
 

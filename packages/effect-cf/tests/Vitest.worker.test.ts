@@ -1,3 +1,4 @@
+import * as WebCrypto from "../src/WebCrypto";
 import { env } from "cloudflare:workers";
 import { assert, it } from "@effect/vitest";
 import { Config, Context, Deferred, Effect, Fiber, Layer, Schema as S } from "effect";
@@ -251,7 +252,7 @@ it.effect("interrupting a Workflow modifier waits for its cleanup", () =>
     Effect.gen(function* () {
       const introspector = yield* PoolWorkers.introspectWorkflowInstance(
         env.TEST_WORKFLOW!,
-        crypto.randomUUID(),
+        yield* WebCrypto.randomUUID,
       );
       const started = yield* Deferred.make<void>();
       const continueCallback = yield* Deferred.make<void>();

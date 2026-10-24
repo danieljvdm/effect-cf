@@ -128,7 +128,7 @@ export const select = <const Candidates extends Arr.NonEmptyReadonlyArray<Candid
         Effect.catch((error) => {
           failures.push({ name: candidate.name, cause: error });
 
-          return Effect.succeed(undefined);
+          return Effect.void;
         }),
       );
 
@@ -137,7 +137,7 @@ export const select = <const Candidates extends Arr.NonEmptyReadonlyArray<Candid
       }
     }
 
-    return yield* new TransportSelectionError({ failures });
+    return yield* TransportSelectionError.make({ failures });
   });
 
 /**

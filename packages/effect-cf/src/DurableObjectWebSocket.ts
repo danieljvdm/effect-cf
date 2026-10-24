@@ -195,7 +195,7 @@ export const attachment = <const AttachmentSchema extends S.Codec<any, any, neve
       }
 
       return Option.some(
-        yield* S.decodeUnknownEffect(schema)(value).pipe(
+        yield* S.decodeEffect(schema)(value).pipe(
           Effect.mapError(
             (cause) => new DurableWebSocketAttachmentError({ operation: "deserialize", cause }),
           ),
@@ -219,7 +219,7 @@ export const attachment = <const AttachmentSchema extends S.Codec<any, any, neve
         }
 
         if (Result.isFailure(decoded) && onInvalid === "fail") {
-          return yield* Effect.fail(decoded.failure);
+          return yield* decoded.failure;
         }
 
         if (Result.isFailure(decoded) && onInvalid === "ignore-and-close") {

@@ -76,7 +76,7 @@ export type TagClass<
     messages: Iterable<QueueBinding.MessageSendRequest<S.Schema.Type<Message>>>,
     options?: QueueBinding.QueueSendBatchOptions,
   ) => Effect.Effect<void, QueueBinding.QueueOperationError | S.SchemaError, Self>;
-  readonly metrics: () => Effect.Effect<
+  readonly metrics: Effect.Effect<
     QueueBinding.QueueMetrics,
     QueueBinding.QueueOperationError,
     Self
@@ -150,10 +150,10 @@ export const Tag =
       yield* queue.sendBatch(messages, options);
     });
 
-    const metrics = Effect.fnUntraced(function* () {
+    const metrics = Effect.gen(function* () {
       const queue = yield* tag;
 
-      return yield* queue.metrics();
+      return yield* queue.metrics;
     });
 
     const rawUnsafe = Effect.flatMap(tag, (queue) => queue.rawUnsafe);

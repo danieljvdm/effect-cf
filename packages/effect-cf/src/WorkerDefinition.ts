@@ -226,7 +226,7 @@ export type TagClass<
     >;
   };
 
-type TagClassValue = S.Schema.Type<typeof S.Unknown>;
+type TagClassValue = typeof S.Unknown.Type;
 
 const assumeTagClass = <Self, Id extends string, MethodDefinitions extends Methods>(
   value: TagClassValue,

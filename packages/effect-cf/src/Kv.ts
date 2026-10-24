@@ -176,7 +176,7 @@ export const makeClient = <Key, Value, EncodedValue>(
         return Option.none();
       }
 
-      return yield* decodeValue(valueEncoded).pipe(Effect.map(Option.some));
+      return yield* decodeValue(valueEncoded).pipe(Effect.asSome);
     }),
     getWithMetadata: Effect.fn("Kv.getWithMetadata", {
       attributes: { binding: definition.binding, operation: "getWithMetadata" },

@@ -577,7 +577,7 @@ const makeFilesystem = (fsClient: CloudflareWorkspaceFilesystem): ComputerWorksp
 
     return yield* stat(path).pipe(
       Effect.as(true),
-      Effect.catch((error) => (isNotFound(error) ? Effect.succeed(false) : Effect.fail(error))),
+      Effect.catchIf(isNotFound, () => Effect.succeed(false)),
     );
   });
 

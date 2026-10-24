@@ -81,7 +81,7 @@ const gzipBytes = (bytes: Uint8Array) =>
     gzip(bytes, { level: 9 }, (cause, compressed) =>
       resume(
         cause
-          ? Effect.fail(new BundleSizeError({ message: "Could not gzip bundle chunk", cause }))
+          ? Effect.fail(BundleSizeError.make({ message: "Could not gzip bundle chunk", cause }))
           : Effect.succeed(compressed.byteLength),
       ),
     );
@@ -109,7 +109,7 @@ export const measureArtifacts = Effect.fn("bundleSize.measureArtifacts")(functio
       path.relative(output, absolute).startsWith("..") ||
       modules.has(absolute)
     ) {
-      return yield* new BundleSizeError({ message: `Invalid or duplicate output chunk: ${file}` });
+      return yield* BundleSizeError.make({ message: `Invalid or duplicate output chunk: ${file}` });
     }
     const bytes = yield* fs.readFile(absolute);
     const parsed = yield* Effect.tryPromise({
@@ -127,12 +127,12 @@ export const measureArtifacts = Effect.fn("bundleSize.measureArtifacts")(functio
           logLevel: "silent",
         }),
       catch: (cause) =>
-        new BundleSizeError({ message: `Could not read imports in ${file}`, cause }),
+        BundleSizeError.make({ message: `Could not read imports in ${file}`, cause }),
     });
     const input = Object.values(parsed.metafile.inputs)[0];
 
     if (input === undefined)
-      return yield* new BundleSizeError({ message: `No JavaScript in ${file}` });
+      return yield* BundleSizeError.make({ message: `No JavaScript in ${file}` });
     modules.set(absolute, {
       file,
       raw: bytes.byteLength,
@@ -149,7 +149,7 @@ export const measureArtifacts = Effect.fn("bundleSize.measureArtifacts")(functio
         !imported.path.startsWith(".") ||
         !modules.has(path.resolve(path.dirname(file), imported.path))
       ) {
-        return yield* new BundleSizeError({
+        return yield* BundleSizeError.make({
           message: `Unbundled dependency ${imported.path} in ${file}`,
         });
       }
@@ -165,7 +165,7 @@ export const measureArtifacts = Effect.fn("bundleSize.measureArtifacts")(functio
     const module = modules.get(file);
 
     if (module === undefined)
-      return yield* new BundleSizeError({ message: `Missing entry chunk: ${entry}` });
+      return yield* BundleSizeError.make({ message: `Missing entry chunk: ${entry}` });
     initial.add(file);
     for (const imported of module.imports) {
       if (imported.kind !== "dynamic-import" && imported.path.startsWith("."))
@@ -394,7 +394,7 @@ const buildPipeline = Effect.fn("bundleSize.buildPipeline")(function* (
 
   yield* fs.writeFileString(path.join(output, "driver.log"), stdout + stderr);
   if (code !== 0)
-    return yield* new BundleSizeError({
+    return yield* BundleSizeError.make({
       message: `${pipeline} build failed; see ${path.join(output, "driver.log")}`,
     });
   const manifest = yield* Schema.decodeEffect(PipelineBundle)(
@@ -465,7 +465,7 @@ export const compareBundles = Effect.fn("bundleSize.compareBundles")(
     const [base, head] = environments;
 
     if (base === undefined || head === undefined)
-      return yield* new BundleSizeError({ message: "Missing checkout environment" });
+      return yield* BundleSizeError.make({ message: "Missing checkout environment" });
     const comparisons: BundleReport["pipelines"][number][] = [];
 
     for (const pipeline of pipelines) {
@@ -488,7 +488,7 @@ export const compareBundles = Effect.fn("bundleSize.compareBundles")(
 
           if (!available.has("effect-cf")) {
             if (side === "head")
-              return yield* new BundleSizeError({ message: "Missing public export: effect-cf" });
+              return yield* BundleSizeError.make({ message: "Missing public export: effect-cf" });
             missingBaseExports.push("effect-cf");
             sides.push(null);
             continue;
@@ -506,7 +506,7 @@ export const compareBundles = Effect.fn("bundleSize.compareBundles")(
             Object.keys(versions).length > 0 &&
             JSON.stringify(versions) !== JSON.stringify(built.versions)
           )
-            return yield* new BundleSizeError({
+            return yield* BundleSizeError.make({
               message: `Tool versions changed within ${pipeline.name} comparison`,
             });
           versions = built.versions;
@@ -515,7 +515,7 @@ export const compareBundles = Effect.fn("bundleSize.compareBundles")(
         const [before, after] = sides;
 
         if (before === undefined || after === undefined || after === null)
-          return yield* new BundleSizeError({
+          return yield* BundleSizeError.make({
             message: `Incomplete measurement for ${fixture.name}`,
           });
         measured.push({ name: fixture.name, base: before, head: after, missingBaseExports });
@@ -541,7 +541,7 @@ export const compareBundles = Effect.fn("bundleSize.compareBundles")(
   Effect.mapError((cause) =>
     cause._tag === "BundleSizeError"
       ? cause
-      : new BundleSizeError({
+      : BundleSizeError.make({
           message: `Bundle comparison failed. Install pipeline tools and build both checkouts. ${cause.message}`,
           cause,
         }),

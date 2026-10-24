@@ -78,7 +78,7 @@ const runPipeline = Effect.fn("runtimeBench.runPipeline")(function* (
 
   yield* fs.writeFileString(`${project}/driver.log`, `${stdout}\n${stderr}`);
   if (code !== 0)
-    return yield* new RuntimeBenchError({
+    return yield* RuntimeBenchError.make({
       message: `Build failed; see ${project}/driver.log. Run vp run bundle:setup if pipeline dependencies are missing.`,
     });
 }, Effect.scoped);
@@ -178,7 +178,7 @@ export const buildBenchmarks = Effect.fn("runtimeBench.buildBenchmarks")(
             external: ["cloudflare:*", "node:*"],
             logLevel: "silent",
           }),
-        catch: (cause) => new RuntimeBenchError({ message: `Could not build ${name}`, cause }),
+        catch: (cause) => RuntimeBenchError.make({ message: `Could not build ${name}`, cause }),
       });
     }
     yield* Console.log(JSON.stringify({ destination, builds: results.length }));
@@ -186,7 +186,7 @@ export const buildBenchmarks = Effect.fn("runtimeBench.buildBenchmarks")(
   Effect.mapError((cause) =>
     isRuntimeBenchError(cause)
       ? cause
-      : new RuntimeBenchError({
+      : RuntimeBenchError.make({
           message:
             "Runtime benchmark build failed; check the retained build directory and pipeline logs.",
           cause,
@@ -235,12 +235,11 @@ const fixturesCommand = Command.make(
   },
   Effect.fn(function* ({ outDir }) {
     yield* generateFixtures(outDir).pipe(
-      Effect.mapError(
-        (cause) =>
-          new RuntimeBenchError({
-            message: `Could not generate fixtures in ${outDir}; choose a writable directory.`,
-            cause,
-          }),
+      Effect.mapError((cause) =>
+        RuntimeBenchError.make({
+          message: `Could not generate fixtures in ${outDir}; choose a writable directory.`,
+          cause,
+        }),
       ),
     );
   }),

@@ -124,7 +124,7 @@ const tryWorkflowPromise = <A>(
     catch: (cause) => workflowError(binding, operation, cause),
   });
 
-type WorkflowBindingValue = S.Schema.Type<typeof S.Unknown>;
+type WorkflowBindingValue = typeof S.Unknown.Type;
 
 const WorkflowBindingSchema = S.declare(
   (value: WorkflowBindingValue): value is Workflow<WorkflowBindingValue> =>

@@ -59,11 +59,11 @@ class TestRpcs extends RpcGroup.make(Ping, Never, Events, Increment) {}
 
 const ResumableEventPayload = Schema.Struct({
   subscriptionKey: Schema.String,
-  after: Schema.Number,
+  after: Schema.Finite,
 });
 
 const ResumableEventValue = Schema.Struct({
-  cursor: Schema.Number,
+  cursor: Schema.Finite,
   value: Schema.String,
 });
 
@@ -90,7 +90,7 @@ const ResumableEventsDeclaration = DurableObjectRpcWebSocket.resumableStream({
   id: "test-events/v1",
   rpcTag: "ResumableEvents",
   resumeDescriptorSchema: ResumableEventResumeDescriptor,
-  checkpointSchema: Schema.Number,
+  checkpointSchema: Schema.Finite,
   identify: (request) =>
     Option.map(decodeResumablePayload(request.payload), (payload) => ({
       subscriptionKey: payload.subscriptionKey,
@@ -118,7 +118,7 @@ const makeTestRpcHandlers = (options?: {
     Effect.succeed(
       TestRpcs.of({
         Increment: ({ value }) => Effect.succeed(value + 1n),
-        Ping: ({ nonce }) => Effect.succeed(new PingResult({ nonce })),
+        Ping: ({ nonce }) => Effect.succeed(PingResult.make({ nonce })),
         Never: () =>
           (options?.neverStarted === undefined
             ? Effect.void
@@ -193,7 +193,9 @@ for (const [format, serializationLayer] of [
           yield* Effect.gen(function* () {
             const transport = yield* DurableObjectRpcWebSocket.DurableObjectRpcWebSocket;
             const protocol = yield* RpcServer.Protocol;
-            const payload = Schema.encodeSync(serialization.codecFor(Increment.payloadSchema))({
+            const payload = yield* Schema.encodeEffect(
+              serialization.codecFor(Increment.payloadSchema),
+            )({
               value: 41n,
             });
             const request = parser.encode({
@@ -212,14 +214,13 @@ for (const [format, serializationLayer] of [
             );
 
             const response = yield* Queue.take(responses);
-            const envelope = Schema.decodeUnknownSync(
-              Schema.Struct({
-                _tag: Schema.Literal("Exit"),
+            const envelope = yield* Schema.decodeUnknownEffect(
+              Schema.TaggedStruct("Exit", {
                 requestId: Schema.Literal("increment"),
                 exit: Schema.Unknown,
               }),
             )(response);
-            const result = Schema.decodeUnknownSync(
+            const result = yield* Schema.decodeUnknownEffect(
               serialization.codecFor(Rpc.exitSchema(Increment)),
             )(envelope.exit);
 
@@ -246,12 +247,14 @@ for (const [format, serializationLayer] of [
             failNextSend = true;
             yield* protocol.send(0, notification);
 
-            const failure = Schema.decodeUnknownSync(
-              Schema.Struct({ _tag: Schema.Literal("Defect"), defect: Schema.Unknown }),
+            const failure = yield* Schema.decodeUnknownEffect(
+              Schema.TaggedStruct("Defect", {
+                defect: Schema.Unknown,
+              }),
             )(yield* Queue.take(responses));
-            const defect = Schema.decodeUnknownSync(serialization.codecFor(Schema.Defect()))(
-              failure.defect,
-            );
+            const defect = yield* Schema.decodeUnknownEffect(
+              serialization.codecFor(Schema.Defect()),
+            )(failure.defect);
 
             assert.instanceOf(defect, Error);
             assert.strictEqual(defect.message, "WebSocket send failed");
@@ -708,8 +711,8 @@ for (const [format, serializationLayer] of [
             (code, reason) => {
               Queue.offerUnsafe(responses, {
                 _tag: "ClientProtocolError",
-                error: new RpcClientError({
-                  reason: new Socket.SocketCloseError({ code: code ?? 1001, closeReason: reason }),
+                error: RpcClientError.make({
+                  reason: Socket.SocketCloseError.make({ code: code ?? 1001, closeReason: reason }),
                 }),
               });
             },
@@ -823,8 +826,8 @@ for (const [format, serializationLayer] of [
             (code, reason) => {
               Queue.offerUnsafe(responses, {
                 _tag: "ClientProtocolError",
-                error: new RpcClientError({
-                  reason: new Socket.SocketCloseError({ code: code ?? 1001, closeReason: reason }),
+                error: RpcClientError.make({
+                  reason: Socket.SocketCloseError.make({ code: code ?? 1001, closeReason: reason }),
                 }),
               });
             },

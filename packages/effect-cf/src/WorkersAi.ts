@@ -155,7 +155,7 @@ const tryWorkersAiSync = <A>(
     catch: (cause) => workersAiError(binding, operation, cause),
   });
 
-type WorkersAiBindingValue = S.Schema.Type<typeof S.Unknown>;
+type WorkersAiBindingValue = typeof S.Unknown.Type;
 
 const WorkersAiBindingSchema = S.declare(
   (value: WorkersAiBindingValue): value is WorkersAiBinding =>
@@ -181,8 +181,8 @@ export const embeddingResponse = (value: {
 
 const decodeEmbeddingResponse = S.decodeUnknownEffect(
   S.Struct({
-    data: S.optional(S.Array(S.Array(S.Number))),
-    [embeddingDimensionsKey]: S.optional(S.Array(S.Number)),
+    data: S.optional(S.Array(S.Array(S.Finite))),
+    [embeddingDimensionsKey]: S.optional(S.Array(S.Finite)),
   }),
 );
 

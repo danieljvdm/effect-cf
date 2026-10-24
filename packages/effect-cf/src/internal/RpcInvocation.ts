@@ -49,7 +49,7 @@ export type AsyncMethodCloudflareReturn<Api, Method extends keyof Api> = Cloudfl
   AsyncMethodSuccess<Api, Method>
 >;
 
-type RpcTargetValue = Schema.Schema.Type<typeof Schema.Unknown>;
+type RpcTargetValue = typeof Schema.Unknown.Type;
 type RpcMethodOwner<Method extends PropertyKey> = {
   readonly [Key in Method]?: RpcTargetValue;
 };

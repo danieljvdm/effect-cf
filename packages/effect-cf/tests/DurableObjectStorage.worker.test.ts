@@ -50,3 +50,25 @@ it.effect("interrupts native transactions and awaits workerd rollback", () => {
     }),
   );
 });
+
+it.effect("executes reusable cursor effects lazily against the current cursor position", () => {
+  const stub = env.TEST_COUNTER_DO!.getByName("lazy-storage-cursor");
+
+  return PoolWorkers.runInDurableObject(stub, (_instance, state) =>
+    Effect.gen(function* () {
+      const cursor = yield* state.storage.sql.exec<{ value: number }>(
+        "SELECT 1 AS value UNION ALL SELECT 2 UNION ALL SELECT 3",
+      );
+      const next = cursor.next;
+      const remaining = cursor.toArray;
+
+      assert.deepStrictEqual(yield* next, { done: false, value: { value: 1 } });
+      assert.deepStrictEqual(yield* next, { done: false, value: { value: 2 } });
+      assert.deepStrictEqual(yield* remaining, [{ value: 3 }]);
+      assert.deepStrictEqual(yield* remaining, []);
+      const single = yield* state.storage.sql.exec<{ value: number }>("SELECT 4 AS value");
+
+      assert.deepStrictEqual(yield* single.one, { value: 4 });
+    }),
+  );
+});

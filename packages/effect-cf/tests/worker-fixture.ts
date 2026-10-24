@@ -35,8 +35,8 @@ export {
 
 export const TestWorkerDefinition = WorkerDefinition.make("TestWorker", {
   parseNumber: WorkerDefinition.method({
-    args: [S.NumberFromString] as const,
-    success: S.NumberFromString,
+    args: [S.FiniteFromString] as const,
+    success: S.FiniteFromString,
   }),
 });
 
@@ -46,28 +46,28 @@ const ByteReadableStream = S.declare(
 
 export const TestCounterDefinition = DurableObjectDefinition.make("TestCounter", {
   increment: DurableObjectDefinition.method({
-    args: [S.NumberFromString] as const,
-    success: S.NumberFromString,
+    args: [S.FiniteFromString] as const,
+    success: S.FiniteFromString,
   }),
   get: DurableObjectDefinition.method({
-    success: S.Number,
+    success: S.Finite,
   }),
   consumeBytes: DurableObjectDefinition.method({
-    args: [S.NumberFromString, DurableObjectDefinition.native(ByteReadableStream)] as const,
-    success: S.Number,
+    args: [S.FiniteFromString, DurableObjectDefinition.native(ByteReadableStream)] as const,
+    success: S.Finite,
   }),
   produceBytes: DurableObjectDefinition.method({
-    args: [S.NumberFromString] as const,
+    args: [S.FiniteFromString] as const,
     success: DurableObjectDefinition.native(ByteReadableStream),
   }),
 });
 
 const ComputerWorkspaceResult = S.Struct({
   text: S.String,
-  bytes: S.Array(S.Number),
+  bytes: S.Array(S.Finite),
   directoryNames: S.Array(S.String),
   foundPaths: S.Array(S.String),
-  grepLines: S.Array(S.Number),
+  grepLines: S.Array(S.Finite),
   linkTarget: S.String,
   commit: S.String,
   branch: S.String,
@@ -89,7 +89,7 @@ export const TestComputerWorkspaceDefinition = DurableObjectDefinition.make(
   },
 );
 
-const CounterValue = S.Struct({ count: S.Number });
+const CounterValue = S.Struct({ count: S.Finite });
 
 const TestWorkerLive = TestWorkerDefinition.make(Layer.empty, {
   fetch: Effect.sync(() => new Response("Test WorkerEntrypoint", { status: 404 })),

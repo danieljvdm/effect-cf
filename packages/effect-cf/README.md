@@ -2,6 +2,8 @@
 
 Cloudflare entrypoints and bindings as Effect services.
 
+See the [Effect API migration guide](../../docs/effect-api-migration.md) for changes to zero-argument operations and numeric validation.
+
 ```sh
 npm install effect-cf "effect@^4.0.0"
 ```

@@ -42,7 +42,7 @@ const queryRowSchema = S.Record(S.String, S.Unknown);
 const queryResponseSchema = S.Struct({
   meta: S.Array(queryColumnSchema),
   data: S.Array(queryRowSchema),
-  rows: S.Number,
+  rows: S.Finite,
 });
 
 export const AnalyticsEngineFieldValueSchema = S.NullOr(
@@ -110,8 +110,8 @@ export type AnalyticsEngineWriteError =
   | AnalyticsEngineOperationError
   | AnalyticsEngineWriteValidationError;
 export type AnalyticsEngineInvalidWritePolicy = "error" | "drop";
-export type AnalyticsEngineQueryColumn = S.Schema.Type<typeof queryColumnSchema>;
-export type AnalyticsEngineQueryRow = S.Schema.Type<typeof queryRowSchema>;
+export type AnalyticsEngineQueryColumn = typeof queryColumnSchema.Type;
+export type AnalyticsEngineQueryRow = typeof queryRowSchema.Type;
 
 export interface AnalyticsEngineWriteOptions {
   /**
@@ -404,7 +404,7 @@ const schemaViolation = (
 });
 
 const toAnalyticsEngineDataPoint = (
-  dataPoint: S.Schema.Type<typeof AnalyticsEngineDataPointSchema>,
+  dataPoint: typeof AnalyticsEngineDataPointSchema.Type,
 ): AnalyticsEngineDataPoint => {
   const result: AnalyticsEngineDataPoint = {};
 
@@ -436,9 +436,7 @@ const validateDataPoint = (
     const violations = validateDataPointLimits(validated, pathPrefix);
 
     if (violations.length > 0) {
-      return yield* Effect.fail(
-        analyticsEngineWriteValidationError(binding, operation, violations),
-      );
+      return yield* analyticsEngineWriteValidationError(binding, operation, violations);
     }
 
     return validated;
@@ -450,7 +448,7 @@ const validateOptionalDataPoint = (
   dataPoint: AnalyticsEngineDataPoint | undefined,
 ): Effect.Effect<AnalyticsEngineDataPoint | undefined, AnalyticsEngineWriteValidationError> =>
   dataPoint === undefined
-    ? Effect.succeed(undefined)
+    ? Effect.as(Effect.void, undefined)
     : validateDataPoint(binding, operation, dataPoint);
 
 const validateDataPoints = (
@@ -495,9 +493,7 @@ const validateDataPoints = (
     }
 
     if (violations.length > 0) {
-      return yield* Effect.fail(
-        analyticsEngineWriteValidationError(binding, operation, violations),
-      );
+      return yield* analyticsEngineWriteValidationError(binding, operation, violations);
     }
 
     return validPoints;
@@ -546,14 +542,12 @@ const responseText = (
   operation: string,
 ) =>
   response.text.pipe(
-    Effect.catch((cause) =>
-      Effect.fail(
-        analyticsEngineQueryError(
-          definition,
-          operation,
-          "Failed to read Analytics Engine SQL API response body",
-          { cause },
-        ),
+    Effect.mapError((cause) =>
+      analyticsEngineQueryError(
+        definition,
+        operation,
+        "Failed to read Analytics Engine SQL API response body",
+        { cause },
       ),
     ),
   );
@@ -583,13 +577,11 @@ const executeQueryRequest = (
     if (response.status < 200 || response.status >= 300) {
       const body = yield* responseText(definition, response, "queryErrorBody");
 
-      return yield* Effect.fail(
-        analyticsEngineQueryError(
-          definition,
-          "query",
-          `Analytics Engine SQL API returned HTTP ${response.status}`,
-          { status: response.status, body },
-        ),
+      return yield* analyticsEngineQueryError(
+        definition,
+        "query",
+        `Analytics Engine SQL API returned HTTP ${response.status}`,
+        { status: response.status, body },
       );
     }
 
@@ -610,40 +602,37 @@ const makeQueryClientWith = (
   ) {
     const response = yield* raw(sql, options);
     const json = yield* response.json.pipe(
-      Effect.catch((cause) =>
-        Effect.fail(
-          analyticsEngineQueryError(
-            definition,
-            "json",
-            "Failed to read Analytics Engine SQL API JSON response body",
-            { cause },
-          ),
+      Effect.mapError((cause) =>
+        analyticsEngineQueryError(
+          definition,
+          "json",
+          "Failed to read Analytics Engine SQL API JSON response body",
+          { cause },
         ),
       ),
     );
 
     return yield* decodeQueryResponse(json);
   });
-  const queryResult = <Row>(
+  const queryResult = Effect.fn("AnalyticsEngine.queryResult")(function* <Row>(
     row: S.Codec<Row, unknown>,
     sql: string,
     options?: AnalyticsEngineQueryOptions,
-  ) =>
-    Effect.gen(function* () {
-      const result = yield* query(sql, options);
-      const decodeRow = S.decodeUnknownEffect(row);
-      const data: Array<Row> = [];
+  ) {
+    const result = yield* query(sql, options);
+    const decodeRow = S.decodeUnknownEffect(row);
+    const data: Array<Row> = [];
 
-      for (const value of result.data) {
-        data.push(yield* decodeRow(value));
-      }
+    for (const value of result.data) {
+      data.push(yield* decodeRow(value));
+    }
 
-      return {
-        ...result,
-        data,
-        rows: result.rows,
-      } satisfies AnalyticsEngineQueryResult<Row>;
-    }).pipe(Effect.withSpan("AnalyticsEngine.queryResult"));
+    return {
+      ...result,
+      data,
+      rows: result.rows,
+    } satisfies AnalyticsEngineQueryResult<Row>;
+  });
 
   return {
     definition,
@@ -690,8 +679,7 @@ export const makeClient =
 
       return validateOptionalDataPoint(definition.binding, "writeDataPoint", dataPoint).pipe(
         Effect.matchEffect({
-          onFailure: (error) =>
-            policy.onInvalid === "drop" ? Effect.succeed(undefined) : Effect.fail(error),
+          onFailure: (error) => (policy.onInvalid === "drop" ? Effect.void : Effect.fail(error)),
           onSuccess: (point) =>
             tryAnalyticsEngineSync(definition.binding, "writeDataPoint", () =>
               dataset.writeDataPoint(point),

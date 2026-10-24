@@ -424,9 +424,10 @@ it.effect("rolls back on interruption during native alarm reconciliation", () =>
   Effect.gen(function* () {
     const reconciled = yield* Deferred.make<void>();
     const releaseNative = yield* Deferred.make<void>();
+    const context = yield* Effect.context<never>();
     const fixture = makeAlarmFixture({
       afterSetAlarm: () =>
-        Effect.runPromise(
+        Effect.runPromiseWith(context)(
           Deferred.succeed(reconciled, undefined).pipe(
             Effect.andThen(Deferred.await(releaseNative)),
           ),
@@ -525,9 +526,10 @@ it.effect.each(["lost reply", "interruption"] as const)(
     Effect.gen(function* () {
       const committed = yield* Deferred.make<void>();
       const releaseReply = yield* Deferred.make<void>();
+      const context = yield* Effect.context<never>();
       const fixture = makeAlarmFixture({
         afterCommit: () =>
-          Effect.runPromise(
+          Effect.runPromiseWith(context)(
             Deferred.succeed(committed, undefined).pipe(
               Effect.andThen(Deferred.await(releaseReply)),
               Effect.andThen(kind === "lost reply" ? Effect.fail("reply lost") : Effect.void),

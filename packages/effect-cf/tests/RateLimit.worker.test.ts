@@ -1,3 +1,4 @@
+import * as WebCrypto from "../src/WebCrypto";
 import { env } from "cloudflare:workers";
 import { Effect, Layer } from "effect";
 import { expect, test } from "vite-plus/test";
@@ -21,7 +22,7 @@ test("native binding preserves admission, denial, independent keys, and raw acce
         yield* requests.limit({ key }),
         yield* named.limit({ key }),
         yield* requests.limit({ key }),
-        yield* named.limit({ key: crypto.randomUUID() }),
+        yield* named.limit({ key: yield* WebCrypto.randomUUID }),
       ];
     }).pipe(
       Effect.provide(

@@ -35,7 +35,7 @@ export interface QueueBindingClient<Message extends RpcDefinition.ServiceFreeSch
     messages: Iterable<MessageSendRequest<S.Schema.Type<Message>>>,
     options?: QueueSendBatchOptions,
   ) => Effect.Effect<void, QueueOperationError | S.SchemaError>;
-  readonly metrics: () => Effect.Effect<QueueMetrics, QueueOperationError>;
+  readonly metrics: Effect.Effect<QueueMetrics, QueueOperationError>;
   readonly rawUnsafe: Effect.Effect<QueueProducer<S.Codec.Encoded<Message>>>;
 }
 
@@ -108,7 +108,7 @@ export const makeClient = <Message extends RpcDefinition.ServiceFreeSchema>(
         sendBatch.call(queue, encodedMessages, options),
       );
     }),
-    metrics: () => {
+    metrics: Effect.suspend(() => {
       const metrics = queue.metrics;
 
       if (metrics === undefined) {
@@ -123,7 +123,7 @@ export const makeClient = <Message extends RpcDefinition.ServiceFreeSchema>(
       }
 
       return tryQueuePromise(definition.binding, "metrics", () => metrics.call(queue));
-    },
+    }),
     rawUnsafe: Effect.succeed(queue),
   });
 };

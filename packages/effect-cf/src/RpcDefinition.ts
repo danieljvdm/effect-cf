@@ -20,8 +20,8 @@ export class RpcArgumentCountError extends S.TaggedError<RpcArgumentCountError>(
   {
     definition: S.String,
     method: S.String,
-    expected: S.Number,
-    actual: S.Number,
+    expected: S.Finite,
+    actual: S.Finite,
   },
 ) {
   override get message(): string {
@@ -86,12 +86,12 @@ const WireErrorSchema = S.Union([
 
 const wireErrorKey = "effect-cf/RpcDefinition/wireError";
 
-type WireValue = S.Schema.Type<typeof S.Unknown>;
+type WireValue = typeof S.Unknown.Type;
 
 export const isWireError = (error: WireValue): error is WireError =>
-  error instanceof RpcArgumentCountError ||
-  error instanceof RpcArgumentDecodeError ||
-  error instanceof RpcSuccessEncodeError;
+  S.is(RpcArgumentCountError)(error) ||
+  S.is(RpcArgumentDecodeError)(error) ||
+  S.is(RpcSuccessEncodeError)(error);
 
 /**
  * Encodes package RPC errors into a plain `Error` envelope so their tags
@@ -262,7 +262,7 @@ export namespace Definition {
   export type MethodNames<Self extends Any> = Extract<keyof Self["methods"], string>;
 }
 
-type ReservedMethodValue = S.Schema.Type<typeof S.Unknown>;
+type ReservedMethodValue = typeof S.Unknown.Type;
 
 export const assertNoReservedMethods = <
   MethodDefinitions extends Readonly<Record<string, ReservedMethodValue>>,
@@ -309,7 +309,7 @@ export const decodeArgs = Effect.fnUntraced(function* <
   const methodDefinition = definition.methods[methodName];
 
   if (args.length !== methodDefinition.args.length) {
-    return yield* new RpcArgumentCountError({
+    return yield* RpcArgumentCountError.make({
       definition: definition.id,
       method: methodName,
       expected: methodDefinition.args.length,
@@ -319,13 +319,12 @@ export const decodeArgs = Effect.fnUntraced(function* <
 
   const codecs = methodDefinition.args.map((schema) => wireCodec(schema));
   const decoded = yield* S.decodeUnknownEffect(S.Tuple(codecs))(args).pipe(
-    Effect.mapError(
-      (cause) =>
-        new RpcArgumentDecodeError({
-          definition: definition.id,
-          method: methodName,
-          cause,
-        }),
+    Effect.mapError((cause) =>
+      RpcArgumentDecodeError.make({
+        definition: definition.id,
+        method: methodName,
+        cause,
+      }),
     ),
   );
 
@@ -347,7 +346,7 @@ export const encodeArgs = Effect.fnUntraced(function* <
   const methodDefinition = definition.methods[methodName];
 
   if (args.length !== methodDefinition.args.length) {
-    return yield* new RpcArgumentCountError({
+    return yield* RpcArgumentCountError.make({
       definition: definition.id,
       method: methodName,
       expected: methodDefinition.args.length,
@@ -382,13 +381,12 @@ export const encodeSuccess = <
   const methodDefinition = definition.methods[methodName];
 
   return S.encodeUnknownEffect(wireCodec(methodDefinition.success))(value).pipe(
-    Effect.mapError(
-      (cause) =>
-        new RpcSuccessEncodeError({
-          definition: definition.id,
-          method: methodName,
-          cause,
-        }),
+    Effect.mapError((cause) =>
+      RpcSuccessEncodeError.make({
+        definition: definition.id,
+        method: methodName,
+        cause,
+      }),
     ),
   );
 };

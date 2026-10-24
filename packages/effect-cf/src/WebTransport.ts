@@ -47,8 +47,8 @@ import * as S from "effect/Schema";
  */
 export class InboundTransport extends S.Class<InboundTransport>("InboundTransport")({
   httpProtocol: S.String,
-  clientQuicRtt: S.optional(S.Number),
-  clientTcpRtt: S.optional(S.Number),
+  clientQuicRtt: S.optional(S.Finite),
+  clientTcpRtt: S.optional(S.Finite),
 }) {}
 
 const decodeInboundTransport = S.decodeUnknownResult(InboundTransport);

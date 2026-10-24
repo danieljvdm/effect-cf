@@ -1,6 +1,10 @@
-export class NonRetryableError extends Error {
+import * as Data from "effect/Data";
+
+export class NonRetryableError extends Data.TaggedError("NonRetryableError")<{
+  readonly message: string;
+}> {
   constructor(message: string, name = "NonRetryableError") {
-    super(message);
+    super({ message });
     this.name = name;
   }
 }

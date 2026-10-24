@@ -39,7 +39,7 @@ export type AiGatewayHeaders = NonNullable<AiGatewayUniversalRequest["headers"]>
 export type AiGatewayRunOptions = Parameters<AiGatewayBinding["run"]>[1];
 type AiGatewayBindingCandidate = Parameters<typeof isWorkersAiBinding>[0];
 
-const AiGatewayMetadata = S.Record(S.String, S.Union([S.String, S.Number, S.Boolean, S.Null]));
+const AiGatewayMetadata = S.Record(S.String, S.Union([S.String, S.Finite, S.Boolean, S.Null]));
 const AiGatewayHttpMetadata = S.Union([AiGatewayMetadata, S.fromJsonString(AiGatewayMetadata)]);
 const AiGatewayLogResponse = S.Struct({
   success: S.Literal(true),
@@ -49,23 +49,23 @@ const AiGatewayLogResponse = S.Struct({
     model: S.String,
     model_type: S.optional(S.String),
     path: S.String,
-    duration: S.Number,
+    duration: S.Finite,
     request_type: S.optional(S.String),
     request_content_type: S.optional(S.String),
-    status_code: S.Number,
+    status_code: S.Finite,
     response_content_type: S.optional(S.String),
     success: S.Boolean,
     cached: S.Boolean,
-    tokens_in: S.optional(S.Number),
-    tokens_out: S.optional(S.Number),
+    tokens_in: S.optional(S.Finite),
+    tokens_out: S.optional(S.Finite),
     metadata: S.optional(AiGatewayHttpMetadata),
-    step: S.optional(S.Number),
-    cost: S.optional(S.Number),
+    step: S.optional(S.Finite),
+    cost: S.optional(S.Finite),
     custom_cost: S.optional(S.Boolean),
-    request_size: S.Number,
+    request_size: S.Finite,
     request_head: S.optional(S.String),
     request_head_complete: S.Boolean,
-    response_size: S.Number,
+    response_size: S.Finite,
     response_head: S.optional(S.String),
     response_head_complete: S.Boolean,
     created_at: S.DateFromString,

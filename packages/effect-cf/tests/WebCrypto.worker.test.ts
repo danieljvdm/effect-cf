@@ -22,13 +22,3 @@ it.effect("honors a provided Crypto service for UUID generation", () =>
     expect(id).toBe("00000000-0000-4000-8000-000000000000");
   }),
 );
-
-it.effect("provides Workers digest operations as an Effect service", () =>
-  Effect.gen(function* () {
-    const crypto = yield* Crypto.Crypto;
-    const digest = yield* crypto.digest("SHA-256", new TextEncoder().encode("abc"));
-    const hex = Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
-
-    expect(hex).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
-  }).pipe(Effect.provide(WebCrypto.layer)),
-);

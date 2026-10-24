@@ -13,8 +13,8 @@ The stricter Effect policy makes zero-argument operations reusable Effect values
 | `yield* repo.info()`                  | `yield* repo.info`                  |
 | `yield* queue.metrics()`              | `yield* queue.metrics`              |
 
-`QueueDefinition` tag helpers also expose `metrics` as an Effect value. Each execution still performs the native operation; retaining a cursor Effect does not snapshot or consume its rows.
+`QueueDefinition` tag helpers also expose `metrics` as an Effect value. Each execution still performs the native operation; retaining a cursor Effect does not snapshot or consume its rows. Each execution of `repo.info` reads current metadata, including property-backed legacy handles updated after a push.
 
 Numeric schemas now reject `NaN`, `Infinity`, and `-Infinity` in RPC argument counts, Analytics Engine query row counts, AI embeddings, AI Gateway metadata, and WebTransport close information.
 
-`WebCrypto.layer` provides Effect's `Crypto.Crypto` service using Workers Web Crypto. `WebCrypto.randomUUID` uses a supplied Crypto service when present and otherwise uses the Workers implementation. Alarm revision identifiers use this same injectable source. Production services must use a secure source of randomness.
+`WebCrypto.randomUUID` uses a supplied Effect `Crypto.Crypto` service when present and otherwise uses Workers Web Crypto. Alarm revision identifiers use this same injectable source. Production services must use a secure source of randomness.

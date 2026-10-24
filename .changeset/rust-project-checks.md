@@ -13,6 +13,6 @@ Align Effect checks with the shared authored policy while retaining documented C
 
 Expose zero-argument storage, cursor, artifact-info, and queue-metrics operations as reusable Effect values. Yield `cursor.next`, `cursor.toArray`, `cursor.one`, `transaction.rollback`, `storage.sync`, `storage.getCurrentBookmark`, `repo.info`, and `queue.metrics` directly instead of calling them.
 
-Add a Workers Web Crypto layer for Effect's Crypto service, and use its injectable UUID generation in alarm scheduling.
+Add a Workers Web Crypto UUID helper that honors a supplied Effect Crypto service, and use it in alarm scheduling.
 
 Reject non-finite numeric values in RPC counts, Analytics Engine query metadata, AI embeddings and gateway metadata, and WebTransport close information. Schema operations inside Effects now preserve typed decoding failures.

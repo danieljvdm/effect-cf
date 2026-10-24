@@ -391,18 +391,19 @@ const decodeRepoInfo = (
 const readRepoInfo = (
   binding: string,
   repo: ArtifactsRepoBinding,
-): Effect.Effect<ArtifactsRepoInfo, ArtifactsOperationError> => {
-  if (hasFunction(repo, "info")) {
-    return tryArtifactsPromise(binding, "info", () => repo.info()).pipe(
-      Effect.flatMap((info) => decodeRepoInfo(binding, info)),
+): Effect.Effect<ArtifactsRepoInfo, ArtifactsOperationError> =>
+  Effect.suspend(() => {
+    if (hasFunction(repo, "info")) {
+      return tryArtifactsPromise(binding, "info", () => repo.info()).pipe(
+        Effect.flatMap((info) => decodeRepoInfo(binding, info)),
+        Effect.withSpan("Artifacts.info", spanOptions(binding, "info")),
+      );
+    }
+
+    return decodeRepoInfo(binding, repo).pipe(
       Effect.withSpan("Artifacts.info", spanOptions(binding, "info")),
     );
-  }
-
-  return decodeRepoInfo(binding, repo).pipe(
-    Effect.withSpan("Artifacts.info", spanOptions(binding, "info")),
-  );
-};
+  });
 
 export const isArtifactsRepoBinding = <Candidate>(
   value: Candidate,

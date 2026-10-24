@@ -350,6 +350,33 @@ const artifactsLayer = (artifacts: Artifacts.ArtifactsBinding) =>
   });
 }
 
+it.effect("Artifacts refreshes property-backed metadata on every execution", () =>
+  Effect.gen(function* () {
+    const calls = makeCalls();
+    const native = makeRepo(calls);
+    const artifacts = {
+      ...makeArtifacts(calls),
+      get: async () => native,
+    } satisfies Artifacts.ArtifactsBinding;
+    const client = Artifacts.makeClient({ binding: "ARTIFACTS" })(artifacts);
+    const repo = yield* client.get("starter-repo");
+    const info = repo.info;
+    const initial = yield* info;
+    const pushedAt = "2026-08-15T02:00:00.000Z";
+
+    Object.assign(native, { updatedAt: pushedAt, lastPushAt: pushedAt });
+
+    const refreshed = yield* info;
+
+    assert.deepStrictEqual(initial, repoInfo);
+    assert.deepStrictEqual(refreshed, {
+      ...repoInfo,
+      updatedAt: pushedAt,
+      lastPushAt: pushedAt,
+    });
+  }),
+);
+
 test("Artifacts supports method-only remote repository handles", async () => {
   const calls = makeCalls();
   const artifacts = {

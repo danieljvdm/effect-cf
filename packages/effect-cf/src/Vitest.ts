@@ -108,29 +108,9 @@ export const scheduled = Effect.fn("effect-cf/vitest/scheduled")(function* (
 
 type AnyPagesFunction = globalThis.PagesFunction<WorkerEnv, string, any>;
 
-interface PagesEventContextInitBase {
-  readonly request: Request<unknown, IncomingRequestCfProperties>;
-  readonly functionPath?: string;
-  readonly next?: (request: Request) => Response | Promise<Response>;
-}
-
-type PagesEventContextInitParams<Context> =
-  Context extends globalThis.EventContext<unknown, infer Params, unknown>
-    ? [Params] extends [never]
-      ? { readonly params?: Record<string, never> }
-      : { readonly params: Record<Params, string | Array<string>> }
-    : never;
-
-type PagesEventContextInitData<Context> =
-  Context extends globalThis.EventContext<unknown, string, infer Data>
-    ? Data extends Record<string, never>
-      ? { readonly data?: Data }
-      : { readonly data: Data }
-    : never;
-
-export type PagesEventContextInit<Function extends AnyPagesFunction> = PagesEventContextInitBase &
-  PagesEventContextInitParams<Parameters<Function>[0]> &
-  PagesEventContextInitData<Parameters<Function>[0]>;
+export type PagesEventContextInit<Function extends AnyPagesFunction> = Readonly<
+  Parameters<typeof createPagesEventContext<Function>>[0]
+>;
 
 /**
  * Invokes a Pages Function with a typed event context and drains its
@@ -141,7 +121,7 @@ export const pages = Effect.fn("effect-cf/vitest/pages")(function* <
 >(handler: Function, init: PagesEventContextInit<Function>) {
   return yield* Effect.acquireUseRelease(
     Effect.sync(() =>
-      // SAFETY: PagesEventContextInit computes the same conditional initializer accepted by this Function.
+      // SAFETY: init has the native initializer's exact fields with readonly modifiers.
       createPagesEventContext<Function>(
         init as Parameters<typeof createPagesEventContext<Function>>[0],
       ),

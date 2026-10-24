@@ -72,7 +72,7 @@
     "dev": "vp pack --watch",
     "test": "vp test",
     "check": "vp check",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "vp exec effect-tsrs diagnostics --project tsconfig.json --strict"
   },
   "devDependencies": {
     "@cloudflare/computer": "0.2.0",

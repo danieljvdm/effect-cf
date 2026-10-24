@@ -2,13 +2,9 @@ import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Console, Effect, FileSystem, Path, Schema, Stream } from "effect";
 import { ChildProcess } from "effect/process";
 
-// ---------------------------------------------------------------------------
-// Patch the installed `typescript` binary with the Effect TypeScript-Go
-// integration, replacing the `dev-kit tsgo patch` lifecycle task after
-// ejecting Dev Kit's v1 managed model. `effect-tsgo patch` selects its
-// replacement by installed package version and is safe to re-run, so this
-// script only adds the version-pin check that made the pairing intentional.
-// ---------------------------------------------------------------------------
+// Vite+ declaration builds and the external-consumer emit tests still use
+// TypeScript-Go. Project checking runs separately through Effect tsrs.
+// Keep this pinned patch for emission and the upstream editor integration.
 
 const EXPECTED_TSGO_VERSION = "0.36.4";
 const EXPECTED_TYPESCRIPT_VERSION = "7.0.2";

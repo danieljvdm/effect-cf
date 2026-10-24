@@ -130,7 +130,7 @@ const recommended = {
       check: ["vp fmt --check", "vp lint", "vp test", "vp run typecheck"],
       typecheck: {
         command: [
-          "vp exec tsc --noEmit -p scripts/tsconfig.json",
+          "vp exec effect-tsrs diagnostics --project scripts/tsconfig.json --strict",
           "vp run --cache --filter './packages/*' --filter './examples/*' --fail-if-no-match typecheck",
         ],
         cache: false,
@@ -217,7 +217,7 @@ export default defineConfig({
         cache: false,
       },
       "bundle:typecheck": {
-        command: "vp exec tsc --noEmit -p scripts/bundle-pipelines/tsconfig.json",
+        command: "vp exec tsrs --noEmit -p scripts/bundle-pipelines/tsconfig.json",
         cache: false,
       },
       "runtime:bench": {

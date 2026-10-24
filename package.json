@@ -29,10 +29,12 @@
     "@stylistic/eslint-plugin": "5.10.0",
     "@types/bun": "^1.4.0",
     "@types/node": "^25.6.0",
+    "@yielded/effect-tsrs": "0.2.1",
     "effect": "catalog:",
     "esbuild": "0.28.1",
     "oxfmt": "0.64.0",
     "oxlint": "1.79.0",
+    "tsrs": "0.18.0-ts7.1.0-dev.20260929",
     "typescript": "7.0.2",
     "vite-plus": "catalog:",
     "vitest": "catalog:",
@@ -49,7 +51,7 @@
   },
   "engines": {
     "bun": ">=1.4.0",
-    "node": ">=22.12.0"
+    "node": ">=22.14.0"
   },
   "packageManager": "bun@1.4.0",
   "catalog": {

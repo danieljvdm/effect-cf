@@ -233,7 +233,7 @@ interface FakeWebSocket extends WebSocket {
 }
 
 type AttachmentFixture = null | { readonly id: number | string };
-const AttachmentFixtureSchema = S.NullOr(S.Struct({ id: S.Union([S.Number, S.String]) }));
+const AttachmentFixtureSchema = S.NullOr(S.Struct({ id: S.Union([S.Finite, S.String]) }));
 
 function makeFakeWebSocket(options?: {
   readonly initialAttachment?: AttachmentFixture;

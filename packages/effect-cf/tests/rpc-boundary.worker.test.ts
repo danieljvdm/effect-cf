@@ -15,7 +15,7 @@ import {
 import { makePartialTestDouble } from "./TestDoubles";
 
 class Counter extends DurableObject.Tag<Counter>()("WorkerPoolCounter", {
-  get: DurableObject.method({ success: S.Number }),
+  get: DurableObject.method({ success: S.Finite }),
 }) {}
 
 const ByteReadableStream = S.declare(
@@ -24,11 +24,11 @@ const ByteReadableStream = S.declare(
 
 class StreamCounter extends DurableObject.Tag<StreamCounter>()("TestCounter", {
   consumeBytes: DurableObject.method({
-    args: [S.NumberFromString, DurableObject.native(ByteReadableStream)] as const,
-    success: S.Number,
+    args: [S.FiniteFromString, DurableObject.native(ByteReadableStream)] as const,
+    success: S.Finite,
   }),
   produceBytes: DurableObject.method({
-    args: [S.NumberFromString] as const,
+    args: [S.FiniteFromString] as const,
     success: DurableObject.native(ByteReadableStream),
   }),
 }) {}
@@ -92,14 +92,14 @@ interface AuditReceipt {
 
 const AuditReceipt = S.Struct({
   room: S.String,
-  total: S.Number,
-  sequence: S.Number,
+  total: S.Finite,
+  sequence: S.Finite,
 });
 
 class MathWorker extends Worker.Tag<MathWorker>()("WorkerPoolMath", {
   double: Worker.method({
-    args: [S.Number] as const,
-    success: S.Number,
+    args: [S.Finite] as const,
+    success: S.Finite,
   }),
 }) {}
 
@@ -112,7 +112,7 @@ class FormatWorker extends Worker.Tag<FormatWorker>()("WorkerPoolFormat", {
 
 class AuditLog extends DurableObject.Tag<AuditLog>()("WorkerPoolAuditLog", {
   append: DurableObject.method({
-    args: [S.String, S.Number] as const,
+    args: [S.String, S.Finite] as const,
     success: AuditReceipt,
   }),
 }) {}
@@ -205,20 +205,18 @@ test("namespace RPC validation fails with package errors inside the Workers runt
 
 test("service binding RPC validation runs inside the Workers runtime", async () => {
   const WorkerClass = Worker.make(EchoService.layer({ binding: "ECHO" }), {
-    fetch: Effect.gen(function* () {
-      return yield* EchoService.call("echo", "hello").pipe(
-        Effect.match({
-          onFailure: (error) =>
-            new Response(
-              error instanceof ServiceBinding.ServiceBindingRpcError ? error._tag : "unknown",
-              {
-                status: 599,
-              },
-            ),
-          onSuccess: (value) => new Response(value),
-        }),
-      );
-    }),
+    fetch: EchoService.call("echo", "hello").pipe(
+      Effect.match({
+        onFailure: (error) =>
+          new Response(
+            error instanceof ServiceBinding.ServiceBindingRpcError ? error._tag : "unknown",
+            {
+              status: 599,
+            },
+          ),
+        onSuccess: (value) => new Response(value),
+      }),
+    ),
   });
 
   const invalid = new WorkerClass(

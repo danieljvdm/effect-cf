@@ -185,6 +185,8 @@ vp run dev
 
 `check` builds the packages, checks formatting, lints, runs tests, and typechecks the packages and example. `dev` starts the document outbox locally.
 
+Package, example, and repository-script typechecks use `effect-tsrs diagnostics --type-check`: warnings remain visible without failing the command; TypeScript errors and configured Effect errors fail. [tsconfig.json](tsconfig.json) owns the Effect diagnostic policy and Cloudflare boundary exceptions. Declaration builds still use patched TypeScript-Go; prepare that compiler with `vp run patch:tsgo`.
+
 Use `vp run -r build` to build all workspaces. Package tests live under `packages/*/tests`.
 
 Effect 4.0's Vitest adapter declares a Vitest 5 peer requirement, while the

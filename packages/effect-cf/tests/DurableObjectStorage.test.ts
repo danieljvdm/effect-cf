@@ -179,7 +179,7 @@ it.effect("maps rejected platform operations to StorageOperationError", () =>
     const { raw } = makeRawDurableObjectStorage({ syncError: platformError });
     const storage = DurableObjectStorage.fromDurableObjectStorage(raw);
 
-    const exit = yield* Effect.exit(storage.sync());
+    const exit = yield* Effect.exit(storage.sync);
 
     assert.strictEqual(exit._tag, "Failure");
     if (exit._tag === "Failure") {

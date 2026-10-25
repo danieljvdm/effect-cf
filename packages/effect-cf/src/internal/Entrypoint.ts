@@ -78,7 +78,7 @@ export const defineEntrypointRpcMethods = <Self, Prototype extends object = obje
   }
 };
 
-type EntrypointClassValue = Schema.Schema.Type<typeof Schema.Unknown>;
+type EntrypointClassValue = typeof Schema.Unknown.Type;
 
 export const assumeEntrypointClass = <Class>(entrypoint: EntrypointClassValue): Class => {
   // SAFETY: callers pass a freshly declared Cloudflare entrypoint subclass matching Class's constructor contract.

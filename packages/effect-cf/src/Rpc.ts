@@ -99,7 +99,7 @@ export type DisposableValue = {
   [Symbol.dispose](): void;
 };
 
-type RpcBoundaryValue = Schema.Schema.Type<typeof Schema.Unknown>;
+type RpcBoundaryValue = typeof Schema.Unknown.Type;
 
 export const isDisposable = (value: RpcBoundaryValue): value is DisposableValue =>
   Predicate.hasProperty(value, Symbol.dispose) && Predicate.isFunction(value[Symbol.dispose]);

@@ -13,8 +13,7 @@ import * as Tracer from "effect/Tracer";
  * with this tag for transport context; do not use it as a final domain argument.
  * Never store this in durable messages or envelopes.
  */
-export const RpcTraceContext = Schema.Struct({
-  _tag: Schema.Literal("effect-cf/RpcTraceContext/v1"),
+export const RpcTraceContext = Schema.TaggedStruct("effect-cf/RpcTraceContext/v1", {
   traceId: Schema.String.check(Schema.isPattern(/^(?!0{32}$)[0-9a-f]{32}$/)),
   spanId: Schema.String.check(Schema.isPattern(/^(?!0{16}$)[0-9a-f]{16}$/)),
   sampled: Schema.Boolean,

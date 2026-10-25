@@ -236,7 +236,8 @@ export const layer = (
       const declarations = options.resumableStreams ?? [];
       const durableObjectState = yield* DurableObjectState;
       const serialization = yield* RpcSerialization.RpcSerialization;
-      const encodeDefect = Schema.encodeSync(serialization.codecFor(Schema.Defect()));
+      const encodeDefect = (cause: unknown) =>
+        Schema.encodeEffect(serialization.codecFor(Schema.Defect()))(cause).pipe(Effect.orDie);
       const disconnects = yield* Queue.make<number>();
       const connectionsBySocket = new Map<WebSocket, RpcConnection>();
       const connectionsById = new Map<number, RpcConnection>();
@@ -401,7 +402,12 @@ export const layer = (
             }
 
             const subscriptions = Array.from(connection.subscriptionsByRequestId.values()).map(
-              ({ declaration: _, ...subscription }): PersistedSubscription => subscription,
+              ({ declaration, ...subscription }): PersistedSubscription => {
+                // Handlers and schemas cannot be serialized into hibernation attachments.
+                void declaration;
+
+                return subscription;
+              },
             );
 
             writeAttachment(connection.socket.raw, attachmentKey, {
@@ -778,8 +784,8 @@ export const layer = (
             }
           }
 
-          const enqueued = yield* Effect.sync(() => {
-            try {
+          const enqueued = yield* Effect.try({
+            try: () => {
               const encoded = connection.parser.encode(response);
 
               if (encoded === undefined) {
@@ -789,19 +795,23 @@ export const layer = (
               connection.socket.raw.send(encoded);
 
               return true;
-            } catch (cause) {
-              delivered = RpcMessage.ResponseDefectEncoded(encodeDefect(cause));
-              const encoded = connection.parser.encode(delivered);
-
-              if (encoded === undefined) {
-                return false;
-              }
-
-              connection.socket.raw.send(encoded);
-
-              return true;
-            }
+            },
+            catch: (cause) => cause,
           }).pipe(
+            Effect.catch((cause) =>
+              Effect.gen(function* () {
+                delivered = RpcMessage.ResponseDefectEncoded(yield* encodeDefect(cause));
+                const encoded = connection.parser.encode(delivered);
+
+                if (encoded === undefined) {
+                  return false;
+                }
+
+                connection.socket.raw.send(encoded);
+
+                return true;
+              }),
+            ),
             Effect.catchCause((cause) =>
               Effect.logDebug("Durable Object RPC websocket send failed", cause).pipe(
                 Effect.as(false),
@@ -993,7 +1003,7 @@ export const layer = (
             if (run === undefined) {
               yield* send(
                 connection,
-                RpcMessage.ResponseDefectEncoded(encodeDefect("RPC server is not ready")),
+                RpcMessage.ResponseDefectEncoded(yield* encodeDefect("RPC server is not ready")),
               );
 
               return;
@@ -1039,7 +1049,9 @@ export const layer = (
 
               return Predicate.isTagged(cause, "MaxBufferSizeExceeded")
                 ? Effect.ignore(connection.socket.close(1009, String(cause)))
-                : send(connection, RpcMessage.ResponseDefectEncoded(encodeDefect(cause)));
+                : Effect.flatMap(encodeDefect(cause), (encoded) =>
+                    send(connection, RpcMessage.ResponseDefectEncoded(encoded)),
+                  );
             }),
           ),
         close: (socket) =>

@@ -31,9 +31,9 @@ export class StorageOperationError extends Data.TaggedError("StorageOperationErr
 type StorageEffect<A> = Effect.Effect<A, StorageOperationError>;
 
 export interface SqlCursor<T extends Record<string, SqlStorageValue>> {
-  next(): StorageEffect<{ done?: false; value: T } | { done: true; value?: never }>;
-  toArray(): StorageEffect<Array<T>>;
-  one(): StorageEffect<T>;
+  readonly next: StorageEffect<{ done?: false; value: T } | { done: true; value?: never }>;
+  readonly toArray: StorageEffect<Array<T>>;
+  readonly one: StorageEffect<T>;
   raw<U extends Array<SqlStorageValue>>(): StorageEffect<IterableIterator<U>>;
   readonly columnNames: Array<string>;
   readonly rowsRead: StorageEffect<number>;
@@ -93,7 +93,7 @@ export interface DurableObjectTransaction {
   ): StorageEffect<void>;
   delete(key: string, options?: globalThis.DurableObjectPutOptions): StorageEffect<boolean>;
   delete(keys: Array<string>, options?: globalThis.DurableObjectPutOptions): StorageEffect<number>;
-  rollback(): StorageEffect<void>;
+  readonly rollback: StorageEffect<void>;
   getAlarm(options?: globalThis.DurableObjectGetAlarmOptions): StorageEffect<number | null>;
 }
 
@@ -127,9 +127,9 @@ export interface DurableObjectStorage {
     closure: (txn: DurableObjectTransaction) => Effect.Effect<A, E, R>,
   ): Effect.Effect<A, E | StorageOperationError, R>;
   /** Flushes pending writes to disk. */
-  sync(): StorageEffect<void>;
+  readonly sync: StorageEffect<void>;
   /** Requires SQLite-backed Durable Object storage. */
-  getCurrentBookmark(): StorageEffect<string>;
+  readonly getCurrentBookmark: StorageEffect<string>;
   /** Requires SQLite-backed Durable Object storage. */
   onNextSessionRestoreBookmark(bookmark: string): StorageEffect<string>;
   readonly sql: SqlStorage;
@@ -154,9 +154,9 @@ const tryStoragePromise = <A>(operation: string, evaluate: () => Promise<A>): St
 const fromSqlCursor = <T extends Record<string, SqlStorageValue>>(
   cursor: globalThis.SqlStorageCursor<T>,
 ): SqlCursor<T> => ({
-  next: () => tryStorageSync("sql.next", () => cursor.next()),
-  toArray: () => tryStorageSync("sql.toArray", () => cursor.toArray()),
-  one: () => tryStorageSync("sql.one", () => cursor.one()),
+  next: tryStorageSync("sql.next", () => cursor.next()),
+  toArray: tryStorageSync("sql.toArray", () => cursor.toArray()),
+  one: tryStorageSync("sql.one", () => cursor.one()),
   raw: <U extends Array<SqlStorageValue>>() => tryStorageSync("sql.raw", () => cursor.raw<U>()),
   get columnNames() {
     return cursor.columnNames;
@@ -196,7 +196,7 @@ const schemaBackedSyncKvStorage = <Key, Value, EncodedValue>(
           return Option.none();
         }
 
-        return yield* decodeValue(encodedValue).pipe(Effect.map(Option.some));
+        return yield* decodeValue(encodedValue).pipe(Effect.asSome);
       }),
     put: (key, value) =>
       Effect.gen(function* () {
@@ -266,11 +266,10 @@ const fromDurableObjectTransaction = (
       Array.isArray(keyOrKeys)
         ? tryStoragePromise("transaction.delete", () => txn.delete(keyOrKeys, options))
         : tryStoragePromise("transaction.delete", () => txn.delete(keyOrKeys, options)),
-    rollback: () =>
-      tryStorageSync("transaction.rollback", () => {
-        txn.rollback();
-        if (owner !== undefined) owner.rolledBack = true;
-      }),
+    rollback: tryStorageSync("transaction.rollback", () => {
+      txn.rollback();
+      if (owner !== undefined) owner.rolledBack = true;
+    }),
     getAlarm: (options?: globalThis.DurableObjectGetAlarmOptions) =>
       tryStoragePromise("transaction.getAlarm", () => txn.getAlarm(options)),
   }) as DurableObjectTransaction;
@@ -374,9 +373,8 @@ export const fromDurableObjectStorage = (
         );
       }),
     ),
-  sync: () => tryStoragePromise("sync", () => storage.sync()),
-  getCurrentBookmark: () =>
-    tryStoragePromise("getCurrentBookmark", () => storage.getCurrentBookmark()),
+  sync: tryStoragePromise("sync", () => storage.sync()),
+  getCurrentBookmark: tryStoragePromise("getCurrentBookmark", () => storage.getCurrentBookmark()),
   onNextSessionRestoreBookmark: (bookmark: string) =>
     tryStoragePromise("onNextSessionRestoreBookmark", () =>
       storage.onNextSessionRestoreBookmark(bookmark),

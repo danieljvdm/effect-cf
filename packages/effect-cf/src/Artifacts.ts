@@ -243,7 +243,7 @@ export interface ArtifactsBinding {
 export interface ArtifactsRepoClient extends ArtifactsRepoInfo {
   /** Release the native repository handle when its owning scope closes. */
   readonly dispose: Effect.Effect<void>;
-  readonly info: () => Effect.Effect<ArtifactsRepoInfo, ArtifactsOperationError>;
+  readonly info: Effect.Effect<ArtifactsRepoInfo, ArtifactsOperationError>;
   /**
    * Create a Git token for the repository.
    *
@@ -391,18 +391,19 @@ const decodeRepoInfo = (
 const readRepoInfo = (
   binding: string,
   repo: ArtifactsRepoBinding,
-): Effect.Effect<ArtifactsRepoInfo, ArtifactsOperationError> => {
-  if (hasFunction(repo, "info")) {
-    return tryArtifactsPromise(binding, "info", () => repo.info()).pipe(
-      Effect.flatMap((info) => decodeRepoInfo(binding, info)),
+): Effect.Effect<ArtifactsRepoInfo, ArtifactsOperationError> =>
+  Effect.suspend(() => {
+    if (hasFunction(repo, "info")) {
+      return tryArtifactsPromise(binding, "info", () => repo.info()).pipe(
+        Effect.flatMap((info) => decodeRepoInfo(binding, info)),
+        Effect.withSpan("Artifacts.info", spanOptions(binding, "info")),
+      );
+    }
+
+    return decodeRepoInfo(binding, repo).pipe(
       Effect.withSpan("Artifacts.info", spanOptions(binding, "info")),
     );
-  }
-
-  return decodeRepoInfo(binding, repo).pipe(
-    Effect.withSpan("Artifacts.info", spanOptions(binding, "info")),
-  );
-};
+  });
 
 export const isArtifactsRepoBinding = <Candidate>(
   value: Candidate,
@@ -432,7 +433,7 @@ const wrapRepo = (
 ): ArtifactsRepoClient => ({
   ...info,
   dispose: Effect.sync(() => repo[Symbol.dispose]?.()),
-  info: () => readRepoInfo(binding, repo),
+  info: readRepoInfo(binding, repo),
   createToken: Effect.fn(
     "Artifacts.createToken",
     spanOptions(binding, "createToken"),

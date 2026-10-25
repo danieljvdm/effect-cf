@@ -10,24 +10,81 @@
       {
         "name": "@effect/language-service",
         "diagnosticSeverity": {
-          "instanceOfSchema": "suggestion",
-          "nestedEffectGenYield": "suggestion",
-          "newSchemaClass": "suggestion",
-          "preferSchemaTypeProperty": "suggestion",
-          // `rpc` deliberately returns Cloudflare's unresolved RPC result, whose
-          // type is a Promise intersection. That is the documented difference
-          // from `call`, so this rule does not apply to this codebase.
+          "instanceOfSchema": "error",
+          "nestedEffectGenYield": "error",
+          "newSchemaClass": "error",
+          "preferSchemaTypeProperty": "error",
+          "floatingEffect": "error",
+          "globalErrorInEffectCatch": "error",
+          "globalErrorInEffectFailure": "error",
+          "extendsNativeError": "error",
+          "preferTypedSchemaDecoder": "error",
+          "catchAllTagDispatchToCatchTag": "error",
+          "catchConditionalRefailToCatchIf": "error",
+          "provideLayerSucceedToProvideService": "error",
+          "allOfMapToForEach": "error",
+          "flatMapConditionalToFilterOrFail": "error",
+          "optionMatchToFromOption": "error",
+          "timeoutCatchTagToTimeoutOrElse": "error",
+          "runOfExitToRunExit": "error",
+          "unsafeEffectTypeAssertion": "error",
+          "schemaSync": "off",
+          "schemaNumber": "error",
+          "lazyEffect": "error",
+          "leakingRequirements": "error",
+          "unnecessaryTypeofType": "error",
+          "multipleCatchTag": "error",
+          "effectSucceedWithVoid": "error",
+          "catchToOrElseSucceed": "error",
+          "abortControllerInEffect": "error",
+          "acquireReleaseDisposable": "error",
+          "catchAllToMapError": "error",
+          "catchChainToFirstSuccessOf": "error",
+          "catchDieToOrDie": "error",
+          "catchTagToCatchReason": "error",
+          "catchToIgnore": "error",
+          "catchUnfailableEffect": "error",
+          "duplicatePackage": "error",
+          "effectFnIife": "error",
+          "effectFnOpportunity": "error",
+          "effectGenUsesAdapter": "error",
+          "effectInFailure": "error",
+          "effectInVoidSuccess": "error",
+          "effectMapFlatten": "error",
+          "effectMapVoid": "error",
+          "flatMapToMap": "error",
+          "genericEffectServices": "error",
+          "layerMergeAllWithDependencies": "error",
+          "lazyPromiseInEffectSync": "error",
+          "mapSomeToAsSome": "error",
+          "matchEffectToMapBoth": "error",
+          "matchEffectToMatch": "error",
+          "multipleEffectProvide": "error",
+          "obsoleteMatchImport": "error",
+          "obsoleteSchemaImport": "error",
+          "outdatedApi": "error",
+          "preferSucceedSomeOrNone": "error",
+          "preferUnsafeConstructor": "error",
+          "raceFirstWithSleepToTimeout": "error",
+          "redundantMapError": "error",
+          "redundantOrDie": "error",
+          "redundantSchemaTagIdentifier": "error",
+          "returnEffectInGen": "error",
+          "runEffectInsideEffect": "error",
+          "schemaStructWithTag": "error",
+          "schemaSyncInEffect": "error",
+          "scopeInLayerEffect": "error",
+          "syncToSucceed": "error",
+          "tryCatchInEffectGen": "error",
+          "unnecessaryEffectGen": "error",
+          "unnecessaryFailYieldableError": "error",
+          "unnecessaryPipe": "error",
+          "unnecessaryPipeChain": "error",
+          "cryptoRandomUUIDInEffect": "error",
+          // Cloudflare RPC returns an unresolved Promise intersection by design.
           "promiseInEffectSuccess": "off",
-          // Dev Kit's recommended profile sets this to `warning`; keep it there
-          // explicitly so new unsafe assertions fail rather than falling back to
-          // the language service's lower default. Existing exceptions carry a
-          // per-site `@effect-diagnostics-next-line` directive and a reason.
-          "unsafeEffectTypeAssertion": "warning",
-          // Remaining backlog. The compiler exits non-zero on warnings, and the
-          // Cloudflare host boundaries still produce these, so keep the guidance
-          // visible in editors at `suggestion` until the error channels are typed.
-          // Tracked in https://github.com/danieljvdm/effect-cf/issues/63 —
-          // drop each override as its count reaches zero.
+          // Preserve the tracked Cloudflare host-boundary error-channel backlog.
+          // https://github.com/danieljvdm/effect-cf/issues/63
           "anyUnknownInErrorContext": "suggestion",
           "unknownInEffectCatch": "suggestion"
         },

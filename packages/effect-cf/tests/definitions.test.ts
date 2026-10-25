@@ -39,11 +39,11 @@ const invokeInvalidDoubleArgument = (
   // validating the supplied fixture as a string, so the runtime schema rejection is observable.
   const double = worker.double as typeof worker.double & ((value: string) => Promise<number>);
 
-  return double.call(worker, S.decodeUnknownSync(S.String)(value)).then(() => undefined);
+  return double.call(worker, S.decodeSync(S.String)(value)).then(() => undefined);
 };
 
 const invalidNumberSuccess = (value: string): number => {
-  const decoded = S.decodeUnknownSync(S.String)(value);
+  const decoded = S.decodeSync(S.String)(value);
 
   // SAFETY: This fixture deliberately returns a schema-checked string through a number success
   // boundary to prove the generated Worker validates encoded handler results.
@@ -54,8 +54,8 @@ const makeDurableObjectId = (): DurableObjectId => makePartialTestDouble<Durable
 
 const TestWorker = WorkerDefinition.make("TestWorker", {
   double: WorkerDefinition.method({
-    args: [S.Number] as const,
-    success: S.Number,
+    args: [S.Finite] as const,
+    success: S.Finite,
   }),
 });
 
@@ -101,7 +101,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
   class AvatarQueue extends Queue.Tag<AvatarQueue>()("AvatarQueue", {
     message: S.Struct({
       userId: S.String,
-      attempts: S.NumberFromString,
+      attempts: S.FiniteFromString,
     }),
   }) {}
 
@@ -115,7 +115,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
 
       yield* queue.send({ userId: "u_1", attempts: 1 });
       yield* queue.sendBatch([{ body: { userId: "u_2", attempts: 2 } }]);
-      yield* queue.metrics();
+      yield* queue.metrics;
 
       // @ts-expect-error Queue bindings accept decoded messages, not encoded wire values.
       yield* queue.send({ userId: "u_1", attempts: "1" });
@@ -173,7 +173,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
         const queue = yield* AvatarQueue;
 
         yield* queue.sendBatch([{ body: { userId: "u_2", attempts: 3 } }]);
-        const metrics = yield* queue.metrics();
+        const metrics = yield* queue.metrics;
 
         assert.deepStrictEqual(sent, [
           { userId: "u_1", attempts: "2" },
@@ -242,13 +242,13 @@ test("definition-backed Worker RPC validates encoded success values", async () =
       { message: { userId: "u_1", attempts: "2" }, options: undefined },
     ]);
 
-    const missingMetrics = await Effect.runPromiseExit(provided(AvatarQueue.metrics()));
+    const missingMetrics = await Effect.runPromiseExit(provided(AvatarQueue.metrics));
 
     assert.ok(Exit.isFailure(missingMetrics));
     expect(Cause.pretty(missingMetrics.cause)).toContain(
       'QueueOperationError: Cloudflare queue binding "AVATAR_QUEUE" does not provide metrics()',
     );
-    await expect(Effect.runPromise(provided(AvatarQueue.metrics()))).rejects.toMatchObject({
+    await expect(Effect.runPromise(provided(AvatarQueue.metrics))).rejects.toMatchObject({
       _tag: "QueueOperationError",
       binding: "AVATAR_QUEUE",
       operation: "metrics",
@@ -318,8 +318,8 @@ test("definition-backed Worker RPC validates encoded success values", async () =
 
 {
   class ArtifactWorkflow extends Workflow.Tag<ArtifactWorkflow>()("ArtifactWorkflow", {
-    payload: S.Struct({ segmentId: S.String, attempt: S.NumberFromString }),
-    result: S.NumberFromString,
+    payload: S.Struct({ segmentId: S.String, attempt: S.FiniteFromString }),
+    result: S.FiniteFromString,
   }) {}
 
   void (() => {
@@ -510,8 +510,8 @@ test("definition-backed Worker RPC validates encoded success values", async () =
 {
   const StringNumberWorker = WorkerDefinition.make("StringNumberWorker", {
     increment: WorkerDefinition.method({
-      args: [S.NumberFromString] as const,
-      success: S.NumberFromString,
+      args: [S.FiniteFromString] as const,
+      success: S.FiniteFromString,
     }),
   });
   const StringNumberService = StringNumberWorker;
@@ -644,8 +644,8 @@ test("definition-backed Worker RPC validates encoded success values", async () =
 {
   const NumberRoom = DurableObjectDefinition.make("NumberRoom", {
     increment: DurableObjectDefinition.method({
-      args: [S.NumberFromString] as const,
-      success: S.NumberFromString,
+      args: [S.FiniteFromString] as const,
+      success: S.FiniteFromString,
     }),
   });
   const NumberRooms = NumberRoom;
@@ -802,7 +802,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
 {
   class TaskPayload extends S.Class<TaskPayload>("TaskPayload")({
     id: S.String,
-    attempts: S.Number,
+    attempts: S.Finite,
   }) {}
 
   class TaskFailure extends S.TaggedError<TaskFailure>()("TaskFailure", {
@@ -820,7 +820,7 @@ test("definition-backed Worker RPC validates encoded success values", async () =
   // Workers RPC structured-clones every value crossing an isolate boundary and
   // rejects anything that is not a plain object/array/primitive, so wire
   // values must not carry prototypes (`Result`, Schema classes, live causes).
-  type JsonValue = typeof S.Json.Type;
+  type JsonValue = S.Json;
   const decodeJsonValue = S.decodeUnknownSync(S.Json);
 
   const expectStructuredCloneSafe = (value: JsonValue): void => {
@@ -850,9 +850,11 @@ test("definition-backed Worker RPC validates encoded success values", async () =
           Effect.result(
             payload.attempts > 2
               ? Effect.fail(
-                  new TaskFailure({ reason: "too many attempts", cause: new Error("boom") }),
+                  TaskFailure.make({ reason: "too many attempts", cause: new Error("boom") }),
                 )
-              : Effect.succeed(new TaskPayload({ id: payload.id, attempts: payload.attempts + 1 })),
+              : Effect.succeed(
+                  TaskPayload.make({ id: payload.id, attempts: payload.attempts + 1 }),
+                ),
           ),
       },
     });
@@ -886,11 +888,11 @@ test("definition-backed Worker RPC validates encoded success values", async () =
     });
   });
 
-  const receivedArgs: Array<typeof S.Json.Type> = [];
+  const receivedArgs: Array<S.Json> = [];
   const stub = {
     id: makeDurableObjectId(),
     fetch: async () => new Response("ok"),
-    complete: async (...args: Array<typeof S.Json.Type>) => {
+    complete: async (...args: Array<S.Json>) => {
       receivedArgs.push(...args);
 
       return { _tag: "Success", success: { id: "task-1", attempts: 1 } };
@@ -918,14 +920,14 @@ test("definition-backed Worker RPC validates encoded success values", async () =
         receivedArgs.length = 0;
 
         const result = yield* TaskRoom.byName("main").complete(
-          new TaskPayload({ id: "task-1", attempts: 0 }),
+          TaskPayload.make({ id: "task-1", attempts: 0 }),
         );
 
         assert.deepStrictEqual(receivedArgs, [{ id: "task-1", attempts: 0 }]);
         expectStructuredCloneSafe(receivedArgs[0]);
         assert.ok(Result.isSuccess(result));
         assert.instanceOf(result.success, TaskPayload);
-        assert.deepStrictEqual(result.success, new TaskPayload({ id: "task-1", attempts: 1 }));
+        assert.deepStrictEqual(result.success, TaskPayload.make({ id: "task-1", attempts: 1 }));
       }),
     );
   });
@@ -1089,7 +1091,7 @@ it.effect("Durable Object embedded KV exposes schema-backed helpers", () =>
 
     const typedKv = storage.kv.schema({
       key: S.String,
-      value: S.Struct({ count: S.Number }),
+      value: S.Struct({ count: S.Finite }),
     });
 
     yield* typedKv.put("counter", { count: 1 });
@@ -1152,7 +1154,7 @@ test("QueueMessageDecodeError composes queue, message id, index, and cause messa
 });
 
 test("schema-backed RPC wire errors render a message and survive the wire envelope", () => {
-  const error = new RpcDefinition.RpcArgumentCountError({
+  const error = RpcDefinition.RpcArgumentCountError.make({
     definition: "TestWorker",
     method: "double",
     expected: 1,

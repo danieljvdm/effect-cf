@@ -19,7 +19,7 @@ type NativeContainerState = Awaited<ReturnType<ContainerNamespace.ContainerStub[
 const malformedContainerState = (status: string): NativeContainerState => {
   const fixture = {
     lastChange: Number.NaN,
-    status: Schema.decodeUnknownSync(Schema.String)(status),
+    status: Schema.decodeSync(Schema.String)(status),
   };
 
   // SAFETY: This test deliberately violates the native state discriminant and finite timestamp

@@ -8,6 +8,8 @@ npm install effect-webtransport "effect@^4.0.0"
 
 Requires a platform WebTransport implementation. The constructor is an injectable service for platforms and tests.
 
+See the [Effect API migration guide](../../docs/effect-api-migration.md) for numeric validation changes.
+
 ```ts
 import { Effect } from "effect";
 import { WebTransport } from "effect-webtransport";

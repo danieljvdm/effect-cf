@@ -68,7 +68,7 @@ Prepare a second checkout at the revision to compare. In **each checkout**, run:
 
 ```sh
 vp install --frozen-lockfile --ignore-scripts
-vp run patch:tsgo
+vp run patch:tsgo # declaration builds; project checks use tsrs
 vp run effect-cf#build
 vp run effect-webtransport#build
 ```

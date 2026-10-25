@@ -66,9 +66,7 @@ export class AlarmBench extends AlarmsApi.make(Layer.empty, {
       const cursor = yield* state.storage.sql.exec(
         "SELECT alarm_id, tag, run_at, payload FROM effect_cf_scheduled_alarms ORDER BY alarm_id",
       );
-      const rows = yield* Schema.decodeUnknownEffect(Schema.Array(AlarmRow))(
-        yield* cursor.toArray(),
-      );
+      const rows = yield* Schema.decodeUnknownEffect(Schema.Array(AlarmRow))(yield* cursor.toArray);
 
       return { count: rows.length, nextAlarm: yield* state.storage.getAlarm(), rows };
     }),
@@ -81,7 +79,7 @@ export class AlarmBench extends AlarmsApi.make(Layer.empty, {
       const cursor = yield* state.storage.sql.exec(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'effect_cf_scheduled_alarms'",
       );
-      const tables = (yield* cursor.toArray()).length;
+      const tables = (yield* cursor.toArray).length;
 
       return { cleaned: nextAlarm === null && tables === 0, nextAlarm, tables };
     }),

@@ -142,7 +142,7 @@ const spanOptions = (binding: string, operation: VectorizeOperation) => ({
   attributes: { binding, operation },
 });
 
-type VectorizeBindingValue = Schema.Schema.Type<typeof Schema.Unknown>;
+type VectorizeBindingValue = typeof Schema.Unknown.Type;
 
 const invokeVectorizeMethod = <Args extends Array<any>, Return>(
   method: (...args: Args) => Return,

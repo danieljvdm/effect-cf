@@ -8,8 +8,8 @@ import { Worker } from "../src/index";
 import { makePartialTestDouble } from "./TestDoubles";
 
 const ClockResponse = Schema.Struct({
-  millisBefore: Schema.Number,
-  sleptMillis: Schema.Number,
+  millisBefore: Schema.Finite,
+  sleptMillis: Schema.Finite,
 });
 
 test("Worker.make fetch runs in the Workers runtime", async () => {

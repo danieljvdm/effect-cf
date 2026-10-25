@@ -92,7 +92,7 @@ export class SessionClosedError extends Schema.Error<SessionClosedError>(
   "effect-webtransport/WebTransport/SessionClosedError",
 )({
   _tag: Schema.tag("SessionClosedError"),
-  closeCode: Schema.optional(Schema.Number),
+  closeCode: Schema.optional(Schema.Finite),
   closeReason: Schema.optional(Schema.String),
   cause: Schema.Defect(),
 }) {
@@ -212,12 +212,12 @@ export function isWebTransportError(cause: unknown): cause is WebTransportError 
 }
 
 const wtError = (reason: WebTransportErrorReason): WebTransportError =>
-  new WebTransportError({ reason });
+  WebTransportError.make({ reason });
 
 export class CloseInfo extends Schema.Class<CloseInfo>(
   "effect-webtransport/WebTransport/CloseInfo",
 )({
-  closeCode: Schema.optional(Schema.Number),
+  closeCode: Schema.optional(Schema.Finite),
   reason: Schema.optional(Schema.String),
 }) {}
 
@@ -241,7 +241,7 @@ export const constructorGlobal: Effect.Effect<
   const ctor = platformGlobal.WebTransport;
 
   if (!Predicate.isFunction(ctor)) {
-    return Effect.fail(wtError(new UnsupportedError({ feature: "WebTransport" })));
+    return Effect.fail(wtError(UnsupportedError.make({ feature: "WebTransport" })));
   }
   // SAFETY: Predicate.isFunction establishes only callability. This unsafe global adapter
   // deliberately trusts the host WebTransport WebIDL binding to be constructable and to
@@ -338,7 +338,7 @@ const streamFromReadable = <A>(options: {
       Effect.fnUntraced(function* (_, scope) {
         const reader = yield* Effect.try({
           try: () => options.evaluate().getReader(),
-          catch: (cause) => wtError(new ReadError({ source: options.source, cause })),
+          catch: (cause) => wtError(ReadError.make({ source: options.source, cause })),
         });
 
         yield* Scope.addFinalizer(
@@ -366,12 +366,15 @@ const streamFromReadable = <A>(options: {
               }),
         );
 
-        return Effect.tryPromise({
-          try: () => reader.read(),
-          catch: (cause) => wtError(new ReadError({ source: options.source, cause })),
-        }).pipe(
-          Effect.flatMap((result) =>
-            result.done ? Cause.done() : Effect.succeed(singleton(result.value)),
+        // A channel acquires the pull effect here and runs it only on demand.
+        return yield* Effect.succeed(
+          Effect.tryPromise({
+            try: () => reader.read(),
+            catch: (cause) => wtError(ReadError.make({ source: options.source, cause })),
+          }).pipe(
+            Effect.flatMap((result) =>
+              result.done ? Cause.done() : Effect.succeed(singleton(result.value)),
+            ),
           ),
         );
       }),
@@ -395,7 +398,7 @@ const closeBidirectionalStreamSafely = (stream: NativeBidirectionalStream) =>
 const makeDatagrams = (native: NativeWebTransport): Datagrams => {
   const requireDatagrams = Effect.suspend(() =>
     native.datagrams === undefined
-      ? Effect.fail(wtError(new UnsupportedError({ feature: "Datagrams" })))
+      ? Effect.fail(wtError(UnsupportedError.make({ feature: "Datagrams" })))
       : Effect.succeed(native.datagrams),
   );
   let cachedWriter: WritableStreamDefaultWriter<Uint8Array> | undefined;
@@ -416,13 +419,13 @@ const makeDatagrams = (native: NativeWebTransport): Datagrams => {
     Effect.flatMap(requireDatagrams, (datagrams) => {
       if (closed) {
         return Effect.fail(
-          wtError(new SessionClosedError({ cause: "datagram send after session closure" })),
+          wtError(SessionClosedError.make({ cause: "datagram send after session closure" })),
         );
       }
       if (data.byteLength > datagrams.maxDatagramSize) {
         return Effect.fail(
           wtError(
-            new DatagramTooLargeError({
+            DatagramTooLargeError.make({
               size: data.byteLength,
               maxDatagramSize: datagrams.maxDatagramSize,
             }),
@@ -447,7 +450,7 @@ const makeDatagrams = (native: NativeWebTransport): Datagrams => {
           await writer.ready;
           await writer.write(data);
         },
-        catch: (cause) => wtError(new WriteError({ source: "datagram", cause })),
+        catch: (cause) => wtError(WriteError.make({ source: "datagram", cause })),
       });
     });
   const take: Effect.Effect<Uint8Array, WebTransportError> = Effect.flatMap(
@@ -459,16 +462,16 @@ const makeDatagrams = (native: NativeWebTransport): Datagrams => {
         try {
           reader = datagrams.readable.getReader();
         } catch (cause) {
-          return Effect.fail(wtError(new ReadError({ source: "datagram", cause })));
+          return Effect.fail(wtError(ReadError.make({ source: "datagram", cause })));
         }
 
         return Effect.tryPromise({
           try: () => reader.read(),
-          catch: (cause) => wtError(new ReadError({ source: "datagram", cause })),
+          catch: (cause) => wtError(ReadError.make({ source: "datagram", cause })),
         }).pipe(
           Effect.flatMap((result) =>
             result.done
-              ? Effect.fail(wtError(new SessionClosedError({ cause: "datagram source ended" })))
+              ? Effect.fail(wtError(SessionClosedError.make({ cause: "datagram source ended" })))
               : Effect.succeed(result.value),
           ),
           Effect.ensuring(
@@ -511,7 +514,7 @@ export const fromNative = (native: NativeWebTransport): WebTransport => ({
     Effect.acquireRelease(
       Effect.tryPromise({
         try: () => native.createBidirectionalStream(options),
-        catch: (cause) => wtError(new StreamOpenError({ direction: "bidirectional", cause })),
+        catch: (cause) => wtError(StreamOpenError.make({ direction: "bidirectional", cause })),
       }),
       closeBidirectionalStreamSafely,
     ),
@@ -520,13 +523,13 @@ export const fromNative = (native: NativeWebTransport): WebTransport => ({
       const create = native.createUnidirectionalStream;
 
       if (!Predicate.isFunction(create)) {
-        return Effect.fail(wtError(new UnsupportedError({ feature: "UnidirectionalStreams" })));
+        return Effect.fail(wtError(UnsupportedError.make({ feature: "UnidirectionalStreams" })));
       }
 
       return Effect.acquireRelease(
         Effect.tryPromise({
           try: () => create.call(native, options),
-          catch: (cause) => wtError(new StreamOpenError({ direction: "unidirectional", cause })),
+          catch: (cause) => wtError(StreamOpenError.make({ direction: "unidirectional", cause })),
         }),
         (writable) => Effect.promise(() => writable.close().then(constVoid, constVoid)),
       );
@@ -541,7 +544,7 @@ export const fromNative = (native: NativeWebTransport): WebTransport => ({
       const incoming = native.incomingUnidirectionalStreams;
 
       return incoming === undefined
-        ? Effect.fail(wtError(new UnsupportedError({ feature: "UnidirectionalStreams" })))
+        ? Effect.fail(wtError(UnsupportedError.make({ feature: "UnidirectionalStreams" })))
         : Effect.succeed(
             streamFromReadable({
               evaluate: () => incoming,
@@ -563,14 +566,14 @@ export const fromNative = (native: NativeWebTransport): WebTransport => ({
     }),
   closed: Effect.tryPromise({
     try: () => native.closed,
-    catch: (cause) => wtError(new SessionClosedError({ cause })),
+    catch: (cause) => wtError(SessionClosedError.make({ cause })),
   }).pipe(
     Effect.flatMap((info) => {
       const result = decodeCloseInfo(info);
 
       return Result.isSuccess(result)
         ? Effect.succeed(result.success)
-        : Effect.fail(wtError(new SessionClosedError({ cause: result.failure })));
+        : Effect.fail(wtError(SessionClosedError.make({ cause: result.failure })));
     }),
   ),
 });
@@ -609,7 +612,7 @@ export const connect = Effect.fn("WebTransport.connect")(function* (
   const session = yield* Effect.acquireRelease(
     Effect.try({
       try: () => fromNative(makeNative(resolvedUrl, options)),
-      catch: (cause) => wtError(new ConnectError({ kind: "OpenFailed", cause })),
+      catch: (cause) => wtError(ConnectError.make({ kind: "OpenFailed", cause })),
     }),
     (session) => session.close(options?.closeInfo),
   );
@@ -617,14 +620,14 @@ export const connect = Effect.fn("WebTransport.connect")(function* (
 
   yield* Effect.tryPromise({
     try: () => native.ready,
-    catch: (cause) => wtError(new ConnectError({ kind: "OpenFailed", cause })),
+    catch: (cause) => wtError(ConnectError.make({ kind: "OpenFailed", cause })),
   }).pipe(
     Effect.timeoutOrElse({
       duration: options?.openTimeout ?? 10000,
       orElse: () =>
         Effect.fail(
           wtError(
-            new ConnectError({
+            ConnectError.make({
               kind: "Timeout",
               cause: new Error(`timeout waiting for WebTransport session "ready"`),
             }),
@@ -695,7 +698,7 @@ export const writer = (
   Effect.acquireRelease(
     Effect.try({
       try: () => writable.getWriter(),
-      catch: (cause) => wtError(new WriteError({ source: "stream", cause })),
+      catch: (cause) => wtError(WriteError.make({ source: "stream", cause })),
     }),
     (writer, exit) =>
       Effect.promise(async () => {
@@ -720,7 +723,7 @@ export const writer = (
               await writer.ready;
               await writer.write(chunk);
             },
-            catch: (cause) => wtError(new WriteError({ source: "stream", cause })),
+            catch: (cause) => wtError(WriteError.make({ source: "stream", cause })),
           }),
     ),
   );

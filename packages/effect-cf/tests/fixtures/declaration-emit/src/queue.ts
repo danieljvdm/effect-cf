@@ -9,7 +9,7 @@ export const bindingLayer = Jobs.layer({ binding: "JOBS" });
 
 export const sent = Jobs.send({ jobId: "one" });
 export const batchSent = Jobs.sendBatch([{ body: { jobId: "one" } }]);
-export const metrics = Jobs.metrics();
+export const metrics = Jobs.metrics;
 export const raw = Jobs.rawUnsafe;
 export const send = Jobs.send;
 export const sendBatch = Jobs.sendBatch;

@@ -16,6 +16,7 @@ import { SqlError } from "effect/sql/SqlError";
 
 import { DurableObjectState } from "./DurableObjectState";
 import { type SqlStorageValue, StorageOperationError } from "./DurableObjectStorage";
+import * as WebCrypto from "./WebCrypto";
 import * as ErrorMessage from "./internal/ErrorMessage";
 import {
   CurrentStorageTransaction,
@@ -261,26 +262,29 @@ export const ResponseEvent = Context.Reference<boolean>(
 const getScheduleConfiguration = Effect.fnUntraced(function* (defaults: ScheduleConfiguration) {
   const input = { ...defaults, ...(yield* ScheduleConfiguration) };
 
-  return yield* Effect.try({
-    try: () =>
-      S.decodeUnknownSync(ScheduleConfigurationSchema)({
-        dispatchAfterEvent: input.dispatchAfterEvent ?? false,
-        inFlightRecovery: Math.ceil(
-          Duration.toMillis(input.inFlightRecovery ?? DEFAULT_IN_FLIGHT_RECOVERY_MS),
-        ),
-        minimumRetryDelay: Math.ceil(
-          Duration.toMillis(input.minimumRetryDelay ?? MIN_RETRY_DELAY_MS),
-        ),
-        unchangedAttemptBudget: input.unchangedAttemptBudget ?? UNCHANGED_ATTEMPT_BUDGET,
-        parkedRetryDelay: Math.ceil(
-          Duration.toMillis(input.parkedRetryDelay ?? PARKED_RETRY_DELAY_MS),
-        ),
-        minimumRepeatInterval: Math.ceil(
-          Duration.toMillis(input.minimumRepeatInterval ?? DEFAULT_MIN_REPEAT_INTERVAL_MS),
-        ),
-      }),
+  const configuration = yield* Effect.try({
+    try: () => ({
+      dispatchAfterEvent: input.dispatchAfterEvent ?? false,
+      inFlightRecovery: Math.ceil(
+        Duration.toMillis(input.inFlightRecovery ?? DEFAULT_IN_FLIGHT_RECOVERY_MS),
+      ),
+      minimumRetryDelay: Math.ceil(
+        Duration.toMillis(input.minimumRetryDelay ?? MIN_RETRY_DELAY_MS),
+      ),
+      unchangedAttemptBudget: input.unchangedAttemptBudget ?? UNCHANGED_ATTEMPT_BUDGET,
+      parkedRetryDelay: Math.ceil(
+        Duration.toMillis(input.parkedRetryDelay ?? PARKED_RETRY_DELAY_MS),
+      ),
+      minimumRepeatInterval: Math.ceil(
+        Duration.toMillis(input.minimumRepeatInterval ?? DEFAULT_MIN_REPEAT_INTERVAL_MS),
+      ),
+    }),
     catch: (cause) => new InvalidScheduleConfigurationError({ cause }),
   });
+
+  return yield* S.decodeEffect(ScheduleConfigurationSchema)(configuration).pipe(
+    Effect.mapError((cause) => new InvalidScheduleConfigurationError({ cause })),
+  );
 });
 
 export class StoredAlarmDecodeError extends Data.TaggedError("StoredAlarmDecodeError")<{
@@ -324,7 +328,7 @@ const AlarmRefSchema = S.Struct({
 });
 
 const decodeAlarmRef = (input: AlarmRef) =>
-  S.decodeUnknownEffect(AlarmRefSchema)(input).pipe(
+  S.decodeEffect(AlarmRefSchema)(input).pipe(
     Effect.mapError((cause) => new InvalidAlarmRefError({ cause })),
   );
 
@@ -497,7 +501,7 @@ const StoredPayloadString = S.fromJsonString(S.Json);
 const StoredTags = S.fromJsonString(S.Array(S.String));
 
 const decodeStoredPayload = (row: AlarmRow) =>
-  S.decodeUnknownEffect(StoredPayloadString)(row.payload).pipe(
+  S.decodeEffect(StoredPayloadString)(row.payload).pipe(
     Effect.mapError((cause) => new StoredAlarmDecodeError({ cause, storageId: row.storage_id })),
   );
 
@@ -512,12 +516,12 @@ const ensureTable = Effect.fnUntraced(function* (state: DurableObjectState["Serv
     LIFECYCLE_INDEX,
   );
 
-  if ((yield* index.toArray()).length > 0) return;
+  if ((yield* index.toArray).length > 0) return;
   yield* state.storage.sql.exec(INIT_TABLE_SQL);
   const columns = yield* state.storage.sql.exec<{ name: string }>(
     "SELECT name FROM pragma_table_info('effect_cf_scheduled_alarms')",
   );
-  const names = new Set((yield* columns.toArray()).map((column) => column.name));
+  const names = new Set((yield* columns.toArray).map((column) => column.name));
 
   if (!names.has("lifecycle")) {
     yield* state.storage.sql.exec(
@@ -545,7 +549,7 @@ const ensureTable = Effect.fnUntraced(function* (state: DurableObjectState["Serv
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'effect_cf_alarm_attempts'",
   );
 
-  if ((yield* attempts.toArray()).length > 0) {
+  if ((yield* attempts.toArray).length > 0) {
     yield* state.storage.sql.exec(`UPDATE effect_cf_scheduled_alarms SET
       (revision, attempts, parked, retry_at, progress) =
       (SELECT revision, attempts, parked, retry_at, progress FROM effect_cf_alarm_attempts s
@@ -590,12 +594,10 @@ const toRepeatEveryMillis = (input: Duration.Input | undefined, minimum: number)
 const toAlarmDue = (row: AlarmRow) =>
   Effect.gen(function* () {
     if (!Number.isFinite(row.run_at)) {
-      return yield* Effect.fail(
-        new StoredAlarmDecodeError({
-          cause: new Error("Stored alarm run_at must be a finite number"),
-          storageId: row.storage_id,
-        }),
-      );
+      return yield* new StoredAlarmDecodeError({
+        cause: new Error("Stored alarm run_at must be a finite number"),
+        storageId: row.storage_id,
+      });
     }
 
     return DurableObjectAlarmEvent.make({
@@ -787,22 +789,26 @@ const missingAlarm = (tag: string) =>
   });
 
 const validateRegistration = <R, E>(parts: RegistrationParts<R, E>) =>
-  Effect.try({
-    try: () => {
-      if (parts.invalid !== undefined) throw new Error(parts.invalid);
-      const tags = parts.dispatchers.flatMap((dispatcher) => dispatcher.tags);
+  Effect.gen(function* () {
+    const tags = parts.dispatchers.flatMap((dispatcher) => dispatcher.tags);
 
-      S.decodeUnknownSync(S.Array(S.NonEmptyString))([...parts.services, ...tags]);
-      if (
-        new Set(parts.services).size !== parts.services.length ||
-        new Set(tags).size !== tags.length
-      ) {
-        throw new Error(
-          "Alarm service keys and definition tags must be unique within a Durable Object",
-        );
-      }
-    },
-    catch: (cause) => new InvalidAlarmRegistrationError({ cause }),
+    yield* S.decodeEffect(S.Array(S.NonEmptyString))([...parts.services, ...tags]).pipe(
+      Effect.mapError((cause) => new InvalidAlarmRegistrationError({ cause })),
+    );
+    yield* Effect.try({
+      try: () => {
+        if (parts.invalid !== undefined) throw new Error(parts.invalid);
+        if (
+          new Set(parts.services).size !== parts.services.length ||
+          new Set(tags).size !== tags.length
+        ) {
+          throw new Error(
+            "Alarm service keys and definition tags must be unique within a Durable Object",
+          );
+        }
+      },
+      catch: (cause) => new InvalidAlarmRegistrationError({ cause }),
+    });
   });
 
 const runRegistrations = <R, E>(
@@ -973,11 +979,9 @@ const makeDefinition = <const Definitions extends AlarmDefinitions>(definitions:
     const definition = definitionFor(input.tag);
 
     if (definition === undefined) {
-      return yield* Effect.fail(
-        new InvalidAlarmRefError({
-          cause: new Error(`Unknown alarm tag "${input.tag}"`),
-        }),
-      );
+      return yield* new InvalidAlarmRefError({
+        cause: new Error(`Unknown alarm tag "${input.tag}"`),
+      });
     }
     const payload = yield* S.encodeEffect(getAlarmDefinitionSchema(definition))(input.payload).pipe(
       Effect.flatMap(S.decodeUnknownEffect(S.Json)),
@@ -995,11 +999,9 @@ const makeDefinition = <const Definitions extends AlarmDefinitions>(definitions:
     input: AlarmRef<keyof Definitions & string>,
   ) {
     if (definitionFor(input.tag) === undefined) {
-      return yield* Effect.fail(
-        new InvalidAlarmRefError({
-          cause: new Error(`Unknown alarm tag "${input.tag}"`),
-        }),
-      );
+      return yield* new InvalidAlarmRefError({
+        cause: new Error(`Unknown alarm tag "${input.tag}"`),
+      });
     }
 
     yield* mutations.cancelAlarm(input);
@@ -1028,18 +1030,16 @@ const makeDefinition = <const Definitions extends AlarmDefinitions>(definitions:
             const definition = definitionFor(event.tag);
 
             if (definition === undefined) {
-              return yield* Effect.fail(
-                new StoredAlarmDecodeError({
-                  cause: new Error(`Unknown alarm tag "${event.tag}"`),
-                  storageId: getScheduledEventId(event),
-                }),
-              );
+              return yield* new StoredAlarmDecodeError({
+                cause: new Error(`Unknown alarm tag "${event.tag}"`),
+                storageId: getScheduledEventId(event),
+              });
             }
 
             const schema = getAlarmDefinitionSchema(definition);
             // SAFETY: schema is selected from the same tagged definition used to select its handler.
             const payload = yield* (
-              S.decodeUnknownEffect(schema)(event.payload) as Effect.Effect<
+              S.decodeEffect(schema)(event.payload) as Effect.Effect<
                 AlarmDefinitionPayload<Definitions[keyof Definitions & string]>,
                 unknown
               >
@@ -1094,7 +1094,7 @@ const hasSchedulerTables = Effect.fnUntraced(function* (state: DurableObjectStat
       "effect_cf_scheduled_alarms",
     );
 
-    return (yield* tables.toArray()).length > 0;
+    return (yield* tables.toArray).length > 0;
   }).pipe(
     Effect.catchIf(
       (error) =>
@@ -1252,14 +1252,14 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           cacheStateForObject.committed = emptyCache();
           cacheStateForObject.transactions = new WeakMap();
         }
-        if (!cacheControl.enabled) return Effect.succeed(undefined);
+        if (!cacheControl.enabled) return Effect.as(Effect.void, undefined);
         const sql = Context.getOption(fiber.context, SqlClient);
 
         // Without its transaction key, an unwrapped SQL scope cannot be observed.
         if (sql._tag === "None") {
           invalidateStorageCache(state.raw.storage, true);
 
-          return Effect.succeed(undefined);
+          return Effect.as(Effect.void, undefined);
         }
         const transaction = Context.get(fiber.context, CurrentStorageTransaction);
         const connection = Context.getOption(fiber.context, sql.value.transactionService);
@@ -1277,7 +1277,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         if (connection._tag === "Some") {
           invalidateStorageCache(state.raw.storage, true);
 
-          return Effect.succeed(undefined);
+          return Effect.as(Effect.void, undefined);
         }
 
         return Effect.succeed(cacheStateForObject.committed);
@@ -1343,7 +1343,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           storageId,
         );
 
-        const row = (yield* cursor.toArray())[0];
+        const row = (yield* cursor.toArray)[0];
 
         if (row !== undefined) rememberRow(cache, row);
 
@@ -1401,7 +1401,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
              ORDER BY wake_at, storage_id LIMIT 1`,
           );
 
-          next = (yield* cursor.toArray())[0]?.run_at ?? null;
+          next = (yield* cursor.toArray)[0]?.run_at ?? null;
           if (cache !== undefined && next === null) {
             cache.complete = true;
             cache.rows.clear();
@@ -1439,7 +1439,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           `UPDATE effect_cf_scheduled_alarms SET revision = ?, attempts = ?, parked = ?,
              retry_at = ?, progress = ?, wake_at = MAX(run_at, COALESCE(?, run_at))
            WHERE storage_id = ? RETURNING *`,
-          crypto.randomUUID(),
+          yield* WebCrypto.randomUUID,
           attempts,
           parked,
           retryAt,
@@ -1447,7 +1447,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           retryAt,
           storageId,
         );
-        const row = (yield* cursor.toArray())[0];
+        const row = (yield* cursor.toArray)[0];
 
         if (row !== undefined) rememberRow(yield* currentCache, row);
       });
@@ -1472,7 +1472,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
       ) {
         const configuration = yield* getScheduleConfiguration(configurationDefaults);
         const ref = yield* decodeAlarmRef(input);
-        const lifecycle = yield* S.decodeUnknownEffect(AlarmLifecycleSchema)(
+        const lifecycle = yield* S.decodeEffect(AlarmLifecycleSchema)(
           input.lifecycle ?? "automatic",
         ).pipe(Effect.mapError((cause) => new InvalidAlarmRefError({ cause })));
 
@@ -1480,11 +1480,9 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           lifecycle === "manual" &&
           (input.repeatEvery !== undefined || input.progress !== undefined)
         ) {
-          return yield* Effect.fail(
-            new InvalidAlarmRefError({
-              cause: new Error("Manual alarms own their repeats and progress budgets"),
-            }),
-          );
+          return yield* new InvalidAlarmRefError({
+            cause: new Error("Manual alarms own their repeats and progress budgets"),
+          });
         }
         const repeatEveryMillis = yield* toRepeatEveryMillis(
           input.repeatEvery,
@@ -1539,10 +1537,10 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
             runAt,
             runAt,
             payload,
-            crypto.randomUUID(),
+            yield* WebCrypto.randomUUID,
           );
 
-          const row = (yield* cursor.toArray())[0];
+          const row = (yield* cursor.toArray)[0];
 
           if (row !== undefined) rememberRow(cache, row);
 
@@ -1555,7 +1553,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
         const progress = existing?.progress ?? source?.progress ?? -1;
 
         if (input.progress !== undefined) {
-          yield* S.decodeUnknownEffect(S.Natural)(input.progress).pipe(
+          yield* S.decodeEffect(S.Natural)(input.progress).pipe(
             Effect.mapError((cause) => new InvalidAlarmRefError({ cause })),
           );
         }
@@ -1604,13 +1602,13 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           scheduledRepeat,
           scheduledPayload,
           Math.max(scheduledAt, retryAt ?? scheduledAt),
-          crypto.randomUUID(),
+          yield* WebCrypto.randomUUID,
           attempts,
           parked,
           retryAt,
           nextProgress,
         );
-        const row = (yield* cursor.toArray())[0];
+        const row = (yield* cursor.toArray)[0];
 
         if (row !== undefined) rememberRow(yield* currentCache, row);
         if (parked === 1 && retryAt !== null && (existing?.parked ?? source?.parked ?? 0) === 0) {
@@ -1725,7 +1723,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                         : withStorageTransaction(state.raw.storage, operation, client)
                     ).pipe(
                       Effect.mapError((cause) =>
-                        cause instanceof SqlError
+                        S.is(SqlError)(cause)
                           ? new StorageOperationError({ operation: "alarm.transaction", cause })
                           : cause,
                       ),
@@ -1733,10 +1731,10 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                   },
                 );
 
-          return Effect.flatMap(operation, (result) =>
-            reports.length === 0
-              ? Effect.succeed(result)
-              : Effect.as(reportParked(reports), result),
+          return Effect.filterOrElse(
+            operation,
+            () => reports.length === 0,
+            (result) => Effect.as(reportParked(reports), result),
           );
         });
 
@@ -1931,12 +1929,12 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
              retry_at = NULL, progress = ? WHERE ${sameRevisionSql} RETURNING *`,
           next,
           next,
-          crypto.randomUUID(),
+          yield* WebCrypto.randomUUID,
           row.progress,
           row.storage_id,
           row.revision,
         );
-        const updated = (yield* cursor.toArray())[0];
+        const updated = (yield* cursor.toArray)[0];
 
         if (updated !== undefined) rememberRow(yield* currentCache, updated);
       });
@@ -1983,7 +1981,9 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
               ? ""
               : ` AND a.tag ${dispatch.exclude ? "NOT IN" : "IN"} (SELECT value FROM json_each(?))`;
           const tagBindings =
-            dispatch === undefined ? [] : [S.encodeSync(StoredTags)([...dispatch.tags])];
+            dispatch === undefined
+              ? []
+              : [yield* S.encodeEffect(StoredTags)([...dispatch.tags]).pipe(Effect.orDie)];
           const cursor = yield* state.storage.sql.exec<AlarmRow>(
             `${alarmRowsSql} WHERE a.lifecycle = ? AND a.wake_at <= ?${tagFilter}
              ORDER BY a.wake_at ASC, a.storage_id ASC LIMIT ?`,
@@ -1993,7 +1993,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
             batchLimit,
           );
 
-          const rows = yield* cursor.toArray();
+          const rows = yield* cursor.toArray;
 
           for (const row of rows) rememberRow(cache, row);
 
@@ -2015,7 +2015,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                   (options?.[ManualTags]?.has(row.tag)
                     ? configuration.inFlightRecovery
                     : configuration.parkedRetryDelay);
-                const revision = `manual:${crypto.randomUUID()}`;
+                const revision = `manual:${yield* WebCrypto.randomUUID}`;
                 const cursor = yield* state.storage.sql.exec<AlarmRow>(
                   `UPDATE effect_cf_scheduled_alarms SET run_at = ?, wake_at = ?, revision = ?
                    WHERE ${sameRevisionSql} RETURNING *`,
@@ -2027,7 +2027,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                 );
 
                 // Keep the selected deadline/payload; dispatch only a successfully fenced claim.
-                const updated = (yield* cursor.toArray())[0];
+                const updated = (yield* cursor.toArray)[0];
 
                 if (updated !== undefined) {
                   rememberRow(yield* currentCache, updated);
@@ -2106,7 +2106,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           const manual = row.lifecycle === "manual";
 
           if (manual && !options?.[ManualTags]?.has(row.tag)) {
-            return yield* Effect.fail(missingAlarm(row.tag));
+            return yield* missingAlarm(row.tag);
           }
           const eventExit = yield* Effect.exit(toAlarmDue(row));
 
@@ -2161,11 +2161,11 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                  WHERE ${sameRevisionSql} RETURNING *`,
                   recoveryAt,
                   recoveryAt,
-                  crypto.randomUUID(),
+                  yield* WebCrypto.randomUUID,
                   row.storage_id,
                   row.revision,
                 );
-                const updated = (yield* cursor.toArray())[0];
+                const updated = (yield* cursor.toArray)[0];
 
                 if (updated !== undefined) rememberRow(yield* currentCache, updated);
               }
@@ -2191,7 +2191,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
             now,
           );
 
-          return (yield* cursor.toArray()).length > 0;
+          return (yield* cursor.toArray).length > 0;
         }),
         deferWakes,
         cancelAlarm: (input) => transaction((alarms) => alarms.cancelAlarm(input)),

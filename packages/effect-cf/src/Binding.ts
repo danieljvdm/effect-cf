@@ -135,39 +135,33 @@ const getBinding = <Resource>(
     if (!isPropertyTarget(env)) {
       const actual = describeActual(env);
 
-      return yield* Effect.fail(
-        new BindingValidationError({
-          binding,
-          expected: "WorkerEnvironment object",
-          actual,
-          message: `Cloudflare binding "${binding}" failed validation. Expected WorkerEnvironment object; got ${actual}`,
-        }),
-      );
+      return yield* new BindingValidationError({
+        binding,
+        expected: "WorkerEnvironment object",
+        actual,
+        message: `Cloudflare binding "${binding}" failed validation. Expected WorkerEnvironment object; got ${actual}`,
+      });
     }
 
     const resource = Predicate.hasProperty(env, binding) ? env[binding] : undefined;
 
     if (resource === undefined) {
-      return yield* Effect.fail(
-        new BindingNotFoundError({
-          binding,
-          message: `Cloudflare binding "${binding}" was not found in WorkerEnvironment`,
-        }),
-      );
+      return yield* new BindingNotFoundError({
+        binding,
+        message: `Cloudflare binding "${binding}" was not found in WorkerEnvironment`,
+      });
     }
 
     if (!isResource(resource)) {
       const expected = options?.expected ?? defaultExpected;
       const actual = describeActual(resource);
 
-      return yield* Effect.fail(
-        new BindingValidationError({
-          binding,
-          expected,
-          actual,
-          message: `Cloudflare binding "${binding}" failed validation. Expected ${expected}; got ${actual}`,
-        }),
-      );
+      return yield* new BindingValidationError({
+        binding,
+        expected,
+        actual,
+        message: `Cloudflare binding "${binding}" failed validation. Expected ${expected}; got ${actual}`,
+      });
     }
 
     return resource;

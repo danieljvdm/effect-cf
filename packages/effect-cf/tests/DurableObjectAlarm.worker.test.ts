@@ -324,7 +324,7 @@ it.effect("keeps post-event checks from taking over raw-only native alarms", () 
           "SELECT name FROM sqlite_master WHERE name = 'effect_cf_scheduled_alarms'",
         );
 
-        assert.deepStrictEqual(yield* tables.toArray(), []);
+        assert.deepStrictEqual(yield* tables.toArray, []);
         assert.strictEqual(yield* state.storage.getAlarm(), deadline);
         yield* Effect.promise(async () => {
           await instance.alarm();
@@ -1464,8 +1464,8 @@ it.effect.each(["claim", "park"] as const)(
             state.storage.sql.exec<T>(query, ...bindings).pipe(
               Effect.map((cursor) => ({
                 ...cursor,
-                toArray: Effect.fnUntraced(function* () {
-                  const rows = yield* cursor.toArray();
+                toArray: Effect.gen(function* () {
+                  const rows = yield* cursor.toArray;
 
                   if (
                     holdSnapshot &&
@@ -1865,7 +1865,7 @@ it.effect("discards alarms after an explicit successful storage rollback", () =>
         Effect.gen(function* () {
           yield* state.storage.put("uncommitted", true);
           yield* alarms.scheduleAlarm(alarm(ref.id, 2_000));
-          yield* tx.rollback();
+          yield* tx.rollback;
 
           return "returned after rollback";
         }),
@@ -1904,11 +1904,12 @@ it.effect("does not retain a caught child's first schema initialization in its p
       yield* sql`CREATE TABLE source (generation INTEGER NOT NULL)`;
       const setAlarm = state.raw.storage.setAlarm.bind(state.raw.storage);
       let holdAcquisition = true;
+      const context = yield* Effect.context<never>();
       const native = vi.spyOn(state.raw.storage, "setAlarm").mockImplementation(async (...args) => {
         if (holdAcquisition) {
           holdAcquisition = false;
-          await Effect.runPromise(Deferred.succeed(entered, undefined));
-          await Effect.runPromise(Deferred.await(release));
+          await Effect.runPromiseWith(context)(Deferred.succeed(entered, undefined));
+          await Effect.runPromiseWith(context)(Deferred.await(release));
         }
 
         return setAlarm(...args);
@@ -2810,7 +2811,7 @@ it.effect.each(["legacy", "parked", "indexed"] as const)(
 
         assert.isTrue(Exit.isFailure(aborted));
         assert.deepStrictEqual(
-          (yield* columns.toArray()).map((column) => column.name),
+          (yield* columns.toArray).map((column) => column.name),
           [
             "storage_id",
             "alarm_id",
@@ -2828,7 +2829,7 @@ it.effect.each(["legacy", "parked", "indexed"] as const)(
         );
 
         assert.include(
-          (yield* upgradedColumns.toArray()).map((column) => column.name),
+          (yield* upgradedColumns.toArray).map((column) => column.name),
           "lifecycle",
         );
         assert.strictEqual(yield* state.storage.getAlarm(), deadline);
@@ -2876,8 +2877,8 @@ it.effect.each([100, 1_000])(
 
         return {
           ...cursor,
-          toArray: Effect.fnUntraced(function* () {
-            const rows = yield* cursor.toArray();
+          toArray: Effect.gen(function* () {
+            const rows = yield* cursor.toArray;
             const total = yield* cursor.rowsRead;
 
             rowsRead += total - counted;

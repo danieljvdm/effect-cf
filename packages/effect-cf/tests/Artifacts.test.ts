@@ -285,7 +285,7 @@ const artifactsLayer = (artifacts: Artifacts.ArtifactsBinding) =>
       Effect.gen(function* () {
         const artifacts = yield* TestArtifacts;
         const repo = yield* artifacts.get("starter-repo");
-        const info = yield* repo.info();
+        const info = yield* repo.info;
         const token = yield* repo.createToken("read", 3600);
         const tokens = yield* repo.listTokens;
         const revoked = yield* repo.revokeToken("token-1");
@@ -350,6 +350,33 @@ const artifactsLayer = (artifacts: Artifacts.ArtifactsBinding) =>
   });
 }
 
+it.effect("Artifacts refreshes property-backed metadata on every execution", () =>
+  Effect.gen(function* () {
+    const calls = makeCalls();
+    const native = makeRepo(calls);
+    const artifacts = {
+      ...makeArtifacts(calls),
+      get: async () => native,
+    } satisfies Artifacts.ArtifactsBinding;
+    const client = Artifacts.makeClient({ binding: "ARTIFACTS" })(artifacts);
+    const repo = yield* client.get("starter-repo");
+    const info = repo.info;
+    const initial = yield* info;
+    const pushedAt = "2026-08-15T02:00:00.000Z";
+
+    Object.assign(native, { updatedAt: pushedAt, lastPushAt: pushedAt });
+
+    const refreshed = yield* info;
+
+    assert.deepStrictEqual(initial, repoInfo);
+    assert.deepStrictEqual(refreshed, {
+      ...repoInfo,
+      updatedAt: pushedAt,
+      lastPushAt: pushedAt,
+    });
+  }),
+);
+
 test("Artifacts supports method-only remote repository handles", async () => {
   const calls = makeCalls();
   const artifacts = {
@@ -361,7 +388,7 @@ test("Artifacts supports method-only remote repository handles", async () => {
     Effect.gen(function* () {
       const client = yield* TestArtifacts;
       const repo = yield* client.get("starter-repo");
-      const refreshed = yield* repo.info();
+      const refreshed = yield* repo.info;
 
       return [repo, refreshed] as const;
     }).pipe(Effect.provide(artifactsLayer(artifacts))),
@@ -444,9 +471,7 @@ it.effect("Artifacts repository disposal releases its native handle at scope exi
 test("Artifacts layer validates the namespace binding shape", async () => {
   await expect(
     Effect.runPromise(
-      Effect.gen(function* () {
-        yield* TestArtifacts;
-      }).pipe(
+      Effect.asVoid(TestArtifacts).pipe(
         Effect.provide(
           TestArtifacts.layer({ binding: "ARTIFACTS" }).pipe(
             Layer.provide(
@@ -464,9 +489,7 @@ test("Artifacts layer validates the namespace binding shape", async () => {
 test("Artifacts layer reports a missing configured binding", async () => {
   await expect(
     Effect.runPromise(
-      Effect.gen(function* () {
-        yield* TestArtifacts;
-      }).pipe(
+      Effect.asVoid(TestArtifacts).pipe(
         Effect.provide(
           TestArtifacts.layer({ binding: "MISSING_ARTIFACTS" }).pipe(
             Layer.provide(Layer.succeed(WorkerEnvironment, {})),

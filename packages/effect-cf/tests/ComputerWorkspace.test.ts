@@ -152,7 +152,7 @@ it.effect("wraps text, binary streams, runtime metadata, and scoped run disposal
 
     assert.deepStrictEqual(taggedResult, runtimeResult);
     assert.deepStrictEqual(
-      Schema.decodeUnknownSync(Schema.Array(Schema.String))(execCalls[1]?.[0]),
+      yield* Schema.decodeUnknownEffect(Schema.Array(Schema.String))(execCalls[1]?.[0]),
       ["echo ", ""],
     );
     assert.strictEqual(execCalls[1]?.[1], "tagged");

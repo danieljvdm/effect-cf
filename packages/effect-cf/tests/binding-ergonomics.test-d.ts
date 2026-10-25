@@ -51,7 +51,7 @@ const queueProgram = Effect.gen(function* () {
 
   yield* queue.send({ requestId: "r1", userId: "u1" });
   yield* queue.sendBatch([{ body: { requestId: "r2", userId: "u2" } }]);
-  yield* queue.metrics();
+  yield* queue.metrics;
 
   // @ts-expect-error queue messages use the decoded schema shape.
   yield* queue.send({ requestId: "r1" });
@@ -126,7 +126,7 @@ const artifactsProgram = Effect.gen(function* () {
 
   expectTypeOf(repo).toEqualTypeOf<Artifacts.ArtifactsRepoClient>();
   expectTypeOf(repo.dispose).toEqualTypeOf<Effect.Effect<void>>();
-  expectTypeOf(repo.info()).toEqualTypeOf<
+  expectTypeOf(repo.info).toEqualTypeOf<
     Effect.Effect<Artifacts.ArtifactsRepoInfo, Artifacts.ArtifactsOperationError>
   >();
   expectTypeOf(repo.createToken("read", 3600)).toEqualTypeOf<
@@ -488,7 +488,7 @@ const analyticsEngineQueryProgram = Effect.gen(function* () {
   const query = yield* RequestAnalyticsQuery;
   const row = Schema.Struct({
     path: Schema.String,
-    views: Schema.Number,
+    views: Schema.Finite,
   });
 
   expectTypeOf(query.query("SHOW TABLES")).toEqualTypeOf<
@@ -593,7 +593,7 @@ expectTypeOf(EffectCf.HyperdrivePg).toBeNever();
 
 export class SessionKv extends Kv.Tag<SessionKv>()("SessionKv", {
   key: Schema.String,
-  value: Schema.Struct({ count: Schema.Number }),
+  value: Schema.Struct({ count: Schema.Finite }),
 }) {}
 
 export const SessionKvLayer = SessionKv.layer({
@@ -670,10 +670,10 @@ const workerProgram = Effect.gen(function* () {
 export class CounterDurableObject extends DurableObject.Tag<CounterDurableObject>()(
   "CounterDurableObject",
   {
-    get: DurableObject.method({ success: Schema.Number }),
+    get: DurableObject.method({ success: Schema.Finite }),
     increment: DurableObject.method({
-      args: [Schema.Number] as const,
-      success: Schema.Number,
+      args: [Schema.Finite] as const,
+      success: Schema.Finite,
     }),
   },
 ) {}

@@ -10,22 +10,22 @@ interface OwnerMetadata {
 
 class TestKv extends Kv.Tag<TestKv>()("test/TestKv", {
   key: S.String,
-  value: S.Struct({ count: S.Number }),
+  value: S.Struct({ count: S.Finite }),
 }) {}
 
 class NumberKeyKv extends Kv.Tag<NumberKeyKv>()("test/NumberKeyKv", {
-  key: S.NumberFromString,
+  key: S.FiniteFromString,
   value: S.String,
 }) {}
 
 class ValueStyleKv extends Kv.Tag<ValueStyleKv>()("test/ValueStyleKv", {
   key: S.String,
-  value: S.Struct({ count: S.Number }),
+  value: S.Struct({ count: S.Finite }),
 }) {}
 
 class TestKvDefinition extends Kv.Tag<TestKvDefinition>()("test/TestKvDefinition", {
   key: S.String,
-  value: S.Struct({ count: S.Number }),
+  value: S.Struct({ count: S.Finite }),
 }) {}
 
 const TestKvBinding = TestKvDefinition;

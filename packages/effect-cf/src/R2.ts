@@ -229,7 +229,7 @@ const wrapGetResult = (
   return wrapObjectBody(binding, object);
 };
 
-type R2BindingValue = Schema.Schema.Type<typeof Schema.Unknown>;
+type R2BindingValue = typeof Schema.Unknown.Type;
 
 const R2BucketSchema = Schema.declare(
   (value: R2BindingValue): value is R2Bucket =>

@@ -152,9 +152,8 @@ it.live.each(["tsconfig.workers-types.json", "tsconfig.workers-types-composite.j
         path.join(consumer, "node_modules/@cloudflare/workers-types"),
       );
       yield* run([
-        "run",
-        "--no-cache",
-        "effect-cf#typecheck",
+        "exec",
+        "tsc",
         "--noEmit",
         "false",
         "--emitDeclarationOnly",
@@ -206,9 +205,8 @@ it.live.each(["tsconfig.wrangler-types.json", "tsconfig.wrangler-types-composite
         path.join(consumer, "wrangler.jsonc"),
       ]);
       yield* run([
-        "run",
-        "--no-cache",
-        "effect-cf#typecheck",
+        "exec",
+        "tsc",
         "--noEmit",
         "false",
         "--emitDeclarationOnly",

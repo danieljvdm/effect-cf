@@ -1,3 +1,4 @@
+import * as WebCrypto from "../src/WebCrypto";
 import { env, exports } from "cloudflare:workers";
 import { listDurableObjectIds, runInDurableObject } from "cloudflare:test";
 import { assert, expect, layer, test } from "@effect/vitest";
@@ -61,7 +62,7 @@ test("runs package default Worker fetch in the Workers runtime", async () => {
 layer(testLayer)("Workers runtime Durable Object namespace", (it) => {
   it.effect("runs RPC, fetch, and schema-backed embedded KV", () =>
     Effect.gen(function* () {
-      const name = `counter-${crypto.randomUUID()}`;
+      const name = `counter-${yield* WebCrypto.randomUUID}`;
       const counter = TestCounters.byName(name);
       const stub = yield* TestCounters.getByName(name);
 

@@ -5,10 +5,12 @@ Cloudflare entrypoints and bindings as Effect services.
 See the [Effect API migration guide](../../docs/effect-api-migration.md) for changes to zero-argument operations and numeric validation.
 
 ```sh
-npm install effect-cf "effect@^4.0.0"
+npm install effect-cf "effect@^4.0.6"
 ```
 
-The repository tests against workerd `1.20260926.1` and `@cloudflare/workers-types@5.20260926.1`. Use `compatibility_date: "2026-09-26"` in Wrangler.
+The repository tests against workerd `1.20261026.1` and `@cloudflare/workers-types@5.20261026.1`. Use `compatibility_date: "2026-10-26"` in Wrangler.
+
+Serve Effect's native `McpServer` through `Worker.make`, with live tool progress and request cancellation. See the [MCP guide](https://github.com/danieljvdm/effect-cf/blob/main/docs/mcp.md) for server and client examples.
 
 See the [runtime performance guide](https://github.com/danieljvdm/effect-cf/blob/main/docs/runtime-performance.md) for measured alarm batching and telemetry configuration guidance.
 
@@ -114,7 +116,7 @@ Enable tracing in `wrangler.jsonc`:
 
 ```jsonc
 {
-  "compatibility_date": "2026-09-26",
+  "compatibility_date": "2026-10-26",
   "observability": {
     "traces": { "enabled": true },
   },

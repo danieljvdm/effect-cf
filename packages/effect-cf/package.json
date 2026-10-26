@@ -27,11 +27,6 @@
       "import": "./dist/HyperdrivePg.mjs",
       "default": "./dist/HyperdrivePg.mjs"
     },
-    "./mcp": {
-      "types": "./dist/Mcp.d.mts",
-      "import": "./dist/Mcp.mjs",
-      "default": "./dist/Mcp.mjs"
-    },
     "./computer-artifacts": {
       "types": "./dist/ComputerArtifacts.d.mts",
       "import": "./dist/ComputerArtifacts.mjs",
@@ -74,6 +69,9 @@
     "check": "vp check",
     "typecheck": "vp exec effect-tsrs diagnostics --type-check --project tsconfig.json"
   },
+  "dependencies": {
+    "@effect/platform-browser": "^4.0.6"
+  },
   "devDependencies": {
     "@cloudflare/computer": "0.2.0",
     "@cloudflare/containers": "catalog:",
@@ -87,7 +85,6 @@
     "@effect/sql-sqlite-do": "catalog:",
     "@effect/vitest": "catalog:",
     "@modelcontextprotocol/client": "^2.0.0",
-    "@modelcontextprotocol/server": "^2.0.0",
     "@platformatic/vfs": "^0.4.0",
     "effect": "catalog:",
     "esbuild": "^0.28.1",
@@ -99,12 +96,11 @@
     "@cloudflare/computer": "^0.2.0",
     "@cloudflare/sandbox": "^0.13.0-next.738.2 || ^1.0.0",
     "@cloudflare/vitest-plugin": "^1.0.0",
-    "@cloudflare/workers-types": "^5.20260926.1",
+    "@cloudflare/workers-types": "^5.20261026.1",
     "@effect/sql-d1": "^4.0.0",
     "@effect/sql-pg": "^4.0.0",
     "@effect/sql-sqlite-do": "^4.0.0",
-    "@modelcontextprotocol/server": "^2.0.0",
-    "effect": "^4.0.0"
+    "effect": "^4.0.6"
   },
   "peerDependenciesMeta": {
     "@cloudflare/computer": {
@@ -120,9 +116,6 @@
       "optional": true
     },
     "@effect/sql-pg": {
-      "optional": true
-    },
-    "@modelcontextprotocol/server": {
       "optional": true
     }
   }

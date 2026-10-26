@@ -1,6 +1,7 @@
 import { SqliteClient } from "@effect/sql-sqlite-do";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -16,7 +17,6 @@ import { SqlError } from "effect/sql/SqlError";
 
 import { DurableObjectState } from "./DurableObjectState";
 import { type SqlStorageValue, StorageOperationError } from "./DurableObjectStorage";
-import * as WebCrypto from "./WebCrypto";
 import * as ErrorMessage from "./internal/ErrorMessage";
 import {
   CurrentStorageTransaction,
@@ -479,7 +479,7 @@ export type AlarmScheduler = {
   ) => Effect.Effect<
     ProcessDueAlarmsResult,
     E | OnFailureE | DurableObjectAlarmError,
-    R | OnFailureR
+    R | OnFailureR | Crypto.Crypto
   >;
 
   /** A failed platform setAlarm rolls back the logical schedule in the same transaction. */
@@ -491,7 +491,8 @@ export type AlarmScheduler = {
     | InvalidAlarmRefError
     | InvalidRepeatEveryError
     | InvalidScheduleConfigurationError
-    | StorageOperationError
+    | StorageOperationError,
+    Crypto.Crypto
   >;
   /** Atomically min-merge a logical deadline. Preserves an earlier alarm's payload and repeat. */
   readonly scheduleAlarmEarlier: AlarmScheduler["scheduleAlarm"];
@@ -762,7 +763,7 @@ export interface AlarmRegistration<Self, R = never, E = never> {
   readonly run: Effect.Effect<
     ProcessDueAlarmsResult,
     E | DurableObjectAlarmError,
-    R | DurableObjectAlarm
+    R | DurableObjectAlarm | Crypto.Crypto
   >;
   readonly [RegistrationParts]?: RegistrationParts<R, E>;
 }
@@ -914,7 +915,7 @@ export function mergeAll<
   ...registrations: Registrations
 ): AlarmRegistration<
   Layer.Success<Registrations[number]["layer"]>,
-  Exclude<Effect.Services<Registrations[number]["run"]>, DurableObjectAlarm>,
+  Exclude<Effect.Services<Registrations[number]["run"]>, DurableObjectAlarm | Crypto.Crypto>,
   Exclude<Effect.Error<Registrations[number]["run"]>, DurableObjectAlarmError>
 >;
 export function mergeAll(
@@ -1110,7 +1111,11 @@ const hasSchedulerTables = Effect.fnUntraced(function* (state: DurableObjectStat
 export const dispatchRawAlarm = <Self, E, R>(
   rawAlarm: Effect.Effect<void, E, R>,
   registration?: AlarmRegistration<Self, R, E>,
-): Effect.Effect<void, E | DurableObjectAlarmError, R | DurableObjectAlarm | DurableObjectState> =>
+): Effect.Effect<
+  void,
+  E | DurableObjectAlarmError,
+  R | DurableObjectAlarm | DurableObjectState | Crypto.Crypto
+> =>
   Effect.gen(function* () {
     const parts = registration?.[RegistrationParts];
 
@@ -1439,7 +1444,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           `UPDATE effect_cf_scheduled_alarms SET revision = ?, attempts = ?, parked = ?,
              retry_at = ?, progress = ?, wake_at = MAX(run_at, COALESCE(?, run_at))
            WHERE storage_id = ? RETURNING *`,
-          yield* WebCrypto.randomUUID,
+          yield* Crypto.Crypto.use((crypto) => crypto.randomUUIDv4()).pipe(Effect.orDie),
           attempts,
           parked,
           retryAt,
@@ -1537,7 +1542,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
             runAt,
             runAt,
             payload,
-            yield* WebCrypto.randomUUID,
+            yield* Crypto.Crypto.use((crypto) => crypto.randomUUIDv4()).pipe(Effect.orDie),
           );
 
           const row = (yield* cursor.toArray)[0];
@@ -1602,7 +1607,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           scheduledRepeat,
           scheduledPayload,
           Math.max(scheduledAt, retryAt ?? scheduledAt),
-          yield* WebCrypto.randomUUID,
+          yield* Crypto.Crypto.use((crypto) => crypto.randomUUIDv4()).pipe(Effect.orDie),
           attempts,
           parked,
           retryAt,
@@ -1657,8 +1662,8 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
           const body = Effect.withFiber((owner) => {
             let active = true;
             const lazySchema = options !== undefined && (wakeDeferrals > 0 || dispatchActive);
-            const requireActive = <A, E>(effect: Effect.Effect<A, E>) =>
-              Effect.withFiber<A, E | StorageOperationError>((fiber) => {
+            const requireActive = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+              Effect.withFiber<A, E | StorageOperationError, R>((fiber) => {
                 // A queued or suspended transaction can outlive the handler that admitted it.
                 if (!active || fiber !== owner || (pass !== undefined && !pass.active))
                   return Effect.fail(
@@ -1929,7 +1934,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
              retry_at = NULL, progress = ? WHERE ${sameRevisionSql} RETURNING *`,
           next,
           next,
-          yield* WebCrypto.randomUUID,
+          yield* Crypto.Crypto.use((crypto) => crypto.randomUUIDv4()).pipe(Effect.orDie),
           row.progress,
           row.storage_id,
           row.revision,
@@ -2015,7 +2020,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                   (options?.[ManualTags]?.has(row.tag)
                     ? configuration.inFlightRecovery
                     : configuration.parkedRetryDelay);
-                const revision = `manual:${yield* WebCrypto.randomUUID}`;
+                const revision = `manual:${yield* Crypto.Crypto.use((crypto) => crypto.randomUUIDv4()).pipe(Effect.orDie)}`;
                 const cursor = yield* state.storage.sql.exec<AlarmRow>(
                   `UPDATE effect_cf_scheduled_alarms SET run_at = ?, wake_at = ?, revision = ?
                    WHERE ${sameRevisionSql} RETURNING *`,
@@ -2161,7 +2166,7 @@ export class DurableObjectAlarm extends Context.Service<DurableObjectAlarm, Alar
                  WHERE ${sameRevisionSql} RETURNING *`,
                   recoveryAt,
                   recoveryAt,
-                  yield* WebCrypto.randomUUID,
+                  yield* Crypto.Crypto.use((crypto) => crypto.randomUUIDv4()).pipe(Effect.orDie),
                   row.storage_id,
                   row.revision,
                 );

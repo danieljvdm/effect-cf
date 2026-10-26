@@ -1,6 +1,6 @@
-import * as WebCrypto from "../src/WebCrypto";
+import * as BrowserCrypto from "@effect/platform-browser/BrowserCrypto";
 import { env } from "cloudflare:workers";
-import { Effect, Layer } from "effect";
+import { Crypto, Effect, Layer } from "effect";
 import { expect, test } from "vite-plus/test";
 
 import { Binding, RateLimit, WorkerEnvironment } from "../src/index";
@@ -9,9 +9,10 @@ class Requests extends RateLimit.Tag<Requests>()("test/RateLimit") {}
 
 test("native binding preserves admission, denial, independent keys, and raw access", async () => {
   const RequestsByName = RateLimit.make("test/RateLimitByName");
-  const key = crypto.randomUUID();
   const results = await Effect.runPromise(
     Effect.gen(function* () {
+      const crypto = yield* Crypto.Crypto;
+      const key = yield* crypto.randomUUIDv4();
       const requests = yield* Requests;
       const named = yield* RequestsByName;
 
@@ -22,11 +23,12 @@ test("native binding preserves admission, denial, independent keys, and raw acce
         yield* requests.limit({ key }),
         yield* named.limit({ key }),
         yield* requests.limit({ key }),
-        yield* named.limit({ key: yield* WebCrypto.randomUUID }),
+        yield* named.limit({ key: yield* crypto.randomUUIDv4() }),
       ];
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
+          BrowserCrypto.layer,
           Requests.layer({ binding: "TEST_RATE_LIMITER" }),
           RequestsByName.layer({ binding: "TEST_RATE_LIMITER" }),
         ).pipe(Layer.provide(Layer.succeed(WorkerEnvironment, env))),

@@ -17,7 +17,7 @@ import * as Effect from "effect/Effect";
 import * as FiberSet from "effect/FiberSet";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import type { ManagedRuntime, Scope } from "effect";
+import type { Crypto, ManagedRuntime, Scope } from "effect";
 
 import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 import { ExecutionContext, WorkerContext } from "./Worker";
@@ -216,7 +216,12 @@ const fromWorkflowStep = (step: CloudflareWorkflowStep): WorkflowStepService => 
     }),
 });
 
-type RuntimeContext<ROut> = ExecutionContext | WorkerContext | WorkerEnvironment | ROut;
+type RuntimeContext<ROut> =
+  | Crypto.Crypto
+  | ExecutionContext
+  | WorkerContext
+  | WorkerEnvironment
+  | ROut;
 
 /** Override to instrument the whole workflow run, then call super[RunSymbol]. */
 export const RunSymbol = Symbol.for("effect-cf/Workflow/run");
@@ -252,7 +257,7 @@ export type WorkflowClass<Payload, Result, ROut> = new (
 };
 
 export const make = <ROut, LayerError, Payload = unknown, Result = unknown>(
-  layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+  layer: Layer.Layer<ROut, LayerError, RuntimeContext<never>>,
   options: WorkflowOptions<ROut, Payload, Result>,
 ): WorkflowClass<Payload, Result, ROut> => {
   class EffectWorkflow extends CloudflareWorkflowEntrypoint<WorkerEnv, Payload> {

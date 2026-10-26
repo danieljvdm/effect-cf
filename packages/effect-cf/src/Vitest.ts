@@ -24,7 +24,9 @@ import {
   runInDurableObject as runInDurableObjectPromise,
   waitOnExecutionContext,
 } from "cloudflare:test";
+import * as BrowserCrypto from "@effect/platform-browser/BrowserCrypto";
 import * as ConfigProvider from "effect/ConfigProvider";
+import type * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
@@ -41,7 +43,8 @@ import { runNativeCallback } from "./internal/NativeCallback";
 
 const currentEnv: WorkerEnv = env;
 
-export const layer: Layer.Layer<WorkerEnvironment> = Layer.mergeAll(
+export const layer: Layer.Layer<WorkerEnvironment | Crypto.Crypto> = Layer.mergeAll(
+  BrowserCrypto.layer,
   Layer.succeed(WorkerEnvironment, currentEnv),
   ConfigProvider.layer(WorkerConfig.providerFromEnv(currentEnv)),
 );
@@ -135,11 +138,12 @@ interface QueueWorker {
   queue(batch: globalThis.MessageBatch): Promise<void>;
 }
 
-export type QueueMessage<Body> = {
+export interface QueueMessage<Body> {
   readonly id: string;
-  readonly timestamp: Date;
+  readonly timestamp: Date | number;
   readonly attempts: number;
-} & ({ readonly body: Body } | { readonly serializedBody: ArrayBuffer | ArrayBufferView });
+  readonly body: Body;
+}
 
 /** Acknowledgement and retry result returned by the Workers Vitest plugin. */
 export type QueueResult = Awaited<ReturnType<typeof getQueueResult>>;

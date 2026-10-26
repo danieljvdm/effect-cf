@@ -38,15 +38,17 @@
     "typescript": "7.0.2",
     "vite-plus": "catalog:",
     "vitest": "catalog:",
+    "workerd": "catalog:",
     "wrangler": "catalog:"
   },
   "overrides": {
     "@cloudflare/workers-types": "catalog:",
-    "@effect/platform-node-shared": "^4.0.0",
+    "@effect/platform-node-shared": "^4.0.6",
     "miniflare": "catalog:",
     "typescript": "7.0.2",
     "vite": "catalog:",
     "vitest": "catalog:",
+    "workerd": "catalog:",
     "wrangler": "catalog:"
   },
   "engines": {
@@ -56,19 +58,20 @@
   "packageManager": "bun@1.4.0",
   "catalog": {
     "@cloudflare/containers": "0.3.7",
-    "@cloudflare/workers-types": "5.20260926.1",
-    "@cloudflare/vitest-plugin": "1.0.0",
-    "@effect/platform-node": "^4.0.0",
-    "@effect/sql-d1": "^4.0.0",
-    "@effect/sql-pg": "^4.0.0",
-    "@effect/sql-sqlite-do": "^4.0.0",
-    "@effect/vitest": "^4.0.0",
-    "effect": "^4.0.0",
-    "miniflare": "5.20260926.1-alpha",
+    "@cloudflare/workers-types": "5.20261026.1",
+    "@cloudflare/vitest-plugin": "1.4.8",
+    "@effect/platform-node": "^4.0.6",
+    "@effect/sql-d1": "^4.0.6",
+    "@effect/sql-pg": "^4.0.6",
+    "@effect/sql-sqlite-do": "^4.0.6",
+    "@effect/vitest": "^4.0.6",
+    "effect": "^4.0.6",
+    "miniflare": "5.20261023.0-beta",
     "vite": "npm:@voidzero-dev/vite-plus-core@0.3.0",
     "vitest": "4.1.11",
     "vite-plus": "0.3.0",
-    "wrangler": "4.144.0"
+    "wrangler": "4.153.0",
+    "workerd": "1.20261026.1"
   },
   "patchedDependencies": {
     "@cloudflare/sandbox@1.0.0": "patches/@cloudflare%2Fsandbox@1.0.0.patch"

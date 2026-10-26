@@ -33,7 +33,6 @@ const createResult = (name: string): Artifacts.ArtifactsCreateRepoResult => ({
   defaultBranch: "main",
   remote: `https://git.cloudflare.com/default/${name}`,
   token: `${name}-token`,
-  tokenExpiresAt: "2026-08-16T00:00:00.000Z",
 });
 
 it.effect("delegates session naming and filtering to the upstream Artifacts facade", () =>

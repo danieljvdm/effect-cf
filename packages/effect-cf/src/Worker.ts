@@ -4,9 +4,10 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as References from "effect/References";
 import * as Tracer from "effect/Tracer";
-import type { Cause, ManagedRuntime, Scope } from "effect";
+import type { Cause, Crypto, ManagedRuntime, Scope } from "effect";
 import * as HttpEffect from "effect/http/HttpEffect";
 import * as HttpMiddleware from "effect/http/HttpMiddleware";
+import { ClientAbort } from "effect/http/HttpServerError";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 
@@ -94,7 +95,12 @@ const reservedMethodNames = new Set<string>([
   "trace",
 ]);
 
-type WorkerBaseContext<ROut> = ExecutionContext | WorkerContext | WorkerEnvironment | ROut;
+type WorkerBaseContext<ROut> =
+  | Crypto.Crypto
+  | ExecutionContext
+  | WorkerContext
+  | WorkerEnvironment
+  | ROut;
 type WorkerFetchContext<ROut> =
   | WorkerBaseContext<ROut>
   | NativeRequest
@@ -248,6 +254,7 @@ export interface FetchHandler<Env extends WorkerEnv = WorkerEnv> {
 const renderFetchSuccess = <E, R, REvent, EventLayerError, EventLayerRequirements>(
   effect: Effect.Effect<WorkerFetchSuccess, E, R>,
   eventLayer: Layer.Layer<REvent, EventLayerError, EventLayerRequirements> | undefined,
+  signal: AbortSignal,
 ): Effect.Effect<
   Response,
   E | EventLayerError,
@@ -286,6 +293,7 @@ const renderFetchSuccess = <E, R, REvent, EventLayerError, EventLayerRequirement
               {
                 withoutBody,
                 context,
+                signal,
               },
             );
           });
@@ -335,7 +343,23 @@ const renderFetchSuccess = <E, R, REvent, EventLayerError, EventLayerRequirement
     // response, so both branches return the response captured above.
     const captured = () => nativeResponse ?? webResponse ?? new Response(null, { status: 500 });
 
-    return Effect.matchCause(handled, { onFailure: captured, onSuccess: captured });
+    return Effect.acquireUseRelease(
+      Effect.withFiber((fiber) =>
+        Effect.sync(() => {
+          const onAbort = () => fiber.interruptUnsafe(undefined, ClientAbort.annotation);
+
+          if (signal.aborted) {
+            onAbort();
+          } else {
+            signal.addEventListener("abort", onAbort, { once: true });
+          }
+
+          return onAbort;
+        }),
+      ),
+      () => Effect.matchCause(handled, { onFailure: captured, onSuccess: captured }),
+      (onAbort) => Effect.sync(() => signal.removeEventListener("abort", onAbort)),
+    );
   });
 
 const isWorkerOptions = <ROut, REvent, EventLayerError, Rpc extends WorkerRpc<ROut | REvent>>(
@@ -372,7 +396,7 @@ const scheduleFetchTelemetryFlush: Effect.Effect<void, never, WorkerContext> =
  * `eventLayer` for resources whose finalizers must run with an event.
  */
 export function make<ROut, LayerError>(
-  layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+  layer: Layer.Layer<ROut, LayerError, RuntimeContext<never>>,
   fetch: WorkerHandler<ROut>,
 ): WorkerClass<Record<never, never>, ROut>;
 export function make<
@@ -382,7 +406,7 @@ export function make<
   EventLayerError = never,
   const Rpc extends WorkerRpc<ROut | REvent> = Record<never, never>,
 >(
-  layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+  layer: Layer.Layer<ROut, LayerError, RuntimeContext<never>>,
   options: WorkerOptionsWithEventLayer<ROut, REvent, EventLayerError, Rpc>,
 ): WorkerClass<Rpc, ROut | REvent>;
 export function make<
@@ -392,7 +416,7 @@ export function make<
   EventLayerError = never,
   const Rpc extends WorkerRpc<ROut | REvent> = Record<never, never>,
 >(
-  layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+  layer: Layer.Layer<ROut, LayerError, RuntimeContext<never>>,
   options: WorkerOptions<ROut, REvent, EventLayerError, Rpc>,
 ): WorkerClass<Rpc, ROut | REvent>;
 export function make<
@@ -402,7 +426,7 @@ export function make<
   EventLayerError = never,
   const Rpc extends WorkerRpc<ROut | REvent> = Record<never, never>,
 >(
-  layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+  layer: Layer.Layer<ROut, LayerError, RuntimeContext<never>>,
   optionsOrFetch: WorkerOptions<ROut, REvent, EventLayerError, Rpc> | WorkerHandler<ROut>,
 ): WorkerClass<Rpc, ROut | REvent> {
   const options: WorkerOptions<ROut, REvent, EventLayerError, Rpc> = isWorkerOptions(optionsOrFetch)
@@ -487,7 +511,7 @@ export function make<
       // never build an event layer against a previous request's ExecutionContext.
       // HttpEffect owns the inner scope and transfers it to streaming response bodies.
       return this[RunSymbol](
-        renderFetchSuccess(fetchHandler, options.eventLayer).pipe(
+        renderFetchSuccess(fetchHandler, options.eventLayer, request.signal).pipe(
           Effect.provideContext(requestServices),
         ),
         { event: "fetch" },
@@ -548,7 +572,7 @@ export function makeFetchHandler<
   EventLayerError = never,
   Env extends WorkerEnv = WorkerEnv,
 >(
-  layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+  layer: Layer.Layer<ROut, LayerError, RuntimeContext<never>>,
   options: FetchWorkerOptionsWithEventLayer<ROut, REvent, EventLayerError>,
 ): FetchHandler<Env>;
 export function makeFetchHandler<
@@ -558,7 +582,7 @@ export function makeFetchHandler<
   EventLayerError = never,
   Env extends WorkerEnv = WorkerEnv,
 >(
-  layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+  layer: Layer.Layer<ROut, LayerError, RuntimeContext<never>>,
   options: FetchWorkerOptions<ROut, REvent, EventLayerError>,
 ): FetchHandler<Env>;
 export function makeFetchHandler<
@@ -568,7 +592,7 @@ export function makeFetchHandler<
   EventLayerError = never,
   Env extends WorkerEnv = WorkerEnv,
 >(
-  layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+  layer: Layer.Layer<ROut, LayerError, RuntimeContext<never>>,
   options: FetchWorkerOptions<ROut, REvent, EventLayerError>,
 ): FetchHandler<Env> {
   const WorkerClass =

@@ -1,3 +1,4 @@
+import type * as Crypto from "effect/Crypto";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import type { Layer, Schema as S } from "effect";
@@ -194,7 +195,10 @@ export type TagClass<
         layer: Layer.Layer<
           ROut,
           LayerError,
-          WorkerEntrypoint.ExecutionContext | WorkerEntrypoint.WorkerContext | WorkerEnvironment
+          | Crypto.Crypto
+          | WorkerEntrypoint.ExecutionContext
+          | WorkerEntrypoint.WorkerContext
+          | WorkerEnvironment
         >,
         options: Options<ROut, Definition<Id, MethodDefinitions>, REvent, EventLayerError> & {
           readonly eventLayer: NonNullable<
@@ -209,7 +213,10 @@ export type TagClass<
         layer: Layer.Layer<
           ROut,
           LayerError,
-          WorkerEntrypoint.ExecutionContext | WorkerEntrypoint.WorkerContext | WorkerEnvironment
+          | Crypto.Crypto
+          | WorkerEntrypoint.ExecutionContext
+          | WorkerEntrypoint.WorkerContext
+          | WorkerEnvironment
         >,
         options: Options<ROut, Definition<Id, MethodDefinitions>, REvent, EventLayerError>,
       ): WorkerEntrypoint.WorkerClass<
@@ -263,7 +270,10 @@ const makeDefinition = <Id extends string, const MethodDefinitions extends Metho
       layer: Layer.Layer<
         ROut,
         LayerError,
-        WorkerEntrypoint.ExecutionContext | WorkerEntrypoint.WorkerContext | WorkerEnvironment
+        | Crypto.Crypto
+        | WorkerEntrypoint.ExecutionContext
+        | WorkerEntrypoint.WorkerContext
+        | WorkerEnvironment
       >,
       options: Options<ROut, SelfDefinition, REvent, EventLayerError>,
     ) => {

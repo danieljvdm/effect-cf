@@ -17,4 +17,24 @@ The stricter Effect policy makes zero-argument operations reusable Effect values
 
 Numeric schemas now reject `NaN`, `Infinity`, and `-Infinity` in RPC argument counts, Analytics Engine query row counts, Workers AI embedding values and dimensions, AI Gateway log metrics and metadata, WebTransport close information, and Cloudflare inbound transport round-trip times.
 
-`WebCrypto.randomUUID` uses a supplied Effect `Crypto.Crypto` service when present and otherwise uses Workers Web Crypto. Alarm revision identifiers use this same injectable source. Production services must use a secure source of randomness.
+## Effect 4.0.6
+
+`effect-cf` now requires Effect `^4.0.6`. PostgreSQL options use the current `PgClientConfig` type without introducing unknown service requirements.
+
+Replace the removed `WebCrypto.randomUUID` helper with Effect's `Crypto` service:
+
+```ts
+import { Crypto, Effect } from "effect";
+
+const program = Effect.gen(function* () {
+  const crypto = yield* Crypto.Crypto;
+
+  return yield* crypto.randomUUIDv4();
+});
+```
+
+Worker, Durable Object, and Workflow runtimes supply `Crypto.Crypto` through Effect's `BrowserCrypto.layer`, backed by Workers Web Crypto. Application and event layers can override this service. Alarm scheduling and dispatch use the current invocation's service for revision identifiers; when running alarm effects outside these runtimes, supply a platform crypto layer such as `BrowserCrypto.layer` or `NodeCrypto.layer`. The `effect-cf/vitest` layer also includes native crypto.
+
+HTTP server spans follow Effect's new default names (`GET`, `POST`, and so on). A custom `HttpMiddleware.SpanNameGenerator` still overrides them.
+
+When a cause contains both typed failures and defects, Effect promotes the typed failures to defects. `onFailure` observers receive that complete cause after cleanup, and the native Promise still rejects with the original first error. Update consumers that inspect the cause's reason tags; the original error objects remain available.

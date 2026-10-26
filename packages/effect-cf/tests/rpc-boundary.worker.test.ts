@@ -79,9 +79,11 @@ test("RPC observes the complete event cause before rejecting with the original f
   events.push("reject");
   expect(events).toEqual(["cleanup", "observe", "reject"]);
   expect(observed).toHaveLength(1);
-  expect(observed[0]!.reasons.map((reason) => reason._tag)).toEqual(["Fail", "Die"]);
-  expect(observed[0]!.reasons.filter(Cause.isFailReason)[0]!.error).toBe(handlerFailure);
-  expect(observed[0]!.reasons.filter(Cause.isDieReason)[0]!.defect).toBe(finalizerDefect);
+  expect(observed[0]!.reasons.map((reason) => reason._tag)).toEqual(["Die", "Die"]);
+  const defects = observed[0]!.reasons.filter(Cause.isDieReason);
+
+  expect(defects[0]!.defect).toBe(handlerFailure);
+  expect(defects[1]!.defect).toBe(finalizerDefect);
 });
 
 interface AuditReceipt {

@@ -36,7 +36,6 @@ export * as RpcTargets from "./RpcTargets";
 export * as RpcWebSocketClient from "./RpcWebSocketClient";
 export * as ServiceBinding from "./ServiceBinding";
 export * as Vectorize from "./Vectorize";
-export * as WebCrypto from "./WebCrypto";
 export * as WebTransport from "./WebTransport";
 export * as Worker from "./Worker";
 export * as WorkerDefinition from "./WorkerDefinition";

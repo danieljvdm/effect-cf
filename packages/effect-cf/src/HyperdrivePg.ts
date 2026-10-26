@@ -9,7 +9,7 @@ import type { WorkerEnvironment } from "./Environment";
 import type * as Hyperdrive from "./Hyperdrive";
 
 export type PgLayerOptions = Omit<
-  Parameters<typeof PgClient.makeClient>[0],
+  PgClient.PgClientConfig,
   "url" | "host" | "port" | "path" | "ssl" | "database" | "username" | "password" | "stream"
 >;
 

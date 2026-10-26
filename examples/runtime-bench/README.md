@@ -1,8 +1,8 @@
 # Runtime benchmark example
 
-This private example preserves the application workloads used to investigate Effect Worker runtime costs: repeated typed service-binding RPC, HTTP application Layer reuse, OTLP signal configuration, and related Durable Object alarms. It imports the published `effect-cf` package without modifying it. The rejected RPC codec cache candidate is not included.
+Use this private example to measure Effect Worker runtime costs: repeated typed service-binding RPC, HTTP application Layer reuse, OTLP signal configuration, and related Durable Object alarms. It imports the published `effect-cf` package without modifying it.
 
-The portable workflows below build bundles and run local smoke checks. They do not deploy or delete Cloudflare resources, require credentials, or reproduce hosted CPU measurements. The archived hosted experiment and its limits are described in [the runtime performance report](../../docs/runtime-performance.md), with artifacts under [`benchmarks/runtime/2026-09-09`](../../benchmarks/runtime/2026-09-09/).
+The portable workflows below build bundles and run local smoke checks. They do not deploy or delete Cloudflare resources or require credentials. See the [runtime performance guide](../../docs/runtime-performance.md) for application configuration and measurement guidance.
 
 ## Build and fixtures
 
@@ -72,7 +72,7 @@ curl -H 'x-bench-id: local-rpc-1' 'http://localhost:8787/rpc?calls=25&sku=NOTE-A
 
 Every iteration makes a new sequential service-binding call using the definition-derived Effect client, with `benchId` as the explicit first RPC argument. The binding client is reusable; native invocation objects, promises, and results are not reused. The target logs role `target` for each lookup; the HTTP orchestrator logs role `gateway` with the call count.
 
-Response is `{ "calls":N, "results":[product,...] }`. NOTE-A5 is `{ "sku":"NOTE-A5", "name":"A5 dotted notebook", "category":"paper", "unitPriceCents":1295 }`. Unknown valid SKUs return null. This is a reusable baseline workload, not a shipped codec optimization.
+Response is `{ "calls":N, "results":[product,...] }`. NOTE-A5 is `{ "sku":"NOTE-A5", "name":"A5 dotted notebook", "category":"paper", "unitPriceCents":1295 }`. Unknown valid SKUs return null.
 
 ## HTTP setup reuse
 

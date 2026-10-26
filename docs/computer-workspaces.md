@@ -47,13 +47,3 @@ The filesystem facade and its top-level aliases include `rename(oldPath, newPath
 - Computer's native `ContainerBackend` uses Durable Object scheduling. The older platform-scheduled backend is now `LegacyContainerBackend` and is deprecated.
 
 See the [upstream changelog](https://github.com/cloudflare/computer/blob/9f0ade40196a4ef95ddde4f2b75e1555d9dfeeb1/packages/computer/CHANGELOG.md) and [runtime migration guide](https://github.com/cloudflare/computer/blob/9f0ade40196a4ef95ddde4f2b75e1555d9dfeeb1/docs/18_runtime_migration.md) when updating custom backends or JavaScript modules.
-
-## Upstream capabilities to build on
-
-| Capability                                           | Integration boundary                                                                                                                                                                                                                                                             |
-| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WorkerBundle` mounts and mount versions             | Already accepted by the host's `mounts` option. Bundle skills, templates, or reference files, and refresh them when their version changes. The upstream `computerBundle()` Vite plugin builds the file tree.                                                                     |
-| JavaScript CPU limits and host modules               | Configure `WorkerJavaScriptBackend` through `backends`. `maxCpuMs` bounds CPU time; `ws:tools`, `ws:assets`, and `ws:container` let code call explicitly supplied host capabilities.                                                                                             |
-| Replay after interruption and durable approval waits | Experimental upstream APIs: backend `onInterrupt`, host-function `ctx.interrupt()`, and native runtime `pending()`/`respond()`. The current upstream `WorkspaceRuntimeClient` does not expose the approval methods, so the Effect client facade does not yet expose them either. |
-
-Replay requires deliberate handling of side effects: use the stable call ID for deduplication or upstream's `unsafeToRepeat()` marker. Follow the [isolate JavaScript guide](https://github.com/cloudflare/computer/blob/9f0ade40196a4ef95ddde4f2b75e1555d9dfeeb1/docs/17_isolate_javascript.md) before enabling it. The base Workspace and Worker JavaScript backend are stable upstream; replay, container execution, and Worker Shell remain experimental.

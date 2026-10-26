@@ -47,6 +47,7 @@ Do not use `bun run`, `npm run`, `pnpm run`, or `yarn run` in this repository. D
 
 - Keep READMEs focused on the package's purpose, installation, and concise usage examples.
 - Put detailed setup, troubleshooting, and background explanations in `docs/`, with short README links when needed. Keep contributor and agent instructions in `AGENTS.md`.
+- Keep committed documentation focused on maintained usage, APIs, setup, troubleshooting, and migrations. Put one-off investigations, dependency audits, work logs, and generated benchmark results in PR descriptions or attached artifacts.
 
 # Repo-local skills
 

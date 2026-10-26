@@ -5,7 +5,7 @@ Effect services for Cloudflare Workers and Durable Objects.
 - [effect-cf](packages/effect-cf): Worker and Durable Object entrypoints, typed bindings, and storage.
 - [effect-webtransport](packages/effect-webtransport): WebTransport sessions, streams, datagrams, and Effect Socket adapters.
 
-For measured application tuning, see [runtime performance](docs/runtime-performance.md) and the [runtime benchmark example](examples/runtime-bench/README.md).
+For application tuning, see [runtime performance](docs/runtime-performance.md) and the [runtime benchmark example](examples/runtime-bench/README.md).
 
 ## Worker + Durable Object
 

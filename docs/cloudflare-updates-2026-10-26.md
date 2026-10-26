@@ -1,4 +1,4 @@
-# Cloudflare dependency review — 2026-10-26
+# Cloudflare and Vite+ dependency review — 2026-10-26
 
 The npm release tags, installed SDK declarations and implementation, and upstream changes between the old and new pins were checked for this upgrade.
 
@@ -55,3 +55,34 @@ The stable Vite plugin updates add several useful development features:
 Our bundle measurement harness deliberately sets `sourcemap: false` and `target: "es2022"`, so those two new defaults do not change its output settings. These are consumer configuration opportunities, not measured performance improvements from this upgrade. The source is the [stable 1.65.0 changelog](https://github.com/cloudflare/workers-sdk/blob/%40cloudflare%2Fvite-plugin%401.65.0/packages/vite-plugin/CHANGELOG.md).
 
 Vite plugin 1.65 removes `experimental.newConfig`: stable v1 uses Wrangler configuration files. `cloudflare.config.ts` now belongs to Vite plugin v2 beta. The existing harness already uses `wrangler.json`, so adopting the v2 configuration system should be evaluated separately.
+
+## Vite+ toolchain update
+
+The repository and its isolated bundle tools now use Vite+ 1.4.0. The global CLI was already current; the project dependencies were still on 0.3.0.
+
+| Tool                                            | Previous | Updated |
+| ----------------------------------------------- | -------- | ------- |
+| Vite+ and its core alias                        | 0.3.0    | 1.4.0   |
+| Bundled Vite                                    | 8.2.2    | 8.3.5   |
+| Vitest                                          | 4.1.11   | 5.0.5   |
+| Bundled Rolldown                                | 1.2.5    | 1.2.15  |
+| Standalone Rolldown for Alchemy bundle analysis | 1.1.5    | 1.2.15  |
+| Oxlint                                          | 1.79.0   | 1.89.0  |
+| Oxfmt                                           | 0.64.0   | 0.74.0  |
+| Bundled tsdown                                  | 0.22.14  | 0.23.1  |
+| Standalone esbuild                              | 0.28.1   | 0.28.2  |
+| GitHub Actions `setup-vp`                       | 1.18.0   | 1.22.0  |
+
+Vite+ owns the bundled tool versions. The standalone tsdown release is 0.23.2, but Vite+ 1.4.0 embeds 0.23.1; adding a tsdown dependency or override would not replace that embedded code.
+
+Vitest 5 closes the previous peer-version mismatch with `@effect/vitest`. Test imports and custom lint plugin imports use Vite+'s entrypoints, keeping them aligned with the tools running them. The private workspace requires Node `^22.18.0 || ^24.11.0 || >=26.0.0`; the published packages' runtime contracts are unchanged. Library builds select the declaration generator with `dts.generator: "tsgo"`.
+
+The Worker test projects disable Vitest 5's filesystem module cache. With the cache enabled, full runs under Cloudflare's test plugin 1.4.8 closed runner WebSockets before some files could execute; disabling only that cache allowed all 22 Worker suites to pass. Node tests retain the cache. This is a test-runner compatibility setting, with no effect on published code.
+
+Lint policy now lives in the workspace root, as required by the updated Oxlint integration. Type-aware lint rules remain enabled. Compiler diagnostics run through the existing per-project `typecheck` task and packaging tests, which stage the declaration fixtures with their consumer dependencies before compiling them.
+
+The migration-generated `clearMocks: false`, inline `extends: false`, and `sharedViteServer: false` settings were removed from the root and both package configurations. The full suite passed after each removal without changing assertions or adding skips. Package builds also use tsdown 0.23's default of preserving external subpath imports, removing the generated `resolveDepSubpath: true` override.
+
+Vite+ 1.4 also adds `vpx` execution of TypeScript files and `vp check --deny-warnings`. These are available for future repository workflow changes; the current Effect diagnostics intentionally keep warnings nonfatal. See the [Vite+ 1.4 release](https://github.com/voidzero-dev/vite-plus/releases/tag/v1.4.0) and [Vitest 5 migration guide](https://vitest.dev/guide/migration/).
+
+The [setup-vp 1.22 release](https://github.com/voidzero-dev/setup-vp/releases/tag/v1.22.0) adds Node and package-manager version outputs and optional caching of the CLI, Node runtime, and package manager. Toolchain caching requires exact Vite+ and Node pins; our workflows retain the rolling Node 24 selector and their existing dependency cache.

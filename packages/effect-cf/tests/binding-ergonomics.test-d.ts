@@ -1,4 +1,4 @@
-import { expectTypeOf } from "vitest";
+import { expectTypeOf } from "vite-plus/test";
 import { Config, Effect, Layer, Option, Redacted, Schema } from "effect";
 import type { PgClient } from "@effect/sql-pg";
 import type { HttpClient } from "effect/http";

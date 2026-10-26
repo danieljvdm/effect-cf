@@ -175,7 +175,7 @@ The [outbox example](#worker--durable-object) demonstrates atomic state and alar
 
 ## Development
 
-Use Vite+ 0.3.0 and Bun 1.4.0. Run `vp upgrade` to update an existing global Vite+ installation. The root `packageManager` field selects Bun for local installs and CI.
+Use Vite+ 1.4.0 and Bun 1.4.0 with Node 24.11 or newer on the 24.x line. Run `vp upgrade` to update an existing global Vite+ installation. The root `packageManager` field selects Bun for local installs and CI.
 
 ```sh
 vp install
@@ -189,16 +189,13 @@ Package, example, and repository-script typechecks use `effect-tsrs diagnostics 
 
 Use `vp run -r build` to build all workspaces. Package tests live under `packages/*/tests`.
 
-Effect 4.0's Vitest adapter declares a Vitest 5 peer requirement, while the
-repository's pinned Vite+ and Cloudflare test plugin use Vitest 4.1.11. The repository keeps
-that runner and validates the Effect adapter with its Node and workerd suites;
-this remains a declared peer compatibility gap until the toolchains align.
+Vite+ supplies Vitest 5.0.5, matching the Effect test adapter and Cloudflare test plugin's supported versions.
 
 Every PR gets a [consumer bundle comparison](docs/bundle-analysis.md), with initial
 and deferred sizes, a PR comment, and downloadable module analysis. Run it locally
 with `vp run bundle:compare -- --base-dir /path/to/built/base-checkout`.
 
-Vite+ 0.3 forwards Bun 1.4's native dependency-management commands:
+Vite+ forwards Bun 1.4's native dependency-management commands:
 
 - Run `vp dedupe` after dependency updates to consolidate compatible versions in `bun.lock`, or `vp dedupe --check` to inspect without changing it.
 - Use `vp add <package> --filter <workspace> --save-catalog` to add a shared dependency through the root catalog without manually editing both manifests.

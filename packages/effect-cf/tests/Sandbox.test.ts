@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import { Effect, Layer, Option, Stream } from "effect";
-import { expectTypeOf } from "vitest";
+import { expectTypeOf } from "vite-plus/test";
 
 import { Binding, WorkerEnvironment, type WorkerEnv } from "../src/index";
 import * as Sandbox from "../src/Sandbox";

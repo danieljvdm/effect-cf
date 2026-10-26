@@ -31,6 +31,8 @@ export default defineConfig({
         ],
         test: {
           name: "workers",
+          // Cached module replies make the Cloudflare 1.4.8 runner close its WebSocket.
+          fsModuleCache: false,
           exclude: testExcludes,
           include: ["**/*.worker.test.ts"],
         },
@@ -53,13 +55,7 @@ export default defineConfig({
       neverBundle: ["cloudflare:test", "cloudflare:workers", "cloudflare:workflows"],
     },
     dts: {
-      tsgo: true,
-    },
-  },
-  lint: {
-    options: {
-      typeAware: true,
-      typeCheck: true,
+      generator: "tsgo",
     },
   },
   fmt: {},

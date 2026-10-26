@@ -1,6 +1,6 @@
 import { cloudflareTest } from "@cloudflare/vitest-plugin";
-import type { OxfmtConfig } from "oxfmt";
-import type { OxlintConfig } from "oxlint";
+import type { OxfmtConfig } from "vite-plus/fmt";
+import type { OxlintConfig } from "vite-plus/lint";
 import { defineConfig } from "vite-plus";
 
 const toolIgnorePatterns = [
@@ -35,6 +35,8 @@ const recommendedOxlintConfig = {
   ignorePatterns: toolIgnorePatterns,
   options: {
     typeAware: true,
+    // Compiler diagnostics run per project; declaration fixtures need their staged consumers.
+    typeCheck: false,
   },
   jsPlugins: [
     {
@@ -175,6 +177,8 @@ export default defineConfig({
         ],
         test: {
           name: "workers",
+          // Cached module replies make the Cloudflare 1.4.8 runner close its WebSocket.
+          fsModuleCache: false,
           exclude: testExcludes,
           include: ["**/*.worker.test.ts"],
         },

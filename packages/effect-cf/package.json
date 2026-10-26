@@ -87,9 +87,10 @@
     "@modelcontextprotocol/client": "^2.0.0",
     "@platformatic/vfs": "^0.4.0",
     "effect": "catalog:",
-    "esbuild": "^0.28.1",
+    "esbuild": "^0.28.2",
     "just-bash": "3.6.0",
     "miniflare": "catalog:",
+    "vite": "catalog:",
     "vite-plus": "catalog:",
     "vitest": "catalog:"
   },

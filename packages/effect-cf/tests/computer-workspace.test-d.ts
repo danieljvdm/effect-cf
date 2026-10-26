@@ -1,6 +1,6 @@
 import type { WorkspaceClient, WorkspaceRuntimeClient } from "@cloudflare/computer";
 import type { GitClient } from "@cloudflare/computer/git";
-import { expectTypeOf } from "vitest";
+import { expectTypeOf } from "vite-plus/test";
 import { Effect, type Layer, type Scope } from "effect";
 
 import * as ComputerArtifacts from "effect-cf/computer-artifacts";

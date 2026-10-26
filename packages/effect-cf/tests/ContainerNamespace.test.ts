@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import type { Container as CloudflareContainer } from "@cloudflare/containers";
 import { Effect, Layer, Schema } from "effect";
-import { expectTypeOf } from "vitest";
+import { expectTypeOf } from "vite-plus/test";
 
 import {
   Binding,

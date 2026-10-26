@@ -1,5 +1,5 @@
 import type { ISandbox } from "@cloudflare/sandbox";
-import { expectTypeOf } from "vitest";
+import { expectTypeOf } from "vite-plus/test";
 import { Effect, type Option, type Stream } from "effect";
 
 import * as Sandbox from "effect-cf/sandbox";

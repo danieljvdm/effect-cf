@@ -135,11 +135,12 @@ interface QueueWorker {
   queue(batch: globalThis.MessageBatch): Promise<void>;
 }
 
-export type QueueMessage<Body> = {
+export interface QueueMessage<Body> {
   readonly id: string;
-  readonly timestamp: Date;
+  readonly timestamp: Date | number;
   readonly attempts: number;
-} & ({ readonly body: Body } | { readonly serializedBody: ArrayBuffer | ArrayBufferView });
+  readonly body: Body;
+}
 
 /** Acknowledgement and retry result returned by the Workers Vitest plugin. */
 export type QueueResult = Awaited<ReturnType<typeof getQueueResult>>;

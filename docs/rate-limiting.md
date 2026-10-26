@@ -9,7 +9,7 @@ For example, in `wrangler.jsonc`:
 {
   "name": "my-worker",
   "main": "src/index.ts",
-  "compatibility_date": "2026-09-26",
+  "compatibility_date": "2026-10-26",
   "ratelimits": [
     {
       "name": "MY_RATE_LIMITER",

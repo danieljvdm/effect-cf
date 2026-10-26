@@ -2,7 +2,7 @@
   "$schema": "../../../../../node_modules/wrangler/config-schema.json",
   "name": "effect-cf-native-container-test",
   "main": "worker.ts",
-  "compatibility_date": "2026-09-26",
+  "compatibility_date": "2026-10-26",
   "compatibility_flags": ["nodejs_compat"],
   "containers": [
     {

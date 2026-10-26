@@ -39,6 +39,7 @@ export type ArtifactsOperation =
 export const artifactsErrorCodes = [
   "ALREADY_EXISTS",
   "NOT_FOUND",
+  "CREATE_IN_PROGRESS",
   "IMPORT_IN_PROGRESS",
   "FORK_IN_PROGRESS",
   "INVALID_INPUT",
@@ -51,6 +52,11 @@ export const artifactsErrorCodes = [
   "INTERNAL_ERROR",
 ] as const satisfies ReadonlyArray<ArtifactsErrorCode>;
 
+/**
+ * Numeric codes documented by Cloudflare. `CREATE_IN_PROGRESS` has no published
+ * numeric mapping yet; operation errors preserve the runtime's `numericCode`.
+ * @see https://developers.cloudflare.com/artifacts/api/errors/
+ */
 export const artifactsErrorNumericCodes = {
   ALREADY_EXISTS: 10201,
   NOT_FOUND: 10200,
@@ -64,7 +70,7 @@ export const artifactsErrorNumericCodes = {
   UPSTREAM_UNAVAILABLE: 10401,
   MEMORY_LIMIT: 10402,
   INTERNAL_ERROR: 10400,
-} as const satisfies Readonly<Record<ArtifactsErrorCode, number>>;
+} as const satisfies Readonly<Partial<Record<ArtifactsErrorCode, number>>>;
 
 export type ArtifactsErrorCode = globalThis.ArtifactsErrorCode;
 

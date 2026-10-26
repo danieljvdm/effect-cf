@@ -1342,7 +1342,7 @@ function cursor<T extends SqlFixtureRow>(
 
       index += 1;
 
-      return value === undefined ? { done: true } : { done: false, value };
+      return value === undefined ? { done: true, value: undefined } : { done: false, value };
     },
     toArray: () => rows,
     one: () => {

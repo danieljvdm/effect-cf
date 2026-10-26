@@ -8,25 +8,29 @@ import {
   type CallToolResult,
   type CreateMcpHandlerOptions,
   type JSONObject,
+  type ServerContext,
   type ServerOptions,
   type StandardSchemaWithJSON,
 } from "@modelcontextprotocol/server";
-import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
+import * as FiberSet from "effect/FiberSet";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
-import type { JsonSchema } from "effect";
+import type { JsonSchema, Scope } from "effect";
 import * as AiError from "effect/ai/AiError";
 import * as Tool from "effect/ai/Tool";
 import type { Toolkit } from "effect/ai";
+import * as HttpEffect from "effect/http/HttpEffect";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
 
+import * as McpTool from "./McpTool";
 import { NativeRequest } from "./Worker";
-import { runNativeCallback } from "./internal/NativeCallback";
+
+export { McpProgressError, reportProgress, ToolContext, type Progress } from "./McpTool";
 
 /**
  * CORS headers applied to MCP responses.
@@ -81,18 +85,20 @@ export interface FromToolkitOptions extends CreateMcpHandlerOptions {
 
 /**
  * Services required to execute the tools of a toolkit: the tool handlers plus
- * every service those handlers and their parameter/result codecs need.
+ * every service those handlers and their parameter/result codecs need, except
+ * `McpTool.ToolContext`, which the bridge supplies separately for each call.
  */
 export type ToolkitServices<Tools extends Record<string, Tool.Any>> =
   | Tool.HandlersFor<Tools>
-  | Tool.HandlerServices<Tools[keyof Tools]>;
+  | Exclude<Tool.HandlerServices<Tools[keyof Tools]>, McpTool.ToolContext>;
 
 /**
  * Context required by the Effect returned from {@link fromToolkit}: the native
- * request provided by `Worker.make` plus the toolkit services.
+ * request and HTTP scope provided by `Worker.make` plus the toolkit services.
  */
 export type FromToolkitContext<Tools extends Record<string, Tool.Any>> =
   | NativeRequest
+  | Scope.Scope
   | ToolkitServices<Tools>;
 
 const DEFAULT_CORS_OPTIONS: Required<CorsOptions> = {
@@ -283,18 +289,20 @@ const standardInputSchema = (tool: Tool.Any): StandardSchemaWithJSON => {
 
 type RunToolCallback<R> = (
   effect: Effect.Effect<CallToolResult, never, R>,
-) => Promise<Exit.Exit<CallToolResult, never>>;
+  signal: AbortSignal,
+) => Promise<CallToolResult>;
 
 const handleToolCall = <Tools extends Record<string, Tool.Any>>(
   built: Toolkit.WithHandler<Tools>,
   tool: Tool.Any,
   params: Tool.Parameters<Tools[keyof Tools]>,
+  toolCallId: string,
 ): Effect.Effect<CallToolResult, never, Tool.HandlerServices<Tools[keyof Tools]>> => {
   const isDeclaredFailure = Schema.is(tool.failureSchema);
 
   // SAFETY: registerToolkitTool only registers tools taken from `built.tools`,
   // so the tool name is a key of the toolkit's tools record.
-  return built.handle(tool.name as keyof Tools, params).pipe(
+  return built.handle(tool.name as keyof Tools, params, toolCallId).pipe(
     Stream.unwrap,
     Stream.run(Sink.last()),
     Effect.flatMap(Effect.fromOption),
@@ -347,11 +355,32 @@ const handleToolCall = <Tools extends Record<string, Tool.Any>>(
   );
 };
 
+const makeToolContext = (context: ServerContext): McpTool.ToolContext["Service"] => {
+  const progressToken = context.mcpReq._meta?.progressToken;
+
+  return {
+    requestId: context.mcpReq.id,
+    signal: context.mcpReq.signal,
+    progressToken,
+    reportProgress: (progress) =>
+      progressToken === undefined
+        ? Effect.void
+        : Effect.tryPromise({
+            try: () =>
+              context.mcpReq.notify({
+                method: "notifications/progress",
+                params: { ...progress, progressToken },
+              }),
+            catch: (cause) => new McpTool.McpProgressError({ cause }),
+          }),
+  };
+};
+
 const registerToolkitTool = <Tools extends Record<string, Tool.Any>>(
   server: McpServer,
   built: Toolkit.WithHandler<Tools>,
   tool: Tool.Any,
-  run: RunToolCallback<Tool.HandlerServices<Tools[keyof Tools]>>,
+  run: RunToolCallback<Exclude<Tool.HandlerServices<Tools[keyof Tools]>, McpTool.ToolContext>>,
 ): void => {
   const outputJsonSchema = Tool.getJsonSchemaFromSchema(tool.successSchema);
   const outputSchema =
@@ -375,19 +404,19 @@ const registerToolkitTool = <Tools extends Record<string, Tool.Any>>(
       },
       _meta: toolMeta,
     },
-    async (args) => {
+    (args, context) => {
       // SAFETY: the SDK validated the arguments with the tool input schema,
       // whose `validate` keeps the encoded input, and the toolkit decodes the
       // parameters with the tool's Effect `Schema` before invoking the
       // handler.
       const params = (args ?? {}) as Tool.Parameters<Tools[keyof Tools]>;
-      const exit = await run(handleToolCall(built, tool, params));
 
-      if (Exit.isSuccess(exit)) {
-        return exit.value;
-      }
-
-      throw Cause.squash(exit.cause);
+      return run(
+        handleToolCall(built, tool, params, String(context.mcpReq.id)).pipe(
+          Effect.provideService(McpTool.ToolContext, makeToolContext(context)),
+        ),
+        context.mcpReq.signal,
+      );
     },
   );
 };
@@ -416,9 +445,18 @@ const registerToolkitTool = <Tools extends Record<string, Tool.Any>>(
  * `isError: true`, and unexpected errors are logged and reported to the client
  * as an internal tool error.
  *
- * In-flight tool calls are awaited before the HTTP response is returned, so
- * tool handlers always run to completion inside the fetch event, including on
- * transport lanes that stream results into the response body.
+ * Streaming responses return while tool calls are still running. The response
+ * body owns the HTTP request scope, keeping tool fibers and event-layer services
+ * alive until the body finishes or is canceled. Consume or cancel the returned
+ * body to release those resources.
+ *
+ * Tools can declare `McpTool.ToolContext` in their dependencies and call
+ * `McpTool.reportProgress` to send progress notifications. The bridge injects
+ * the service per call and uses the client's progress token. For modern clients,
+ * the default `responseMode: "auto"` streams notifications and `"json"` suppresses
+ * them. The legacy compatibility transport always uses SSE for tool calls.
+ * Toolkit preliminary results remain separate from MCP progress; only the
+ * final encoded result becomes the `CallToolResult`.
  *
  * **Example**
  *
@@ -488,44 +526,37 @@ export const fromToolkit = <Tools extends Record<string, Tool.Any>>(
 
     const built = yield* toolkit;
 
-    const response = yield* runNativeCallback<
+    const run = yield* FiberSet.makeRuntimePromise<
+      Exclude<Tool.HandlerServices<Tools[keyof Tools]>, McpTool.ToolContext>,
       CallToolResult,
-      never,
-      Tool.HandlerServices<Tools[keyof Tools]>,
-      Response
-    >(async (run) => {
-      // Some transport lanes (e.g. the 2025-era stateless fallback) resolve
-      // the HTTP response before in-flight tool handlers settle and stream the
-      // results into the response body afterwards. Track every tool-call
-      // effect and drain them before resolving, so the fetch Effect scope does
-      // not close (and interrupt them) mid-execution.
-      const pending = new Set<Promise<unknown>>();
-      const trackedRun: RunToolCallback<Tool.HandlerServices<Tools[keyof Tools]>> = (effect) => {
-        const promise = run(effect);
+      never
+    >();
+    const handler = yield* Effect.acquireRelease(
+      Effect.sync(() =>
+        createMcpHandler(() => {
+          const server = new McpServer(serverInfo, serverOptions);
 
-        pending.add(promise);
-        void promise.finally(() => pending.delete(promise));
+          for (const tool of Object.values(built.tools)) {
+            registerToolkitTool(server, built, tool, (effect, signal) => run(effect, { signal }));
+          }
 
-        return promise;
-      };
-      const handler = createMcpHandler(() => {
-        const server = new McpServer(serverInfo, serverOptions);
+          return server;
+        }, handlerOptions),
+      ),
+      (handler) => Effect.promise(() => handler.close()),
+    );
+    const response = yield* Effect.tryPromise(() => handler.fetch(request));
+    const context = yield* Effect.context<never>();
 
-        for (const tool of Object.values(built.tools)) {
-          registerToolkitTool(server, built, tool, trackedRun);
-        }
-
-        return server;
-      }, handlerOptions);
-      const response = await handler.fetch(request);
-
-      while (pending.size > 0) {
-        await Promise.allSettled([...pending]);
-      }
-
-      return response;
-    });
-
-    return Option.some(withCors(response, corsOptions));
+    // Worker.make passes native Responses through. Transfer its HTTP scope here
+    // so returning the headers cannot interrupt tools or release their services.
+    return Option.some(
+      HttpServerResponse.toWeb(
+        HttpEffect.scopeTransferToStream(
+          HttpServerResponse.fromWeb(withCors(response, corsOptions)),
+        ),
+        { context },
+      ),
+    );
   });
 };

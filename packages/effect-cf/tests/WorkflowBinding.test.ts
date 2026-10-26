@@ -20,7 +20,6 @@ it.effect("returns an errored status with Option.none output when output is null
   });
   const workflow = makePartialTestDouble<CloudflareWorkflow<unknown>>({
     create: async () => rawInstance,
-    createBatch: async () => [rawInstance],
     get: async () => rawInstance,
   });
   const client = WorkflowBinding.makeClient({
@@ -51,7 +50,6 @@ it.effect("decodes a completed null output with a Null result schema as Option.s
   });
   const workflow = makePartialTestDouble<CloudflareWorkflow<unknown>>({
     create: async () => rawInstance,
-    createBatch: async () => [rawInstance],
     get: async () => rawInstance,
   });
   const client = WorkflowBinding.makeClient({
@@ -85,7 +83,6 @@ it.effect("normalizes a null Workflow status error to Option.none", () => {
     CloudflareWorkflowInstance;
   const workflow = makePartialTestDouble<CloudflareWorkflow<unknown>>({
     create: async () => rawInstance,
-    createBatch: async () => [rawInstance],
     get: async () => rawInstance,
   });
   const client = WorkflowBinding.makeClient({

@@ -2,7 +2,7 @@
 
 `DurableObjectContainer` wraps Cloudflare's [Durable Object Container API](https://developers.cloudflare.com/containers/api/durable-object-container/). It supplies Effect operations for startup, readiness, monitoring, process execution, port access, outbound interception, and filesystem snapshots. It does not require `@cloudflare/containers` or the Sandbox SDK. `ContainerFiles` separately wraps the SDK 1.x `Files` utility.
 
-The tested baseline is Wrangler `4.144.0`, workerd `1.20260926.1`, and `@cloudflare/workers-types@5.20260926.1`, with compatibility date `2026-09-26`. Generate application types with `vp exec wrangler types`, or supply the supported Workers globals through `compilerOptions.types`.
+The tested baseline is Wrangler `4.153.0`, workerd `1.20261026.1`, and `@cloudflare/workers-types@5.20261026.1`, with compatibility date `2026-10-26`. Generate application types with `vp exec wrangler types`, or supply the supported Workers globals through `compilerOptions.types`.
 
 ## Configure a new application
 
@@ -11,7 +11,7 @@ Runtime image selection, instance sizing, and snapshots require the `durable_obj
 ```jsonc
 {
   "main": "src/index.ts",
-  "compatibility_date": "2026-09-26",
+  "compatibility_date": "2026-10-26",
   "containers": [
     {
       "class_name": "AgentContainer",

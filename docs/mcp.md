@@ -3,7 +3,7 @@
 `effect-cf/mcp` serves an Effect `Toolkit` through the MCP SDK's stateless HTTP handler. Install the optional server SDK alongside `effect-cf` and Effect:
 
 ```sh
-npm install effect-cf "effect@^4.0.0" "@modelcontextprotocol/server@^2.0.0"
+npm install effect-cf "effect@^4.0.6" "@modelcontextprotocol/server@^2.0.0"
 ```
 
 Declare `McpTool.ToolContext` as a tool dependency to report progress. The bridge supplies a separate context for each call, including its request ID, progress token, and abort signal. The root `McpTool` export has no MCP SDK dependency; the HTTP bridge lives in `effect-cf/mcp`.

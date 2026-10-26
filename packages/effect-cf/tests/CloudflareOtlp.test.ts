@@ -151,7 +151,8 @@ class OtlpCollector extends Context.Service<
   ).pipe(Layer.provide(NodeHttpServer.layerTest));
 }
 
-layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
+// The HTTP collector and exporter deadlines need the same live clock.
+layer(OtlpCollector.layer, { excludeTestServices: true })("CloudflareOtlp collector", (it) => {
   it.effect("reads standard OTEL config from the ambient ConfigProvider", () =>
     Effect.gen(function* () {
       const collector = yield* OtlpCollector;
@@ -290,11 +291,8 @@ layer(OtlpCollector.layer)("CloudflareOtlp collector", (it) => {
         const request = yield* collector.nextRequest;
         const spans = decodeOtlpPayload(request.body).resourceSpans[0].scopeSpans[0].spans;
 
-        expect(spans.map((span) => span.name).toSorted()).toEqual([
-          "current.request",
-          "http.server GET",
-        ]);
-        const server = spans.find((span) => span.name === "http.server GET");
+        expect(spans.map((span) => span.name).toSorted()).toEqual(["GET", "current.request"]);
+        const server = spans.find((span) => span.name === "GET");
 
         expect(getStringAttribute(server!.attributes, "url.path")).toBe("/current-request");
       }).pipe(Effect.scoped),

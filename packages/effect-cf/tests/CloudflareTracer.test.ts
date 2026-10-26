@@ -174,8 +174,8 @@ it.live.each(["default", "events", "diagnostics", "throwing"])(
         const branches = spans.filter(({ event }) => event.name === "branch");
 
         expect(branches).toHaveLength(2);
-        expect(span("operation").spanContext.spanId).toBe(span("http.server GET").event.spanId);
-        expect(span("http.server GET").spanContext.spanId).toBe(trace[0]!.event.spanId);
+        expect(span("operation").spanContext.spanId).toBe(span("GET").event.spanId);
+        expect(span("GET").spanContext.spanId).toBe(trace[0]!.event.spanId);
 
         for (const branch of branches) {
           const id = branch.event.spanId!;

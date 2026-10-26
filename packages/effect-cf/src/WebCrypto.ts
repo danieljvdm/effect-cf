@@ -6,7 +6,7 @@ import * as Option from "effect/Option";
 export const randomUUID: Effect.Effect<string> = Effect.serviceOption(Crypto.Crypto).pipe(
   Effect.flatMap((service) =>
     Option.isSome(service)
-      ? service.value.randomUUIDv4
+      ? service.value.randomUUIDv4()
       : Effect.sync(crypto.randomUUID.bind(crypto)),
   ),
   Effect.orDie,

@@ -356,9 +356,11 @@ test.each(["runtime", "event"] as const)(
     await expect(durableObject.succeed()).rejects.toBe(acquisitionFailure);
     expect(events).toEqual(["cleanup", "observe"]);
     expect(observed).toHaveLength(1);
-    expect(observed[0]!.reasons.map((reason) => reason._tag)).toEqual(["Fail", "Die"]);
-    expect(observed[0]!.reasons.filter(Cause.isFailReason)[0]!.error).toBe(acquisitionFailure);
-    expect(observed[0]!.reasons.filter(Cause.isDieReason)[0]!.defect).toBe(finalizerDefect);
+    expect(observed[0]!.reasons.map((reason) => reason._tag)).toEqual(["Die", "Die"]);
+    const defects = observed[0]!.reasons.filter(Cause.isDieReason);
+
+    expect(defects[0]!.defect).toBe(acquisitionFailure);
+    expect(defects[1]!.defect).toBe(finalizerDefect);
   },
 );
 

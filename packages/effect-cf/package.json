@@ -104,7 +104,7 @@
     "@effect/sql-pg": "^4.0.0",
     "@effect/sql-sqlite-do": "^4.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
-    "effect": "^4.0.0"
+    "effect": "^4.0.6"
   },
   "peerDependenciesMeta": {
     "@cloudflare/computer": {

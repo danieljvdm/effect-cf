@@ -371,7 +371,7 @@ const makeToolContext = (context: ServerContext): McpTool.ToolContext["Service"]
                 method: "notifications/progress",
                 params: { ...progress, progressToken },
               }),
-            catch: (cause) => new McpTool.McpProgressError({ cause }),
+            catch: (cause) => McpTool.McpProgressError.make({ cause }),
           }),
   };
 };

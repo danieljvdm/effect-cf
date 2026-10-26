@@ -3,15 +3,15 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@cloudflare/vite-plugin": "1.54.6",
+    "@cloudflare/vite-plugin": "1.65.0",
     "@effect/platform-node": "4.0.6",
     "alchemy": "2.0.0-beta.72",
     "effect": "4.0.6",
-    "esbuild": "0.28.1",
+    "esbuild": "0.28.2",
     "mime": "4.0.7",
-    "rolldown": "1.1.5",
-    "vite": "npm:@voidzero-dev/vite-plus-core@0.3.0",
-    "vite-plus": "0.3.0",
+    "rolldown": "1.2.15",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.4.0",
+    "vite-plus": "1.4.0",
     "wrangler": "4.153.0"
   },
   "devDependencies": {
@@ -19,14 +19,17 @@
     "typescript": "7.0.2"
   },
   "overrides": {
+    "@cloudflare/unenv-preset": "2.16.2",
     "@effect/platform-node": "4.0.6",
     "@effect/platform-node-shared": "4.0.6",
     "@effect/sql-d1": "4.0.6",
     "@effect/sql-sqlite-do": "4.0.6",
     "@effect/vitest": "4.0.6",
     "effect": "4.0.6",
-    "vite": "npm:@voidzero-dev/vite-plus-core@0.3.0",
-    "workerd": "1.20261026.1"
+    "miniflare": "5.20261023.0-beta",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.4.0",
+    "workerd": "1.20261026.1",
+    "wrangler": "4.153.0"
   },
   "packageManager": "bun@1.4.0",
   "patchedDependencies": {

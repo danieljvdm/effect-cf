@@ -89,7 +89,7 @@ Process `output` returns native `ArrayBuffer` stdout/stderr and an exit code; `o
 Install `@cloudflare/sandbox@1`, enable `nodejs_compat`, and copy the matching static helper into the image:
 
 ```dockerfile
-COPY --from=docker.io/cloudflare/sandbox:1.0.0 /usr/local/bin/sandbox-shim /usr/local/bin/sandbox-shim
+COPY --from=docker.io/cloudflare/sandbox:1.0.3 /usr/local/bin/sandbox-shim /usr/local/bin/sandbox-shim
 ```
 
 Wrap `Files` after obtaining the container service:
@@ -113,7 +113,7 @@ const writeTask = Effect.fn("writeTask")(function* () {
 
 The adapter accepts a structural `Files` instance, so importing `effect-cf` does not load either SDK version. See the SDK's [requirements](https://developers.cloudflare.com/sandbox/reference/) for image and Worker setup.
 
-SDK 1.0.0 can deadlock on file reads in local Docker development when stdout arrives before its opening control frame. This repository carries a [development SDK patch](../patches/README.md) for that bug. It is not shipped in `effect-cf` or applied to consumer installations; applications using SDK 1.0.0 locally need the same fix until an upstream SDK release includes it.
+Use Sandbox SDK 1.0.3 or newer. It includes the upstream fix for file reads hanging in local Docker development when stdout arrives before the opening control frame.
 
 ## Background processes and logs
 
@@ -197,6 +197,8 @@ CI runs this command separately from `vp test`, which skips the Docker test by d
 ## Migrate existing applications
 
 `ContainerNamespace` wraps RPC methods provided by the legacy `@cloudflare/containers` class. `effect-cf/sandbox` continues to wrap the legacy `@cloudflare/sandbox@0.13` API. Neither adapter implements the native API or the new scheduling policy.
+
+Process and terminal handles from `effect-cf/sandbox` implement `Disposable`. Within an Effect scope, acquire them with `Effect.acquireDisposable(sandbox.exec(command))` or `Effect.acquireDisposable(sandbox.createTerminal(options))` to release their RPC references automatically. Successful `getProcess` and `getTerminal` lookups return disposable handles too. Disposal leaves the process or terminal running; call `kill` or `terminate` when the workload should stop.
 
 To replace the Container base class while retaining the `default` policy, keep the Worker name, exported class, namespace binding, image, and migration history. Use `DurableObject.make` with the new layer, and provide the application's own RPC or fetch methods. Changing the TypeScript base class alone needs no new Durable Object migration. Replace `envVars` with native `env`; `enableInternet` is required whenever startup options are supplied. Use `setInactivityTimeout` for idle shutdown and `waitForHttp` for HTTP readiness; automatic proxying and lifecycle hooks become application code. Follow the [Container class migration guide](https://developers.cloudflare.com/containers/guides/migrate-to-durable-object-container-api/).
 

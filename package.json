@@ -25,17 +25,15 @@
     "@effect/platform-node": "catalog:",
     "@effect/tsgo": "0.36.4",
     "@effect/vitest": "catalog:",
-    "@oxlint/plugins": "1.79.0",
     "@stylistic/eslint-plugin": "5.10.0",
     "@types/bun": "^1.4.0",
     "@types/node": "^25.6.0",
     "@yielded/effect-tsrs": "0.2.2",
     "effect": "catalog:",
-    "esbuild": "0.28.1",
-    "oxfmt": "0.64.0",
-    "oxlint": "1.79.0",
+    "esbuild": "0.28.2",
     "tsrs": "0.18.0-ts7.1.0-dev.20260929",
     "typescript": "7.0.2",
+    "vite": "catalog:",
     "vite-plus": "catalog:",
     "vitest": "catalog:",
     "workerd": "catalog:",
@@ -53,7 +51,7 @@
   },
   "engines": {
     "bun": ">=1.4.0",
-    "node": ">=22.14.0"
+    "node": "^22.18.0 || ^24.11.0 || >=26.0.0"
   },
   "packageManager": "bun@1.4.0",
   "catalog": {
@@ -67,13 +65,10 @@
     "@effect/vitest": "^4.0.6",
     "effect": "^4.0.6",
     "miniflare": "5.20261023.0-beta",
-    "vite": "npm:@voidzero-dev/vite-plus-core@0.3.0",
-    "vitest": "4.1.11",
-    "vite-plus": "0.3.0",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.4.0",
+    "vitest": "5.0.5",
+    "vite-plus": "1.4.0",
     "wrangler": "4.153.0",
     "workerd": "1.20261026.1"
-  },
-  "patchedDependencies": {
-    "@cloudflare/sandbox@1.0.0": "patches/@cloudflare%2Fsandbox@1.0.0.patch"
   }
 }

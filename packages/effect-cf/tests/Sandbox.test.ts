@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import { Effect, Layer, Option, Stream } from "effect";
-import { expectTypeOf } from "vitest";
+import { expectTypeOf } from "vite-plus/test";
 
 import { Binding, WorkerEnvironment, type WorkerEnv } from "../src/index";
 import * as Sandbox from "../src/Sandbox";
@@ -104,6 +104,9 @@ const makeFakeProcess = (calls: Array<Call>): Sandbox.SandboxProcess =>
     kill: async (signal) => {
       calls.push({ operation: "process.kill", args: [signal] });
     },
+    [Symbol.dispose]: () => {
+      calls.push({ operation: "process.dispose", args: [] });
+    },
   });
 
 const terminalSnapshot: Sandbox.TerminalSnapshot = {
@@ -151,6 +154,9 @@ const makeFakeTerminal = (calls: Array<Call>): Sandbox.Terminal =>
     },
     terminate: async () => {
       calls.push({ operation: "terminal.terminate", args: [] });
+    },
+    [Symbol.dispose]: () => {
+      calls.push({ operation: "terminal.dispose", args: [] });
     },
   });
 
@@ -343,6 +349,26 @@ const makeFakeClient = (options?: {
 
   return { calls, client, instance, process, response, terminal, tunnelInfo };
 };
+
+it.effect("releases RPC handles without stopping their processes or terminals", () =>
+  Effect.gen(function* () {
+    const fake = makeFakeClient();
+
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        yield* Effect.acquireDisposable(fake.instance.exec(["sleep", "60"]));
+        yield* Effect.acquireDisposable(fake.instance.createTerminal({ command: ["bash"] }));
+      }),
+    );
+
+    assert.deepStrictEqual(fake.calls.map(({ operation }) => operation).sort(), [
+      "createTerminal",
+      "exec",
+      "process.dispose",
+      "terminal.dispose",
+    ]);
+  }),
+);
 
 it.effect("executes commands and wraps process handles", () => {
   const fake = makeFakeClient();

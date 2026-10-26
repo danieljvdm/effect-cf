@@ -1,10 +1,6 @@
-import type {
-  ThinkWorkspaceCompatibility,
-  WorkspaceClient,
-  WorkspaceRuntimeClient,
-} from "@cloudflare/computer";
+import type { WorkspaceClient, WorkspaceRuntimeClient } from "@cloudflare/computer";
 import type { GitClient } from "@cloudflare/computer/git";
-import { expectTypeOf } from "vitest";
+import { expectTypeOf } from "vite-plus/test";
 import { Effect, type Layer, type Scope } from "effect";
 
 import * as ComputerArtifacts from "effect-cf/computer-artifacts";
@@ -23,15 +19,9 @@ type MissingRuntimeMethods = Exclude<
   keyof WorkspaceRuntimeClient,
   keyof ComputerWorkspace.ComputerWorkspaceRuntime
 >;
-type MissingThinkMethods = Exclude<
-  keyof ThinkWorkspaceCompatibility,
-  keyof ComputerWorkspace.ComputerWorkspaceThink
->;
-
 expectTypeOf<MissingFilesystemMethods>().toEqualTypeOf<never>();
 expectTypeOf<MissingGitMethods>().toEqualTypeOf<never>();
 expectTypeOf<MissingRuntimeMethods>().toEqualTypeOf<never>();
-expectTypeOf<MissingThinkMethods>().toEqualTypeOf<never>();
 expectTypeOf(ComputerWorkspace.ComputerWorkspace.layer).toEqualTypeOf<
   Layer.Layer<
     ComputerWorkspace.ComputerWorkspace,
@@ -108,7 +98,7 @@ expectTypeOf<InstanceType<typeof WrappedDurableObject>>().toMatchTypeOf<BaseDura
 expectTypeOf<ComputerWorkspaceHostConfig["artifacts"]>().toEqualTypeOf<
   | {
       readonly binding: import("../src/Artifacts").ArtifactsBinding;
-      readonly sessionId?: string;
+      readonly sessionId?: string | null;
     }
   | undefined
 >();

@@ -37,7 +37,7 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - name: Set up Vite+ and install PR dependencies
-        uses: voidzero-dev/setup-vp@v1.18.0
+        uses: voidzero-dev/setup-vp@v1.22.0
         with:
           node-version: "24"
           cache: true

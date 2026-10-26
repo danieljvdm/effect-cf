@@ -13,28 +13,28 @@ import * as Predicate from "effect/Predicate";
 
 import * as Artifacts from "./Artifacts";
 
-/** External Git source accepted by a session-scoped repository import. */
+/** External Git source accepted by a repository import. */
 export type ComputerArtifactImportSource = Readonly<CloudflareComputerArtifactImportSource>;
 
-/** Target options accepted by a session-scoped repository import. */
+/** Target options accepted by a repository import. */
 export type ComputerArtifactImportOptions = Readonly<CloudflareComputerArtifactImportOptions>;
 
-/** Repository metadata returned by a session-scoped list operation. */
+/** Repository metadata returned by a list operation. */
 export type ComputerArtifactRepoSummary = Readonly<CloudflareComputerArtifactRepoSummary>;
 
-/** Token scope accepted by the upstream session facade. */
+/** Token scope accepted by the upstream Artifacts facade. */
 export type ComputerArtifactScope = CloudflareComputerArtifactScope;
 
 /** Optional Git remote-registration seam accepted by the argv API. */
 export type ComputerArtifactsRemoteAdd = CloudflareComputerRemoteAdd;
 
-/** Input to the session-scoped `artifacts` argv API. */
+/** Input to the `artifacts` argv API. */
 export type ComputerArtifactsCliInput = CloudflareComputerArtifactsCliInput;
 
-/** Result from the session-scoped `artifacts` argv API. */
+/** Result from the `artifacts` argv API. */
 export type ComputerArtifactsCliResult = Readonly<CloudflareComputerArtifactsCliResult>;
 
-/** Options used when wrapping a session-scoped Artifacts client. */
+/** Options used when wrapping an Artifacts client. */
 export interface ComputerArtifactsClientOptions {
   readonly binding?: string;
 }
@@ -47,13 +47,13 @@ interface MutableArtifactsErrorDetails {
 /**
  * Effect-native facade over `@cloudflare/computer/artifacts`.
  *
- * Repository names are local to {@link sessionId}. Prefixing and filtering are
- * intentionally delegated to the upstream `createArtifact` implementation so
- * this client and the worker-shell `artifacts` command always use the same
- * namespace convention.
+ * Repository names are local to {@link sessionId} when it is set. An undefined
+ * session ID addresses the whole namespace. Prefixing and filtering are
+ * delegated to the upstream `createArtifact` implementation so this client and
+ * the worker-shell `artifacts` command use the same namespace convention.
  */
 export interface ComputerArtifactsClient {
-  readonly sessionId: string;
+  readonly sessionId: string | undefined;
   readonly create: (
     name: Artifacts.RepoName,
     options?: Artifacts.ArtifactsCreateOptions,
@@ -132,7 +132,7 @@ const tryOperation = <A>(
 
 const spanOptions = (
   binding: string,
-  sessionId: string,
+  sessionId: string | undefined,
   operation: Artifacts.ArtifactsOperation,
 ) => ({ attributes: { binding, sessionId, operation } });
 
@@ -233,13 +233,14 @@ export const fromClient = (
 };
 
 /**
- * Creates an Effect-native session client directly from a Worker Artifacts
- * binding. `@cloudflare/computer` is loaded only when this Effect runs, keeping
- * the optional peer out of applications that do not use this integration.
+ * Creates an Effect-native client directly from a Worker Artifacts binding.
+ * Pass a session ID to scope repository names; omit it or pass `null` to address
+ * the whole namespace. `@cloudflare/computer` is loaded only when this Effect
+ * runs, keeping the optional peer out of applications without this integration.
  */
 export const makeClient = Effect.fn("ComputerArtifacts.makeClient")(function* (
   bindingValue: Artifacts.ArtifactsBinding,
-  sessionId: string,
+  sessionId?: string | null,
   options: ComputerArtifactsClientOptions = {},
 ) {
   const binding = options.binding ?? "ARTIFACTS";

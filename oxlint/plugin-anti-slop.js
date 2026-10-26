@@ -1,5 +1,5 @@
 // Bundled from the vendored anti-slop source at commit 9b80d9a5c317d3af94d88a577bdbde4d9a45f7be.
-import { definePlugin, defineRule } from "@oxlint/plugins";
+import { definePlugin, defineRule } from "vite-plus/lint/plugins";
 function isTypeAssertionExpression(node) {
 	return node.type === "TSAsExpression" || node.type === "TSTypeAssertion";
 }

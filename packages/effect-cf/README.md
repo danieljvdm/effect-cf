@@ -12,7 +12,7 @@ The repository tests against workerd `1.20261026.1` and `@cloudflare/workers-typ
 
 Serve Effect's native `McpServer` through `Worker.make`, with live tool progress and request cancellation. See the [MCP guide](https://github.com/danieljvdm/effect-cf/blob/main/docs/mcp.md) for server and client examples.
 
-See the [runtime performance guide](https://github.com/danieljvdm/effect-cf/blob/main/docs/runtime-performance.md) for measured alarm batching and telemetry configuration guidance.
+See the [runtime performance guide](https://github.com/danieljvdm/effect-cf/blob/main/docs/runtime-performance.md) for alarm batching and telemetry configuration guidance.
 
 For typed WebSocket RPC clients whose connection lifetime is owned by an Effect layer, see the [WebSocket RPC guide](https://github.com/danieljvdm/effect-cf/blob/main/docs/websocket-rpc.md).
 
@@ -234,6 +234,6 @@ See [binding configuration and usage](../../docs/rate-limiting.md).
 
 See the [exports](src/index.ts) and [tests](https://github.com/danieljvdm/effect-cf/tree/main/packages/effect-cf/tests) for the remaining APIs.
 
-Optional integrations have separate imports: `effect-cf/hyperdrive-pg`, `effect-cf/computer-workspace`, `effect-cf/computer-artifacts`, `effect-cf/computer-workspace-host`, `effect-cf/sandbox`, and `effect-cf/vitest`. Install the matching SDK or driver listed in [peerDependencies](package.json). Computer Git operations also require `@platformatic/vfs`.
+Optional integrations have separate imports: `effect-cf/hyperdrive-pg`, `effect-cf/computer-workspace`, `effect-cf/computer-artifacts`, `effect-cf/computer-workspace-host`, `effect-cf/sandbox`, and `effect-cf/vitest`. Install the matching SDK or driver listed in [peerDependencies](package.json). See [Computer workspace setup and migration](../../docs/computer-workspaces.md) for its additional peers and runtime options.
 
 [Changelog](CHANGELOG.md) · [MIT license](LICENSE)

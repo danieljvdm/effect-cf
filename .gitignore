@@ -56,3 +56,4 @@ Session.vim
 .bundle-base/
 .bundle-report/
 .runtime-bench/
+.vitest/

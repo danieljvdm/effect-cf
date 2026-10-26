@@ -1,3 +1,5 @@
+import { createRequire } from "node:module";
+
 import {
   Artifacts,
   createArtifactStore,
@@ -297,10 +299,19 @@ const versions = Effect.fn("bundlePipelines.versions")(function* (pipeline: Pipe
   if (pipeline === "vite") {
     result.vite = viteVersions.vite;
     result.rolldown = viteVersions.rolldown;
+    const pluginWranglerPath = yield* Effect.try({
+      try: () =>
+        createRequire(`${root}/node_modules/@cloudflare/vite-plugin/package.json`).resolve(
+          "wrangler/package.json",
+        ),
+      catch: (cause) =>
+        new PipelineError({
+          message: "Could not resolve the Vite plugin's Wrangler dependency",
+          cause,
+        }),
+    });
     const pluginWrangler = yield* Schema.decodeEffect(Schema.fromJsonString(Package))(
-      yield* fs.readFileString(
-        `${root}/node_modules/@cloudflare/vite-plugin/node_modules/wrangler/package.json`,
-      ),
+      yield* fs.readFileString(pluginWranglerPath),
     );
 
     result.wrangler = pluginWrangler.version;

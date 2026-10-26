@@ -69,6 +69,9 @@ const ComputerWorkspaceResult = S.Struct({
   foundPaths: S.Array(S.String),
   grepLines: S.Array(S.Finite),
   linkTarget: S.String,
+  missingFile: S.Boolean,
+  missingLink: S.Boolean,
+  backendCount: S.Finite,
   commit: S.String,
   branch: S.String,
   branches: S.Array(S.String),
@@ -466,7 +469,8 @@ const TestComputerWorkspaceLive = TestComputerWorkspaceDefinition.make(
           const workspace = yield* ComputerWorkspace.ComputerWorkspace;
 
           yield* workspace.mkdir("/notes", { recursive: true });
-          yield* workspace.writeFile("/notes/todo.md", "Ship it\nTODO verify\n");
+          yield* workspace.writeFile("/notes/todo.tmp", "Ship it\nTODO verify\n");
+          yield* workspace.rename("/notes/todo.tmp", "/notes/todo.md");
           yield* workspace.writeFile("/blob.bin", new Uint8Array([1, 2, 3]));
           yield* workspace.symlink("/notes/todo.md", "/todo-link");
           yield* workspace.chmod("/notes/todo.md", 0o640);
@@ -480,6 +484,9 @@ const TestComputerWorkspaceLive = TestComputerWorkspaceDefinition.make(
           const found = yield* workspace.find("/");
           const grep = yield* workspace.grep("todo", "/", { ignoreCase: true });
           const linkTarget = yield* workspace.readlink("/todo-link");
+          const missingFile = yield* workspace.statOrNull("/notes/todo.tmp");
+          const missingLink = yield* workspace.lstatOrNull("/notes/todo.tmp");
+          const backends = yield* workspace.runtime.backends;
 
           yield* workspace.git.init({ defaultBranch: "main" });
           yield* workspace.writeFile("/README.md", "first\n");
@@ -511,6 +518,9 @@ const TestComputerWorkspaceLive = TestComputerWorkspaceDefinition.make(
             foundPaths: found.map((entry) => entry.path),
             grepLines: grep.map((match) => match.line),
             linkTarget,
+            missingFile: missingFile === null,
+            missingLink: missingLink === null,
+            backendCount: backends.length,
             commit: resolved === committed.oid ? committed.oid : "mismatch",
             branch,
             branches,

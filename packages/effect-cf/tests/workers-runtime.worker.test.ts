@@ -1,10 +1,9 @@
-import * as WebCrypto from "../src/WebCrypto";
 import { env, exports } from "cloudflare:workers";
 import { listDurableObjectIds, runInDurableObject } from "cloudflare:test";
 import { assert, expect, layer, test } from "@effect/vitest";
-import { Effect, Layer, Predicate } from "effect";
+import { Crypto, Effect, Layer, Predicate } from "effect";
 
-import { WorkerEnvironment } from "../src/index";
+import * as PoolWorkers from "../src/Vitest";
 import { makePartialTestDouble } from "./TestDoubles";
 import { TestCounterDefinition, TestCounterDurableObject } from "./worker-fixture";
 
@@ -43,7 +42,7 @@ const encodedCounterStub = (stub: DecodedCounterStub): EncodedCounterStub => {
 };
 
 const testLayer = TestCounters.layer({ binding: "TEST_COUNTER_DO" }).pipe(
-  Layer.provide(Layer.succeed(WorkerEnvironment, env)),
+  Layer.provideMerge(PoolWorkers.layer),
 );
 
 test("runs package WorkerEntrypoint RPC in the Workers runtime", async () => {
@@ -62,7 +61,7 @@ test("runs package default Worker fetch in the Workers runtime", async () => {
 layer(testLayer)("Workers runtime Durable Object namespace", (it) => {
   it.effect("runs RPC, fetch, and schema-backed embedded KV", () =>
     Effect.gen(function* () {
-      const name = `counter-${yield* WebCrypto.randomUUID}`;
+      const name = `counter-${yield* Crypto.Crypto.use((crypto) => crypto.randomUUIDv4())}`;
       const counter = TestCounters.byName(name);
       const stub = yield* TestCounters.getByName(name);
 

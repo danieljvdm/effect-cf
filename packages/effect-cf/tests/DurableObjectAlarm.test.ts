@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { assert, expect, it, test } from "@effect/vitest";
 import { Cause, Context, DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema } from "effect";
 import { TestClock } from "effect/testing";
@@ -1270,6 +1271,7 @@ function makeAlarmFixture(options: AlarmFixtureOptions = {}) {
         DurableObjectState.fromDurableObjectState(state),
       ),
     ),
+    Layer.merge(NodeCrypto.layer),
   );
 
   return {

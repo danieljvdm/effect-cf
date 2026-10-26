@@ -1,7 +1,6 @@
-import * as WebCrypto from "../src/WebCrypto";
 import { env } from "cloudflare:workers";
 import { assert, it } from "@effect/vitest";
-import { Config, Context, Deferred, Effect, Fiber, Layer, Schema as S } from "effect";
+import { Config, Context, Crypto, Deferred, Effect, Fiber, Layer, Schema as S } from "effect";
 
 import { DurableObjectState, QueueDefinition, Worker, WorkerEnvironment } from "../src/index";
 import * as PoolWorkers from "../src/Vitest";
@@ -252,7 +251,7 @@ it.effect("interrupting a Workflow modifier waits for its cleanup", () =>
     Effect.gen(function* () {
       const introspector = yield* PoolWorkers.introspectWorkflowInstance(
         env.TEST_WORKFLOW!,
-        yield* WebCrypto.randomUUID,
+        yield* Crypto.Crypto.use((crypto) => crypto.randomUUIDv4()),
       );
       const started = yield* Deferred.make<void>();
       const continueCallback = yield* Deferred.make<void>();
@@ -277,7 +276,7 @@ it.effect("interrupting a Workflow modifier waits for its cleanup", () =>
       yield* Deferred.await(finalized);
       assert.isTrue(joinedCleanup);
     }),
-  ),
+  ).pipe(Effect.provide(PoolWorkers.layer)),
 );
 
 it.effect("introspects one Workflow instance with Effect-native modifiers", () => {

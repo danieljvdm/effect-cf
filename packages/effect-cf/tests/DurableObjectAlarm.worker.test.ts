@@ -6,6 +6,7 @@ import {
   Cause,
   Clock,
   Context,
+  type Crypto,
   DateTime,
   Deferred,
   Effect,
@@ -32,9 +33,10 @@ import type {
 } from "../src/DurableObjectStorage";
 import * as PoolWorkers from "../src/Vitest";
 
-const services = Layer.merge(
+const services = Layer.mergeAll(
   DurableObjectAlarm.DurableObjectAlarm.layer,
   DurableObjectSqlite.layer(),
+  PoolWorkers.layer,
 );
 // Far-future native deadlines keep these tests independent of the wall clock.
 const deadline = 4_000_000_000_000;
@@ -1836,7 +1838,9 @@ it.effect.each(["sql", "native", "no SQL service", "reused native callback"] as 
         );
 
         yield* boundary === "no SQL service"
-          ? transaction.pipe(Effect.updateContext<never, never>(Context.omit(SqlClient.SqlClient)))
+          ? transaction.pipe(
+              Effect.updateContext<Crypto.Crypto, Crypto.Crypto>(Context.omit(SqlClient.SqlClient)),
+            )
           : transaction;
         assert.deepStrictEqual(yield* sql`SELECT value FROM rollback_source ORDER BY value`, [
           { value: 1 },
@@ -2948,7 +2952,10 @@ it.effect.each([100, 1_000])(
         assert.isBelow(independentDispatchReads, 5_000);
       }).pipe(
         Effect.provide(
-          DurableObjectAlarm.DurableObjectAlarm.layer.pipe(Layer.provide(measuredState)),
+          DurableObjectAlarm.DurableObjectAlarm.layer.pipe(
+            Layer.provide(measuredState),
+            Layer.merge(PoolWorkers.layer),
+          ),
         ),
       );
     });

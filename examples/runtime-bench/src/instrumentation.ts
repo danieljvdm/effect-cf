@@ -1,5 +1,5 @@
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
-import { WebCrypto } from "effect-cf";
 
 let isolateId: string | undefined;
 const counters = new Map<string, number>();
@@ -9,7 +9,11 @@ export const mark = Effect.fnUntraced(function* (
   benchId: string,
   fields: Record<string, string | number | boolean> = {},
 ) {
-  if (isolateId === undefined) isolateId = yield* WebCrypto.randomUUID;
+  if (isolateId === undefined) {
+    const crypto = yield* Crypto.Crypto;
+
+    isolateId = yield* crypto.randomUUIDv4();
+  }
   const invocation = (counters.get(role) ?? 0) + 1;
 
   counters.set(role, invocation);

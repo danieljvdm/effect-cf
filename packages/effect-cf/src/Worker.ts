@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as References from "effect/References";
 import * as Tracer from "effect/Tracer";
-import type { Cause, ManagedRuntime, Scope } from "effect";
+import type { Cause, Crypto, ManagedRuntime, Scope } from "effect";
 import * as HttpEffect from "effect/http/HttpEffect";
 import * as HttpMiddleware from "effect/http/HttpMiddleware";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
@@ -94,7 +94,12 @@ const reservedMethodNames = new Set<string>([
   "trace",
 ]);
 
-type WorkerBaseContext<ROut> = ExecutionContext | WorkerContext | WorkerEnvironment | ROut;
+type WorkerBaseContext<ROut> =
+  | Crypto.Crypto
+  | ExecutionContext
+  | WorkerContext
+  | WorkerEnvironment
+  | ROut;
 type WorkerFetchContext<ROut> =
   | WorkerBaseContext<ROut>
   | NativeRequest
@@ -372,7 +377,7 @@ const scheduleFetchTelemetryFlush: Effect.Effect<void, never, WorkerContext> =
  * `eventLayer` for resources whose finalizers must run with an event.
  */
 export function make<ROut, LayerError>(
-  layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+  layer: Layer.Layer<ROut, LayerError, RuntimeContext<never>>,
   fetch: WorkerHandler<ROut>,
 ): WorkerClass<Record<never, never>, ROut>;
 export function make<
@@ -382,7 +387,7 @@ export function make<
   EventLayerError = never,
   const Rpc extends WorkerRpc<ROut | REvent> = Record<never, never>,
 >(
-  layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+  layer: Layer.Layer<ROut, LayerError, RuntimeContext<never>>,
   options: WorkerOptionsWithEventLayer<ROut, REvent, EventLayerError, Rpc>,
 ): WorkerClass<Rpc, ROut | REvent>;
 export function make<
@@ -392,7 +397,7 @@ export function make<
   EventLayerError = never,
   const Rpc extends WorkerRpc<ROut | REvent> = Record<never, never>,
 >(
-  layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+  layer: Layer.Layer<ROut, LayerError, RuntimeContext<never>>,
   options: WorkerOptions<ROut, REvent, EventLayerError, Rpc>,
 ): WorkerClass<Rpc, ROut | REvent>;
 export function make<
@@ -402,7 +407,7 @@ export function make<
   EventLayerError = never,
   const Rpc extends WorkerRpc<ROut | REvent> = Record<never, never>,
 >(
-  layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+  layer: Layer.Layer<ROut, LayerError, RuntimeContext<never>>,
   optionsOrFetch: WorkerOptions<ROut, REvent, EventLayerError, Rpc> | WorkerHandler<ROut>,
 ): WorkerClass<Rpc, ROut | REvent> {
   const options: WorkerOptions<ROut, REvent, EventLayerError, Rpc> = isWorkerOptions(optionsOrFetch)
@@ -548,7 +553,7 @@ export function makeFetchHandler<
   EventLayerError = never,
   Env extends WorkerEnv = WorkerEnv,
 >(
-  layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+  layer: Layer.Layer<ROut, LayerError, RuntimeContext<never>>,
   options: FetchWorkerOptionsWithEventLayer<ROut, REvent, EventLayerError>,
 ): FetchHandler<Env>;
 export function makeFetchHandler<
@@ -558,7 +563,7 @@ export function makeFetchHandler<
   EventLayerError = never,
   Env extends WorkerEnv = WorkerEnv,
 >(
-  layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+  layer: Layer.Layer<ROut, LayerError, RuntimeContext<never>>,
   options: FetchWorkerOptions<ROut, REvent, EventLayerError>,
 ): FetchHandler<Env>;
 export function makeFetchHandler<
@@ -568,7 +573,7 @@ export function makeFetchHandler<
   EventLayerError = never,
   Env extends WorkerEnv = WorkerEnv,
 >(
-  layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+  layer: Layer.Layer<ROut, LayerError, RuntimeContext<never>>,
   options: FetchWorkerOptions<ROut, REvent, EventLayerError>,
 ): FetchHandler<Env> {
   const WorkerClass =

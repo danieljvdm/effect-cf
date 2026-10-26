@@ -1,3 +1,4 @@
+import type * as Crypto from "effect/Crypto";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as S from "effect/Schema";
@@ -66,7 +67,11 @@ export type TagClass<
   readonly payload: Payload;
   readonly result: Result;
   readonly make: <ROut, LayerError>(
-    layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+    layer: Layer.Layer<
+      ROut,
+      LayerError,
+      Crypto.Crypto | ExecutionContext | WorkerContext | WorkerEnvironment
+    >,
     options: Options<ROut, Definition<Id, Payload, Result>>,
   ) => WorkflowEntrypoint.WorkflowClass<S.Codec.Encoded<Payload>, S.Codec.Encoded<Result>, ROut>;
   readonly layer: (
@@ -124,7 +129,11 @@ const makeDefinition = <
 
   return Object.assign(workflowDefinition, {
     make: <ROut, LayerError>(
-      layer: Layer.Layer<ROut, LayerError, ExecutionContext | WorkerContext | WorkerEnvironment>,
+      layer: Layer.Layer<
+        ROut,
+        LayerError,
+        Crypto.Crypto | ExecutionContext | WorkerContext | WorkerEnvironment
+      >,
       options: Options<ROut, SelfDefinition>,
     ) =>
       WorkflowEntrypoint.make(layer, {

@@ -1,7 +1,6 @@
-import * as WebCrypto from "../src/WebCrypto";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
-import { Effect, Exit, Stream } from "effect";
+import { Crypto, Effect, Exit, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { createTestHarness } from "wrangler";
 
@@ -65,7 +64,9 @@ it.live.runIf(process.env.EFFECT_CF_CONTAINER_TESTS === "1")(
 
       const worker = server.getWorker<ContainerTestEnv>();
       const env = yield* step("get Worker bindings", () => worker.getEnv());
-      const container = env.CONTAINER.getByName(yield* WebCrypto.randomUUID);
+      const container = env.CONTAINER.getByName(
+        yield* Crypto.Crypto.use((crypto) => crypto.randomUUIDv4()),
+      );
       const proxyName = `workerd-effect-cf-native-container-test-IntegrationContainer-${container.id.toString()}-proxy`;
 
       // Wrangler removes the workload but currently leaves its egress proxy behind.

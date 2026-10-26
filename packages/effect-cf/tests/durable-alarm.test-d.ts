@@ -1,5 +1,5 @@
 import { expectTypeOf } from "vitest";
-import { Context, DateTime, Effect, Layer, Schema } from "effect";
+import { Context, type Crypto, DateTime, Effect, Layer, Schema } from "effect";
 import { SqlClient, type SqlError } from "effect/sql";
 
 import {
@@ -49,7 +49,7 @@ expectTypeOf(composed).toEqualTypeOf<
     | DurableObjectAlarm.InvalidAlarmPayloadError
     | DurableObjectAlarm.InvalidRepeatEveryError
     | DurableObjectAlarm.InvalidScheduleConfigurationError,
-    Application | SqlClient.SqlClient | DurableObjectState.DurableObjectState
+    Application | SqlClient.SqlClient | DurableObjectState.DurableObjectState | Crypto.Crypto
   >
 >();
 
@@ -252,7 +252,7 @@ expectTypeOf(maintenanceRegistration.run).toEqualTypeOf<
   Effect.Effect<
     DurableObjectAlarm.ProcessDueAlarmsResult,
     ApplicationError | DurableObjectAlarm.DurableObjectAlarmError,
-    Application | DurableObjectAlarm.DurableObjectAlarm
+    Application | DurableObjectAlarm.DurableObjectAlarm | Crypto.Crypto
   >
 >();
 const armMaintenance = Effect.flatMap(Maintenance, (alarms) =>

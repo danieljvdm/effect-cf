@@ -24,7 +24,6 @@ export * as Environment from "./Environment";
 export * as Hyperdrive from "./Hyperdrive";
 export * as Images from "./Images";
 export * as Kv from "./Kv";
-export * as McpTool from "./McpTool";
 export * as Queue from "./Queue";
 export * as QueueBinding from "./QueueBinding";
 export * as QueueDefinition from "./QueueDefinition";

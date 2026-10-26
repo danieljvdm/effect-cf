@@ -1,53 +1,68 @@
-# MCP tools and live progress
+# MCP servers on Workers
 
-`effect-cf/mcp` serves an Effect `Toolkit` through the MCP SDK's stateless HTTP handler. Install the optional server SDK alongside `effect-cf` and Effect:
-
-```sh
-npm install effect-cf "effect@^4.0.6" "@modelcontextprotocol/server@^2.0.0"
-```
-
-Declare `McpTool.ToolContext` as a tool dependency to report progress. The bridge supplies a separate context for each call, including its request ID, progress token, and abort signal. The root `McpTool` export has no MCP SDK dependency; the HTTP bridge lives in `effect-cf/mcp`.
+Use Effect's `McpServer.layerHttpRequestScoped` with `Worker.make`. Effect owns tool registration, schemas, protocol handling, and progress notifications; the Worker owns the HTTP request and response lifetime. Install `effect-cf` and `effect@^4.0.6`; no separate MCP server SDK is required.
 
 ```ts
-import { Effect, Option, Schema } from "effect";
-import { Tool, Toolkit } from "effect/ai";
-import { McpTool, Worker } from "effect-cf";
-import * as Mcp from "effect-cf/mcp";
+import { Effect, Layer, Schema } from "effect";
+import { McpProtocol, McpSchema, McpServer, Tool, Toolkit } from "effect/ai";
+import { HttpRouter } from "effect/http";
+import { Worker } from "effect-cf";
 
 const Wait = Tool.make("Wait", {
   description: "Waits one second and reports progress",
-  dependencies: [McpTool.ToolContext],
-  parameters: Schema.Struct({}),
+  dependencies: [McpServer.McpServer, McpSchema.McpRequestContext],
+  parameters: Tool.EmptyParams,
   success: Schema.Struct({ done: Schema.Boolean }),
-  failure: McpTool.McpProgressError,
 });
 const toolkit = Toolkit.make(Wait);
-const live = toolkit.toLayer({
+const handlers = toolkit.toLayer({
   Wait: () =>
     Effect.gen(function* () {
-      yield* McpTool.reportProgress({ progress: 0, total: 1, message: "Started" });
+      const server = yield* McpServer.McpServer;
+      const { requestMetadata } = yield* McpSchema.McpRequestContext;
+      const progressToken = requestMetadata?.progressToken;
+
+      if (Schema.is(McpSchema.ProgressToken)(progressToken)) {
+        yield* server.notifications["notifications/progress"]({
+          progressToken,
+          progress: 0,
+          total: 1,
+          message: "Started",
+        });
+      }
+
       yield* Effect.sleep("1 second");
-      yield* McpTool.reportProgress({ progress: 1, total: 1, message: "Finished" });
 
       return { done: true };
     }),
 });
 
-export default Worker.make(live, {
-  fetch: Effect.gen(function* () {
-    const response = yield* Mcp.fromToolkit(toolkit, {
-      name: "progress-example",
-      version: "1.0.0",
-    });
+const server = McpServer.layerHttpRequestScoped({
+  name: "progress-example",
+  version: "1.0.0",
+  path: "/mcp",
+  protocols: [McpProtocol.v2026_07_28],
+});
+const routes = McpServer.toolkit(toolkit).pipe(
+  Layer.provide(handlers),
+  Layer.provideMerge(server),
+  Layer.provideMerge(HttpRouter.layer),
+);
 
-    return Option.isSome(response) ? response.value : new Response("Not found", { status: 404 });
-  }),
+export default Worker.make(routes, {
+  fetch: HttpRouter.HttpRouter.use((router) => router.asHttpEffect()),
 });
 ```
 
-Progress units belong to the tool. Values must increase on successive updates; `total` and `message` are optional. A failed notification produces `McpProgressError`, which the example declares as a tool failure. The helpers are also exported directly from `effect-cf/mcp`.
+Use `Tool.EmptyParams` for tools without parameters. Other tools use an object schema such as `Schema.Struct({ query: Schema.String })`. Progress values must increase on successive updates; their units belong to the tool. Read the current call's token from `McpRequestContext` and omit notifications when the client supplies none. Toolkit preliminary results are separate from progress notifications.
 
-The client must request progress. With `@modelcontextprotocol/client@^2.0.0`, supplying `onprogress` makes the SDK send and track a progress token:
+The sessionless `2026-07-28` protocol uses one `/mcp` endpoint. Streamable HTTP POST responses carry live notifications as `text/event-stream`; there is no legacy GET event-stream endpoint or separate message endpoint. Requests without notifications can return JSON. The request-scoped server supports tools, resources, prompts, and completions, but not long-lived sessions or subscriptions.
+
+Merge other Effect HTTP routes into the same router. For browser clients, set the server's `allowedOrigins` to exact origins and configure `HttpRouter.cors` on that router. Present `Origin` headers are denied unless explicitly allowed; clients without an `Origin` header remain supported. Apply authentication through your usual HTTP middleware.
+
+## Client progress
+
+With `@modelcontextprotocol/client@^2.0.0`, enable modern version negotiation and supply `onprogress` so the client sends and tracks a progress token:
 
 ```ts
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
@@ -70,14 +85,10 @@ try {
 }
 ```
 
-For modern clients, `responseMode` controls delivery:
+## Request lifetime and migration
 
-| Mode               | Behavior                                                                                              |
-| ------------------ | ----------------------------------------------------------------------------------------------------- |
-| `"auto"` (default) | Starts streaming when the tool sends its first notification. Calls without notifications return JSON. |
-| `"sse"`            | Returns streaming headers before the tool finishes, even without notifications.                       |
-| `"json"`           | Waits for the final result and suppresses notifications.                                              |
+Return the router's `HttpServerResponse` directly from the Worker fetch effect. `Worker.make` keeps the HTTP scope open until the body finishes or is canceled and forwards the request's abort signal to the running handler and response stream. Cancellation interrupts unfinished tools and releases request resources. Custom consumers of `worker.fetch` must consume or cancel the response body.
 
-Legacy clients use the SDK's SSE compatibility transport. `responseMode` applies only to the modern transport. Without a client progress token, `reportProgress` does nothing and the tool still returns its final result. Effect Toolkit preliminary results remain separate: the bridge sends the final encoded result as `CallToolResult`, and explicit progress calls produce `notifications/progress`.
+The example registers tools with application services once. If registration or handlers capture request-specific services, assemble the registration and router in the Worker's `eventLayer` with those services. Each request then owns its registrations and resources. Avoid wrapping the fetch effect in an inner `Effect.scoped` that closes before streaming ends.
 
-Yield `Mcp.fromToolkit` inside a `Worker.make` fetch handler. It requires the HTTP request scope and transfers that scope to the response body so tool fibers and event-layer services survive returning the headers. Consuming or canceling the body releases the scope; cancellation interrupts unfinished tools. Custom consumers must consume or cancel the response, and must not wrap the call in an inner `Effect.scoped` that closes before streaming ends. Do not retain `ToolContext` after its call finishes.
+`effect-cf/mcp` and `Mcp.fromToolkit` have been removed. Replace them with the native layer composition above. Use `McpSchema.McpRequestContext` and `McpServer.McpServer.notifications` for per-call progress. Replace `route` with `path`, SDK server options with Effect's server options, and `corsOptions` with `HttpRouter.cors`. Replace `allowedOriginHostnames` with `allowedOrigins` containing full origins; enforce any host restrictions through routing or middleware. `responseMode` and legacy transport options are no longer supported; Effect selects JSON or a streaming POST response as needed.

@@ -7,6 +7,7 @@ import * as Tracer from "effect/Tracer";
 import type { Cause, Crypto, ManagedRuntime, Scope } from "effect";
 import * as HttpEffect from "effect/http/HttpEffect";
 import * as HttpMiddleware from "effect/http/HttpMiddleware";
+import { ClientAbort } from "effect/http/HttpServerError";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 
@@ -253,6 +254,7 @@ export interface FetchHandler<Env extends WorkerEnv = WorkerEnv> {
 const renderFetchSuccess = <E, R, REvent, EventLayerError, EventLayerRequirements>(
   effect: Effect.Effect<WorkerFetchSuccess, E, R>,
   eventLayer: Layer.Layer<REvent, EventLayerError, EventLayerRequirements> | undefined,
+  signal: AbortSignal,
 ): Effect.Effect<
   Response,
   E | EventLayerError,
@@ -291,6 +293,7 @@ const renderFetchSuccess = <E, R, REvent, EventLayerError, EventLayerRequirement
               {
                 withoutBody,
                 context,
+                signal,
               },
             );
           });
@@ -340,7 +343,23 @@ const renderFetchSuccess = <E, R, REvent, EventLayerError, EventLayerRequirement
     // response, so both branches return the response captured above.
     const captured = () => nativeResponse ?? webResponse ?? new Response(null, { status: 500 });
 
-    return Effect.matchCause(handled, { onFailure: captured, onSuccess: captured });
+    return Effect.acquireUseRelease(
+      Effect.withFiber((fiber) =>
+        Effect.sync(() => {
+          const onAbort = () => fiber.interruptUnsafe(undefined, ClientAbort.annotation);
+
+          if (signal.aborted) {
+            onAbort();
+          } else {
+            signal.addEventListener("abort", onAbort, { once: true });
+          }
+
+          return onAbort;
+        }),
+      ),
+      () => Effect.matchCause(handled, { onFailure: captured, onSuccess: captured }),
+      (onAbort) => Effect.sync(() => signal.removeEventListener("abort", onAbort)),
+    );
   });
 
 const isWorkerOptions = <ROut, REvent, EventLayerError, Rpc extends WorkerRpc<ROut | REvent>>(
@@ -492,7 +511,7 @@ export function make<
       // never build an event layer against a previous request's ExecutionContext.
       // HttpEffect owns the inner scope and transfers it to streaming response bodies.
       return this[RunSymbol](
-        renderFetchSuccess(fetchHandler, options.eventLayer).pipe(
+        renderFetchSuccess(fetchHandler, options.eventLayer, request.signal).pipe(
           Effect.provideContext(requestServices),
         ),
         { event: "fetch" },

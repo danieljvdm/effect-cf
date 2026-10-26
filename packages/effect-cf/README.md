@@ -10,7 +10,7 @@ npm install effect-cf "effect@^4.0.6"
 
 The repository tests against workerd `1.20261026.1` and `@cloudflare/workers-types@5.20261026.1`. Use `compatibility_date: "2026-10-26"` in Wrangler.
 
-Expose Effect toolkits through `effect-cf/mcp` and report live tool progress with `McpTool.reportProgress`. See the [MCP guide](https://github.com/danieljvdm/effect-cf/blob/main/docs/mcp.md) for server and client examples.
+Serve Effect's native `McpServer` through `Worker.make`, with live tool progress and request cancellation. See the [MCP guide](https://github.com/danieljvdm/effect-cf/blob/main/docs/mcp.md) for server and client examples.
 
 See the [runtime performance guide](https://github.com/danieljvdm/effect-cf/blob/main/docs/runtime-performance.md) for measured alarm batching and telemetry configuration guidance.
 

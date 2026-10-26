@@ -27,11 +27,6 @@
       "import": "./dist/HyperdrivePg.mjs",
       "default": "./dist/HyperdrivePg.mjs"
     },
-    "./mcp": {
-      "types": "./dist/Mcp.d.mts",
-      "import": "./dist/Mcp.mjs",
-      "default": "./dist/Mcp.mjs"
-    },
     "./computer-artifacts": {
       "types": "./dist/ComputerArtifacts.d.mts",
       "import": "./dist/ComputerArtifacts.mjs",
@@ -90,7 +85,6 @@
     "@effect/sql-sqlite-do": "catalog:",
     "@effect/vitest": "catalog:",
     "@modelcontextprotocol/client": "^2.0.0",
-    "@modelcontextprotocol/server": "^2.0.0",
     "@platformatic/vfs": "^0.4.0",
     "effect": "catalog:",
     "esbuild": "^0.28.1",
@@ -106,7 +100,6 @@
     "@effect/sql-d1": "^4.0.0",
     "@effect/sql-pg": "^4.0.0",
     "@effect/sql-sqlite-do": "^4.0.0",
-    "@modelcontextprotocol/server": "^2.0.0",
     "effect": "^4.0.6"
   },
   "peerDependenciesMeta": {
@@ -123,9 +116,6 @@
       "optional": true
     },
     "@effect/sql-pg": {
-      "optional": true
-    },
-    "@modelcontextprotocol/server": {
       "optional": true
     }
   }

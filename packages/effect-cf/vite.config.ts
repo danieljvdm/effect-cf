@@ -45,7 +45,6 @@ export default defineConfig({
       "src/ComputerWorkspace.ts",
       "src/ComputerWorkspaceHost.ts",
       "src/HyperdrivePg.ts",
-      "src/Mcp.ts",
       "src/Sandbox.ts",
       "src/Vitest.ts",
       "src/RpcWebSocketClient.ts",

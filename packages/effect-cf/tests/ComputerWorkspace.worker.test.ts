@@ -1,7 +1,36 @@
 /// <reference types="@cloudflare/vitest-plugin/types" />
 
 import { env } from "cloudflare:test";
+import { assert, it } from "@effect/vitest";
+import { Effect } from "effect";
 import { expect, test } from "vite-plus/test";
+
+import * as ComputerWorkspace from "../src/ComputerWorkspace";
+import * as PoolWorkers from "../src/Vitest";
+
+it.effect("preserves invalid-path errors when the path contains missing-entry error text", () => {
+  const stub = env.TEST_COMPUTER_DO!.getByName(crypto.randomUUID());
+
+  return PoolWorkers.runInDurableObject(stub, () =>
+    Effect.gen(function* () {
+      const workspace = yield* ComputerWorkspace.ComputerWorkspace;
+
+      for (const path of ["/../ENOENT", "/../no such"]) {
+        const errors = [
+          yield* workspace.statOrNull(path).pipe(Effect.flip),
+          yield* workspace.lstatOrNull(path).pipe(Effect.flip),
+          yield* workspace.exists(path).pipe(Effect.flip),
+        ];
+
+        for (const error of errors) {
+          assert.instanceOf(error, ComputerWorkspace.WorkspaceFsError);
+          assert.strictEqual(error.code, "EINVAL");
+          assert.strictEqual(error.path, path);
+        }
+      }
+    }).pipe(Effect.provide(ComputerWorkspace.ComputerWorkspace.layer)),
+  );
+});
 
 test("SQLite-backed workspaces persist filesystem and local Git operations", async () => {
   const namespace = env.TEST_COMPUTER_DO;

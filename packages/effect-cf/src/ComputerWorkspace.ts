@@ -533,7 +533,7 @@ const tryFs = <A>(operation: string, path: string, evaluate: () => Promise<A>) =
   });
 
 const isNotFound = (error: WorkspaceFsError): boolean =>
-  error.code === "ENOENT" || /ENOENT|no such/i.test(error.message);
+  error.code !== undefined ? error.code === "ENOENT" : /ENOENT|no such/i.test(error.message);
 
 const makeFilesystem = (fsClient: CloudflareWorkspaceFilesystem): ComputerWorkspaceFilesystem => {
   const readFileImplementation = Effect.fn("ComputerWorkspace.fs.readFile", {

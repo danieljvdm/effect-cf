@@ -1,5 +1,4 @@
 import type {
-  ThinkWorkspaceCompatibility,
   WorkspaceClient,
   WorkspaceRuntimeEvent,
   WorkspaceRuntimeExecHandle,
@@ -31,21 +30,26 @@ const runtimeResult = {
   stdout: "hello\n",
   stderr: "",
   value: { ok: true },
+  truncated: {
+    stdout: {
+      status: "saved" as const,
+      path: "/.computer/output/exec.stdout",
+      totalBytes: 13,
+      totalLines: 2,
+      firstLine: 2,
+      partialLine: false,
+    },
+  },
   pushed: 2,
   pulled: 3,
   skipped: [],
   sync: { status: "complete" as const, applied: 3, skipped: [] },
 };
 
-interface ReceiverSensitiveThinkClient extends ThinkWorkspaceCompatibility {
-  readonly root: string;
-  readonly writes: Array<string>;
-}
-
 const makeHandle = (id: string, disposed: Array<string>): WorkspaceRuntimeExecHandle<"utf8"> => {
   const events: Array<WorkspaceRuntimeEvent<"utf8">> = [
     { id, seq: 0, name: "stdout", value: "hello\n" },
-    { id, seq: 1, name: "exit", code: 0, result: { ok: true } },
+    { id, seq: 1, name: "exit", code: 0, result: { ok: true }, truncated: runtimeResult.truncated },
   ];
   const stream = new ReadableStream<WorkspaceRuntimeEvent<"utf8">>({
     start(controller) {
@@ -176,6 +180,7 @@ it.effect("wraps text, binary streams, runtime metadata, and scoped run disposal
         sequence: 1,
         exitCode: 0,
         value: { ok: true },
+        truncated: runtimeResult.truncated,
       },
     ]);
     assert.deepStrictEqual(disposed, ["exec-1", "exec-2", "exec-3"]);
@@ -249,48 +254,6 @@ it("propagates native Git acquisition failures while wrapping the workspace", ()
 
   assert.throws(() => ComputerWorkspace.fromWorkspaceClient(client), cause);
 });
-
-it.effect("preserves the workspace receiver for Think compatibility methods", () =>
-  Effect.gen(function* () {
-    const thinkClient: ReceiverSensitiveThinkClient = {
-      root: "/workspace",
-      writes: [],
-      readFile(path) {
-        return Promise.resolve(`${this.root}${path}`);
-      },
-      readFileBytes(path) {
-        return Promise.resolve(new TextEncoder().encode(`${this.root}${path}`));
-      },
-      writeFile(path, content) {
-        this.writes.push(`${this.root}${path}:${content}`);
-
-        return Promise.resolve();
-      },
-      readDir: () => Promise.resolve([]),
-      rm: () => Promise.resolve(),
-      glob: () => Promise.resolve([]),
-      mkdir: () => Promise.resolve(),
-      stat: () => Promise.resolve(null),
-    };
-    const client = makePartialTestDouble<WorkspaceClient>({
-      ...thinkClient,
-      fs: {},
-      git: {},
-      artifacts: emptyArtifacts,
-      assets: undefined,
-      runtime: {},
-      [Symbol.dispose]: () => {},
-    });
-    const think = ComputerWorkspace.fromWorkspaceClient(client).think;
-
-    assert.isDefined(think);
-    assert.strictEqual(yield* think.readFile("/notes.txt"), "/workspace/notes.txt");
-
-    yield* think.writeFile("/notes.txt", "saved");
-
-    assert.deepStrictEqual(thinkClient.writes, ["/workspace/notes.txt:saved"]);
-  }),
-);
 
 it.effect("maps filesystem failures to schema-serializable family errors", () =>
   Effect.gen(function* () {

@@ -72,8 +72,5 @@
     "vite-plus": "0.3.0",
     "wrangler": "4.153.0",
     "workerd": "1.20261026.1"
-  },
-  "patchedDependencies": {
-    "@cloudflare/sandbox@1.0.0": "patches/@cloudflare%2Fsandbox@1.0.0.patch"
   }
 }

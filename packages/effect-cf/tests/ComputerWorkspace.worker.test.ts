@@ -19,6 +19,9 @@ test("SQLite-backed workspaces persist filesystem and local Git operations", asy
   expect(result.foundPaths).toEqual(expect.arrayContaining(["/notes/todo.md", "/blob.bin"]));
   expect(result.grepLines).toEqual([2]);
   expect(result.linkTarget).toBe("/notes/todo.md");
+  expect(result.missingFile).toBe(true);
+  expect(result.missingLink).toBe(true);
+  expect(result.backendCount).toBe(0);
   expect(result.commit).toMatch(/^[0-9a-f]{40}$/);
   expect(result.branch).toBe("main");
   expect(result.branches).toContain("feature");

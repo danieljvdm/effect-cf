@@ -6,13 +6,9 @@ import {
   type WorkspaceObserver,
   type WorkspaceOptions,
   type WorkspaceRegisteredBackend,
-  type WorkspaceRetryPendingSyncResult,
   type WorkspaceSpan,
   type WorkspaceAttributes,
   type WorkspaceAttributeValue,
-  type SyncRetryIntent,
-  type SyncRetryOptions,
-  type SyncRetryScheduler,
   withWorkspace,
 } from "@cloudflare/computer";
 import {
@@ -36,14 +32,10 @@ export { WorkspaceServiceProxy } from "@cloudflare/computer";
 
 export type {
   ShellModuleGroup,
-  SyncRetryIntent,
-  SyncRetryOptions,
-  SyncRetryScheduler,
   WorkspaceAttributeValue,
   WorkspaceAttributes,
   WorkspaceEgressPolicy,
   WorkspaceObserver,
-  WorkspaceRetryPendingSyncResult,
   WorkspaceSpan,
 };
 
@@ -55,14 +47,15 @@ export interface ComputerWorkspaceGitIdentity {
   readonly email: string;
 }
 
-/** Session-scoped Artifacts configuration passed through to `Workspace`. */
+/** Artifacts configuration passed through to `Workspace`. */
 export interface ComputerWorkspaceArtifactsOptions {
   readonly binding: Artifacts.ArtifactsBinding;
   /**
    * Session prefix for repository names. When omitted, `sessionId` from the
-   * enclosing host configuration is used.
+   * enclosing host configuration is used. Pass `null` to address the whole
+   * namespace even when the host has a session ID.
    */
-  readonly sessionId?: string;
+  readonly sessionId?: string | null;
 }
 
 /**
@@ -92,12 +85,10 @@ export interface ComputerWorkspaceHostConfig {
   readonly shell?: ComputerWorkspaceShellOptions;
   readonly mounts?: WorkspaceOptions["mounts"];
   readonly observer?: WorkspaceOptions["observer"];
-  readonly retryScheduler?: WorkspaceOptions["retryScheduler"];
-  readonly retry?: WorkspaceOptions["retry"];
+  readonly output?: WorkspaceOptions["output"];
   readonly assets?: WorkspaceOptions["assets"];
   readonly artifacts?: ComputerWorkspaceArtifactsOptions;
   readonly now?: WorkspaceOptions["now"];
-  readonly useThink?: WorkspaceOptions["useThink"];
 }
 
 const toWorkspaceOptions = (config: ComputerWorkspaceHostConfig): WorkspaceOptions => {
@@ -117,10 +108,8 @@ const toWorkspaceOptions = (config: ComputerWorkspaceHostConfig): WorkspaceOptio
     );
   }
 
-  // SAFETY: Cloudflare's native DurableObjectStorage implements the narrower storage methods used
-  // by Computer; the union also accepts Computer's structural test/storage contract directly.
   const options: WorkspaceOptions = {
-    storage: config.storage as DurableObjectStorageLike,
+    storage: config.storage,
     git: config.git ?? createGitClient(),
   };
 
@@ -129,8 +118,7 @@ const toWorkspaceOptions = (config: ComputerWorkspaceHostConfig): WorkspaceOptio
   if (config.sessionId !== undefined) options.sessionId = config.sessionId;
   if (config.mounts !== undefined) options.mounts = config.mounts;
   if (config.observer !== undefined) options.observer = config.observer;
-  if (config.retryScheduler !== undefined) options.retryScheduler = config.retryScheduler;
-  if (config.retry !== undefined) options.retry = config.retry;
+  if (config.output !== undefined) options.output = config.output;
   if (config.assets !== undefined) options.assets = config.assets;
 
   if (config.artifacts !== undefined) {
@@ -153,7 +141,6 @@ const toWorkspaceOptions = (config: ComputerWorkspaceHostConfig): WorkspaceOptio
   }
 
   if (config.now !== undefined) options.now = config.now;
-  if (config.useThink !== undefined) options.useThink = config.useThink;
 
   return options;
 };

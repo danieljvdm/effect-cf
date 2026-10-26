@@ -5,11 +5,12 @@ import type {
   RuntimeKillOptions as CloudflareRuntimeKillOptions,
   ShellValue as CloudflareShellValue,
   SkippedEntry as CloudflareSkippedEntry,
-  ThinkWorkspaceCompatibility as CloudflareThinkWorkspaceCompatibility,
+  WorkspaceBackendInfo as CloudflareWorkspaceBackendInfo,
   WorkspaceClient as CloudflareWorkspaceClient,
   WorkspaceRuntimeEvent as CloudflareWorkspaceRuntimeEvent,
   WorkspaceRuntimeExecHandle as CloudflareWorkspaceRuntimeExecHandle,
   WorkspaceRuntimeResult as CloudflareWorkspaceRuntimeResult,
+  WorkspaceRuntimeTruncation as CloudflareWorkspaceRuntimeTruncation,
   WorkspaceRuntimeValue as CloudflareWorkspaceRuntimeValue,
 } from "@cloudflare/computer";
 import type { ArtifactClient as CloudflareComputerArtifactClient } from "@cloudflare/computer/artifacts";
@@ -148,7 +149,11 @@ export interface WorkspaceReadFile {
 export interface ComputerWorkspaceFilesystem {
   readonly readFile: WorkspaceReadFile;
   readonly stat: (path: string) => Effect.Effect<WorkspaceEntryStat, WorkspaceFsError>;
+  readonly statOrNull: (path: string) => Effect.Effect<WorkspaceEntryStat | null, WorkspaceFsError>;
   readonly lstat: (path: string) => Effect.Effect<WorkspaceEntryStat, WorkspaceFsError>;
+  readonly lstatOrNull: (
+    path: string,
+  ) => Effect.Effect<WorkspaceEntryStat | null, WorkspaceFsError>;
   readonly exists: (path: string) => Effect.Effect<boolean, WorkspaceFsError>;
   readonly readlink: (path: string) => Effect.Effect<string, WorkspaceFsError>;
   readonly readdir: (
@@ -176,6 +181,7 @@ export interface ComputerWorkspaceFilesystem {
     options?: WorkspaceMkdirOptions,
   ) => Effect.Effect<void, WorkspaceFsError>;
   readonly rm: (path: string, options?: RemovePathOptions) => Effect.Effect<void, WorkspaceFsError>;
+  readonly rename: (oldPath: string, newPath: string) => Effect.Effect<void, WorkspaceFsError>;
   readonly chmod: (path: string, mode: number) => Effect.Effect<void, WorkspaceFsError>;
   readonly symlink: (target: string, path: string) => Effect.Effect<void, WorkspaceFsError>;
 }
@@ -266,6 +272,10 @@ export type WorkspaceGetExecOptions<Encoding extends WorkspaceExecEncoding = "ut
   readonly encoding?: Encoding;
 };
 
+/** Describes output omitted from a result and where the full stream was saved. */
+export type WorkspaceExecTruncation = CloudflareWorkspaceRuntimeTruncation;
+export type WorkspaceBackendInfo = CloudflareWorkspaceBackendInfo;
+
 export type WorkspaceExecEvent<Encoding extends WorkspaceExecEncoding = "utf8"> =
   | ({
       readonly _tag: "Stdout";
@@ -285,6 +295,7 @@ export type WorkspaceExecEvent<Encoding extends WorkspaceExecEncoding = "utf8"> 
       readonly sequence: number;
       readonly exitCode: number;
       readonly value?: WorkspaceRuntimeValue;
+      readonly truncated?: WorkspaceExecTruncation;
     };
 
 export interface WorkspaceExecResult<Encoding extends WorkspaceExecEncoding = "utf8"> {
@@ -293,6 +304,8 @@ export interface WorkspaceExecResult<Encoding extends WorkspaceExecEncoding = "u
   readonly stdout: WorkspaceExecChunk<Encoding>;
   readonly stderr: WorkspaceExecChunk<Encoding>;
   readonly value?: WorkspaceRuntimeValue;
+  /** Full-output locations when stdout or stderr exceeded the configured limits. */
+  readonly truncated?: WorkspaceExecTruncation;
   readonly pushed: number;
   readonly pulled: number;
   readonly skipped: ReadonlyArray<WorkspaceExecSkippedEntry>;
@@ -353,6 +366,7 @@ export interface WorkspaceExecCollect {
 }
 
 export interface ComputerWorkspaceRuntime {
+  readonly backends: Effect.Effect<ReadonlyArray<WorkspaceBackendInfo>, WorkspaceExecError>;
   readonly exec: WorkspaceExec;
   readonly execCollect: WorkspaceExecCollect;
   readonly getExec: WorkspaceGetExec;
@@ -373,28 +387,18 @@ export interface ComputerWorkspaceAssets {
   ) => Effect.Effect<string, WorkspaceAssetsError>;
 }
 
-type EffectThinkMethod<Method> = Method extends (...args: infer Args) => Promise<infer Success>
-  ? (...args: Args) => Effect.Effect<Success, WorkspaceFsError>
-  : never;
-
-/** Effect wrapper of the optional Think compatibility surface. */
-export type ComputerWorkspaceThink = {
-  readonly [Name in keyof CloudflareThinkWorkspaceCompatibility]: EffectThinkMethod<
-    CloudflareThinkWorkspaceCompatibility[Name]
-  >;
-};
-
 export interface ComputerWorkspaceService {
   readonly fs: ComputerWorkspaceFilesystem;
   readonly git: ComputerWorkspaceGit;
   readonly runtime: ComputerWorkspaceRuntime;
   readonly artifacts: ComputerArtifacts.ComputerArtifactsClient;
   readonly assets: ComputerWorkspaceAssets | undefined;
-  readonly think: ComputerWorkspaceThink | undefined;
 
   readonly readFile: WorkspaceReadFile;
   readonly stat: ComputerWorkspaceFilesystem["stat"];
+  readonly statOrNull: ComputerWorkspaceFilesystem["statOrNull"];
   readonly lstat: ComputerWorkspaceFilesystem["lstat"];
+  readonly lstatOrNull: ComputerWorkspaceFilesystem["lstatOrNull"];
   readonly exists: ComputerWorkspaceFilesystem["exists"];
   readonly readlink: ComputerWorkspaceFilesystem["readlink"];
   readonly readdir: ComputerWorkspaceFilesystem["readdir"];
@@ -405,6 +409,7 @@ export interface ComputerWorkspaceService {
   readonly writeFile: ComputerWorkspaceFilesystem["writeFile"];
   readonly mkdir: ComputerWorkspaceFilesystem["mkdir"];
   readonly rm: ComputerWorkspaceFilesystem["rm"];
+  readonly rename: ComputerWorkspaceFilesystem["rename"];
   readonly removePath: ComputerWorkspaceFilesystem["rm"];
   readonly chmod: ComputerWorkspaceFilesystem["chmod"];
   readonly symlink: ComputerWorkspaceFilesystem["symlink"];
@@ -570,6 +575,27 @@ const makeFilesystem = (fsClient: CloudflareWorkspaceFilesystem): ComputerWorksp
     return yield* tryFs("lstat", path, () => fsClient.lstat(path));
   });
 
+  const statOrNull = Effect.fn("ComputerWorkspace.fs.statOrNull", {
+    attributes: { family: "fs", operation: "statOrNull" },
+  })(function* (path: string) {
+    yield* Effect.annotateCurrentSpan("path", path);
+
+    // Computer 0.8's local filesystem lacks the nullable methods declared in its types.
+    return yield* tryFs("statOrNull", path, () => fsClient.stat(path)).pipe(
+      Effect.catchIf(isNotFound, () => Effect.succeed(null)),
+    );
+  });
+
+  const lstatOrNull = Effect.fn("ComputerWorkspace.fs.lstatOrNull", {
+    attributes: { family: "fs", operation: "lstatOrNull" },
+  })(function* (path: string) {
+    yield* Effect.annotateCurrentSpan("path", path);
+
+    return yield* tryFs("lstatOrNull", path, () => fsClient.lstat(path)).pipe(
+      Effect.catchIf(isNotFound, () => Effect.succeed(null)),
+    );
+  });
+
   const exists = Effect.fn("ComputerWorkspace.fs.exists", {
     attributes: { family: "fs", operation: "exists" },
   })(function* (path: string) {
@@ -653,6 +679,13 @@ const makeFilesystem = (fsClient: CloudflareWorkspaceFilesystem): ComputerWorksp
     yield* tryFs("chmod", path, () => fsClient.chmod(path, mode));
   });
 
+  const rename = Effect.fn("ComputerWorkspace.fs.rename", {
+    attributes: { family: "fs", operation: "rename" },
+  })(function* (oldPath: string, newPath: string) {
+    yield* Effect.annotateCurrentSpan({ path: oldPath, newPath });
+    yield* tryFs("rename", oldPath, () => fsClient.rename(oldPath, newPath));
+  });
+
   const symlink = Effect.fn("ComputerWorkspace.fs.symlink", {
     attributes: { family: "fs", operation: "symlink" },
   })(function* (target: string, path: string) {
@@ -663,7 +696,9 @@ const makeFilesystem = (fsClient: CloudflareWorkspaceFilesystem): ComputerWorksp
   return {
     readFile,
     stat,
+    statOrNull,
     lstat,
+    lstatOrNull,
     exists,
     readlink,
     readdir,
@@ -673,6 +708,7 @@ const makeFilesystem = (fsClient: CloudflareWorkspaceFilesystem): ComputerWorksp
     writeFile,
     mkdir,
     rm,
+    rename,
     chmod,
     symlink,
   };
@@ -843,7 +879,9 @@ const wrapRuntimeResult = <Encoding extends WorkspaceExecEncoding>(
     sync: result.sync,
   };
 
-  return result.value === undefined ? wrapped : { ...wrapped, value: result.value };
+  const withValue = result.value === undefined ? wrapped : { ...wrapped, value: result.value };
+
+  return result.truncated === undefined ? withValue : { ...withValue, truncated: result.truncated };
 };
 
 type AnyWorkspaceExecEvent = WorkspaceExecEvent<"utf8"> | WorkspaceExecEvent<"binary">;
@@ -886,7 +924,12 @@ const wrapRuntimeEvent = (
         exitCode: event.code,
       };
 
-      return event.result === undefined ? exitEvent : { ...exitEvent, value: event.result };
+      const withValue =
+        event.result === undefined ? exitEvent : { ...exitEvent, value: event.result };
+
+      return event.truncated === undefined
+        ? withValue
+        : { ...withValue, truncated: event.truncated };
   }
 };
 
@@ -924,6 +967,15 @@ const wrapRun = <Encoding extends WorkspaceExecEncoding>(
 };
 
 const makeRuntime = (client: CloudflareWorkspaceClient): ComputerWorkspaceRuntime => {
+  const backends = Effect.try({
+    try: () => client.runtime.backends(),
+    catch: (cause) => execError("backends", cause),
+  }).pipe(
+    Effect.withSpan("ComputerWorkspace.runtime.backends", {
+      attributes: { family: "runtime", operation: "backends" },
+    }),
+  );
+
   const execImplementation = Effect.fn("ComputerWorkspace.runtime.exec", {
     attributes: { family: "runtime", operation: "exec" },
   })(function* <Encoding extends WorkspaceExecEncoding = "utf8">(
@@ -1032,7 +1084,7 @@ const makeRuntime = (client: CloudflareWorkspaceClient): ComputerWorkspaceRuntim
   // returns the result associated with that same encoding.
   const execCollect = execCollectImplementation as WorkspaceExecCollect;
 
-  return { exec, execCollect, getExec, killExec, disposeExec };
+  return { backends, exec, execCollect, getExec, killExec, disposeExec };
 };
 
 const makeAssets = (
@@ -1052,90 +1104,6 @@ const makeAssets = (
           });
         }),
       };
-
-const makeThink = (client: CloudflareWorkspaceClient): ComputerWorkspaceThink | undefined => {
-  if (
-    client.readFile === undefined ||
-    client.readFileBytes === undefined ||
-    client.writeFile === undefined ||
-    client.readDir === undefined ||
-    client.rm === undefined ||
-    client.glob === undefined ||
-    client.mkdir === undefined ||
-    client.stat === undefined
-  ) {
-    return undefined;
-  }
-
-  const method = <Args extends Array<unknown>, Success>(
-    operation: string,
-    pathOf: (...args: Args) => string,
-    evaluate: (...args: Args) => Promise<Success>,
-  ) =>
-    Effect.fn(`ComputerWorkspace.think.${operation}`, {
-      attributes: { family: "think", operation },
-    })(function* (...args: Args) {
-      const path = pathOf(...args);
-
-      yield* Effect.annotateCurrentSpan("path", path);
-
-      return yield* tryFs(`think.${operation}`, path, () => evaluate(...args));
-    });
-
-  const readFile = client.readFile.bind(client);
-  const readFileBytes = client.readFileBytes.bind(client);
-  const writeFile = client.writeFile.bind(client);
-  const readDir = client.readDir.bind(client);
-  const rm = client.rm.bind(client);
-  const glob = client.glob.bind(client);
-  const mkdir = client.mkdir.bind(client);
-  const stat = client.stat.bind(client);
-
-  return {
-    readFile: method(
-      "readFile",
-      (path: string) => path,
-      (path: string) => readFile(path),
-    ),
-    readFileBytes: method(
-      "readFileBytes",
-      (path: string) => path,
-      (path: string) => readFileBytes(path),
-    ),
-    writeFile: method(
-      "writeFile",
-      (path: string, _content: string) => path,
-      (path: string, content: string) => writeFile(path, content),
-    ),
-    readDir: method(
-      "readDir",
-      (path: string, _options?: { readonly limit?: number; readonly offset?: number }) => path,
-      (path: string, options?: { readonly limit?: number; readonly offset?: number }) =>
-        readDir(path, options),
-    ),
-    rm: method(
-      "rm",
-      (path: string, _options?: { readonly recursive?: boolean; readonly force?: boolean }) => path,
-      (path: string, options?: { readonly recursive?: boolean; readonly force?: boolean }) =>
-        rm(path, options),
-    ),
-    glob: method(
-      "glob",
-      (pattern: string) => pattern,
-      (pattern: string) => glob(pattern),
-    ),
-    mkdir: method(
-      "mkdir",
-      (path: string, _options?: { readonly recursive?: boolean }) => path,
-      (path: string, options?: { readonly recursive?: boolean }) => mkdir(path, options),
-    ),
-    stat: method(
-      "stat",
-      (path: string) => path,
-      (path: string) => stat(path),
-    ),
-  } satisfies ComputerWorkspaceThink;
-};
 
 /**
  * Wraps a client whose lifetime is owned by the caller. Prefer
@@ -1160,7 +1128,6 @@ export const fromWorkspaceClient = (
   // SAFETY: the upstream WorkspaceClient declaration erases this optional concrete assets client
   // to `any`; Workspace exposes AssetsClient | undefined here.
   const assets = makeAssets(client.assets as CloudflareComputerAssetsClient | undefined);
-  const think = makeThink(client);
 
   return {
     fs,
@@ -1170,10 +1137,11 @@ export const fromWorkspaceClient = (
     runtime,
     artifacts,
     assets,
-    think,
     readFile: fs.readFile,
     stat: fs.stat,
+    statOrNull: fs.statOrNull,
     lstat: fs.lstat,
+    lstatOrNull: fs.lstatOrNull,
     exists: fs.exists,
     readlink: fs.readlink,
     readdir: fs.readdir,
@@ -1184,6 +1152,7 @@ export const fromWorkspaceClient = (
     writeFile: fs.writeFile,
     mkdir: fs.mkdir,
     rm: fs.rm,
+    rename: fs.rename,
     removePath: fs.rm,
     chmod: fs.chmod,
     symlink: fs.symlink,

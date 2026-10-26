@@ -182,6 +182,8 @@ export interface SandboxClientResource extends ISandbox {
 }
 
 export interface SandboxProcessHandle {
+  /** Releases the RPC reference without stopping the process. */
+  [Symbol.dispose](): void;
   readonly id: string;
   readonly pid: number;
   readonly rawUnsafe: Effect.Effect<SandboxProcess>;
@@ -211,6 +213,8 @@ export interface SandboxProcessHandle {
 }
 
 export interface SandboxTerminalHandle {
+  /** Releases the RPC reference without terminating the terminal. */
+  [Symbol.dispose](): void;
   readonly id: string;
   readonly rawUnsafe: Effect.Effect<Terminal>;
   readonly snapshot: Effect.Effect<TerminalSnapshot, SandboxOperationError>;
@@ -483,6 +487,7 @@ const makeProcessHandle = (
   return {
     id: process.id,
     pid: process.pid,
+    [Symbol.dispose]: () => process[Symbol.dispose](),
     rawUnsafe: Effect.succeed(process),
     status: attempt("process.status", () => process.status()).pipe(
       Effect.withSpan("Sandbox.process.status", spanOptions("process.status")),
@@ -562,6 +567,7 @@ const makeTerminalHandle = (
 
   return {
     id: terminal.id,
+    [Symbol.dispose]: () => terminal[Symbol.dispose](),
     rawUnsafe: Effect.succeed(terminal),
     snapshot: attempt("terminal.snapshot", () => terminal.getSnapshot()).pipe(
       Effect.withSpan("Sandbox.terminal.snapshot", spanOptions("terminal.snapshot")),

@@ -1,5 +1,27 @@
 # effect-cf
 
+## 0.58.0
+
+### Minor Changes
+
+- [#242](https://github.com/danieljvdm/effect-cf/pull/242) [`2ca2e2f`](https://github.com/danieljvdm/effect-cf/commit/2ca2e2f513cda12d56a00f77c0d95912d8d4cd27) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Replace `effect-cf/mcp` with Effect's native `McpServer.layerHttpRequestScoped` and `Worker.make` composition for live tool progress; remove the MCP server SDK dependency and legacy transport, and propagate request cancellation through Worker response streams.
+
+  Adopt Effect `4.0.6`, workerd `1.20261026.1`, Workers types `5.20261026.1`, and compatibility date `2026-10-26`; replace `WebCrypto.randomUUID` with runtime-provided Effect `Crypto`, align Artifacts types, and require queue test messages to use `body` instead of `serializedBody`, with a `Date` or numeric timestamp.
+
+- [#240](https://github.com/danieljvdm/effect-cf/pull/240) [`4e84d82`](https://github.com/danieljvdm/effect-cf/commit/4e84d821f85b3d2025edbe626287290950199799) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Run package typechecking with the Rust-based TypeScript and Effect diagnostics tools while retaining the existing declaration emitter.
+
+  Preserve typed Pages Function initializers across TypeScript checkers by deriving their fields from Cloudflare's native context helper.
+
+  Keep typecheck warnings visible while failing on TypeScript and Effect errors.
+
+  Align Effect checks with the shared authored policy while retaining documented Cloudflare boundary exceptions.
+
+  Expose zero-argument storage, cursor, artifact-info, and queue-metrics operations as reusable Effect values. Yield `cursor.next`, `cursor.toArray`, `cursor.one`, `transaction.rollback`, `storage.sync`, `storage.getCurrentBookmark`, `repo.info`, and `queue.metrics` directly instead of calling them.
+
+  Add a Workers Web Crypto UUID helper that honors a supplied Effect Crypto service, and use it in alarm scheduling.
+
+  Reject non-finite numeric values in RPC counts, Analytics Engine query metadata, AI embeddings and gateway metadata, and WebTransport close information. Schema operations inside Effects now preserve typed decoding failures.
+
 ## 0.57.0
 
 ### Minor Changes

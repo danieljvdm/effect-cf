@@ -1,9 +1,10 @@
 import { DurableObject as CloudflareDurableObject } from "cloudflare:workers";
 import * as Effect from "effect/Effect";
+import type { Digest, SecureRandom } from "effect/crypto";
 import * as Layer from "effect/Layer";
 import * as Scheduler from "effect/Scheduler";
 import * as Tracer from "effect/Tracer";
-import type { Crypto, ManagedRuntime, Scope } from "effect";
+import type { ManagedRuntime, Scope } from "effect";
 
 import { NativeRequest } from "./Worker";
 import { WorkerEnvironment, type WorkerEnv } from "./Environment";
@@ -41,7 +42,8 @@ export type {
 const reservedMethodNames: ReadonlySet<string> = RpcDefinition.reservedMethodNames;
 
 export type RuntimeContext<ROut> =
-  | Crypto.Crypto
+  | Digest.Digest
+  | SecureRandom.SecureRandom
   | DurableObjectState
   | DurableObjectAlarm
   | WorkerEnvironment

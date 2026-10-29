@@ -26,7 +26,7 @@ import {
 } from "cloudflare:test";
 import * as BrowserCrypto from "@effect/platform-browser/BrowserCrypto";
 import * as ConfigProvider from "effect/ConfigProvider";
-import type * as Crypto from "effect/Crypto";
+import type { Digest, SecureRandom } from "effect/crypto";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
@@ -43,11 +43,13 @@ import { runNativeCallback } from "./internal/NativeCallback";
 
 const currentEnv: WorkerEnv = env;
 
-export const layer: Layer.Layer<WorkerEnvironment | Crypto.Crypto> = Layer.mergeAll(
-  BrowserCrypto.layer,
-  Layer.succeed(WorkerEnvironment, currentEnv),
-  ConfigProvider.layer(WorkerConfig.providerFromEnv(currentEnv)),
-);
+export const layer: Layer.Layer<WorkerEnvironment | Digest.Digest | SecureRandom.SecureRandom> =
+  Layer.mergeAll(
+    BrowserCrypto.layerSecureRandom,
+    BrowserCrypto.layerDigest,
+    Layer.succeed(WorkerEnvironment, currentEnv),
+    ConfigProvider.layer(WorkerConfig.providerFromEnv(currentEnv)),
+  );
 
 export interface WorkerConstructor<Instance> {
   new (context: globalThis.ExecutionContext, env: WorkerEnv): Instance;

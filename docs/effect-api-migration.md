@@ -17,23 +17,35 @@ The stricter Effect policy makes zero-argument operations reusable Effect values
 
 Numeric schemas now reject `NaN`, `Infinity`, and `-Infinity` in RPC argument counts, Analytics Engine query row counts, Workers AI embedding values and dimensions, AI Gateway log metrics and metadata, WebTransport close information, and Cloudflare inbound transport round-trip times.
 
-## Effect 4.0.6
+## Effect 4.1
 
-`effect-cf` now requires Effect `^4.0.6`. PostgreSQL options use the current `PgClientConfig` type without introducing unknown service requirements.
+`effect-cf` now requires Effect `^4.1.0`. Upgrade Effect and its platform and SQL packages together.
 
-Replace the removed `WebCrypto.randomUUID` helper with Effect's `Crypto` service:
+Replace the removed `Crypto.Crypto` service with `SecureRandom.SecureRandom` for randomness and UUIDs, and `Digest.Digest` for hashing:
 
 ```ts
-import { Crypto, Effect } from "effect";
+import { Effect } from "effect";
+import { Digest, SecureRandom } from "effect/crypto";
 
 const program = Effect.gen(function* () {
-  const crypto = yield* Crypto.Crypto;
+  const random = yield* SecureRandom.SecureRandom;
+  const digest = yield* Digest.Digest;
+  const id = yield* random.uuidV4();
+  const hash = yield* digest.digestHex(Digest.sha256, new TextEncoder().encode(id));
 
-  return yield* crypto.randomUUIDv4();
+  return { id, hash };
 });
 ```
 
-Worker, Durable Object, and Workflow runtimes supply `Crypto.Crypto` through Effect's `BrowserCrypto.layer`, backed by Workers Web Crypto. Application and event layers can override this service. Alarm scheduling and dispatch use the current invocation's service for revision identifiers; when running alarm effects outside these runtimes, supply a platform crypto layer such as `BrowserCrypto.layer` or `NodeCrypto.layer`. The `effect-cf/vitest` layer also includes native crypto.
+Worker, Durable Object, and Workflow runtimes supply `SecureRandom` and `Digest` through `BrowserCrypto.layerSecureRandom` and `BrowserCrypto.layerDigest`, backed by Workers Web Crypto. Application and event layers can override these services. The `effect-cf/vitest` layer supplies them too. Other crypto families, such as `Aead` or `Signature`, require an explicit application layer.
+
+Alarm scheduling and dispatch use the current invocation's `SecureRandom` service for revision identifiers. Outside these runtimes, provide `BrowserCrypto.layerSecureRandom` or `NodeCrypto.layerSecureRandom`. Effect's platform `*Services` bundles no longer include crypto.
+
+For custom layers, replace `Crypto.make({ randomBytes, digest })` with `SecureRandom.make(randomBytes)` and a separate `Digest` service. Replace `randomUUIDv4()` with `uuidV4()`, and pass algorithm values such as `Digest.sha256` to hashing operations. `SecureRandom` operations have no typed error channel.
+
+## Earlier Effect 4 changes
+
+PostgreSQL options use the current `PgClientConfig` type without introducing unknown service requirements.
 
 HTTP server spans follow Effect's new default names (`GET`, `POST`, and so on). A custom `HttpMiddleware.SpanNameGenerator` still overrides them.
 

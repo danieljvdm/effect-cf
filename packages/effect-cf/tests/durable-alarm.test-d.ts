@@ -1,5 +1,6 @@
 import { expectTypeOf } from "vite-plus/test";
-import { Context, type Crypto, DateTime, Effect, Layer, Schema } from "effect";
+import { Context, DateTime, Effect, Layer, Schema } from "effect";
+import type { SecureRandom } from "effect/crypto";
 import { SqlClient, type SqlError } from "effect/sql";
 
 import {
@@ -49,7 +50,10 @@ expectTypeOf(composed).toEqualTypeOf<
     | DurableObjectAlarm.InvalidAlarmPayloadError
     | DurableObjectAlarm.InvalidRepeatEveryError
     | DurableObjectAlarm.InvalidScheduleConfigurationError,
-    Application | SqlClient.SqlClient | DurableObjectState.DurableObjectState | Crypto.Crypto
+    | Application
+    | SqlClient.SqlClient
+    | DurableObjectState.DurableObjectState
+    | SecureRandom.SecureRandom
   >
 >();
 
@@ -252,7 +256,7 @@ expectTypeOf(maintenanceRegistration.run).toEqualTypeOf<
   Effect.Effect<
     DurableObjectAlarm.ProcessDueAlarmsResult,
     ApplicationError | DurableObjectAlarm.DurableObjectAlarmError,
-    Application | DurableObjectAlarm.DurableObjectAlarm | Crypto.Crypto
+    Application | DurableObjectAlarm.DurableObjectAlarm | SecureRandom.SecureRandom
   >
 >();
 const armMaintenance = Effect.flatMap(Maintenance, (alarms) =>

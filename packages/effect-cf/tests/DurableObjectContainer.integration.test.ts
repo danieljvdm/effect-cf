@@ -1,6 +1,7 @@
-import { NodeServices } from "@effect/platform-node";
+import { NodeCrypto, NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
-import { Crypto, Effect, Exit, Stream } from "effect";
+import { Effect, Exit, Stream } from "effect";
+import { SecureRandom } from "effect/crypto";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import { createTestHarness } from "wrangler";
 
@@ -65,7 +66,7 @@ it.live.runIf(process.env.EFFECT_CF_CONTAINER_TESTS === "1")(
       const worker = server.getWorker<ContainerTestEnv>();
       const env = yield* step("get Worker bindings", () => worker.getEnv());
       const container = env.CONTAINER.getByName(
-        yield* Crypto.Crypto.use((crypto) => crypto.randomUUIDv4()),
+        yield* SecureRandom.SecureRandom.use((random) => random.uuidV4()),
       );
       const proxyName = `workerd-effect-cf-native-container-test-IntegrationContainer-${container.id.toString()}-proxy`;
 
@@ -159,6 +160,6 @@ it.live.runIf(process.env.EFFECT_CF_CONTAINER_TESTS === "1")(
         "hello from sandbox-shim",
       );
       expect(yield* step("check restored container", () => container.isRunning())).toBe(true);
-    }).pipe(Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide([NodeServices.layer, NodeCrypto.layerSecureRandom])),
   { timeout: 120_000 },
 );

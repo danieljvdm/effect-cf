@@ -1,5 +1,5 @@
-import type * as Crypto from "effect/Crypto";
 import * as Context from "effect/Context";
+import type { Digest, SecureRandom } from "effect/crypto";
 import * as Effect from "effect/Effect";
 import type { Layer, Schema as S } from "effect";
 
@@ -195,7 +195,8 @@ export type TagClass<
         layer: Layer.Layer<
           ROut,
           LayerError,
-          | Crypto.Crypto
+          | Digest.Digest
+          | SecureRandom.SecureRandom
           | WorkerEntrypoint.ExecutionContext
           | WorkerEntrypoint.WorkerContext
           | WorkerEnvironment
@@ -213,7 +214,8 @@ export type TagClass<
         layer: Layer.Layer<
           ROut,
           LayerError,
-          | Crypto.Crypto
+          | Digest.Digest
+          | SecureRandom.SecureRandom
           | WorkerEntrypoint.ExecutionContext
           | WorkerEntrypoint.WorkerContext
           | WorkerEnvironment
@@ -270,7 +272,8 @@ const makeDefinition = <Id extends string, const MethodDefinitions extends Metho
       layer: Layer.Layer<
         ROut,
         LayerError,
-        | Crypto.Crypto
+        | Digest.Digest
+        | SecureRandom.SecureRandom
         | WorkerEntrypoint.ExecutionContext
         | WorkerEntrypoint.WorkerContext
         | WorkerEnvironment

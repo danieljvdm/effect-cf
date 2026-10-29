@@ -1,10 +1,11 @@
 import { WorkerEntrypoint as CloudflareWorkerEntrypoint } from "cloudflare:workers";
 import * as Context from "effect/Context";
+import type { Digest, SecureRandom } from "effect/crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as References from "effect/References";
 import * as Tracer from "effect/Tracer";
-import type { Cause, Crypto, ManagedRuntime, Scope } from "effect";
+import type { Cause, ManagedRuntime, Scope } from "effect";
 import * as HttpEffect from "effect/http/HttpEffect";
 import * as HttpMiddleware from "effect/http/HttpMiddleware";
 import { ClientAbort } from "effect/http/HttpServerError";
@@ -96,7 +97,8 @@ const reservedMethodNames = new Set<string>([
 ]);
 
 type WorkerBaseContext<ROut> =
-  | Crypto.Crypto
+  | Digest.Digest
+  | SecureRandom.SecureRandom
   | ExecutionContext
   | WorkerContext
   | WorkerEnvironment

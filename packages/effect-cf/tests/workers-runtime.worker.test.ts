@@ -1,7 +1,8 @@
 import { env, exports } from "cloudflare:workers";
 import { listDurableObjectIds, runInDurableObject } from "cloudflare:test";
 import { assert, expect, layer, test } from "@effect/vitest";
-import { Crypto, Effect, Layer, Predicate } from "effect";
+import { Effect, Layer, Predicate } from "effect";
+import { SecureRandom } from "effect/crypto";
 
 import * as PoolWorkers from "../src/Vitest";
 import { makePartialTestDouble } from "./TestDoubles";
@@ -61,7 +62,7 @@ test("runs package default Worker fetch in the Workers runtime", async () => {
 layer(testLayer)("Workers runtime Durable Object namespace", (it) => {
   it.effect("runs RPC, fetch, and schema-backed embedded KV", () =>
     Effect.gen(function* () {
-      const name = `counter-${yield* Crypto.Crypto.use((crypto) => crypto.randomUUIDv4())}`;
+      const name = `counter-${yield* SecureRandom.SecureRandom.use((random) => random.uuidV4())}`;
       const counter = TestCounters.byName(name);
       const stub = yield* TestCounters.getByName(name);
 

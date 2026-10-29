@@ -6,7 +6,6 @@ import {
   Cause,
   Clock,
   Context,
-  type Crypto,
   DateTime,
   Deferred,
   Effect,
@@ -15,6 +14,7 @@ import {
   Layer,
   Schema,
 } from "effect";
+import type { SecureRandom } from "effect/crypto";
 import * as Reactivity from "effect/reactivity/Reactivity";
 import { TestClock } from "effect/testing";
 import { SqlClient } from "effect/sql";
@@ -1839,7 +1839,9 @@ it.effect.each(["sql", "native", "no SQL service", "reused native callback"] as 
 
         yield* boundary === "no SQL service"
           ? transaction.pipe(
-              Effect.updateContext<Crypto.Crypto, Crypto.Crypto>(Context.omit(SqlClient.SqlClient)),
+              Effect.updateContext<SecureRandom.SecureRandom, SecureRandom.SecureRandom>(
+                Context.omit(SqlClient.SqlClient),
+              ),
             )
           : transaction;
         assert.deepStrictEqual(yield* sql`SELECT value FROM rollback_source ORDER BY value`, [

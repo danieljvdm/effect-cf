@@ -70,7 +70,7 @@
     "typecheck": "vp exec effect-tsrs diagnostics --type-check --project tsconfig.json"
   },
   "dependencies": {
-    "@effect/platform-browser": "^4.0.6"
+    "@effect/platform-browser": "^4.1.0"
   },
   "devDependencies": {
     "@cloudflare/computer": "0.8.0",
@@ -102,7 +102,7 @@
     "@effect/sql-d1": "^4.0.0",
     "@effect/sql-pg": "^4.0.0",
     "@effect/sql-sqlite-do": "^4.0.0",
-    "effect": "^4.0.6",
+    "effect": "^4.1.0",
     "just-bash": "^3.0.1"
   },
   "peerDependenciesMeta": {

@@ -1,6 +1,7 @@
 import * as BrowserCrypto from "@effect/platform-browser/BrowserCrypto";
 import { env } from "cloudflare:workers";
-import { Crypto, Effect, Layer } from "effect";
+import { Effect, Layer } from "effect";
+import { SecureRandom } from "effect/crypto";
 import { expect, test } from "vite-plus/test";
 
 import { Binding, RateLimit, WorkerEnvironment } from "../src/index";
@@ -11,8 +12,8 @@ test("native binding preserves admission, denial, independent keys, and raw acce
   const RequestsByName = RateLimit.make("test/RateLimitByName");
   const results = await Effect.runPromise(
     Effect.gen(function* () {
-      const crypto = yield* Crypto.Crypto;
-      const key = yield* crypto.randomUUIDv4();
+      const random = yield* SecureRandom.SecureRandom;
+      const key = yield* random.uuidV4();
       const requests = yield* Requests;
       const named = yield* RequestsByName;
 
@@ -23,7 +24,7 @@ test("native binding preserves admission, denial, independent keys, and raw acce
         yield* requests.limit({ key }),
         yield* named.limit({ key }),
         yield* requests.limit({ key }),
-        yield* named.limit({ key: yield* crypto.randomUUIDv4() }),
+        yield* named.limit({ key: yield* random.uuidV4() }),
       ];
     }).pipe(
       Effect.provide(

@@ -11,11 +11,17 @@ const run = Effect.fn("Packaging.run")(function* (args: ReadonlyArray<string>) {
   const child = yield* spawner.spawn(
     ChildProcess.make("vp", args, { cwd, stdout: "pipe", stderr: "pipe" }),
   );
-  const output = yield* child.all.pipe(Stream.decodeText(), Stream.mkString);
-  const exitCode = yield* child.exitCode;
+  const [output, errors, exitCode] = yield* Effect.all(
+    [
+      child.stdout.pipe(Stream.decodeText(), Stream.mkString),
+      child.stderr.pipe(Stream.decodeText(), Stream.mkString),
+      child.exitCode,
+    ],
+    { concurrency: 3 },
+  );
 
   if (exitCode !== 0) {
-    expect.unreachable(`vp exited with code ${exitCode}:\n${output}`);
+    expect.unreachable(`vp exited with code ${exitCode}:\n${output}\n${errors}`);
   }
 
   return output;

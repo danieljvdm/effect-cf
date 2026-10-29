@@ -1,6 +1,6 @@
 # MCP servers on Workers
 
-Use Effect's `McpServer.layerHttpRequestScoped` with `Worker.make`. Effect owns tool registration, schemas, protocol handling, and progress notifications; the Worker owns the HTTP request and response lifetime. Install `effect-cf` and `effect@^4.0.6`; no separate MCP server SDK is required.
+Use Effect's `McpServer.layerHttpRequestScoped` with `Worker.make`. Effect owns tool registration, schemas, protocol handling, and progress notifications; the Worker owns the HTTP request and response lifetime. Install `effect-cf` and `effect@^4.1.0`; no separate MCP server SDK is required.
 
 ```ts
 import { Effect, Layer, Schema } from "effect";
@@ -10,32 +10,37 @@ import { Worker } from "effect-cf";
 
 const Wait = Tool.make("Wait", {
   description: "Waits one second and reports progress",
-  dependencies: [McpServer.McpServer, McpSchema.McpRequestContext],
+  dependencies: [McpSchema.McpRequestContext],
   parameters: Tool.EmptyParams,
   success: Schema.Struct({ done: Schema.Boolean }),
 });
 const toolkit = Toolkit.make(Wait);
-const handlers = toolkit.toLayer({
-  Wait: () =>
-    Effect.gen(function* () {
-      const server = yield* McpServer.McpServer;
-      const { requestMetadata } = yield* McpSchema.McpRequestContext;
-      const progressToken = requestMetadata?.progressToken;
+const handlers = toolkit.toLayer(
+  Effect.gen(function* () {
+    const server = yield* McpServer.McpServer;
 
-      if (Schema.is(McpSchema.ProgressToken)(progressToken)) {
-        yield* server.notifications["notifications/progress"]({
-          progressToken,
-          progress: 0,
-          total: 1,
-          message: "Started",
-        });
-      }
+    return {
+      Wait: () =>
+        Effect.gen(function* () {
+          const { requestMetadata } = yield* McpSchema.McpRequestContext;
+          const progressToken = requestMetadata?.progressToken;
 
-      yield* Effect.sleep("1 second");
+          if (Schema.is(McpSchema.ProgressToken)(progressToken)) {
+            yield* server.notifications["notifications/progress"]({
+              progressToken,
+              progress: 0,
+              total: 1,
+              message: "Started",
+            });
+          }
 
-      return { done: true };
-    }),
-});
+          yield* Effect.sleep("1 second");
+
+          return { done: true };
+        }),
+    };
+  }),
+);
 
 const server = McpServer.layerHttpRequestScoped({
   name: "progress-example",
@@ -88,6 +93,8 @@ try {
 ## Request lifetime and migration
 
 Return the router's `HttpServerResponse` directly from the Worker fetch effect. `Worker.make` keeps the HTTP scope open until the body finishes or is canceled and forwards the request's abort signal to the running handler and response stream. Cancellation interrupts unfinished tools and releases request resources. Custom consumers of `worker.fetch` must consume or cancel the response body.
+
+In Effect 4.1, tool `dependencies` declare services supplied per request. Capture registration-time services such as `McpServer` in the `toolkit.toLayer` effect; keep `McpRequestContext` in `dependencies` so progress uses the current call.
 
 The example registers tools with application services once. If registration or handlers capture request-specific services, assemble the registration and router in the Worker's `eventLayer` with those services. Each request then owns its registrations and resources. Avoid wrapping the fetch effect in an inner `Effect.scoped` that closes before streaming ends.
 

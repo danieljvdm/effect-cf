@@ -70,8 +70,11 @@ const WorkerLive = Layer.merge(
 const fetch = HttpRouter.HttpRouter.use((router) => router.asHttpEffect());
 const WorkerClass = Worker.make(WorkerLive, { fetch });
 
-const reportProgress = Effect.fnUntraced(function* (progress: number, message: string) {
-  const server = yield* McpServer.McpServer;
+const reportProgress = Effect.fnUntraced(function* (
+  server: McpServer.McpServer["Service"],
+  progress: number,
+  message: string,
+) {
   const { requestMetadata } = yield* McpSchema.McpRequestContext;
   const progressToken = requestMetadata?.progressToken;
 
@@ -181,33 +184,38 @@ test.each(["finish", "cancel", "cancel before progress"] as const)(
     let completed = false;
     let responseReturned = false;
     const Slow = Tool.make("Slow", {
-      dependencies: [StreamingResource, McpServer.McpServer, McpSchema.McpRequestContext],
+      dependencies: [McpSchema.McpRequestContext],
       parameters: Tool.EmptyParams,
       success: Schema.Struct({ resourceOpen: Schema.Boolean }),
     });
     const toolkit = Toolkit.make(Slow);
-    const live = toolkit.toLayer({
-      Slow: () =>
-        Effect.gen(function* () {
-          const current = yield* StreamingResource;
+    const live = toolkit.toLayer(
+      Effect.gen(function* () {
+        const server = yield* McpServer.McpServer;
+        const current = yield* StreamingResource;
 
-          resource = current;
-          started.resolve();
-          if (outcome !== "cancel before progress") {
-            yield* reportProgress(1, "started");
-          }
-          yield* Effect.promise(() => release.promise);
-          completed = true;
+        return {
+          Slow: () =>
+            Effect.gen(function* () {
+              resource = current;
+              started.resolve();
+              if (outcome !== "cancel before progress") {
+                yield* reportProgress(server, 1, "started");
+              }
+              yield* Effect.promise(() => release.promise);
+              completed = true;
 
-          return { resourceOpen: current.open };
-        }).pipe(
-          Effect.ensuring(
-            Effect.sync(() => {
-              stopped = true;
-            }),
-          ),
-        ),
-    });
+              return { resourceOpen: current.open };
+            }).pipe(
+              Effect.ensuring(
+                Effect.sync(() => {
+                  stopped = true;
+                }),
+              ),
+            ),
+        };
+      }),
+    );
     const resourceLayer = Layer.effect(
       StreamingResource,
       Effect.acquireRelease(
@@ -286,22 +294,28 @@ test("clients receive isolated live progress for concurrent tool calls", async (
   const progressB: Array<unknown> = [];
   const completed: Array<string> = [];
   const Slow = Tool.make("Slow", {
-    dependencies: [McpServer.McpServer, McpSchema.McpRequestContext],
+    dependencies: [McpSchema.McpRequestContext],
     parameters: Schema.Struct({ label: Schema.Literals(["a", "b"]) }),
     success: Schema.Struct({ label: Schema.String }),
   });
   const toolkit = Toolkit.make(Slow);
-  const live = toolkit.toLayer({
-    Slow: ({ label }) =>
-      Effect.gen(function* () {
-        yield* reportProgress(1, `${label}:started`);
-        yield* Effect.promise(() => (label === "a" ? releaseA.promise : releaseB.promise));
-        yield* reportProgress(2, `${label}:finished`);
-        completed.push(label);
+  const live = toolkit.toLayer(
+    Effect.gen(function* () {
+      const server = yield* McpServer.McpServer;
 
-        return { label };
-      }),
-  });
+      return {
+        Slow: ({ label }) =>
+          Effect.gen(function* () {
+            yield* reportProgress(server, 1, `${label}:started`);
+            yield* Effect.promise(() => (label === "a" ? releaseA.promise : releaseB.promise));
+            yield* reportProgress(server, 2, `${label}:finished`);
+            completed.push(label);
+
+            return { label };
+          }),
+      };
+    }),
+  );
   const ProgressWorker = Worker.make(
     McpServer.toolkit(toolkit).pipe(
       Layer.provide(live),
@@ -364,14 +378,20 @@ test("clients receive isolated live progress for concurrent tool calls", async (
 
 test("tool calls without a progress token still return the final result", async () => {
   const Progress = Tool.make("Progress", {
-    dependencies: [McpServer.McpServer, McpSchema.McpRequestContext],
+    dependencies: [McpSchema.McpRequestContext],
     parameters: Tool.EmptyParams,
     success: Schema.Struct({ ok: Schema.Boolean }),
   });
   const toolkit = Toolkit.make(Progress);
-  const live = toolkit.toLayer({
-    Progress: () => reportProgress(1, "done").pipe(Effect.as({ ok: true })),
-  });
+  const live = toolkit.toLayer(
+    Effect.gen(function* () {
+      const server = yield* McpServer.McpServer;
+
+      return {
+        Progress: () => reportProgress(server, 1, "done").pipe(Effect.as({ ok: true })),
+      };
+    }),
+  );
   const ProgressWorker = Worker.make(
     McpServer.toolkit(toolkit).pipe(
       Layer.provide(live),

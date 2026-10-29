@@ -1,5 +1,5 @@
-import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import { SecureRandom } from "effect/crypto";
 
 let isolateId: string | undefined;
 const counters = new Map<string, number>();
@@ -10,9 +10,9 @@ export const mark = Effect.fnUntraced(function* (
   fields: Record<string, string | number | boolean> = {},
 ) {
   if (isolateId === undefined) {
-    const crypto = yield* Crypto.Crypto;
+    const random = yield* SecureRandom.SecureRandom;
 
-    isolateId = yield* crypto.randomUUIDv4();
+    isolateId = yield* random.uuidV4();
   }
   const invocation = (counters.get(role) ?? 0) + 1;
 

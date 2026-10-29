@@ -11,13 +11,14 @@ import {
 } from "cloudflare:workers";
 import { NonRetryableError as CloudflareNonRetryableError } from "cloudflare:workflows";
 import * as Cause from "effect/Cause";
+import type { Digest, SecureRandom } from "effect/crypto";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FiberSet from "effect/FiberSet";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import type { Crypto, ManagedRuntime, Scope } from "effect";
+import type { ManagedRuntime, Scope } from "effect";
 
 import { WorkerEnvironment, type WorkerEnv } from "./Environment";
 import { ExecutionContext, WorkerContext } from "./Worker";
@@ -217,7 +218,8 @@ const fromWorkflowStep = (step: CloudflareWorkflowStep): WorkflowStepService => 
 });
 
 type RuntimeContext<ROut> =
-  | Crypto.Crypto
+  | Digest.Digest
+  | SecureRandom.SecureRandom
   | ExecutionContext
   | WorkerContext
   | WorkerEnvironment

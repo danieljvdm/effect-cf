@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { assert, it } from "@effect/vitest";
-import { Config, Context, Crypto, Deferred, Effect, Fiber, Layer, Schema as S } from "effect";
+import { Config, Context, Deferred, Effect, Fiber, Layer, Schema as S } from "effect";
+import { SecureRandom } from "effect/crypto";
 
 import { DurableObjectState, QueueDefinition, Worker, WorkerEnvironment } from "../src/index";
 import * as PoolWorkers from "../src/Vitest";
@@ -251,7 +252,7 @@ it.effect("interrupting a Workflow modifier waits for its cleanup", () =>
     Effect.gen(function* () {
       const introspector = yield* PoolWorkers.introspectWorkflowInstance(
         env.TEST_WORKFLOW!,
-        yield* Crypto.Crypto.use((crypto) => crypto.randomUUIDv4()),
+        yield* SecureRandom.SecureRandom.use((random) => random.uuidV4()),
       );
       const started = yield* Deferred.make<void>();
       const continueCallback = yield* Deferred.make<void>();

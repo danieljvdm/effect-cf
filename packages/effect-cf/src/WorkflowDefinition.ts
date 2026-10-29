@@ -1,5 +1,5 @@
-import type * as Crypto from "effect/Crypto";
 import * as Context from "effect/Context";
+import type { Digest, SecureRandom } from "effect/crypto";
 import * as Effect from "effect/Effect";
 import * as S from "effect/Schema";
 import type { Layer } from "effect";
@@ -70,7 +70,11 @@ export type TagClass<
     layer: Layer.Layer<
       ROut,
       LayerError,
-      Crypto.Crypto | ExecutionContext | WorkerContext | WorkerEnvironment
+      | Digest.Digest
+      | SecureRandom.SecureRandom
+      | ExecutionContext
+      | WorkerContext
+      | WorkerEnvironment
     >,
     options: Options<ROut, Definition<Id, Payload, Result>>,
   ) => WorkflowEntrypoint.WorkflowClass<S.Codec.Encoded<Payload>, S.Codec.Encoded<Result>, ROut>;
@@ -132,7 +136,11 @@ const makeDefinition = <
       layer: Layer.Layer<
         ROut,
         LayerError,
-        Crypto.Crypto | ExecutionContext | WorkerContext | WorkerEnvironment
+        | Digest.Digest
+        | SecureRandom.SecureRandom
+        | ExecutionContext
+        | WorkerContext
+        | WorkerEnvironment
       >,
       options: Options<ROut, SelfDefinition>,
     ) =>

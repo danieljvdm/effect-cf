@@ -1,11 +1,12 @@
 import * as BrowserCrypto from "@effect/platform-browser/BrowserCrypto";
 import * as Cause from "effect/Cause";
+import type { Digest, SecureRandom } from "effect/crypto";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
-import type { Crypto, Scope, Tracer } from "effect";
+import type { Scope, Tracer } from "effect";
 
 import { WorkerConfig, WorkerEnvironment, type WorkerEnv } from "../Environment";
 import * as RpcTargets from "../RpcTargets";
@@ -54,20 +55,25 @@ const runPromise = <A, E, R, LayerError>(
  * classes (Worker, Durable Object, Workflow).
  *
  * The entrypoint-specific services are merged with the env-backed
- * `ConfigProvider`, `WorkerEnvironment`, and native `Crypto`, then provided to
- * the user-supplied layer so the resulting runtime satisfies both the user
- * services and the platform services.
+ * `ConfigProvider`, `WorkerEnvironment`, and native `SecureRandom` and `Digest`,
+ * then provided to the user-supplied layer so the resulting runtime satisfies
+ * both the user services and the platform services.
  */
 export const makeEntrypointRuntime = <ROut, LayerError, Services, ServicesError = never>(
-  layer: Layer.Layer<ROut, LayerError, Services | WorkerEnvironment | Crypto.Crypto>,
+  layer: Layer.Layer<
+    ROut,
+    LayerError,
+    Services | WorkerEnvironment | Digest.Digest | SecureRandom.SecureRandom
+  >,
   env: WorkerEnv,
   services: Layer.Layer<Services, ServicesError>,
 ): ManagedRuntime.ManagedRuntime<
-  ROut | Services | WorkerEnvironment | Crypto.Crypto,
+  ROut | Services | WorkerEnvironment | Digest.Digest | SecureRandom.SecureRandom,
   LayerError | ServicesError
 > => {
   const entrypointServices = Layer.mergeAll(
-    BrowserCrypto.layer,
+    BrowserCrypto.layerSecureRandom,
+    BrowserCrypto.layerDigest,
     services,
     Layer.succeedContext(
       Context.make(ConfigProvider.ConfigProvider, WorkerConfig.providerFromEnv(env)).pipe(

@@ -5,7 +5,7 @@ Cloudflare entrypoints and bindings as Effect services.
 See the [Effect API migration guide](../../docs/effect-api-migration.md) for changes to zero-argument operations and numeric validation.
 
 ```sh
-npm install effect-cf "effect@^4.0.6"
+npm install effect-cf "effect@^4.1.0"
 ```
 
 The repository tests against workerd `1.20261026.1` and `@cloudflare/workers-types@5.20261026.1`. Use `compatibility_date: "2026-10-26"` in Wrangler.

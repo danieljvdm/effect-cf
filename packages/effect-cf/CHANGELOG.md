@@ -1,5 +1,15 @@
 # effect-cf
 
+## 0.59.0
+
+### Minor Changes
+
+- [#243](https://github.com/danieljvdm/effect-cf/pull/243) [`5fad778`](https://github.com/danieljvdm/effect-cf/commit/5fad778640c7175ccf5a569721eb674dfd0ffe4b) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Update Cloudflare Computer to 0.8 and Sandbox, adding filesystem rename, nullable stats, backend discovery, full-log pointers, namespace-wide Artifacts, and disposable Sandbox handles.
+
+  Remove the retired Think and sync-retry APIs; Computer workspace hosts now require the `just-bash` peer.
+
+- [#246](https://github.com/danieljvdm/effect-cf/pull/246) [`0b0965b`](https://github.com/danieljvdm/effect-cf/commit/0b0965bf21088f6bb20e913d431abbadb03c9222) Thanks [@danieljvdm](https://github.com/danieljvdm)! - Require Effect 4.1 and replace the removed `Crypto` service with native `SecureRandom` and `Digest` services in Worker, Durable Object, Workflow, and Vitest runtimes. Use `SecureRandom` for alarm revision identifiers and migrate custom crypto layers to the new services.
+
 ## 0.58.0
 
 ### Minor Changes
